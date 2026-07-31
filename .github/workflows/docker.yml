@@ -1,0 +1,42 @@
+# GHCR に crawler/viewer の Docker image をビルド・公開する。
+
+name: Docker
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: write
+  packages: write
+  deployments: write
+  actions: read
+
+jobs:
+  docker-ci-crawler:
+    name: Docker CI (crawler)
+    uses: book000/templates/.github/workflows/reusable-docker.yml@master
+    with:
+      targets: >-
+        [
+          { imageName: "tomacheese/twitter-accounts-classifier-crawler", context: ".", file: "crawler/Dockerfile", packageName: "twitter-accounts-classifier-crawler" }
+        ]
+    secrets:
+      DOCKER_USERNAME: ${{ github.actor }}
+      DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+  docker-ci-viewer:
+    name: Docker CI (viewer)
+    needs: docker-ci-crawler
+    if: always() && needs.docker-ci-crawler.result == 'success'
+    uses: book000/templates/.github/workflows/reusable-docker.yml@master
+    with:
+      targets: >-
+        [
+          { imageName: "tomacheese/twitter-accounts-classifier-viewer", context: ".", file: "viewer/Dockerfile", packageName: "twitter-accounts-classifier-viewer" }
+        ]
+    secrets:
+      DOCKER_USERNAME: ${{ github.actor }}
+      DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}

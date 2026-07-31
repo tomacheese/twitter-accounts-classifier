@@ -1,0 +1,168 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// crawler and viewer are independent pnpm workspace packages, each with its own
+// node_modules tree, so a default (output-less) generator's implicit
+// `node_modules/.prisma/client` resolution can't be reached from either package's
+// own dependency tree. A custom `output` sidesteps node_modules resolution entirely.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../crawler/generated/prisma"
+}
+
+generator viewerClient {
+  provider = "prisma-client-js"
+  output   = "../viewer/generated/prisma"
+}
+
+model Account {
+  id                       String         @id
+  screenName               String
+  displayName              String
+  bio                      String?
+  profileImageUrl          String?
+  followersCount           Int
+  followingCount           Int
+  tweetCount               Int
+  accountCreatedAt         DateTime
+  location                 String?
+  url                      String?
+  isBlueVerified           Boolean        @default(false)
+  verifiedType             String?
+  professionalType         String?
+  parodyCommentaryFanLabel String?
+  firstSeenAt              DateTime       @default(now())
+  lastCrawledAt            DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+  tweets                   Tweet[]
+  labels                   AccountLabel[]
+  followerEdges            Follow[]       @relation("FollowerEdges")
+  followeeEdges            Follow[]       @relation("FolloweeEdges")
+
+  // The Accounts page (viewer/lib/queries/accounts.ts's listAccounts) sorts by
+  // whichever of these three columns the user picked, with no other filter in
+  // the common case - without an index Postgres has to sort the whole table
+  // on every page load as Account grows.
+  @@index([followersCount])
+  @@index([tweetCount])
+  @@index([lastCrawledAt])
+}
+
+model Tweet {
+  id                         String   @id
+  accountId                  String
+  account                    Account  @relation(fields: [accountId], references: [id])
+  fullText                   String
+  createdAt                  DateTime
+  retweetCount               Int
+  likeCount                  Int
+  replyCount                 Int
+  quoteCount                 Int
+  isReply                    Boolean  @default(false)
+  inReplyToTweetId           String?
+  isAuthorReply              Boolean  @default(false)
+  isRetweet                  Boolean  @default(false)
+  retweetedTweetId           String?
+  isPromoted                 Boolean  @default(false)
+  isPaidPromotion            Boolean  @default(false)
+  // No default (null): rows collected before this column existed were never evaluated
+  // for AI-generated media at all, and null keeps that "unknown" state distinct from a
+  // real false/true reported by a subsequent fetch. See the migration for detail.
+  hasAiGeneratedMedia        Boolean?
+  aiGeneratedDetectionSource String?
+  source                     String
+  collectedAt                DateTime @default(now())
+
+  @@index([accountId])
+}
+
+model LabelDefinition {
+  id            String         @id @default(cuid())
+  key           String         @unique
+  description   String
+  createdAt     DateTime       @default(now())
+  accountLabels AccountLabel[]
+}
+
+model AccountLabel {
+  id                String          @id @default(cuid())
+  accountId         String
+  account           Account         @relation(fields: [accountId], references: [id])
+  labelDefinitionId String
+  labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
+  value             Boolean
+  confidence        Float
+  reason            String
+  method            String
+  ruleVersion       String
+  labeledAt         DateTime        @default(now())
+
+  @@index([accountId])
+  @@index([labelDefinitionId])
+  @@index([labeledAt])
+  @@index([accountId, labelDefinitionId, labeledAt(sort: Desc)])
+  // Matches the `DISTINCT ON ("accountId", "labelDefinitionId") ... ORDER BY
+  // "accountId", "labelDefinitionId", "labeledAt" DESC, "id" DESC` query in
+  // dashboard.ts's getDashboardKpis/getLabelDistribution exactly, so Postgres can
+  // satisfy that DISTINCT ON with a single index scan instead of falling back to a
+  // sort/unique over the (accountId, labelDefinitionId, labeledAt) index above.
+  @@index([accountId, labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])
+}
+
+model WeeklyAnalysisRun {
+  id                String    @id @default(cuid())
+  startedAt         DateTime
+  finishedAt        DateTime?
+  sampledAccountIds Json
+  findings          String?
+  commitSha         String?
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  follower    Account  @relation("FollowerEdges", fields: [followerId], references: [id])
+  followeeId  String
+  followee    Account  @relation("FolloweeEdges", fields: [followeeId], references: [id])
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@unique([followerId, followeeId])
+  @@index([followerId])
+  @@index([followeeId])
+}
+
+model CrawlRun {
+  id          String            @id @default(cuid())
+  startedAt   DateTime
+  finishedAt  DateTime?
+  status      String
+  accountRuns CrawlAccountRun[]
+
+  @@index([startedAt])
+}
+
+model CrawlAccountRun {
+  id                 String    @id @default(cuid())
+  crawlRunId         String
+  crawlRun           CrawlRun  @relation(fields: [crawlRunId], references: [id])
+  username           String
+  startedAt          DateTime
+  finishedAt         DateTime?
+  status             String
+  recommendedCount   Int       @default(0)
+  followingCount     Int       @default(0)
+  trendingCount      Int       @default(0)
+  replyCount         Int       @default(0)
+  profileCount       Int       @default(0)
+  labelsAppliedCount Int       @default(0)
+  followingSynced    Boolean   @default(false)
+  followersSynced    Boolean   @default(false)
+  warnings           Json      @default("[]")
+  errorMessage       String?
+
+  @@index([crawlRunId])
+  @@index([startedAt])
+}

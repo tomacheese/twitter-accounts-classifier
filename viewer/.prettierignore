@@ -1,0 +1,5 @@
+node_modules
+.next
+generated
+coverage
+pnpm-lock.yaml

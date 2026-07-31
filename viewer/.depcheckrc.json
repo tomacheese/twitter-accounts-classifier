@@ -1,0 +1,10 @@
+{
+  "ignores": [
+    "@prisma/client",
+    "@types/lodash",
+    "@types/react-dom",
+    "autoprefixer",
+    "eslint-config-next",
+    "postcss"
+  ]
+}

@@ -1,0 +1,180 @@
+import { Logger } from '@book000/node-utils'
+import { captureException, initMonitoring } from './monitoring/sentry'
+import { loadConfig } from './config/load-config'
+import { CRAWL_LIMITS } from './config/crawl-limits'
+import { getCookieIssuerBaseUrl } from './config/env'
+import { getPrismaClient, disconnectPrisma } from './db/client'
+import { upsertAccount, type AccountProfileInput } from './db/account-repository'
+import { upsertTweets, type TweetInput } from './db/tweet-repository'
+import { createCookieIssuerClient } from './auth/cookie-issuer-client'
+import {
+  createOpenApiClient as createRealOpenApiClient,
+  closeOpenApiClient as closeRealOpenApiClient,
+} from './twitter/client'
+import { createTweetApiLike, type TweetApiLike } from './twitter/timeline'
+import { createTweetDetailApiLike, type TweetDetailApiLike } from './twitter/engagement'
+import { fetchAccountProfile, fetchRecentTweets, createUserApiLike, type UserApiLike } from './twitter/profile'
+import { toAccountProfileInput, toTweetInput, mergeTweetAdFlags } from './twitter/mappers'
+
+const logger = Logger.configure('crawl-tweet')
+
+export interface ManualCrawlOpenApiClient {
+  getTweetApi(): TweetApiLike & TweetDetailApiLike
+  getUserApi(): UserApiLike
+}
+
+export interface ManualTweetCrawlDependencies {
+  client: ManualCrawlOpenApiClient
+  persistAccount: (input: AccountProfileInput) => Promise<void>
+  persistTweets: (inputs: TweetInput[]) => Promise<void>
+  recentTweetsPerAccount: number
+}
+
+export interface ManualTweetCrawlResult {
+  repliesFound: number
+  accountsProcessed: number
+}
+
+/**
+ * Manually crawls a single tweet's replies, given its id. `runCrawlCycle` only ever
+ * discovers tweets/accounts reachable from a tracked account's own timeline slice, so a
+ * specific tweet a human spotted directly on X (e.g. while reviewing spam patterns) is
+ * otherwise never persisted. Fetches the focal tweet's replies, then each distinct reply
+ * author's profile and recent tweets, so their `AccountFeatureBundle` has enough data for
+ * the existing label rules to evaluate meaningfully once the relabel backfill runs next -
+ * labeling itself is intentionally left to that backfill rather than duplicated here.
+ * @param deps - injected client and persistence functions
+ * @param tweetId - the focal tweet's rest id
+ * @returns how many replies and distinct authors were found
+ */
+export async function runManualTweetCrawl(
+  deps: ManualTweetCrawlDependencies,
+  tweetId: string,
+): Promise<ManualTweetCrawlResult> {
+  const tweetApi = deps.client.getTweetApi()
+  const userApi = deps.client.getUserApi()
+
+  const response = await tweetApi.getTweetDetail({ focalTweetId: tweetId })
+  const rawEntries = response.data.data
+
+  const focalRaw = rawEntries.find((entry) => entry.restId === tweetId)
+  if (!focalRaw) {
+    throw new Error(`Focal tweet ${tweetId} not found in tweet detail response`)
+  }
+
+  const parentTweet = toTweetInput(focalRaw, {
+    source: 'manual',
+    viewerAccountId: focalRaw.user.restId,
+  })
+  const replies = rawEntries
+    .filter((entry) => entry.legacy.inReplyToStatusIdStr === tweetId)
+    .map((entry) => toTweetInput(entry, { source: 'manual', viewerAccountId: focalRaw.user.restId }))
+
+  // Every author embedded in the response is a fallback Account row source, in case a
+  // dedicated profile fetch for that author later fails (e.g. a suspended account) - same
+  // pattern `runAccountCycleBody` uses for timeline authors.
+  const extraAuthors = new Map<string, AccountProfileInput>()
+  for (const entry of rawEntries) extraAuthors.set(entry.user.restId, toAccountProfileInput(entry.user))
+
+  const replyAuthorIds = [...new Set(replies.map((reply) => reply.accountId))]
+  const succeededAuthorIds = new Set<string>()
+  const profileTweets: TweetInput[] = []
+
+  for (const authorId of [focalRaw.user.restId, ...replyAuthorIds]) {
+    try {
+      const profile = await fetchAccountProfile(userApi, authorId)
+      await deps.persistAccount(profile)
+      succeededAuthorIds.add(authorId)
+
+      const { tweets: recentTweets, authors } = await fetchRecentTweets(
+        userApi,
+        authorId,
+        deps.recentTweetsPerAccount,
+      )
+      profileTweets.push(...recentTweets)
+      for (const author of authors) extraAuthors.set(author.id, author)
+    } catch (error) {
+      logger.error(
+        `Failed to fetch full profile for author ${authorId}, falling back to embedded profile data`,
+        error as Error,
+      )
+    }
+  }
+
+  for (const [id, profile] of extraAuthors) {
+    if (succeededAuthorIds.has(id)) continue
+    await deps.persistAccount(profile)
+  }
+
+  await deps.persistTweets(mergeTweetAdFlags([parentTweet, ...replies, ...profileTweets]))
+
+  return { repliesFound: replies.length, accountsProcessed: succeededAuthorIds.size }
+}
+
+async function main(): Promise<void> {
+  const tweetId = process.argv[2]
+  if (!tweetId) {
+    logger.error('Usage: node dist/crawl-tweet.js <tweetId>')
+    process.exitCode = 1
+    return
+  }
+
+  const prisma = getPrismaClient()
+  const config = loadConfig()
+  const [account] = config.accounts
+  const cookieIssuer = createCookieIssuerClient({
+    baseUrl: getCookieIssuerBaseUrl(),
+  })
+
+  const cookies = await cookieIssuer.issueCookiesWithRetry({
+    username: account.username,
+    password: account.password,
+    otp_secret: account.otpSecret,
+  })
+  const openApiContext = await createRealOpenApiClient(cookies)
+
+  try {
+    const client: ManualCrawlOpenApiClient = {
+      getTweetApi: () => ({
+        ...createTweetApiLike(openApiContext.client.getTweetApi()),
+        ...createTweetDetailApiLike(openApiContext.client.getTweetApi()),
+      }),
+      getUserApi: () =>
+        createUserApiLike(openApiContext.client.getUserApi(), openApiContext.client.getTweetApi()),
+    }
+
+    const result = await runManualTweetCrawl(
+      {
+        client,
+        persistAccount: async (input) => {
+          await upsertAccount(prisma, input)
+        },
+        persistTweets: async (inputs) => {
+          await upsertTweets(prisma, inputs)
+        },
+        recentTweetsPerAccount: CRAWL_LIMITS.recentTweetsPerAccount,
+      },
+      tweetId,
+    )
+    logger.info(
+      `Manual tweet crawl complete for ${tweetId}: ${result.repliesFound} replies found, ${result.accountsProcessed} accounts processed`,
+    )
+  } finally {
+    await closeRealOpenApiClient(openApiContext)
+    await disconnectPrisma()
+  }
+}
+
+// Guarded so importing this module (e.g. from crawl-tweet.test.ts) never triggers a real
+// crawl - only running it directly (`node dist/crawl-tweet.js <tweetId>`) does.
+// require/module are the correct CommonJS-native way to detect this (project is
+// CommonJS, not ESM).
+// eslint-disable-next-line unicorn/prefer-module
+if (require.main === module) {
+  initMonitoring()
+  main().catch((error: unknown) => {
+    logger.error('Manual tweet crawl failed', error as Error)
+    captureException(error)
+    process.exitCode = 1
+  })
+}

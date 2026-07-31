@@ -1,0 +1,17 @@
+# Node.js でビルド・テストを実行する。バージョンは各パッケージの .node-version に記載されているものを利用する
+
+name: Node CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  node-ci:
+    name: Node CI
+    uses: book000/templates/.github/workflows/reusable-nodejs-ci-pnpm.yml@master
+    with:
+      directorys: "crawler, viewer"
+      lock-path: "pnpm-lock.yaml"

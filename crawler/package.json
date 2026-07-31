@@ -1,0 +1,44 @@
+{
+  "name": "crawler",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp -r generated dist/generated",
+    "crawl": "node dist/crawl.js",
+    "relabel": "node dist/relabel.js",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "run-p lint typecheck test",
+    "db:generate": "prisma generate --schema=../prisma/schema.prisma",
+    "db:migrate": "prisma migrate deploy --schema=../prisma/schema.prisma",
+    "db:migrate:dev": "prisma migrate dev --schema=../prisma/schema.prisma"
+  },
+  "prisma": {
+    "seed": "tsx ../prisma/seed.ts"
+  },
+  "dependencies": {
+    "@book000/node-utils": "^1.0.0",
+    "@prisma/client": "^6.0.0",
+    "@sentry/node": "^8.0.0",
+    "cycletls": "^2.0.5",
+    "twitter-openapi-typescript": "^0.0.56",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@book000/eslint-config": "1.13.1",
+    "@types/node": "^20.0.0",
+    "eslint": "^9.0.0",
+    "npm-run-all2": "^7.0.0",
+    "prettier": "^3.0.0",
+    "prisma": "^6.0.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}
