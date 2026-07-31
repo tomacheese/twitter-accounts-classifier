@@ -1,0 +1,19 @@
+node_modules/
+dist/
+coverage/
+.next
+*.tsbuildinfo
+viewer/next-env.d.ts
+viewer/generated/
+crawler/generated/
+.env
+.env.*
+!.env.example
+!.env.weekly-review.example
+.worktrees/
+
+# Contains real Twitter account credentials and cached cookies - never commit.
+data/
+
+# Crawl logs can contain real account usernames.
+logs/

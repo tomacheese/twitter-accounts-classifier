@@ -1,0 +1,17 @@
+.git
+node_modules
+viewer/node_modules
+dist
+viewer/.next
+generated
+viewer/generated
+coverage
+viewer/coverage
+*.tsbuildinfo
+.env
+.env.*
+data
+logs
+docs
+.superpowers
+.worktrees
