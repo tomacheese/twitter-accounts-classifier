@@ -104,7 +104,10 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
     persistLabel: vi.fn().mockResolvedValue(undefined),
     syncFollowing: vi.fn().mockResolvedValue(undefined),
     syncFollowers: vi.fn().mockResolvedValue(undefined),
-    startCrawlRun: vi.fn().mockResolvedValue({ id: 'run1' }),
+    startOrResumeCrawlRun: vi.fn().mockResolvedValue({
+      id: 'run1',
+      latestAccountStatuses: new Map(),
+    }),
     finishCrawlRun: vi.fn().mockResolvedValue(undefined),
     recordCrawlAccountRun: vi.fn().mockResolvedValue(undefined),
     sleep: vi.fn().mockResolvedValue(undefined),
@@ -844,7 +847,7 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    expect(deps.startCrawlRun).toHaveBeenCalledWith(expect.any(Date))
+    expect(deps.startOrResumeCrawlRun).toHaveBeenCalledWith(expect.any(Date))
     expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
       expect.objectContaining({
         crawlRunId: 'run1',
@@ -855,6 +858,44 @@ describe('runCrawlCycle', () => {
       }),
     )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'success')
+  })
+
+  it('resumes a run by retaining completed accounts and retrying all other configured accounts', async () => {
+    const issueCookies = vi.fn().mockResolvedValue({ ct0: 'c0', authToken: 'a0' })
+    const deps = makeDeps({
+      config: {
+        accounts: [
+          { email: 'done@example.com', username: 'done', password: 'p', otpSecret: null },
+          { email: 'partial@example.com', username: 'partial', password: 'p', otpSecret: null },
+          { email: 'failed@example.com', username: 'failed', password: 'p', otpSecret: null },
+          { email: 'unknown@example.com', username: 'unknown', password: 'p', otpSecret: null },
+          { email: 'missing@example.com', username: 'missing', password: 'p', otpSecret: null },
+        ],
+      },
+      issueCookies,
+      startOrResumeCrawlRun: vi.fn().mockResolvedValue({
+        id: 'resumed-run',
+        latestAccountStatuses: new Map([
+          ['done', 'success'],
+          ['partial', 'partial'],
+          ['failed', 'failed'],
+          ['unknown', 'running'],
+          ['removed-account', 'failed'],
+        ]),
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(issueCookies).toHaveBeenCalledTimes(3)
+    expect(issueCookies).toHaveBeenCalledWith(expect.objectContaining({ username: 'failed' }))
+    expect(issueCookies).toHaveBeenCalledWith(expect.objectContaining({ username: 'unknown' }))
+    expect(issueCookies).toHaveBeenCalledWith(expect.objectContaining({ username: 'missing' }))
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledTimes(3)
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({ crawlRunId: 'resumed-run', username: 'failed', status: 'success' }),
+    )
+    expect(deps.finishCrawlRun).toHaveBeenCalledWith('resumed-run', expect.any(Date), 'partial')
   })
 
   it('marks the CrawlRun as failed and rethrows when finishCrawlRun itself fails', async () => {

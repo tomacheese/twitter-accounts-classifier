@@ -53,9 +53,10 @@ import {
   syncFollowing as syncFollowingEdges,
 } from './db/follow-repository'
 import {
-  startCrawlRun as startCrawlRunRecord,
+  startOrResumeCrawlRun as startOrResumeCrawlRunRecord,
   finishCrawlRun as finishCrawlRunRecord,
   recordCrawlAccountRun as recordCrawlAccountRunRecord,
+  type CrawlRunStartResult,
   type RecordCrawlAccountRunParams,
   type CrawlWarning,
 } from './db/crawl-run-repository'
@@ -94,7 +95,7 @@ export interface CrawlDependencies {
   }) => Promise<void>
   syncFollowing: (followerId: string, result: FollowListResult) => Promise<void>
   syncFollowers: (followeeId: string, result: FollowListResult) => Promise<void>
-  startCrawlRun: (startedAt: Date) => Promise<{ id: string }>
+  startOrResumeCrawlRun: (startedAt: Date) => Promise<CrawlRunStartResult>
   finishCrawlRun: (id: string, finishedAt: Date, status: string) => Promise<void>
   recordCrawlAccountRun: (params: RecordCrawlAccountRunParams) => Promise<void>
   /** Injectable so `withTwitterRetry`'s backoff and the author-loop throttle don't actually pause tests. */
@@ -600,7 +601,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
   const replyHijackIndex = buildReplyHijackIndex(replyCorpus)
 
-  const { id: crawlRunId } = await deps.startCrawlRun(new Date())
+  const { id: crawlRunId, latestAccountStatuses } = await deps.startOrResumeCrawlRun(new Date())
 
   // Everything below this point is wrapped so that any exception - an unexpected
   // error escaping the per-account loop's own try/catch, for example - still
@@ -613,6 +614,12 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
     for (const account of deps.config.accounts) {
+      const previousStatus = latestAccountStatuses.get(account.username)
+      if (previousStatus === 'success' || previousStatus === 'partial') {
+        accountStatuses.push(previousStatus)
+        continue
+      }
+
       try {
         const status = await runAccountCycle(
           deps,
@@ -707,7 +714,7 @@ async function main(): Promise<void> {
     },
     syncFollowing: (followerId, result) => syncFollowingEdges(prisma, followerId, result),
     syncFollowers: (followeeId, result) => syncFollowersEdges(prisma, followeeId, result),
-    startCrawlRun: (startedAt) => startCrawlRunRecord(prisma, startedAt),
+    startOrResumeCrawlRun: (startedAt) => startOrResumeCrawlRunRecord(prisma, startedAt),
     finishCrawlRun: (id, finishedAt, status) =>
       finishCrawlRunRecord(prisma, id, finishedAt, status),
     recordCrawlAccountRun: (params) => recordCrawlAccountRunRecord(prisma, params),

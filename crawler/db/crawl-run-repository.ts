@@ -55,19 +55,43 @@ export interface RecordCrawlAccountRunParams {
 }
 
 /**
- * Creates a `CrawlRun` row marking the start of one full crawl cycle
- * (`runCrawlCycle`). `status` starts as the "running" placeholder and is
- * corrected once the cycle finishes or fails, via {@link finishCrawlRun}.
- * @param prisma - the Prisma client
- * @param startedAt - when the cycle began
- * @returns the id of the created `CrawlRun`, to attach child `CrawlAccountRun`s to
+ * 再開する crawl run と、アカウントごとの最新試行の status。
  */
-export async function startCrawlRun(
+export interface CrawlRunStartResult {
+  id: string
+  latestAccountStatuses: Map<string, string>
+}
+
+/**
+ * 単一の crawler プロセスだけが動作する環境で、中断された crawl run を再開し、存在しなければ新規に作成する。
+ * @param prisma - the Prisma client
+ * @param startedAt - 新規 run の開始時刻
+ * @returns run ID とアカウントごとの最新試行の status
+ */
+export async function startOrResumeCrawlRun(
   prisma: PrismaClient,
   startedAt: Date,
-): Promise<{ id: string }> {
+): Promise<CrawlRunStartResult> {
+  const existingRun = await prisma.crawlRun.findFirst({
+    where: { status: 'running' },
+    orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+    select: { id: true },
+  })
+  if (existingRun) {
+    const accountRuns = await prisma.$queryRaw<{ username: string; status: string }[]>`
+      SELECT DISTINCT ON ("username") "username", "status"
+      FROM "CrawlAccountRun"
+      WHERE "crawlRunId" = ${existingRun.id}
+      ORDER BY "username", "startedAt" DESC, "id" DESC
+    `
+    const latestAccountStatuses = new Map(
+      accountRuns.map(({ username, status }) => [username, status]),
+    )
+    return { id: existingRun.id, latestAccountStatuses }
+  }
+
   const run = await prisma.crawlRun.create({ data: { startedAt, status: 'running' } })
-  return { id: run.id }
+  return { id: run.id, latestAccountStatuses: new Map() }
 }
 
 /**
@@ -75,7 +99,7 @@ export async function startCrawlRun(
  * once every configured account has been processed for the cycle (with the aggregated
  * status), or early with `'failed'` if an unexpected error escapes the cycle first.
  * @param prisma - the Prisma client
- * @param id - the `CrawlRun` id returned by {@link startCrawlRun}
+ * @param id - {@link startOrResumeCrawlRun} が返した `CrawlRun` の ID
  * @param finishedAt - when the cycle completed (or failed)
  * @param status - the run's final status ("success" | "partial" | "failed")
  */

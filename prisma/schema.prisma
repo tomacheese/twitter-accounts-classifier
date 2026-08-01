@@ -173,6 +173,7 @@ model CrawlRun {
   accountRuns CrawlAccountRun[]
 
   @@index([startedAt])
+  @@index([status, startedAt(sort: Desc), id(sort: Desc)])
 }
 
 model CrawlAccountRun {
@@ -196,4 +197,5 @@ model CrawlAccountRun {
 
   @@index([crawlRunId])
   @@index([startedAt])
+  @@index([crawlRunId, username, startedAt(sort: Desc), id(sort: Desc)])
 }
