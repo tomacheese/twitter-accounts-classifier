@@ -20,15 +20,90 @@ export interface LabelDistributionEntry {
   totalAccounts: number
 }
 
-interface LabeledAccountCountRow {
-  count: bigint
-}
-
-interface LabelDistributionRow {
+// json_agg() が返す distribution の要素はすでに JSON としてパース済みのため、
+// trueCount/totalAccounts はここでは(直接の bigint 列とは異なり)number で届く。
+interface LabelDistributionJsonRow {
   labelKey: string
   labelDescription: string
-  trueCount: bigint
-  totalAccounts: bigint
+  trueCount: number
+  totalAccounts: number
+}
+
+interface LatestLabelsSummaryRow {
+  labeledAccounts: bigint
+  distribution: LabelDistributionJsonRow[]
+}
+
+interface LatestLabelsSummary {
+  labeledAccounts: number
+  distribution: LabelDistributionEntry[]
+}
+
+/**
+ * Runs the merged `latest_labels` aggregation query: computes the
+ * `DISTINCT ON` CTE once (materialized) and derives both the labeled-account
+ * count and the per-label distribution from it in a single query, instead of
+ * running the same expensive CTE twice per dashboard page view. Also sets a
+ * statement_timeout so a query stuck behind disk I/O contention releases its
+ * connection-pool slot instead of holding it for minutes.
+ * @param prisma - the Prisma client to query
+ * @returns the labeled account count and label distribution
+ */
+async function queryLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSummary> {
+  const result = await prisma.$transaction([
+    // Cap how long this query may hold a pool connection: under disk I/O
+    // contention (e.g. right after startup, while the crawler is seeding),
+    // this query can otherwise run for minutes and starve the pool for
+    // every other page. 15s is generous for the steady-state case but short
+    // enough to fail fast and free the connection under contention.
+    prisma.$executeRaw`SET LOCAL statement_timeout = '15000'`,
+    // The planner's cost model underestimates how cheap
+    // "AccountLabel_accountId_labelDefinitionId_labeledAt_id_idx" is on this
+    // table (it already returns rows in the exact order the CTE below sorts
+    // by), so left to itself it picks a cheaper-looking plan that instead
+    // sorts the whole table by hand. Disabling incremental sort for this
+    // transaction only steers it onto the index scan, which is
+    // measurably faster in practice - see the migration note for this index.
+    prisma.$executeRaw`SET LOCAL enable_incremental_sort = off`,
+    prisma.$queryRaw<LatestLabelsSummaryRow[]>`
+      WITH latest_labels AS MATERIALIZED (
+        SELECT DISTINCT ON ("accountId", "labelDefinitionId")
+          "accountId", "labelDefinitionId", value
+        FROM "AccountLabel"
+        ORDER BY "accountId", "labelDefinitionId", "labeledAt" DESC, "id" DESC
+      ),
+      label_counts AS (
+        SELECT
+          ld.key AS "labelKey",
+          ld.description AS "labelDescription",
+          COALESCE(COUNT(*) FILTER (WHERE ll.value), 0) AS "trueCount",
+          COALESCE(COUNT(ll."accountId"), 0) AS "totalAccounts"
+        FROM "LabelDefinition" ld
+        LEFT JOIN latest_labels ll ON ll."labelDefinitionId" = ld.id
+        GROUP BY ld.id, ld.key, ld.description
+      )
+      SELECT
+        (SELECT COUNT(DISTINCT "accountId") FROM latest_labels WHERE value = true) AS "labeledAccounts",
+        (
+          SELECT COALESCE(json_agg(lc.* ORDER BY lc."labelKey"), '[]'::json)
+          FROM label_counts lc
+        ) AS distribution
+    `,
+  ])
+  const rows = result[2]
+
+  // rows は空配列で返ってくることがある(集計対象が0件など)ため、
+  // Array#at() で undefined を許容する型のまま安全に取り出す。
+  const row = rows.at(0)
+  return {
+    labeledAccounts: Number(row?.labeledAccounts ?? 0),
+    distribution: (row?.distribution ?? []).map((entry) => ({
+      labelKey: entry.labelKey,
+      labelDescription: entry.labelDescription,
+      trueCount: entry.trueCount,
+      totalAccounts: entry.totalAccounts,
+    })),
+  }
 }
 
 /**
@@ -41,37 +116,17 @@ interface LabelDistributionRow {
  * @returns the dashboard KPI figures
  */
 export async function getDashboardKpis(prisma: PrismaClient): Promise<DashboardKpis> {
-  const [totalAccounts, totalTweets, [, labeledAccountRows], lastCrawled] = await Promise.all([
+  const [totalAccounts, totalTweets, summary, lastCrawled] = await Promise.all([
     prisma.account.count(),
     prisma.tweet.count(),
-    prisma.$transaction([
-      // The planner's cost model underestimates how cheap
-      // "AccountLabel_accountId_labelDefinitionId_labeledAt_id_idx" is on this
-      // table (it already returns rows in the exact order the CTE below sorts
-      // by), so left to itself it picks a cheaper-looking plan that instead
-      // sorts the whole table by hand. Disabling incremental sort for this
-      // transaction only steers it onto the index scan, which is
-      // measurably faster in practice - see the migration note for this index.
-      prisma.$executeRaw`SET LOCAL enable_incremental_sort = off`,
-      prisma.$queryRaw<LabeledAccountCountRow[]>`
-        WITH latest_labels AS (
-          SELECT DISTINCT ON ("accountId", "labelDefinitionId")
-            "accountId", value
-          FROM "AccountLabel"
-          ORDER BY "accountId", "labelDefinitionId", "labeledAt" DESC, "id" DESC
-        )
-        SELECT COUNT(DISTINCT "accountId") AS count
-        FROM latest_labels
-        WHERE value = true
-      `,
-    ]),
+    queryLatestLabelsSummary(prisma),
     prisma.account.aggregate({ _max: { lastCrawledAt: true } }),
   ])
 
   return {
     totalAccounts,
     totalTweets,
-    labeledAccounts: Number(labeledAccountRows[0]?.count ?? 0),
+    labeledAccounts: summary.labeledAccounts,
     lastCrawledAt: lastCrawled._max.lastCrawledAt,
   }
 }
@@ -87,32 +142,6 @@ export async function getDashboardKpis(prisma: PrismaClient): Promise<DashboardK
 export async function getLabelDistribution(
   prisma: PrismaClient,
 ): Promise<LabelDistributionEntry[]> {
-  const [, rows] = await prisma.$transaction([
-    // See the matching comment in getDashboardKpis for why this is needed.
-    prisma.$executeRaw`SET LOCAL enable_incremental_sort = off`,
-    prisma.$queryRaw<LabelDistributionRow[]>`
-      WITH latest_labels AS (
-        SELECT DISTINCT ON ("accountId", "labelDefinitionId")
-          "accountId", "labelDefinitionId", value
-        FROM "AccountLabel"
-        ORDER BY "accountId", "labelDefinitionId", "labeledAt" DESC, "id" DESC
-      )
-      SELECT
-        ld.key AS "labelKey",
-        ld.description AS "labelDescription",
-        COALESCE(COUNT(*) FILTER (WHERE ll.value), 0) AS "trueCount",
-        COALESCE(COUNT(ll."accountId"), 0) AS "totalAccounts"
-      FROM "LabelDefinition" ld
-      LEFT JOIN latest_labels ll ON ll."labelDefinitionId" = ld.id
-      GROUP BY ld.id, ld.key, ld.description
-      ORDER BY ld.key
-    `,
-  ])
-
-  return rows.map((row: LabelDistributionRow) => ({
-    labelKey: row.labelKey,
-    labelDescription: row.labelDescription,
-    trueCount: Number(row.trueCount),
-    totalAccounts: Number(row.totalAccounts),
-  }))
+  const summary = await queryLatestLabelsSummary(prisma)
+  return summary.distribution
 }
