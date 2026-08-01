@@ -15,7 +15,7 @@ import { replyLanguageMismatchRule } from './rules/reply-language-mismatch'
 import { botRule } from './rules/bot'
 import { aiGeneratedRule } from './rules/ai-generated'
 import { tweetAiGeneratedMediaRule } from './rules/tweet-ai-generated-media'
-import { videoRepostNoCreditRule } from './rules/video-repost-no-credit'
+import { videoRepostRule } from './rules/video-repost'
 import { topicTechRule } from './rules/topic-tech'
 import { topicFinanceRule } from './rules/topic-finance'
 import { topicCryptoRule } from './rules/topic-crypto'
@@ -60,7 +60,7 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   botRule,
   aiGeneratedRule,
   tweetAiGeneratedMediaRule,
-  videoRepostNoCreditRule,
+  videoRepostRule,
   topicTechRule,
   topicFinanceRule,
   topicCryptoRule,
