@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createOpenApiClientWith } from './client'
+import { createCycleTLSFetch, createOpenApiClientWith } from './client'
 
 describe('createOpenApiClientWith', () => {
   it('passes ct0/auth_token through to getClientFromCookies', async () => {
@@ -13,6 +13,22 @@ describe('createOpenApiClientWith', () => {
 
     expect(getClientFromCookies).toHaveBeenCalledWith({ ct0: 'c0', auth_token: 'a0' })
     expect(client).toEqual({ marker: 'client' })
+  })
+})
+
+describe('createCycleTLSFetch', () => {
+  it('preserves CycleTLS response headers for case-insensitive diagnostic lookup', async () => {
+    const cycleTLS = vi.fn().mockResolvedValue({
+      data: 'rate limited',
+      status: 429,
+      headers: { 'X-Rate-Limit-Remaining': '0' },
+    })
+    const fetchImpl = createCycleTLSFetch(cycleTLS as never)
+
+    const response = await fetchImpl('https://x.com/graphql/abc/HeaderPreservationTest')
+
+    expect(response.headers.get('x-rate-limit-remaining')).toBe('0')
+    expect(response.headers.get('X-RATE-LIMIT-REMAINING')).toBe('0')
   })
 })
 
