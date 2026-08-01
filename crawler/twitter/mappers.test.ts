@@ -189,7 +189,10 @@ describe('toTweetInput quoted tweet handling', () => {
       legacy: { ...rawTweet.legacy, quotedStatusResult: quotedStatusResult(['video']) },
     }
 
-    const input = toTweetInput(quoteTweet, { source: 'recommended', viewerAccountId: 'someone-else' })
+    const input = toTweetInput(quoteTweet, {
+      source: 'recommended',
+      viewerAccountId: 'someone-else',
+    })
 
     expect(input.quotedTweetId).toBe('quoted1')
     expect(input.quotedTweetAuthorId).toBe('bob')
@@ -202,7 +205,10 @@ describe('toTweetInput quoted tweet handling', () => {
       legacy: { ...rawTweet.legacy, quotedStatusResult: quotedStatusResult(['animated_gif']) },
     }
 
-    const input = toTweetInput(quoteTweet, { source: 'recommended', viewerAccountId: 'someone-else' })
+    const input = toTweetInput(quoteTweet, {
+      source: 'recommended',
+      viewerAccountId: 'someone-else',
+    })
 
     expect(input.quotedTweetHasVideo).toBe(true)
   })
@@ -213,7 +219,10 @@ describe('toTweetInput quoted tweet handling', () => {
       legacy: { ...rawTweet.legacy, quotedStatusResult: quotedStatusResult(['photo']) },
     }
 
-    const input = toTweetInput(quoteTweet, { source: 'recommended', viewerAccountId: 'someone-else' })
+    const input = toTweetInput(quoteTweet, {
+      source: 'recommended',
+      viewerAccountId: 'someone-else',
+    })
 
     expect(input.quotedTweetId).toBe('quoted1')
     expect(input.quotedTweetAuthorId).toBe('bob')
@@ -239,6 +248,9 @@ function tweetInput(overrides: Partial<TweetInput> & { id: string }): TweetInput
     isPaidPromotion: false,
     hasAiGeneratedMedia: false,
     aiGeneratedDetectionSource: null,
+    quotedTweetId: null,
+    quotedTweetAuthorId: null,
+    quotedTweetHasVideo: null,
     source: 'recommended',
     ...overrides,
   }

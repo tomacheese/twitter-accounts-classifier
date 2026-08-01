@@ -22,6 +22,9 @@ function tweet(id: string, retweetCount: number, likeCount: number): TweetInput 
     isPaidPromotion: false,
     hasAiGeneratedMedia: false,
     aiGeneratedDetectionSource: null,
+    quotedTweetId: null,
+    quotedTweetAuthorId: null,
+    quotedTweetHasVideo: null,
     source: 'recommended',
   }
 }
