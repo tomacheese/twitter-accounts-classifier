@@ -23,6 +23,9 @@ export interface TweetInput {
   isPaidPromotion: boolean
   hasAiGeneratedMedia: boolean | null
   aiGeneratedDetectionSource: string | null
+  quotedTweetId: string | null
+  quotedTweetAuthorId: string | null
+  quotedTweetHasVideo: boolean | null
   source: TweetSource
 }
 
@@ -60,6 +63,9 @@ export async function upsertTweet(prisma: PrismaClient, input: TweetInput): Prom
       hasAiGeneratedMedia: input.hasAiGeneratedMedia ?? existing?.hasAiGeneratedMedia ?? null,
       aiGeneratedDetectionSource:
         input.aiGeneratedDetectionSource ?? existing?.aiGeneratedDetectionSource ?? null,
+      quotedTweetId: input.quotedTweetId,
+      quotedTweetAuthorId: input.quotedTweetAuthorId,
+      quotedTweetHasVideo: input.quotedTweetHasVideo,
       source: input.source,
     },
   })

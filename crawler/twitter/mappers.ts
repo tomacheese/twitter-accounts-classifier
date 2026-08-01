@@ -36,6 +36,19 @@ export interface RawTweetResult {
     isPaidPromotion?: boolean
     hasAiGeneratedMedia?: boolean | null
     aiGeneratedDetectionSource?: string | null
+    quotedStatusResult?: {
+      result: {
+        restId: string
+        legacy: {
+          extendedEntities?: {
+            media?: { type: string }[]
+          }
+        }
+        user: {
+          restId: string
+        }
+      }
+    } | null
   }
   user: RawUserResult
 }
@@ -93,6 +106,12 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
   const isReply = raw.legacy.inReplyToStatusIdStr !== null
   const isRetweet = raw.legacy.retweetedStatusIdStr !== null
 
+  const quotedResult = raw.legacy.quotedStatusResult?.result ?? null
+  const quotedMedia = quotedResult?.legacy.extendedEntities?.media ?? []
+  const quotedTweetHasVideo = quotedResult
+    ? quotedMedia.some((media) => media.type === 'video' || media.type === 'animated_gif')
+    : null
+
   return {
     id: raw.restId,
     accountId: raw.user.restId,
@@ -111,6 +130,9 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
     isPaidPromotion: raw.legacy.isPaidPromotion ?? false,
     hasAiGeneratedMedia: raw.legacy.hasAiGeneratedMedia ?? null,
     aiGeneratedDetectionSource: raw.legacy.aiGeneratedDetectionSource ?? null,
+    quotedTweetId: quotedResult?.restId ?? null,
+    quotedTweetAuthorId: quotedResult?.user.restId ?? null,
+    quotedTweetHasVideo,
     source: context.source,
   }
 }
