@@ -54,6 +54,22 @@ export interface RecordCrawlAccountRunParams {
   errorMessage: string | null
 }
 
+export const CRAWL_ACCOUNT_CHECKPOINT_PHASES = [
+  'timelines',
+  'authors',
+  'following',
+  'followers',
+] as const
+
+export type CrawlAccountCheckpointPhase = (typeof CRAWL_ACCOUNT_CHECKPOINT_PHASES)[number]
+
+export interface CrawlAccountCheckpointParams {
+  crawlRunId: string
+  username: string
+  phase: CrawlAccountCheckpointPhase
+  data: Prisma.InputJsonValue
+}
+
 /**
  * 再開する crawl run と、アカウントごとの最新試行の status。
  */
@@ -126,4 +142,65 @@ export async function recordCrawlAccountRun(
   await prisma.crawlAccountRun.create({
     data: { ...params, warnings: params.warnings as unknown as Prisma.InputJsonValue },
   })
+}
+
+/**
+ * crawl run 内のログインアカウント 1 件について、完了済み checkpoint を取得する。phase の
+ * 結果を永続化してから checkpoint を記録するため、再開時は存在する phase を安全に skip できる。
+ * @param prisma - Prisma client
+ * @param crawlRunId - 取得対象の crawl run
+ * @param username - 設定済みのログインアカウント
+ * @returns 完了済み checkpoint の phase と payload の対応
+ */
+export async function loadCrawlAccountCheckpoints(
+  prisma: PrismaClient,
+  crawlRunId: string,
+  username: string,
+): Promise<Map<CrawlAccountCheckpointPhase, Prisma.JsonValue>> {
+  const checkpoints = await prisma.crawlAccountCheckpoint.findMany({
+    where: { crawlRunId, username },
+    select: { phase: true, data: true },
+  })
+  return new Map(
+    checkpoints
+      .filter(
+        (checkpoint): checkpoint is typeof checkpoint & { phase: CrawlAccountCheckpointPhase } =>
+          (CRAWL_ACCOUNT_CHECKPOINT_PHASES as readonly string[]).includes(checkpoint.phase),
+      )
+      .map((checkpoint) => [checkpoint.phase, checkpoint.data]),
+  )
+}
+
+/**
+ * アカウントの phase の永続化済み結果を atomically に記録する。停止後に完了済み phase を再実行
+ * した場合は、曖昧な 2 件目の checkpoint を作らず既存 payload を置き換える。
+ * @param prisma - Prisma client
+ * @param params - checkpoint の識別子と JSON payload
+ */
+export async function completeCrawlAccountCheckpoint(
+  prisma: PrismaClient,
+  params: CrawlAccountCheckpointParams,
+): Promise<void> {
+  const { crawlRunId, username, phase, data } = params
+  await prisma.crawlAccountCheckpoint.upsert({
+    where: { crawlRunId_username_phase: { crawlRunId, username, phase } },
+    create: { crawlRunId, username, phase, data },
+    update: { data, completedAt: new Date() },
+  })
+}
+
+/**
+ * 通常の cycle 完了後、再開専用の checkpoint payload と label の重複防止 claim を削除する。予期しない
+ * 例外で終了した run は、後続プロセスが再開できるようこれらの状態を維持する。
+ * @param prisma - Prisma client
+ * @param crawlRunId - 最終化済みの crawl run
+ */
+export async function clearCrawlAccountCheckpoints(
+  prisma: PrismaClient,
+  crawlRunId: string,
+): Promise<void> {
+  await prisma.$transaction([
+    prisma.crawlAccountCheckpoint.deleteMany({ where: { crawlRunId } }),
+    prisma.crawlAccountLabelRun.deleteMany({ where: { crawlRunId } }),
+  ])
 }

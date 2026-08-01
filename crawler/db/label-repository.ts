@@ -51,6 +51,11 @@ export interface RecordAccountLabelParams {
   ruleVersion: string
 }
 
+export interface RecordCrawlAccountLabelParams extends RecordAccountLabelParams {
+  crawlRunId: string
+  username: string
+}
+
 /**
  * ルール評価結果を記録する: `AccountLabel` の履歴に追記すると同時に、
  * dashboard/アカウント一覧の各クエリが読む `AccountLabelLatest` の該当行も
@@ -118,4 +123,59 @@ export async function recordAccountLabel(
     )
   }
   return history
+}
+
+/**
+ * crawl 中のラベル評価結果を記録する。同じ crawl run・ログインアカウント・対象アカウント・
+ * ルールを 1 回だけ claim するため、author phase の永続化後に停止しても再開時に
+ * `AccountLabel` の履歴を重複させない。
+ * @param prisma - Prisma クライアント
+ * @param params - crawl run を含むラベル評価結果
+ */
+export async function recordCrawlAccountLabel(
+  prisma: PrismaClient,
+  params: RecordCrawlAccountLabelParams,
+): Promise<void> {
+  const id = randomUUID()
+  const claimId = randomUUID()
+  const rows = await prisma.$queryRaw<RecordAccountLabelRow[]>`
+    WITH shared_now AS (
+      SELECT now() AS "labeledAt"
+    ),
+    claimed AS (
+      INSERT INTO "CrawlAccountLabelRun"
+        ("id", "crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion")
+      VALUES (${claimId}, ${params.crawlRunId}, ${params.username}, ${params.accountId}, ${params.labelDefinitionId}, ${params.method}, ${params.ruleVersion})
+      ON CONFLICT ("crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion") DO NOTHING
+      RETURNING "id"
+    ),
+    inserted_history AS (
+      INSERT INTO "AccountLabel"
+        ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt")
+      SELECT ${id}, ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, ${params.result.confidence}, ${params.result.reason}, ${params.method}, ${params.ruleVersion}, "labeledAt"
+      FROM shared_now
+      WHERE EXISTS (SELECT 1 FROM claimed)
+      RETURNING *
+    ),
+    upserted_latest AS (
+      INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "labeledAt")
+      SELECT ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, "labeledAt"
+      FROM shared_now
+      WHERE EXISTS (SELECT 1 FROM claimed)
+      ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
+      SET "value" = EXCLUDED."value", "labeledAt" = EXCLUDED."labeledAt"
+      WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
+      RETURNING "accountId"
+    )
+    SELECT ih.*, EXISTS (SELECT 1 FROM upserted_latest) AS "latestUpserted"
+    FROM inserted_history ih
+  `
+  const row = rows.at(0)
+  if (!row) return
+  const { latestUpserted } = row
+  if (!latestUpserted) {
+    logger.warn(
+      `recordCrawlAccountLabel: AccountLabelLatest upsert guard skipped the write (accountId=${params.accountId}, labelDefinitionId=${params.labelDefinitionId})`,
+    )
+  }
 }

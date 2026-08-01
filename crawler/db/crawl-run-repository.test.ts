@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
 import {
+  clearCrawlAccountCheckpoints,
+  completeCrawlAccountCheckpoint,
   finishCrawlRun,
+  loadCrawlAccountCheckpoints,
   recordCrawlAccountRun,
   startOrResumeCrawlRun,
 } from './crawl-run-repository'
@@ -123,5 +126,87 @@ describe('recordCrawlAccountRun', () => {
         errorMessage: null,
       },
     })
+  })
+})
+
+describe('crawl account checkpoints', () => {
+  it('loads only recognized completed phases for an account', async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { phase: 'timelines', data: { version: 1 } },
+      { phase: 'unknown_future_phase', data: { ignored: true } },
+      { phase: 'followers', data: { synced: true } },
+    ])
+    const prisma = {
+      crawlAccountCheckpoint: { findMany },
+    } as unknown as PrismaClient
+
+    const result = await loadCrawlAccountCheckpoints(prisma, 'run1', 'someuser')
+
+    expect(result).toEqual(
+      new Map([
+        ['timelines', { version: 1 }],
+        ['followers', { synced: true }],
+      ]),
+    )
+    expect(findMany).toHaveBeenCalledWith({
+      where: { crawlRunId: 'run1', username: 'someuser' },
+      select: { phase: true, data: true },
+    })
+  })
+
+  it('upserts a phase checkpoint by crawl run, account, and phase', async () => {
+    const upsert = vi.fn().mockResolvedValue({})
+    const prisma = {
+      crawlAccountCheckpoint: { upsert },
+    } as unknown as PrismaClient
+
+    await completeCrawlAccountCheckpoint(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      phase: 'following',
+      data: { userId: 'account1', synced: true },
+    })
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        crawlRunId_username_phase: {
+          crawlRunId: 'run1',
+          username: 'someuser',
+          phase: 'following',
+        },
+      },
+      create: {
+        crawlRunId: 'run1',
+        username: 'someuser',
+        phase: 'following',
+        data: { userId: 'account1', synced: true },
+      },
+      update: {
+        data: { userId: 'account1', synced: true },
+        completedAt: expect.any(Date),
+      },
+    })
+  })
+
+  it('clears transient resume state for a normally completed crawl run', async () => {
+    const checkpointOperation = {} as ReturnType<PrismaClient['crawlAccountCheckpoint']['deleteMany']>
+    const labelClaimOperation = {} as ReturnType<PrismaClient['crawlAccountLabelRun']['deleteMany']>
+    const deleteCheckpoints = vi.fn().mockReturnValue(checkpointOperation)
+    const deleteLabelClaims = vi.fn().mockReturnValue(labelClaimOperation)
+    const transaction = vi.fn().mockResolvedValue([])
+    const prisma = {
+      crawlAccountCheckpoint: { deleteMany: deleteCheckpoints },
+      crawlAccountLabelRun: { deleteMany: deleteLabelClaims },
+      $transaction: transaction,
+    } as unknown as PrismaClient
+
+    await clearCrawlAccountCheckpoints(prisma, 'run1')
+
+    expect(deleteCheckpoints).toHaveBeenCalledWith({ where: { crawlRunId: 'run1' } })
+    expect(deleteLabelClaims).toHaveBeenCalledWith({ where: { crawlRunId: 'run1' } })
+    expect(transaction).toHaveBeenCalledWith([
+      checkpointOperation,
+      labelClaimOperation,
+    ])
   })
 })

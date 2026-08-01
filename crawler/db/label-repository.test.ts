@@ -5,6 +5,7 @@ import {
   ensureLabelDefinition,
   ensureLabelDefinitionsForRules,
   recordAccountLabel,
+  recordCrawlAccountLabel,
 } from './label-repository'
 
 vi.mock('node:crypto', () => ({ randomUUID: () => 'mock-id' }))
@@ -129,5 +130,32 @@ describe('recordAccountLabel', () => {
 
     expect(result).toEqual({ id: 'al1' })
     expect(warn).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('recordCrawlAccountLabel', () => {
+  it('does not append a duplicate history row when the same crawl label was already claimed', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await expect(
+      recordCrawlAccountLabel(prisma, {
+        crawlRunId: 'run1',
+        username: 'viewer',
+        accountId: 'u1',
+        labelDefinitionId: 'ld1',
+        result: { value: true, confidence: 1, reason: 'because' },
+        method: 'blue_verified',
+        ruleVersion: '1.0.0',
+      }),
+    ).resolves.toBeUndefined()
+
+    const [sql] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    const sqlText = sql.join('')
+    expect(sqlText).toContain('INSERT INTO "CrawlAccountLabelRun"')
+    expect(sqlText).toContain(
+      'ON CONFLICT ("crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion") DO NOTHING',
+    )
+    expect(sqlText).toContain('WHERE EXISTS (SELECT 1 FROM claimed)')
   })
 })

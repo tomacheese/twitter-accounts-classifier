@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runCrawlCycle, type CrawlDependencies } from './crawl'
+import type { CrawlAccountCheckpointParams } from './db/crawl-run-repository'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 
@@ -110,6 +111,9 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
     }),
     finishCrawlRun: vi.fn().mockResolvedValue(undefined),
     recordCrawlAccountRun: vi.fn().mockResolvedValue(undefined),
+    loadCrawlAccountCheckpoints: vi.fn().mockResolvedValue(new Map()),
+    completeCrawlAccountCheckpoint: vi.fn().mockResolvedValue(undefined),
+    clearCrawlAccountCheckpoints: vi.fn().mockResolvedValue(undefined),
     sleep: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
@@ -129,7 +133,12 @@ describe('runCrawlCycle', () => {
     expect(deps.persistAccount).toHaveBeenCalled()
     expect(deps.persistTweets).toHaveBeenCalled()
     expect(deps.persistLabel).toHaveBeenCalledWith(
-      expect.objectContaining({ accountId: 'author1', labelDefinitionId: 'ld1' }),
+      expect.objectContaining({
+        crawlRunId: 'run1',
+        username: 'v',
+        accountId: 'author1',
+        labelDefinitionId: 'ld1',
+      }),
     )
     expect(deps.closeTrendsScraper).toHaveBeenCalled()
     expect(deps.closeOpenApiClient).toHaveBeenCalled()
@@ -858,6 +867,7 @@ describe('runCrawlCycle', () => {
       }),
     )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'success')
+    expect(deps.clearCrawlAccountCheckpoints).toHaveBeenCalledWith('run1')
   })
 
   it('resumes a run by retaining completed accounts and retrying all other configured accounts', async () => {
@@ -896,6 +906,160 @@ describe('runCrawlCycle', () => {
       expect.objectContaining({ crawlRunId: 'resumed-run', username: 'failed', status: 'success' }),
     )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('resumed-run', expect.any(Date), 'partial')
+  })
+
+  it('resumes author processing from the completed timeline snapshot without refetching timelines', async () => {
+    const checkpoints = new Map<string, unknown>()
+    const firstCycle = makeDeps({
+      completeCrawlAccountCheckpoint: vi.fn((params: CrawlAccountCheckpointParams) => {
+        checkpoints.set(params.phase, params.data)
+        return Promise.resolve(undefined)
+      }),
+    })
+    await runCrawlCycle(firstCycle)
+
+    const getHomeTimeline = vi.fn()
+    const getHomeLatestTimeline = vi.fn()
+    const getSearchTimeline = vi.fn()
+    const resumedCycle = makeDeps({
+      loadCrawlAccountCheckpoints: vi
+        .fn()
+        .mockResolvedValue(new Map([['timelines', checkpoints.get('timelines')]])),
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline,
+            getHomeLatestTimeline,
+            getSearchTimeline,
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(resumedCycle)
+
+    expect(getHomeTimeline).not.toHaveBeenCalled()
+    expect(getHomeLatestTimeline).not.toHaveBeenCalled()
+    expect(getSearchTimeline).not.toHaveBeenCalled()
+    expect(resumedCycle.createTrendsScraper).not.toHaveBeenCalled()
+    expect(resumedCycle.completeCrawlAccountCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'authors' }),
+    )
+  })
+
+  it('refetches timelines when a stored timeline checkpoint is incomplete', async () => {
+    const author = rawUser('author1')
+    const getHomeTimeline = vi.fn().mockResolvedValue({ data: { data: [rawTweet('tweet1', author)] } })
+    const deps = makeDeps({
+      loadCrawlAccountCheckpoints: vi.fn().mockResolvedValue(
+        new Map([
+          [
+            'timelines',
+            {
+              recommended: {
+                tweets: [
+                  {
+                    id: 'tweet1',
+                    accountId: 'author1',
+                    createdAt: '2026-01-01T00:00:00.000Z',
+                  },
+                ],
+                authors: [],
+              },
+              following: { tweets: [], authors: [] },
+              trending: { tweets: [], authors: [] },
+              warnings: [],
+            },
+          ],
+        ]),
+      ),
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline,
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(getHomeTimeline).toHaveBeenCalled()
+    expect(deps.completeCrawlAccountCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'timelines' }),
+    )
+  })
+
+  it('skips a completed following phase while resuming the followers phase', async () => {
+    const checkpoints = new Map<string, unknown>()
+    const firstCycle = makeDeps({
+      completeCrawlAccountCheckpoint: vi.fn((params: CrawlAccountCheckpointParams) => {
+        checkpoints.set(params.phase, params.data)
+        return Promise.resolve(undefined)
+      }),
+    })
+    await runCrawlCycle(firstCycle)
+
+    const getFollowing = vi.fn()
+    const getFollowers = vi
+      .fn()
+      .mockResolvedValue({ data: [rawUser('follower1')], nextCursor: undefined })
+    const resumedCycle = makeDeps({
+      loadCrawlAccountCheckpoints: vi.fn().mockResolvedValue(
+        new Map([
+          ['timelines', checkpoints.get('timelines')],
+          ['authors', checkpoints.get('authors')],
+          ['following', checkpoints.get('following')],
+        ]),
+      ),
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn(),
+            getHomeLatestTimeline: vi.fn(),
+            getSearchTimeline: vi.fn(),
+            getTweetDetail: vi.fn(),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn(),
+            getUserTweetsAndReplies: vi.fn(),
+          }),
+          getUserListApi: () => ({ getFollowing, getFollowers }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(resumedCycle)
+
+    expect(getFollowing).not.toHaveBeenCalled()
+    expect(resumedCycle.syncFollowing).not.toHaveBeenCalled()
+    expect(getFollowers).toHaveBeenCalledWith({ userId: 'viewer1', cursor: undefined, count: 200 })
+    expect(resumedCycle.completeCrawlAccountCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'followers' }),
+    )
+    expect(resumedCycle.createTrendsScraper).not.toHaveBeenCalled()
   })
 
   it('marks the CrawlRun as failed and rethrows when finishCrawlRun itself fails', async () => {
