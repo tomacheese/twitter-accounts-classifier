@@ -30,10 +30,16 @@ describe('startOrResumeCrawlRun', () => {
     const findFirst = vi.fn().mockResolvedValue({
       id: 'run2',
     })
-    const queryRaw = vi.fn().mockResolvedValue([
-      { username: 'alice', status: 'failed' },
-      { username: 'bob', status: 'partial' },
-    ])
+    let sqlQuery: TemplateStringsArray | undefined
+    let requestedRunId: string | undefined
+    const queryRaw = vi.fn((query: TemplateStringsArray, crawlRunId: string) => {
+      sqlQuery = query
+      requestedRunId = crawlRunId
+      return Promise.resolve([
+        { username: 'alice', status: 'failed' },
+        { username: 'bob', status: 'partial' },
+      ])
+    })
     const create = vi.fn()
     const prisma = {
       crawlRun: { findFirst, create },
@@ -49,11 +55,11 @@ describe('startOrResumeCrawlRun', () => {
         ['bob', 'partial'],
       ]),
     })
-    const [query, crawlRunId] = queryRaw.mock.calls[0]
-    expect(query.join('')).toContain('SELECT DISTINCT ON ("username") "username", "status"')
-    expect(query.join('')).toContain('WHERE "crawlRunId" = ')
-    expect(query.join('')).toContain('ORDER BY "username", "startedAt" DESC, "id" DESC')
-    expect(crawlRunId).toBe('run2')
+    if (!sqlQuery) throw new Error('Expected the latest account status query')
+    expect(sqlQuery.join('')).toContain('SELECT DISTINCT ON ("username") "username", "status"')
+    expect(sqlQuery.join('')).toContain('WHERE "crawlRunId" = ')
+    expect(sqlQuery.join('')).toContain('ORDER BY "username", "startedAt" DESC, "id" DESC')
+    expect(requestedRunId).toBe('run2')
     expect(create).not.toHaveBeenCalled()
   })
 })
