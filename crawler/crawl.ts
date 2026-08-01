@@ -356,6 +356,8 @@ async function runAccountCycleBody(
           hasAiGeneratedMedia: t.hasAiGeneratedMedia,
           aiGeneratedDetectionSource: t.aiGeneratedDetectionSource,
           inReplyToTweetId: t.inReplyToTweetId,
+          quotedTweetAuthorId: t.quotedTweetAuthorId,
+          quotedTweetHasVideo: t.quotedTweetHasVideo,
         })),
         templatedReplyNetworkSize,
         replyHijackSwarmSize,

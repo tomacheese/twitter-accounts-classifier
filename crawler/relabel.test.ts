@@ -284,4 +284,44 @@ describe('runRelabelBackfill', () => {
     expect(bundleAcc1?.recentTweets.map((tweet) => tweet.id)).toEqual(['t1', 't2'])
     expect(bundleAcc2?.recentTweets.map((tweet) => tweet.id)).toEqual(['t3'])
   })
+
+  it('wires quotedTweetAuthorId and quotedTweetHasVideo from the raw tweet row into the bundle', async () => {
+    const tweetRow = {
+      id: 't1',
+      accountId: sampleAccount.id,
+      fullText: 'quoting a video',
+      createdAt: new Date(),
+      retweetCount: 0,
+      likeCount: 0,
+      isReply: false,
+      isRetweet: false,
+      isPromoted: false,
+      isPaidPromotion: false,
+      inReplyToTweetId: null,
+      quotedTweetAuthorId: 'bob',
+      quotedTweetHasVideo: true,
+    }
+    const { prisma } = makePrisma({
+      accounts: [[sampleAccount], []],
+      queryRawTweetRows: [tweetRow],
+    })
+    const registry = new LabelRuleRegistry()
+    const seenBundles: AccountFeatureBundle[] = []
+    registry.register({
+      key: 'rule-a',
+      description: 'test rule that records the bundle it saw',
+      version: '1.0.0',
+      evaluate: (bundle) => {
+        seenBundles.push(bundle)
+        return { value: true, confidence: 1, reason: 'test' }
+      },
+    })
+
+    await runRelabelBackfill(prisma, registry)
+
+    expect(seenBundles[0]?.recentTweets[0]).toMatchObject({
+      quotedTweetAuthorId: 'bob',
+      quotedTweetHasVideo: true,
+    })
+  })
 })

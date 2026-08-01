@@ -36,6 +36,21 @@ export interface RawTweetResult {
     isPaidPromotion?: boolean
     hasAiGeneratedMedia?: boolean | null
     aiGeneratedDetectionSource?: string | null
+    quotedStatusResult?: {
+      result: {
+        restId: string
+        // Absent when the quoted tweet itself is tombstoned/withheld (mirrors the
+        // outer tweet's own optional `legacy`, see `toRawTweetResult`).
+        legacy?: {
+          extendedEntities?: {
+            media?: { type: string }[]
+          }
+        }
+        user?: {
+          restId: string
+        }
+      }
+    } | null
   }
   user: RawUserResult
 }
@@ -66,15 +81,19 @@ export interface ToTweetInputContext {
 }
 
 /**
- * Deduplicates tweets by id, OR-ing `isPromoted`/`isPaidPromotion` across duplicate
- * copies of the same tweet id. The same tweet can be observed multiple times through
- * different fetch paths (e.g. a timeline injection and the author's own profile-fetched
- * tweet list), and only one of those paths may carry the ad-disclosure metadata (e.g.
- * `promotedMetadata`) needed to detect it - a plain overwrite would let whichever copy
- * is merged/persisted last silently discard a `true` flag observed via another path.
+ * Deduplicates tweets by id, OR-ing `isPromoted`/`isPaidPromotion` and coalescing the
+ * quoted-tweet fields across duplicate copies of the same tweet id. The same tweet can
+ * be observed multiple times through different fetch paths (e.g. a timeline injection
+ * and the author's own profile-fetched tweet list), and only one of those paths may
+ * carry the ad-disclosure metadata (e.g. `promotedMetadata`) or the quoted tweet's
+ * `legacy` payload needed to evaluate `quotedTweetHasVideo` - a plain overwrite would
+ * let whichever copy is merged/persisted last silently discard a `true` flag or a
+ * resolved quote observed via another path.
  * @param tweets - tweets that may contain duplicate ids
  * @returns one tweet per id, keeping the last-seen copy's other fields but with
- * `isPromoted`/`isPaidPromotion` OR'd across all copies of that id
+ * `isPromoted`/`isPaidPromotion` OR'd, and the quoted-tweet fields coalesced (prefer the
+ * current copy's non-null value, falling back to the previously merged copy's), across
+ * all copies of that id
  */
 export function mergeTweetAdFlags(tweets: TweetInput[]): TweetInput[] {
   const byId = new Map<string, TweetInput>()
@@ -84,6 +103,9 @@ export function mergeTweetAdFlags(tweets: TweetInput[]): TweetInput[] {
       ...tweet,
       isPromoted: tweet.isPromoted || (existing?.isPromoted ?? false),
       isPaidPromotion: tweet.isPaidPromotion || (existing?.isPaidPromotion ?? false),
+      quotedTweetId: tweet.quotedTweetId ?? existing?.quotedTweetId ?? null,
+      quotedTweetAuthorId: tweet.quotedTweetAuthorId ?? existing?.quotedTweetAuthorId ?? null,
+      quotedTweetHasVideo: tweet.quotedTweetHasVideo ?? existing?.quotedTweetHasVideo ?? null,
     })
   }
   return [...byId.values()]
@@ -92,6 +114,16 @@ export function mergeTweetAdFlags(tweets: TweetInput[]): TweetInput[] {
 export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext): TweetInput {
   const isReply = raw.legacy.inReplyToStatusIdStr !== null
   const isRetweet = raw.legacy.retweetedStatusIdStr !== null
+
+  const quotedResult = raw.legacy.quotedStatusResult?.result ?? null
+  // `null` means "no quoted tweet, or its video status was never evaluated" (quoted
+  // tweet tombstoned/withheld, so its `legacy` is absent); `false` means the quoted
+  // tweet's `legacy` was present but carried no video/GIF media.
+  const quotedTweetHasVideo = quotedResult?.legacy
+    ? (quotedResult.legacy.extendedEntities?.media ?? []).some(
+        (media) => media.type === 'video' || media.type === 'animated_gif',
+      )
+    : null
 
   return {
     id: raw.restId,
@@ -111,6 +143,9 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
     isPaidPromotion: raw.legacy.isPaidPromotion ?? false,
     hasAiGeneratedMedia: raw.legacy.hasAiGeneratedMedia ?? null,
     aiGeneratedDetectionSource: raw.legacy.aiGeneratedDetectionSource ?? null,
+    quotedTweetId: quotedResult?.restId ?? null,
+    quotedTweetAuthorId: quotedResult?.user?.restId ?? null,
+    quotedTweetHasVideo,
     source: context.source,
   }
 }

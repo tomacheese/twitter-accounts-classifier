@@ -72,6 +72,11 @@ model Tweet {
   // real false/true reported by a subsequent fetch. See the migration for detail.
   hasAiGeneratedMedia        Boolean?
   aiGeneratedDetectionSource String?
+  // No default (null), same "unknown vs. confirmed" convention as hasAiGeneratedMedia
+  // above. See the migration for detail.
+  quotedTweetId              String?
+  quotedTweetAuthorId        String?
+  quotedTweetHasVideo        Boolean?
   source                     String
   collectedAt                DateTime @default(now())
 

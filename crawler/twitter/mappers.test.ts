@@ -89,8 +89,19 @@ describe('toTweetInput', () => {
       isPaidPromotion: false,
       hasAiGeneratedMedia: null,
       aiGeneratedDetectionSource: null,
+      quotedTweetId: null,
+      quotedTweetAuthorId: null,
+      quotedTweetHasVideo: null,
       source: 'recommended',
     })
+  })
+
+  it('defaults quotedTweetId, quotedTweetAuthorId and quotedTweetHasVideo to null when there is no quoted tweet', () => {
+    const input = toTweetInput(rawTweet, { source: 'recommended', viewerAccountId: 'someone-else' })
+
+    expect(input.quotedTweetId).toBeNull()
+    expect(input.quotedTweetAuthorId).toBeNull()
+    expect(input.quotedTweetHasVideo).toBeNull()
   })
 
   it('marks isAuthorReply true when the reply author matches the viewer account', () => {
@@ -155,6 +166,70 @@ describe('toTweetInput', () => {
   })
 })
 
+function quotedStatusResult(mediaTypes: string[]): RawTweetResult['legacy']['quotedStatusResult'] {
+  return {
+    result: {
+      restId: 'quoted1',
+      legacy: {
+        extendedEntities: {
+          media: mediaTypes.map((type) => ({ type })),
+        },
+      },
+      user: {
+        restId: 'bob',
+      },
+    },
+  }
+}
+
+describe('toTweetInput quoted tweet handling', () => {
+  it('sets quotedTweetHasVideo to true when the quoted tweet has a video', () => {
+    const quoteTweet: RawTweetResult = {
+      ...rawTweet,
+      legacy: { ...rawTweet.legacy, quotedStatusResult: quotedStatusResult(['video']) },
+    }
+
+    const input = toTweetInput(quoteTweet, {
+      source: 'recommended',
+      viewerAccountId: 'someone-else',
+    })
+
+    expect(input.quotedTweetId).toBe('quoted1')
+    expect(input.quotedTweetAuthorId).toBe('bob')
+    expect(input.quotedTweetHasVideo).toBe(true)
+  })
+
+  it('sets quotedTweetHasVideo to true when the quoted tweet has an animated GIF', () => {
+    const quoteTweet: RawTweetResult = {
+      ...rawTweet,
+      legacy: { ...rawTweet.legacy, quotedStatusResult: quotedStatusResult(['animated_gif']) },
+    }
+
+    const input = toTweetInput(quoteTweet, {
+      source: 'recommended',
+      viewerAccountId: 'someone-else',
+    })
+
+    expect(input.quotedTweetHasVideo).toBe(true)
+  })
+
+  it('sets quotedTweetHasVideo to false when the quoted tweet only has photos', () => {
+    const quoteTweet: RawTweetResult = {
+      ...rawTweet,
+      legacy: { ...rawTweet.legacy, quotedStatusResult: quotedStatusResult(['photo']) },
+    }
+
+    const input = toTweetInput(quoteTweet, {
+      source: 'recommended',
+      viewerAccountId: 'someone-else',
+    })
+
+    expect(input.quotedTweetId).toBe('quoted1')
+    expect(input.quotedTweetAuthorId).toBe('bob')
+    expect(input.quotedTweetHasVideo).toBe(false)
+  })
+})
+
 function tweetInput(overrides: Partial<TweetInput> & { id: string }): TweetInput {
   return {
     accountId: 'u1',
@@ -173,6 +248,9 @@ function tweetInput(overrides: Partial<TweetInput> & { id: string }): TweetInput
     isPaidPromotion: false,
     hasAiGeneratedMedia: false,
     aiGeneratedDetectionSource: null,
+    quotedTweetId: null,
+    quotedTweetAuthorId: null,
+    quotedTweetHasVideo: null,
     source: 'recommended',
     ...overrides,
   }

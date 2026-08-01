@@ -52,6 +52,19 @@ export interface AccountFeatureBundle {
      * `null`/absent when `hasAiGeneratedMedia` is not `true`.
      */
     aiGeneratedDetectionSource?: string | null
+    /**
+     * The author id of the tweet this one quotes, or `null`/absent if it isn't a quote
+     * tweet or the quoted tweet's author id is unknown. Optional so bundles built by rule
+     * unit tests that predate this field keep compiling unmodified.
+     */
+    quotedTweetAuthorId?: string | null
+    /**
+     * Whether the quoted tweet's own media contains a video or animated GIF. Same
+     * "unknown (`null`) vs. confirmed" convention as `hasAiGeneratedMedia` above - see
+     * `prisma/schema.prisma`'s `Tweet.quotedTweetHasVideo` for detail. Optional for the
+     * same reason as `quotedTweetAuthorId` above.
+     */
+    quotedTweetHasVideo?: boolean | null
   }[]
   /**
    * The largest number of distinct OTHER accounts observed posting a reply whose text

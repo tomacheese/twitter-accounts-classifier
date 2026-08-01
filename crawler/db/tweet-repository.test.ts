@@ -20,6 +20,9 @@ const sampleTweet: TweetInput = {
   isPaidPromotion: false,
   hasAiGeneratedMedia: false,
   aiGeneratedDetectionSource: null,
+  quotedTweetId: null,
+  quotedTweetAuthorId: null,
+  quotedTweetHasVideo: null,
   source: 'recommended',
 }
 
@@ -92,5 +95,80 @@ describe('upsertTweet ad-disclosure fields', () => {
 
     const call = upsert.mock.calls[0][0] as Record<string, unknown>
     expect(call.update).toMatchObject({ isPromoted: true, isPaidPromotion: true })
+  })
+})
+
+describe('upsertTweet quoted-tweet fields', () => {
+  it('passes quotedTweetId, quotedTweetAuthorId and quotedTweetHasVideo through to both create and update', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
+    const findUnique = vi.fn().mockResolvedValue(null)
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    await upsertTweet(prisma, {
+      ...sampleTweet,
+      quotedTweetId: 'quoted1',
+      quotedTweetAuthorId: 'bob',
+      quotedTweetHasVideo: true,
+    })
+
+    const call = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(call.create).toMatchObject({
+      quotedTweetId: 'quoted1',
+      quotedTweetAuthorId: 'bob',
+      quotedTweetHasVideo: true,
+    })
+    expect(call.update).toMatchObject({
+      quotedTweetId: 'quoted1',
+      quotedTweetAuthorId: 'bob',
+      quotedTweetHasVideo: true,
+    })
+  })
+
+  it('does not let a re-crawl that fails to resolve the quoted tweet erase a previously-known value, like the ad-disclosure fields', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
+    const findUnique = vi.fn().mockResolvedValue({
+      quotedTweetId: 'quoted1',
+      quotedTweetAuthorId: 'bob',
+      quotedTweetHasVideo: true,
+    })
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    await upsertTweet(prisma, {
+      ...sampleTweet,
+      quotedTweetId: null,
+      quotedTweetAuthorId: null,
+      quotedTweetHasVideo: null,
+    })
+
+    const call = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(call.update).toMatchObject({
+      quotedTweetId: 'quoted1',
+      quotedTweetAuthorId: 'bob',
+      quotedTweetHasVideo: true,
+    })
+  })
+
+  it('overwrites a previously-known quoted-tweet value once the re-crawl resolves a different one', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
+    const findUnique = vi.fn().mockResolvedValue({
+      quotedTweetId: 'quoted1',
+      quotedTweetAuthorId: 'bob',
+      quotedTweetHasVideo: true,
+    })
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    await upsertTweet(prisma, {
+      ...sampleTweet,
+      quotedTweetId: 'quoted2',
+      quotedTweetAuthorId: 'carol',
+      quotedTweetHasVideo: false,
+    })
+
+    const call = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(call.update).toMatchObject({
+      quotedTweetId: 'quoted2',
+      quotedTweetAuthorId: 'carol',
+      quotedTweetHasVideo: false,
+    })
   })
 })
