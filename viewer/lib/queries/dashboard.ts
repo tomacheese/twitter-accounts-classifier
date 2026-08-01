@@ -40,37 +40,22 @@ interface LatestLabelsSummary {
 }
 
 /**
- * Runs the merged `latest_labels` aggregation query: computes the
- * `DISTINCT ON` CTE once (materialized) and derives both the labeled-account
- * count and the per-label distribution from it in a single query, instead of
- * running the same expensive CTE twice per dashboard page view. Also sets a
- * statement_timeout so a query stuck behind disk I/O contention releases its
- * connection-pool slot instead of holding it for minutes.
- * @param prisma - the Prisma client to query
- * @returns the labeled account count and label distribution
+ * 集計クエリ `latest_labels` をまとめて実行する: ラベル付けずみアカウント数と
+ * ラベルごとの分布を、`AccountLabelLatest` を1回だけ読んでダッシュボードの
+ * ページロードのたびに同じ集計を二重に実行しないようにする (テーブルの設計
+ * 意図は prisma/schema.prisma の AccountLabelLatest コメントを参照)。無関係な
+ * ディスク I/O 競合でクエリが詰まった場合に備え、念のため statement_timeout も
+ * 設定し、コネクションプールの枠を握ったままにしない。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @returns ラベル付けずみアカウント数とラベル分布
  */
 async function queryLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSummary> {
   const result = await prisma.$transaction([
-    // Cap how long this query may hold a pool connection: under disk I/O
-    // contention (e.g. right after startup, while the crawler is seeding),
-    // this query can otherwise run for minutes and starve the pool for
-    // every other page. 15s is generous for the steady-state case but short
-    // enough to fail fast and free the connection under contention.
     prisma.$executeRaw`SET LOCAL statement_timeout = '15000'`,
-    // The planner's cost model underestimates how cheap
-    // "AccountLabel_accountId_labelDefinitionId_labeledAt_id_idx" is on this
-    // table (it already returns rows in the exact order the CTE below sorts
-    // by), so left to itself it picks a cheaper-looking plan that instead
-    // sorts the whole table by hand. Disabling incremental sort for this
-    // transaction only steers it onto the index scan, which is
-    // measurably faster in practice - see the migration note for this index.
-    prisma.$executeRaw`SET LOCAL enable_incremental_sort = off`,
     prisma.$queryRaw<LatestLabelsSummaryRow[]>`
       WITH latest_labels AS MATERIALIZED (
-        SELECT DISTINCT ON ("accountId", "labelDefinitionId")
-          "accountId", "labelDefinitionId", value
-        FROM "AccountLabel"
-        ORDER BY "accountId", "labelDefinitionId", "labeledAt" DESC, "id" DESC
+        SELECT "accountId", "labelDefinitionId", "value"
+        FROM "AccountLabelLatest"
       ),
       label_counts AS (
         SELECT
@@ -83,14 +68,14 @@ async function queryLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLab
         GROUP BY ld.id, ld.key, ld.description
       )
       SELECT
-        (SELECT COUNT(DISTINCT "accountId") FROM latest_labels WHERE value = true) AS "labeledAccounts",
+        (SELECT COUNT(DISTINCT "accountId") FROM latest_labels WHERE "value" = true) AS "labeledAccounts",
         (
           SELECT COALESCE(json_agg(lc.* ORDER BY lc."labelKey"), '[]'::json)
           FROM label_counts lc
         ) AS distribution
     `,
   ])
-  const rows = result[2]
+  const rows = result[1]
 
   // rows は空配列で返ってくることがある(集計対象が0件など)ため、
   // Array#at() で undefined を許容する型のまま安全に取り出す。
@@ -112,16 +97,15 @@ const CACHE_TTL_MS = 15 * 60 * 1000
 let cached: { promise: Promise<LatestLabelsSummary>; expiresAt: number } | undefined
 
 /**
- * Returns the merged latest_labels summary, reusing a cached in-flight or
- * recently-resolved promise when available. Caching the in-flight promise
- * itself (not just the resolved value) collapses concurrent callers - e.g.
- * getDashboardKpis and getLabelDistribution invoked together via
- * Promise.all on the dashboard page - onto a single underlying query, and
- * keeps serving the same result for CACHE_TTL_MS afterward. A failed query
- * is never cached, so the next call retries against the database instead of
- * re-throwing the same error for the rest of the TTL window.
- * @param prisma - the Prisma client to query
- * @returns the labeled account count and label distribution
+ * 集計済みの latest_labels summary を返す。実行中または直近に解決した
+ * promise があればそれを再利用する。解決済みの値だけでなく実行中の promise
+ * 自体をキャッシュすることで、getDashboardKpis と getLabelDistribution を
+ * ダッシュボードページから Promise.all で同時に呼んだ場合でも、実際のクエリは
+ * 1回にまとめられる。以後 CACHE_TTL_MS の間は同じ結果を返し続ける。失敗した
+ * クエリはキャッシュしないため、次回呼び出し時は TTL 内であっても DB へ
+ * 再試行する(同じエラーを TTL 満了まで返し続けることはない)。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @returns ラベル付けずみアカウント数とラベル分布
  */
 function getLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSummary> {
   const now = Date.now()
@@ -142,13 +126,12 @@ function getLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSumma
 }
 
 /**
- * Loads the top-level KPI figures shown on the dashboard: total accounts and
- * tweets accumulated, how many accounts currently carry at least one positive
- * label (using only each account's most recent evaluation per label, same
- * rule as {@link getLabelDistribution}), and the most recent crawl timestamp
- * across all accounts.
- * @param prisma - the Prisma client to query
- * @returns the dashboard KPI figures
+ * ダッシュボードの上部に表示する KPI を読み込む: 累計アカウント数・ツイート数、
+ * 現在少なくとも1つのラベルが true になっているアカウント数 (各ラベルの
+ * 最新評価のみを使う点は {@link getLabelDistribution} と同じ)、全アカウント中
+ * 最新のクロール日時。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @returns ダッシュボードの KPI
  */
 export async function getDashboardKpis(prisma: PrismaClient): Promise<DashboardKpis> {
   const [totalAccounts, totalTweets, summary, lastCrawled] = await Promise.all([
@@ -167,12 +150,11 @@ export async function getDashboardKpis(prisma: PrismaClient): Promise<DashboardK
 }
 
 /**
- * Loads the per-label distribution shown on the dashboard: for every
- * `LabelDefinition`, how many accounts currently carry that label as `true`
- * (using only each account's most recent evaluation of that label) out of
- * how many accounts have ever been evaluated for it.
- * @param prisma - the Prisma client to query
- * @returns one entry per label definition, ordered by label key
+ * ダッシュボードに表示するラベルごとの分布を読み込む: 各 `LabelDefinition`
+ * について、これまでに評価されたアカウント数のうち現在の最新評価が `true`
+ * であるアカウント数を返す。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @returns ラベル定義ごとの分布 (ラベルキー順)
  */
 export async function getLabelDistribution(
   prisma: PrismaClient,

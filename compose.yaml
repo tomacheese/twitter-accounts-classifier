@@ -70,13 +70,12 @@ services:
           # so the fetch stalls for several seconds before falling back to IPv4 and
           # blows past the timeout below.
           #
-          # /api/health, not '/': the dashboard route runs KPI/label-distribution
-          # queries that scan the AccountLabel table (millions of rows and
-          # growing) — even with the composite index added to keep them fast,
-          # measured response times under real load exceeded 10s, well past any
-          # reasonable healthcheck timeout. /api/health is a plain liveness probe
-          # that never touches the database, so it stays fast regardless of query
-          # load.
+          # '/' ではなく /api/health: ダッシュボードのルートは KPI/ラベル分布の
+          # クエリを実行し、DB にアクセスする (際限なく増え続ける AccountLabel
+          # 履歴ではなく上限のある AccountLabelLatest テーブルに対してだが、
+          # 通常のコネクションプール/DB 負荷の影響は依然として受ける)。
+          # /api/health は DB に一切触れない単純な liveness probe なので、
+          # クエリ負荷に関係なく高速であり続ける。
           "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 10s
