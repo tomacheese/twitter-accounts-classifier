@@ -106,6 +106,41 @@ async function queryLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLab
   }
 }
 
+/** latest_labels summary のキャッシュ有効期限(ミリ秒)。15分。 */
+const CACHE_TTL_MS = 15 * 60 * 1000
+
+let cached: { promise: Promise<LatestLabelsSummary>; expiresAt: number } | undefined
+
+/**
+ * Returns the merged latest_labels summary, reusing a cached in-flight or
+ * recently-resolved promise when available. Caching the in-flight promise
+ * itself (not just the resolved value) collapses concurrent callers - e.g.
+ * getDashboardKpis and getLabelDistribution invoked together via
+ * Promise.all on the dashboard page - onto a single underlying query, and
+ * keeps serving the same result for CACHE_TTL_MS afterward. A failed query
+ * is never cached, so the next call retries against the database instead of
+ * re-throwing the same error for the rest of the TTL window.
+ * @param prisma - the Prisma client to query
+ * @returns the labeled account count and label distribution
+ */
+function getLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSummary> {
+  const now = Date.now()
+  if (cached && cached.expiresAt > now) {
+    return cached.promise
+  }
+
+  const promise = queryLatestLabelsSummary(prisma)
+  const entry = { promise, expiresAt: now + CACHE_TTL_MS }
+  cached = entry
+  promise.catch(() => {
+    if (cached === entry) {
+      cached = undefined
+    }
+  })
+
+  return promise
+}
+
 /**
  * Loads the top-level KPI figures shown on the dashboard: total accounts and
  * tweets accumulated, how many accounts currently carry at least one positive
@@ -119,7 +154,7 @@ export async function getDashboardKpis(prisma: PrismaClient): Promise<DashboardK
   const [totalAccounts, totalTweets, summary, lastCrawled] = await Promise.all([
     prisma.account.count(),
     prisma.tweet.count(),
-    queryLatestLabelsSummary(prisma),
+    getLatestLabelsSummary(prisma),
     prisma.account.aggregate({ _max: { lastCrawledAt: true } }),
   ])
 
@@ -142,6 +177,6 @@ export async function getDashboardKpis(prisma: PrismaClient): Promise<DashboardK
 export async function getLabelDistribution(
   prisma: PrismaClient,
 ): Promise<LabelDistributionEntry[]> {
-  const summary = await queryLatestLabelsSummary(prisma)
+  const summary = await getLatestLabelsSummary(prisma)
   return summary.distribution
 }

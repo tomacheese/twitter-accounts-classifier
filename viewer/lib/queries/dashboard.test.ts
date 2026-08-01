@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
 
 interface MockRow {
@@ -37,6 +37,13 @@ const SAMPLE_ROW: MockRow = {
     { labelKey: 'spam', labelDescription: 'Likely spam account', trueCount: 7, totalAccounts: 120 },
   ],
 }
+
+// getLatestLabelsSummary はモジュールスコープでキャッシュを保持するため、
+// テストごとに vi.resetModules() でモジュールを再ロードし、キャッシュ状態が
+// 前のテストから漏れ出さないようにする。
+beforeEach(() => {
+  vi.resetModules()
+})
 
 describe('getDashboardKpis', () => {
   it('aggregates account/tweet counts, labeled account count, and last crawl time', async () => {
@@ -124,5 +131,67 @@ describe('statement_timeout', () => {
       (call[0] as TemplateStringsArray).join(''),
     )
     expect(calls).toContain("SET LOCAL statement_timeout = '15000'")
+  })
+})
+
+describe('getLatestLabelsSummary caching', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T00:00:00Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reuses a single query for concurrent calls (in-flight dedup)', async () => {
+    const { getDashboardKpis, getLabelDistribution } = await import('./dashboard')
+    const prisma = createMockPrisma([SAMPLE_ROW])
+
+    await Promise.all([getDashboardKpis(prisma), getLabelDistribution(prisma)])
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('reuses the cached result for a second call within the TTL', async () => {
+    const { getLabelDistribution } = await import('./dashboard')
+    const prisma = createMockPrisma([SAMPLE_ROW])
+
+    await getLabelDistribution(prisma)
+    vi.setSystemTime(new Date('2026-08-01T00:10:00Z')) // 15分 TTL 以内
+    await getLabelDistribution(prisma)
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-queries after the TTL expires', async () => {
+    const { getLabelDistribution } = await import('./dashboard')
+    const prisma = createMockPrisma([SAMPLE_ROW])
+
+    await getLabelDistribution(prisma)
+    vi.setSystemTime(new Date('2026-08-01T00:16:00Z')) // 15分 TTL を超過
+    await getLabelDistribution(prisma)
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not cache a failed query, and retries on the next call', async () => {
+    const { getLabelDistribution } = await import('./dashboard')
+    const prisma = createMockPrisma([SAMPLE_ROW])
+    prisma.$transaction.mockRejectedValueOnce(new Error('query_canceled'))
+
+    await expect(getLabelDistribution(prisma)).rejects.toThrow('query_canceled')
+    const result = await getLabelDistribution(prisma)
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2)
+    expect(result).toEqual([
+      {
+        labelKey: 'spam',
+        labelDescription: 'Likely spam account',
+        trueCount: 7,
+        totalAccounts: 120,
+      },
+    ])
   })
 })
