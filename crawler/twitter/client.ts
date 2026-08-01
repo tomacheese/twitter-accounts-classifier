@@ -58,7 +58,7 @@ export function createCycleTLSFetch(cycleTLS: CycleTLSClient): typeof fetch {
     )
     return new Response(
       typeof response.data === 'string' ? response.data : JSON.stringify(response.data),
-      { status: response.status },
+      { status: response.status, headers: new Headers(response.headers) },
     )
   }
 }

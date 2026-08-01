@@ -16,6 +16,12 @@ import { buildReplyHijackIndex, type ReplyHijackCorpusEntry } from './labels/rep
 import { createCookieIssuerClient, type IssuedCookies } from './auth/cookie-issuer-client'
 import { getLastResponseMatching } from './twitter/response-capture'
 import {
+  formatResponseErrorDiagnostics,
+  getResponseErrorDiagnostics,
+  isResponseError,
+  toSafeResponseErrorForLog,
+} from './twitter/response-diagnostics'
+import {
   createOpenApiClient as createRealOpenApiClient,
   closeOpenApiClient as closeRealOpenApiClient,
   createTrendsScraper as createRealTrendsScraper,
@@ -384,13 +390,21 @@ async function runAccountCycleBody(
           `Skipping author ${authorId}: account is unavailable (suspended, deleted, or protected)`,
         )
       } else {
-        const message = `Failed to process author ${authorId}, skipping to next author`
-        logger.error(message, error as Error)
+        const diagnostics = getResponseErrorDiagnostics(error)
+        const message = diagnostics
+          ? `Failed to process author ${authorId}, skipping to next author (${formatResponseErrorDiagnostics(diagnostics)})`
+          : `Failed to process author ${authorId}, skipping to next author`
+        if (isResponseError(error)) {
+          logger.error(message, toSafeResponseErrorForLog(error))
+        } else {
+          logger.error(message, error as Error)
+        }
         warnings.push({
           type: 'author_processing_failed',
           message,
           authorId,
           errorMessage: toErrorMessage(error),
+          ...diagnostics,
         })
       }
     }

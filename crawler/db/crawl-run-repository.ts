@@ -34,6 +34,12 @@ export interface CrawlWarning {
    * investigate the real response shape behind a library parse failure after the fact.
    */
   rawResponseSnippet?: string
+  /** author 処理の ResponseError に限り記録する安全な HTTP 診断情報。 */
+  httpStatus?: number
+  retryAfterSeconds?: number
+  rateLimitLimit?: number
+  rateLimitRemaining?: number
+  rateLimitReset?: number
 }
 
 export interface RecordCrawlAccountRunParams {

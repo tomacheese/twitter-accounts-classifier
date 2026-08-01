@@ -1,3 +1,4 @@
+import { Logger } from '@book000/node-utils'
 import { describe, expect, it, vi } from 'vitest'
 import { runCrawlCycle, type CrawlDependencies } from './crawl'
 import { LabelRuleRegistry } from './labels/registry'
@@ -50,6 +51,18 @@ function rawTweet(
     },
     user,
   }
+}
+
+function responseError(status: number, headers: Headers = new Headers()): Error {
+  const error = new Error('Response returned an error code')
+  error.name = 'ResponseError'
+  ;(error as unknown as { response: { status: number; headers: Headers; body: string } }).response =
+    {
+      status,
+      headers,
+      body: 'diagnostic-test-response-body',
+    }
+  return error
 }
 
 function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies {
@@ -460,7 +473,12 @@ describe('runCrawlCycle', () => {
           }),
           getUserApi: () => ({
             getUserByRestId,
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),
@@ -479,6 +497,10 @@ describe('runCrawlCycle', () => {
         expect.objectContaining({ id: 'tweet-bad' }),
       ]),
     )
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'success', warnings: [] }),
+    )
+    expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'success')
   })
 
   it('merges a timeline-only promoted tweet into the label bundle for its author', async () => {
@@ -970,6 +992,117 @@ describe('runCrawlCycle', () => {
         ]),
       }),
     )
+  })
+
+  it.each([401, 403, 429, 500])(
+    'records safe HTTP diagnostics and a partial run for author ResponseError %i',
+    async (status) => {
+      const author = rawUser('author1')
+      const tweet = rawTweet('tweet1', author)
+      const error = responseError(
+        status,
+        new Headers({
+          'Retry-After': '60',
+          'X-Rate-Limit-Limit': '100',
+          'X-Rate-Limit-Remaining': '0',
+          'X-Rate-Limit-Reset': '1760000000',
+          authorization: 'Bearer diagnostic-test-token',
+          cookie: 'session=diagnostic-test-cookie',
+          'set-cookie': 'session=diagnostic-test-cookie',
+          'x-unrelated-header': 'diagnostic-test-secret',
+        }),
+      )
+      const loggerError = vi
+        .spyOn(Logger.configure('crawl'), 'error')
+        .mockImplementation(() => undefined)
+      const deps = makeDeps({
+        createOpenApiClient: vi.fn().mockResolvedValue({
+          client: {
+            getTweetApi: () => ({
+              getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+              getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            }),
+            getUserApi: () => ({
+              getUserByRestId: vi.fn().mockRejectedValue(error),
+              getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+              getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            }),
+            getUserListApi: () => ({
+              getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+              getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
+          },
+        }),
+      })
+
+      try {
+        await runCrawlCycle(deps)
+
+        expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: 'partial',
+            warnings: expect.arrayContaining([
+              {
+                type: 'author_processing_failed',
+                message: expect.stringContaining(`httpStatus=${String(status)}`),
+                authorId: 'author1',
+                errorMessage: 'Response returned an error code',
+                httpStatus: status,
+                retryAfterSeconds: 60,
+                rateLimitLimit: 100,
+                rateLimitRemaining: 0,
+                rateLimitReset: 1_760_000_000,
+              },
+            ]),
+          }),
+        )
+        expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'partial')
+        const [message] = loggerError.mock.calls[0] ?? []
+        expect(message).toContain(`httpStatus=${String(status)}`)
+        expect(message).not.toContain('diagnostic-test')
+        expect(loggerError).toHaveBeenCalledWith(
+          message,
+          expect.objectContaining({ name: 'ResponseError', message: 'ResponseError' }),
+        )
+      } finally {
+        loggerError.mockRestore()
+      }
+    },
+  )
+
+  it('treats a 404 ResponseError as an expected unavailable account', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockRejectedValue(responseError(404)),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'success', warnings: [] }),
+    )
+    expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'success')
   })
 
   it('records a structured following_timeline_failed warning when the following timeline fetch fails', async () => {
