@@ -67,8 +67,8 @@ describe('listAccounts', () => {
   })
 
   it('filters to accounts whose latest value is true for any given label key', async () => {
-    // The first call is findAccountIdsWithAnyLabel's own $queryRaw; the
-    // second is getActiveLabelKeysByAccount's.
+    // 1回目の呼び出しは findAccountIdsWithAnyLabel 自身の $queryRaw、
+    // 2回目は getActiveLabelKeysByAccount のもの。
     const queryRaw = vi
       .fn()
       .mockResolvedValueOnce([{ accountId: 'a2' }])

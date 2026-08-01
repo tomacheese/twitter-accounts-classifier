@@ -11,9 +11,9 @@ CREATE TABLE "AccountLabelLatest" (
 );
 
 -- CreateIndex
-CREATE INDEX "AccountLabelLatest_labelDefinitionId_idx" ON "AccountLabelLatest"("labelDefinitionId");
-
--- CreateIndex
+-- (labelDefinitionId) 単独のインデックスは作らない: 直後の
+-- (labelDefinitionId, value) 複合インデックスの先頭列と一致するため常に
+-- 冗長になり、crawler の頻繁な upsert に書き込みコストを積むだけになる。
 CREATE INDEX "AccountLabelLatest_labelDefinitionId_value_idx" ON "AccountLabelLatest"("labelDefinitionId", "value");
 
 -- CreateIndex

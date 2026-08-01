@@ -102,8 +102,8 @@ async function getActiveLabelKeysByAccount(
  * Loads every registered label key, for populating the Accounts page's label
  * filter control. Deliberately lighter than {@link getLabelDistribution}
  * (dashboard.ts): the filter only needs the key list, not the true/total
- * counts, which would otherwise force a full `AccountLabel` scan just to
- * render checkboxes.
+ * counts, so it queries `LabelDefinition` directly instead of also reading
+ * `AccountLabelLatest`.
  * @param prisma - the Prisma client to query
  * @returns every label key, ordered alphabetically
  */

@@ -109,6 +109,12 @@ model AccountLabel {
   @@index([accountId])
   @@index([labelDefinitionId])
   @@index([labeledAt])
+  // crawler/relabel.ts の loadLatestRuleVersions が実行する
+  // `DISTINCT ON ("accountId", "labelDefinitionId") ... ORDER BY "accountId",
+  // "labelDefinitionId", "labeledAt" DESC, "id" DESC` にそのまま一致させる
+  // ためのインデックス。AccountLabelLatest は ruleVersion を持たないため、
+  // このバックフィル用クエリだけは AccountLabel の履歴を直接引き続ける。
+  @@index([accountId, labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])
 }
 
 // 履歴テーブルである AccountLabel (アカウント詳細ページの監査証跡として全件を
@@ -119,8 +125,9 @@ model AccountLabel {
 // を保持し、recordAccountLabel が AccountLabel への履歴 INSERT と同時に upsert
 // する。そのためこれらの集計クエリは履歴の総件数ではなく (アカウント数 x
 // ラベル数) で頭打ちになる。この経緯の説明はここを正としており、
-// crawler/db/label-repository.ts・viewer/lib/queries/dashboard.ts・対応する
-// マイグレーションのコメントはここへの参照のみとする。
+// crawler/db/label-repository.ts・viewer/lib/queries/dashboard.ts・
+// viewer/lib/queries/accounts.ts・対応するマイグレーションのコメントは
+// ここへの参照のみとする。
 model AccountLabelLatest {
   accountId         String
   account           Account         @relation(fields: [accountId], references: [id])
@@ -130,7 +137,6 @@ model AccountLabelLatest {
   labeledAt         DateTime
 
   @@id([accountId, labelDefinitionId])
-  @@index([labelDefinitionId])
   // value = true で絞り込む dashboard.ts/accounts.ts の各クエリを支える。
   @@index([labelDefinitionId, value])
   @@index([value, accountId])

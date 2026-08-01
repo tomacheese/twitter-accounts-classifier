@@ -43,9 +43,13 @@ interface LatestLabelsSummary {
  * 集計クエリ `latest_labels` をまとめて実行する: ラベル付けずみアカウント数と
  * ラベルごとの分布を、`AccountLabelLatest` を1回だけ読んでダッシュボードの
  * ページロードのたびに同じ集計を二重に実行しないようにする (テーブルの設計
- * 意図は prisma/schema.prisma の AccountLabelLatest コメントを参照)。無関係な
- * ディスク I/O 競合でクエリが詰まった場合に備え、念のため statement_timeout も
- * 設定し、コネクションプールの枠を握ったままにしない。
+ * 意図は prisma/schema.prisma の AccountLabelLatest コメントを参照)。
+ * `latest_labels` は `NOT MATERIALIZED` を指定し、`value = true` の絞り込みを
+ * `label_counts`/最上位 SELECT 側からプランナーが押し下げられるようにしている。
+ * `MATERIALIZED` を指定すると常に Seq Scan + 一時領域への実体化が強制され、
+ * `AccountLabelLatest_value_accountId_idx` を使った index-only scan が選ばれず
+ * 数倍遅くなる。無関係なディスク I/O 競合でクエリが詰まった場合に備え、念のため
+ * statement_timeout も設定し、コネクションプールの枠を握ったままにしない。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ラベル付けずみアカウント数とラベル分布
  */
@@ -53,7 +57,7 @@ async function queryLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLab
   const result = await prisma.$transaction([
     prisma.$executeRaw`SET LOCAL statement_timeout = '15000'`,
     prisma.$queryRaw<LatestLabelsSummaryRow[]>`
-      WITH latest_labels AS MATERIALIZED (
+      WITH latest_labels AS NOT MATERIALIZED (
         SELECT "accountId", "labelDefinitionId", "value"
         FROM "AccountLabelLatest"
       ),
@@ -77,7 +81,8 @@ async function queryLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLab
   ])
   const rows = result[1]
 
-  // rows は空配列で返ってくることがある(集計対象が0件など)ため、
+  // トップレベルの SELECT に FROM 句がなく常に1行だけ返るが、Prisma の
+  // $queryRaw の戻り値の型は配列であり要素数を型では保証できないため、
   // Array#at() で undefined を許容する型のまま安全に取り出す。
   const row = rows.at(0)
   return {

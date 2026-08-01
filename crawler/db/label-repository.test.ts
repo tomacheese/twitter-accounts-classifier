@@ -7,6 +7,8 @@ import {
   recordAccountLabel,
 } from './label-repository'
 
+vi.mock('node:crypto', () => ({ randomUUID: () => 'mock-id' }))
+
 describe('ensureLabelDefinition', () => {
   it('upserts by key', async () => {
     const upsert = vi.fn().mockResolvedValue({ id: 'ld1', key: 'blue_verified' })
@@ -52,8 +54,8 @@ describe('ensureLabelDefinitionsForRules', () => {
 })
 
 describe('recordAccountLabel', () => {
-  it('inserts a new history row with the rule result fields via a single queryRaw call', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([{ id: 'al1' }])
+  it('inserts a new history row with the rule result fields, bound in the same order as the SQL text, via a single queryRaw call', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ id: 'al1', latestUpserted: true }])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
     const result = await recordAccountLabel(prisma, {
@@ -69,13 +71,26 @@ describe('recordAccountLabel', () => {
     const [sql, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
     expect(sql.join('')).toContain('INSERT INTO "AccountLabel"')
     expect(sql.join('')).toContain('INSERT INTO "AccountLabelLatest"')
-    expect(values).toEqual(
-      expect.arrayContaining(['u1', 'ld1', true, 1, 'because', 'blue_verified', '1.0.0']),
-    )
+    // 生 SQL のバインドは位置指定のため、arrayContaining では value/confidence や
+    // method/ruleVersion の入れ替わりを検知できない。SELECT に現れる順序どおりの
+    // 配列と比較し、取り違えがあれば検知できるようにする。
+    expect(values).toEqual([
+      'mock-id',
+      'u1',
+      'ld1',
+      true,
+      1,
+      'because',
+      'blue_verified',
+      '1.0.0',
+      'u1',
+      'ld1',
+      true,
+    ])
   })
 
-  it('shares one labeledAt between the history insert and the latest-value upsert, guarded against out-of-order writes', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([{ id: 'al1' }])
+  it('derives labeledAt from a single SQL-side now() shared by the history insert and the latest-value upsert, guarded against out-of-order writes', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ id: 'al1', latestUpserted: true }])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
     await recordAccountLabel(prisma, {
@@ -86,12 +101,33 @@ describe('recordAccountLabel', () => {
       ruleVersion: '1.0.0',
     })
 
-    const [sql, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    expect(sql.join('')).toContain('WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"')
-    const labeledAtValues = values.filter((value) => value instanceof Date)
-    // history 側と upsert 側、両方の labeledAt にちょうど1つの Date インスタンスが渡り、
-    // 同じ値を共有していることを確認する。
-    expect(labeledAtValues).toHaveLength(2)
-    expect(labeledAtValues[0]).toEqual(labeledAtValues[1])
+    const [sql] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    const sqlText = sql.join('')
+    // labeledAt は JS の Date ではなく、両方の INSERT が共通の CTE (shared_now)
+    // 経由で同じ SQL 側の now() を1回だけ評価した値を読む。now() 呼び出し自体が
+    // 1箇所だけであることを確認し、アプリサーバー間のクロックスキューの影響を
+    // 受けないことを保証する。
+    expect(sqlText.match(/now\(\)/g)).toHaveLength(1)
+    expect(sqlText).toContain('WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"')
+  })
+
+  it('logs a warning when the AccountLabelLatest upsert guard skips the write', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ id: 'al1', latestUpserted: false }])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+    const { Logger } = await import('@book000/node-utils')
+    const warn = vi
+      .spyOn(Logger.configure('label-repository'), 'warn')
+      .mockImplementation(() => undefined)
+
+    const result = await recordAccountLabel(prisma, {
+      accountId: 'u1',
+      labelDefinitionId: 'ld1',
+      result: { value: true, confidence: 1, reason: 'because' },
+      method: 'blue_verified',
+      ruleVersion: '1.0.0',
+    })
+
+    expect(result).toEqual({ id: 'al1' })
+    expect(warn).toHaveBeenCalledTimes(1)
   })
 })
