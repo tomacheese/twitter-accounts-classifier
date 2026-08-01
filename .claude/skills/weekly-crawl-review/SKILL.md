@@ -19,10 +19,32 @@ needs to survive locally beyond opening the PR in step 8.
 
 ## Procedure
 
+0. **Verify (or create) the disposable worktree.** This skill's write/commit steps must
+   never run directly against the primary checkout. Before doing anything else, check
+   whether the current working directory is already inside a disposable worktree on a
+   non-`master` branch (as `scripts/weekly-analyze.sh` sets up when it invokes this skill
+   on schedule). If it is, proceed to step 1. If it is not — e.g. this skill was invoked
+   directly/manually and the session is sitting in the primary checkout on `master` — set
+   up a worktree of your own before doing anything else, using a path and branch name
+   distinct from the cron script's fixed `.worktrees/weekly-crawl-review` /
+   `weekly-crawl-review-<timestamp>` naming: `scripts/weekly-analyze.sh`'s cleanup logic
+   force-removes (`git worktree remove --force`, falling back to `rm -rf`) anything at that
+   fixed path purely because it exists there, with no liveness check, so a manually-created
+   worktree at that same path would be deleted out from under you if a scheduled run fires
+   while you're still using it. Instead, create
+   `.worktrees/weekly-crawl-review-manual-<timestamp>` as a git worktree branched from
+   `master`, with a `weekly-crawl-review-manual-<timestamp>` branch name, then copy `.env`
+   and `.env.weekly-review` into it. Only then continue from step 1, working inside that
+   worktree. If you created the worktree yourself here, remember to clean it up in step 9
+   once everything else is done.
 1. **Sample recent labels.** Query the `AccountLabel` table (via Prisma or `psql`) for the
    most recent `labeledAt` rows, grouped by `labelDefinition.key`. Pull a mix across all
    registered labels — do not only look at `blue_verified` once other labels exist from a
    future Phase 2.
+   - **Note on `psql`:** Prisma models use camelCase column names (e.g. `labeledAt`). When
+     querying directly via `psql` rather than through Prisma, double-quote camelCase
+     identifiers (e.g. `"labeledAt"`), or Postgres will lowercase them implicitly and error
+     with "column does not exist".
    - **Sample size per label** scales with that label's total true-count (the number of
      `AccountLabel` rows with `value = true` for that `labelDefinition.key`), not a fixed
      number: if `true_count <= 20`, sample all of them (`sample_size = true_count`);
@@ -60,13 +82,21 @@ needs to survive locally beyond opening the PR in step 8.
    `topic_*` label rule for it, following the existing `topic_tech`/`topic_finance`/
    `topic_crypto` pattern: a simple bio-keyword regex rule under `crawler/labels/rules/`,
    registered in `crawler/labels/all-rules.ts`, with its own test file.
-   - **Sensitive-category carve-out:** categories such as NSFW/adult-content and
-     politics/partisan affiliation must be flagged as candidates in the run's findings, but
-     must NOT be auto-added — adding a label for these categories requires explicit user
-     sign-off first, unlike routine topic categories, because of their sensitivity. (In a
-     prior manual run, NSFW and politics keyword clusters were both found present in the
-     data but were deliberately left out of the labels added, specifically for this reason —
-     treat that as the standing precedent.)
+   - **Sensitive-category carve-out:** `topic_nsfw` (`crawler/labels/rules/topic-nsfw.ts`)
+     and `topic_politics` (`crawler/labels/rules/topic-politics.ts`) already exist and are
+     registered in `crawler/labels/all-rules.ts` — that part is a fact about the current
+     codebase. However, there is no historical record confirming their addition actually
+     went through the explicit user sign-off this carve-out requires; their presence in the
+     repository is not itself evidence of sign-off. Treat them as still within the
+     carve-out: continue to report their observed hit rates/behavior in this run's findings
+     (step 7) as you would for any flag-only candidate, and do not treat their mere
+     existence as license to expand them or auto-add further NSFW/politics sub-categories
+     without separately obtaining sign-off. The carve-out (flag-only, no auto-add without
+     explicit user sign-off) applies to any new/expanded NSFW- or politics-adjacent
+     category, including sub-categories not covered by these two existing labels (e.g. a
+     narrower sub-cluster within adult content or partisan affiliation that the existing
+     rule's keywords don't catch) — such sub-categories must be flagged as candidates in the
+     run's findings, but must NOT be auto-added.
 6. **Verify before committing.** Run `pnpm --filter crawler run check` (lint + typecheck +
    test for the crawler package). Do not commit if it fails — fix or revert instead.
 7. **Record the run.** Insert a `WeeklyAnalysisRun` row (via a short Prisma script or
@@ -92,6 +122,49 @@ needs to survive locally beyond opening the PR in step 8.
    Update `WeeklyAnalysisRun.commitSha` with the resulting merge commit hash once known
    (leave it unset if the run finishes before the PR merges — a later run's `psql`/Prisma
    update can backfill it, or it can stay unset for a "no changes needed" run).
+9. **Clean up the worktree, but only if step 0 created it for you.** Skip this step
+   entirely if this run started inside a worktree already set up by
+   `scripts/weekly-analyze.sh` — that script owns cleanup for its own worktree and deletes
+   it after the session ends. Otherwise (step 0 created the worktree because this skill was
+   invoked directly/manually), remove it now that all other steps are finished (after step
+   8's PR/auto-merge, or after step 7 for a "no changes needed" run with no PR):
+   1. Move back out of the worktree to the primary checkout first — a worktree cannot
+      remove itself while it is the current working directory.
+   2. Remove the manual worktree you created in step 0, at
+      `.worktrees/weekly-crawl-review-manual-<timestamp>` (using the actual path from step
+      0) — never the cron script's own fixed `.worktrees/weekly-crawl-review` worktree, which
+      belongs to `scripts/weekly-analyze.sh` and must never be touched here:
+      `git worktree remove --force .worktrees/weekly-crawl-review-manual-<timestamp>`. If
+      that fails, fall back to `rm -rf .worktrees/weekly-crawl-review-manual-<timestamp>`
+      followed by `git worktree prune`, matching the pattern already used elsewhere in this
+      project's tooling for removing a worktree.
+   3. Delete the throwaway branch created in step 0 with
+      `git branch -D weekly-crawl-review-manual-<timestamp>` (using the actual branch name
+      from step 0). This only removes that throwaway branch — it must not touch any separate
+      feature branch (e.g. `fix/...`) created and pushed in step 8, which already lives on
+      the remote and is unrelated to this cleanup, nor the cron script's own
+      `weekly-crawl-review-<timestamp>` branch.
+
+## Execution model
+
+- This skill's design (no human-in-the-loop) is about not pausing for human review — it is
+  not a mandate to run via a sub-agent. In practice, delegating the write-heavy portion of
+  this workflow (DB writes, rule-file edits, `git commit`/push, PR creation, enabling
+  auto-merge) to a sub-agent via the `Agent` tool, foreground or background, has been
+  denied by Claude Code's auto-mode permission classifier. If that happens, run those steps
+  directly in the main session instead of retrying delegation.
+- This skill runs unattended — invoked by `scripts/weekly-analyze.sh` on a schedule, with no
+  user present to respond — so it must never use an interactive confirmation/question tool
+  to ask the user something and wait for a reply. When an ordinary decision point comes up
+  during the run (e.g. environment/prerequisite setup choices, whether to keep or revert a
+  content change, how to phrase a finding), choose the most conservative/documented option
+  yourself, proceed, and record the decision and its reasoning in `WeeklyAnalysisRun.findings`
+  (step 7) so it is auditable after the fact — do not pause and wait for a human. This does
+  not extend to genuine permission or security blocks: if an action is refused by a
+  permission system, security control, or classifier for a reason other than the already-
+  documented sub-agent-delegation case above, that is not an ordinary decision point to route
+  around — stop, leave the refused action undone, and record in `findings` what was attempted
+  and why it was blocked.
 
 ## Constraints
 
