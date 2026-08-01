@@ -39,6 +39,8 @@ export async function upsertTweet(prisma: PrismaClient, input: TweetInput): Prom
   // `true` back to `false`. `hasAiGeneratedMedia`/`aiGeneratedDetectionSource` have the same
   // problem in a different shape: `null` means "not evaluated this fetch", not "confirmed
   // absent", so a later re-crawl observing `null` must not erase an already-known value.
+  // `quotedTweetId`/`quotedTweetAuthorId`/`quotedTweetHasVideo` follow the same
+  // "null = not evaluated this fetch" convention (see the migration for detail).
   const existing = await prisma.tweet.findUnique({
     where: { id: input.id },
     select: {
@@ -46,6 +48,9 @@ export async function upsertTweet(prisma: PrismaClient, input: TweetInput): Prom
       isPaidPromotion: true,
       hasAiGeneratedMedia: true,
       aiGeneratedDetectionSource: true,
+      quotedTweetId: true,
+      quotedTweetAuthorId: true,
+      quotedTweetHasVideo: true,
     },
   })
 
@@ -63,9 +68,9 @@ export async function upsertTweet(prisma: PrismaClient, input: TweetInput): Prom
       hasAiGeneratedMedia: input.hasAiGeneratedMedia ?? existing?.hasAiGeneratedMedia ?? null,
       aiGeneratedDetectionSource:
         input.aiGeneratedDetectionSource ?? existing?.aiGeneratedDetectionSource ?? null,
-      quotedTweetId: input.quotedTweetId,
-      quotedTweetAuthorId: input.quotedTweetAuthorId,
-      quotedTweetHasVideo: input.quotedTweetHasVideo,
+      quotedTweetId: input.quotedTweetId ?? existing?.quotedTweetId ?? null,
+      quotedTweetAuthorId: input.quotedTweetAuthorId ?? existing?.quotedTweetAuthorId ?? null,
+      quotedTweetHasVideo: input.quotedTweetHasVideo ?? existing?.quotedTweetHasVideo ?? null,
       source: input.source,
     },
   })

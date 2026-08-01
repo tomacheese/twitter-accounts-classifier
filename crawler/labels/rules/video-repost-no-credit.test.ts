@@ -137,4 +137,27 @@ describe('videoRepostNoCreditRule', () => {
     expect(result.value).toBe(true)
     expect(result.confidence).toBeCloseTo(1)
   })
+
+  it('does not match "credit" as the tail of an unrelated word like "discredit"', () => {
+    const result = videoRepostNoCreditRule.evaluate(
+      makeBundle([
+        tweet({ id: 't1', fullText: 'this clip seems to discredit: the original claim' }),
+        tweet({ id: 't2', fullText: 'no attribution here' }),
+        tweet({ id: 't3', fullText: 'still no attribution' }),
+      ]),
+    )
+    expect(result.value).toBe(true)
+    expect(result.confidence).toBeCloseTo(1)
+  })
+
+  it('matches "credit" followed by a full-width colon', () => {
+    const result = videoRepostNoCreditRule.evaluate(
+      makeBundle([
+        tweet({ id: 't1', fullText: 'credit：bob' }),
+        tweet({ id: 't2', fullText: 'credit：bob' }),
+        tweet({ id: 't3', fullText: 'credit：bob' }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+  })
 })

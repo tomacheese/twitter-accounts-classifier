@@ -1,7 +1,7 @@
 import type { LabelRule } from '../types'
 
 const CREDIT_PATTERN =
-  /credit\s*[:：]|\bcr\s*[:：]|\bvia\s*@|\bh\/t\b|courtesy\s*of|出典|引用元|元動画|提供\s*[:：]/i
+  /\bcredit\s*[:：]|\bcr\s*[:：]|\bvia\s*@|\bh\/t\b|courtesy\s*of|出典|引用元|元動画|提供\s*[:：]/i
 
 const MIN_QUOTE_SAMPLE = 3
 const UNCREDITED_RATIO_THRESHOLD = 0.5

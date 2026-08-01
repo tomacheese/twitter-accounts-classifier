@@ -72,10 +72,8 @@ model Tweet {
   // real false/true reported by a subsequent fetch. See the migration for detail.
   hasAiGeneratedMedia        Boolean?
   aiGeneratedDetectionSource String?
-  // No default (null): rows collected before this column existed were never evaluated for
-  // a quoted tweet's video content at all, and null keeps that "unknown" state distinct
-  // from a real false/true reported by a subsequent fetch. Same convention as
-  // hasAiGeneratedMedia above.
+  // No default (null), same "unknown vs. confirmed" convention as hasAiGeneratedMedia
+  // above. See the migration for detail.
   quotedTweetId              String?
   quotedTweetAuthorId        String?
   quotedTweetHasVideo        Boolean?

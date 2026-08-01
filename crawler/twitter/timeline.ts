@@ -224,7 +224,10 @@ export function toRawUserResult(user: TweetApiUtilsData['user']): RawUserResult 
  *
  * `retweetedStatusIdStr` does not exist on the real `TweetLegacy` model — a retweet is
  * instead represented by `TweetApiUtilsData.retweeted` holding the full retweeted entry,
- * so its id is read from there.
+ * so its id is read from there. The quoted tweet follows the same shape via
+ * `TweetApiUtilsData.quoted`; its own `legacy` can be absent (tombstoned/withheld quoted
+ * tweet), so `quotedStatusResult.result.legacy` is left `undefined` in that case rather
+ * than assuming it always exists.
  * @param data - one real timeline entry
  * @returns the entry as a `RawTweetResult`, or `null` if it carries no `legacy` payload
  */
@@ -242,6 +245,17 @@ function toRawTweetResult(data: TweetApiUtilsData): RawTweetResult | null {
       quoteCount: data.tweet.legacy.quoteCount,
       inReplyToStatusIdStr: data.tweet.legacy.inReplyToStatusIdStr ?? null,
       retweetedStatusIdStr: data.retweeted?.tweet.restId ?? null,
+      quotedStatusResult: data.quoted
+        ? {
+            result: {
+              restId: data.quoted.tweet.restId,
+              legacy: data.quoted.tweet.legacy
+                ? { extendedEntities: data.quoted.tweet.legacy.extendedEntities }
+                : undefined,
+              user: { restId: data.quoted.user.restId },
+            },
+          }
+        : null,
       isPromoted: Boolean(data.promotedMetadata),
       isPaidPromotion:
         data.tweet.contentDisclosure?.advertisingDisclosure?.isPaidPromotion ?? false,
