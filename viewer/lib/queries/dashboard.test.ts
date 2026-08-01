@@ -20,7 +20,7 @@ function createMockPrisma(rows: MockRow[]) {
         .mockResolvedValue({ _max: { lastCrawledAt: new Date('2026-07-27T00:00:00Z') } }),
     },
     tweet: { count: vi.fn().mockResolvedValue(4500) },
-    $transaction: vi.fn().mockResolvedValue([undefined, undefined, rows]),
+    $transaction: vi.fn().mockResolvedValue([undefined, rows]),
     $executeRaw: vi.fn(),
     $queryRaw: vi.fn(),
   } as unknown as PrismaClient & {

@@ -47,10 +47,18 @@ function makePrisma(overrides: {
   const tweetFindMany = vi
     .fn()
     .mockImplementation(overrides.tweetFindManyImpl ?? (() => Promise.resolve([])))
-  // The first $queryRaw call is always loadLatestRuleVersions's; any call after that is
-  // fetchTweetsForAccounts's batched per-account-batch tweet fetch.
+  // recordAccountLabel の呼び出しは history insert と AccountLabelLatest upsert を
+  // まとめた1本の $queryRaw であり、SQL 文が "INSERT INTO \"AccountLabel\"" を
+  // 含むかどうかで他の $queryRaw 呼び出しと区別できる。それ以外の $queryRaw は
+  // 呼び出し順が固定であることを前提としており、1回目は loadLatestRuleVersions、
+  // 2回目以降は fetchTweetsForAccounts になる。
   let queryRawCalls = 0
-  const queryRaw = vi.fn().mockImplementation(() => {
+  const queryRaw = vi.fn().mockImplementation((strings: unknown) => {
+    if (Array.isArray(strings) && strings.join('').includes('INSERT INTO "AccountLabel"')) {
+      return (create() as Promise<Record<string, unknown>>).then((row) => [
+        { ...row, latestUpserted: true },
+      ])
+    }
     queryRawCalls++
     if (queryRawCalls === 1) {
       return Promise.resolve(overrides.latestRuleVersions ?? [])
@@ -65,7 +73,6 @@ function makePrisma(overrides: {
     account: { findMany },
     tweet: { findMany: tweetFindMany },
     labelDefinition: { upsert },
-    accountLabel: { create },
     $queryRaw: queryRaw,
   } as unknown as PrismaClient
 

@@ -21,6 +21,24 @@ services:
       retries: 10
     logging: *default-logging
 
+  # crawler と viewer の両方がマイグレーション適用済みの状態を前提にできるよう、
+  # 一度だけ実行して完了する専用サービスに分離する。crawler の entrypoint.sh も
+  # 起動時に prisma migrate deploy を実行するが、これは冪等なため二重実行しても
+  # 無害であり、このサービスなしで crawler 単体を起動する経路の保険として残す。
+  migrate:
+    build:
+      context: .
+      dockerfile: crawler/Dockerfile
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
+    entrypoint:
+      ["sh", "-c", "cd /app/crawler && pnpm exec prisma migrate deploy --schema=../prisma/schema.prisma"]
+    logging: *default-logging
+
   crawler:
     build:
       context: .
@@ -29,6 +47,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
       COOKIE_ISSUER_URL: ${COOKIE_ISSUER_URL:?COOKIE_ISSUER_URL must be set in .env}
@@ -49,6 +69,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
       # Docker sets HOSTNAME to the container ID by default; Next.js's
@@ -70,13 +92,10 @@ services:
           # so the fetch stalls for several seconds before falling back to IPv4 and
           # blows past the timeout below.
           #
-          # /api/health, not '/': the dashboard route runs KPI/label-distribution
-          # queries that scan the AccountLabel table (millions of rows and
-          # growing) — even with the composite index added to keep them fast,
-          # measured response times under real load exceeded 10s, well past any
-          # reasonable healthcheck timeout. /api/health is a plain liveness probe
-          # that never touches the database, so it stays fast regardless of query
-          # load.
+          # '/' ではなく /api/health: ダッシュボードのルートは KPI/ラベル分布のクエリを実行し、DB にアクセスする
+          # (際限なく増え続ける AccountLabel 履歴ではなく上限のある AccountLabelLatest テーブルに対してだが、
+          # 通常のコネクションプール/DB 負荷の影響は依然として受ける)。
+          # /api/health は DB に一切触れない単純な liveness probe なので、クエリ負荷に関係なく高速であり続ける。
           "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 10s

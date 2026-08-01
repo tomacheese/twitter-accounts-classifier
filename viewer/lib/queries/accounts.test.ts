@@ -67,14 +67,11 @@ describe('listAccounts', () => {
   })
 
   it('filters to accounts whose latest value is true for any given label key', async () => {
-    const transaction = vi.fn().mockResolvedValue([undefined, [{ accountId: 'a2' }]])
-    // The first call is the raw query template tagged inside the array passed
-    // to $transaction above (its resolved value is unused - $transaction's
-    // own mock supplies the real result); the second is the direct
-    // $queryRaw call from getActiveLabelKeysByAccount.
+    // 1回目の呼び出しは findAccountIdsWithAnyLabel 自身の $queryRaw、
+    // 2回目は getActiveLabelKeysByAccount のもの。
     const queryRaw = vi
       .fn()
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ accountId: 'a2' }])
       .mockResolvedValueOnce([{ accountId: 'a2', key: 'bot' }])
     const findMany = vi.fn().mockResolvedValue([
       {
@@ -91,7 +88,6 @@ describe('listAccounts', () => {
     const prisma = buildPrisma({
       account: { findMany, count },
       $queryRaw: queryRaw,
-      $transaction: transaction,
     })
 
     await listAccounts(prisma, {
@@ -108,11 +104,10 @@ describe('listAccounts', () => {
   })
 
   it('returns an empty page without querying accounts when a label filter matches nothing', async () => {
-    const transaction = vi.fn().mockResolvedValue([undefined, []])
     const findMany = vi.fn()
     const prisma = buildPrisma({
       account: { findMany, count: vi.fn() },
-      $transaction: transaction,
+      $queryRaw: vi.fn().mockResolvedValue([]),
     })
 
     const result = await listAccounts(prisma, {

@@ -38,6 +38,7 @@ model Account {
   updatedAt                DateTime       @updatedAt
   tweets                   Tweet[]
   labels                   AccountLabel[]
+  latestLabels             AccountLabelLatest[]
   followerEdges            Follow[]       @relation("FollowerEdges")
   followeeEdges            Follow[]       @relation("FolloweeEdges")
 
@@ -84,11 +85,12 @@ model Tweet {
 }
 
 model LabelDefinition {
-  id            String         @id @default(cuid())
-  key           String         @unique
-  description   String
-  createdAt     DateTime       @default(now())
-  accountLabels AccountLabel[]
+  id                  String               @id @default(cuid())
+  key                 String               @unique
+  description         String
+  createdAt           DateTime             @default(now())
+  accountLabels       AccountLabel[]
+  accountLabelsLatest AccountLabelLatest[]
 }
 
 model AccountLabel {
@@ -107,13 +109,37 @@ model AccountLabel {
   @@index([accountId])
   @@index([labelDefinitionId])
   @@index([labeledAt])
-  @@index([accountId, labelDefinitionId, labeledAt(sort: Desc)])
-  // Matches the `DISTINCT ON ("accountId", "labelDefinitionId") ... ORDER BY
-  // "accountId", "labelDefinitionId", "labeledAt" DESC, "id" DESC` query in
-  // dashboard.ts's getDashboardKpis/getLabelDistribution exactly, so Postgres can
-  // satisfy that DISTINCT ON with a single index scan instead of falling back to a
-  // sort/unique over the (accountId, labelDefinitionId, labeledAt) index above.
+  // crawler/relabel.ts の loadLatestRuleVersions が実行する
+  // `DISTINCT ON ("accountId", "labelDefinitionId") ... ORDER BY "accountId",
+  // "labelDefinitionId", "labeledAt" DESC, "id" DESC` にそのまま一致させる
+  // ためのインデックス。AccountLabelLatest は ruleVersion を持たないため、
+  // このバックフィル用クエリだけは AccountLabel の履歴を直接引き続ける。
   @@index([accountId, labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])
+}
+
+// 履歴テーブルである AccountLabel (アカウント詳細ページの監査証跡として全件を
+// 保持し続けるため、クロールを重ねるたびに際限なく増える) から DISTINCT ON で
+// 「account/label ごとの最新値」を導出すると全件スキャンになり、本番の
+// ダッシュボード/アカウント一覧クエリの statement_timeout を常態的に超過する
+// ようになった。このテーブルは (accountId, labelDefinitionId) ごとの最新値のみ
+// を保持し、recordAccountLabel が AccountLabel への履歴 INSERT と同時に upsert
+// する。そのためこれらの集計クエリは履歴の総件数ではなく (アカウント数 x
+// ラベル数) で頭打ちになる。この経緯の説明はここを正としており、
+// crawler/db/label-repository.ts・viewer/lib/queries/dashboard.ts・
+// viewer/lib/queries/accounts.ts・対応するマイグレーションのコメントは
+// ここへの参照のみとする。
+model AccountLabelLatest {
+  accountId         String
+  account           Account         @relation(fields: [accountId], references: [id])
+  labelDefinitionId String
+  labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
+  value             Boolean
+  labeledAt         DateTime
+
+  @@id([accountId, labelDefinitionId])
+  // value = true で絞り込む dashboard.ts/accounts.ts の各クエリを支える。
+  @@index([labelDefinitionId, value])
+  @@index([value, accountId])
 }
 
 model WeeklyAnalysisRun {

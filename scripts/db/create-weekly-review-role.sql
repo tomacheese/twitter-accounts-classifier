@@ -14,6 +14,7 @@ GRANT CONNECT ON DATABASE twitter_accounts_classifier TO weekly_review;
 GRANT SELECT ON "Account" TO weekly_review;
 GRANT SELECT ON "Tweet" TO weekly_review;
 GRANT SELECT ON "AccountLabel" TO weekly_review;
+GRANT SELECT ON "AccountLabelLatest" TO weekly_review;
 GRANT SELECT ON "LabelDefinition" TO weekly_review;
 GRANT SELECT, INSERT, UPDATE ON "WeeklyAnalysisRun" TO weekly_review;
 

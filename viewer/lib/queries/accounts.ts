@@ -46,44 +46,33 @@ interface ActiveLabelRow {
 }
 
 /**
- * Finds the IDs of accounts whose most recent evaluation of any of the given
- * label keys is `true`.
- * @param prisma - the Prisma client to query
- * @param labelKeys - the label keys to match against (OR semantics)
- * @returns the matching account IDs
+ * 指定したラベルキーのいずれかで最新評価が `true` のアカウント ID を返す。
+ * `AccountLabelLatest` を読む (テーブルの設計意図は prisma/schema.prisma の
+ * AccountLabelLatest コメントを参照)。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @param labelKeys - マッチ対象のラベルキー (OR 条件)
+ * @returns 一致したアカウント ID
  */
 async function findAccountIdsWithAnyLabel(
   prisma: PrismaClient,
   labelKeys: string[],
 ): Promise<string[]> {
-  // Same "latest value per account per label" DISTINCT ON scan as
-  // dashboard.ts's getDashboardKpis/getLabelDistribution, over the same
-  // multi-million-row AccountLabel table, so it needs the same nudge: left
-  // to itself the planner underestimates the composite index below and
-  // falls back to a full sort. See the migration note for that index.
-  const [, rows] = await prisma.$transaction([
-    prisma.$executeRaw`SET LOCAL enable_incremental_sort = off`,
-    prisma.$queryRaw<MatchingAccountIdRow[]>`
-      SELECT DISTINCT ll."accountId" AS "accountId"
-      FROM (
-        SELECT DISTINCT ON ("accountId", "labelDefinitionId")
-          "accountId", "labelDefinitionId", value
-        FROM "AccountLabel"
-        ORDER BY "accountId", "labelDefinitionId", "labeledAt" DESC, "id" DESC
-      ) ll
-      JOIN "LabelDefinition" ld ON ld.id = ll."labelDefinitionId"
-      WHERE ll.value = true AND ld.key IN (${Prisma.join(labelKeys)})
-    `,
-  ])
+  const rows = await prisma.$queryRaw<MatchingAccountIdRow[]>`
+    SELECT DISTINCT ll."accountId" AS "accountId"
+    FROM "AccountLabelLatest" ll
+    JOIN "LabelDefinition" ld ON ld.id = ll."labelDefinitionId"
+    WHERE ll.value = true AND ld.key IN (${Prisma.join(labelKeys)})
+  `
   return rows.map((row) => row.accountId)
 }
 
 /**
- * Loads the active (most recent value = true) label keys for each given
- * account, for rendering label badges in the account list.
- * @param prisma - the Prisma client to query
- * @param accountIds - the accounts to load active labels for
- * @returns a map from account ID to its active label keys
+ * 指定した各アカウントについて、有効な (最新評価が `true` の) ラベルキーを
+ * 読み込む。アカウント一覧のラベルバッジ表示用。`AccountLabelLatest` を読む
+ * 点は {@link findAccountIdsWithAnyLabel} と同じ。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @param accountIds - 有効ラベルを読み込む対象のアカウント
+ * @returns アカウント ID から有効ラベルキー一覧へのマップ
  */
 async function getActiveLabelKeysByAccount(
   prisma: PrismaClient,
@@ -95,15 +84,9 @@ async function getActiveLabelKeysByAccount(
 
   const rows = await prisma.$queryRaw<ActiveLabelRow[]>`
     SELECT ll."accountId" AS "accountId", ld.key AS "key"
-    FROM (
-      SELECT DISTINCT ON ("accountId", "labelDefinitionId")
-        "accountId", "labelDefinitionId", value
-      FROM "AccountLabel"
-      WHERE "accountId" IN (${Prisma.join(accountIds)})
-      ORDER BY "accountId", "labelDefinitionId", "labeledAt" DESC, "id" DESC
-    ) ll
+    FROM "AccountLabelLatest" ll
     JOIN "LabelDefinition" ld ON ld.id = ll."labelDefinitionId"
-    WHERE ll.value = true
+    WHERE ll.value = true AND ll."accountId" IN (${Prisma.join(accountIds)})
   `
 
   const map = new Map<string, string[]>()
@@ -119,8 +102,8 @@ async function getActiveLabelKeysByAccount(
  * Loads every registered label key, for populating the Accounts page's label
  * filter control. Deliberately lighter than {@link getLabelDistribution}
  * (dashboard.ts): the filter only needs the key list, not the true/total
- * counts, which would otherwise force a full `AccountLabel` scan just to
- * render checkboxes.
+ * counts, so it queries `LabelDefinition` directly instead of also reading
+ * `AccountLabelLatest`.
  * @param prisma - the Prisma client to query
  * @returns every label key, ordered alphabetically
  */

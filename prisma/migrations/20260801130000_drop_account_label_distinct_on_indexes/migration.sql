@@ -1,0 +1,12 @@
+-- DropIndex
+-- CONCURRENTLY で "AccountLabel" への crawler の書き込みをロックせずにインデックスを
+-- 削除する。Prisma Migrate はファイルが単一ステートメントのときのみトランザクションで
+-- 包まずに実行する (CONCURRENTLY はトランザクション内では実行できない) ため、この
+-- マイグレーションは必ず1ステートメントのままにすること。ダッシュボードの
+-- DISTINCT ON クエリは "AccountLabelLatest" 側へ移したが、crawler/relabel.ts の
+-- loadLatestRuleVersions は今も AccountLabel に対して同種の DISTINCT ON クエリを
+-- 実行している。ただしこのクエリは "id" 列まで含む複合インデックス
+-- (AccountLabel_accountId_labelDefinitionId_labeledAt_id_idx) 側でも満たせるため、
+-- そちらを残す前提でこの "id" を含まない prefix のインデックスだけを冗長として
+-- 削除する。
+DROP INDEX CONCURRENTLY IF EXISTS "AccountLabel_accountId_labelDefinitionId_labeledAt_idx";
