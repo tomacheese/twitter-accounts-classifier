@@ -65,6 +65,8 @@ interface TweetRow {
   isPromoted: boolean
   isPaidPromotion: boolean
   inReplyToTweetId: string | null
+  quotedTweetAuthorId: string | null
+  quotedTweetHasVideo: boolean | null
   accountId: string
 }
 
@@ -88,7 +90,8 @@ async function fetchTweetsForAccounts(
 
   const rows = await prisma.$queryRaw<TweetRow[]>`
     SELECT id, "fullText", "createdAt", "retweetCount", "likeCount", "isReply",
-           "isRetweet", "isPromoted", "isPaidPromotion", "inReplyToTweetId", "accountId"
+           "isRetweet", "isPromoted", "isPaidPromotion", "inReplyToTweetId",
+           "quotedTweetAuthorId", "quotedTweetHasVideo", "accountId"
     FROM (
       SELECT *, ROW_NUMBER() OVER (
         PARTITION BY "accountId" ORDER BY "createdAt" DESC
@@ -152,6 +155,8 @@ function buildFeatureBundle(
       isPromoted: tweet.isPromoted,
       isPaidPromotion: tweet.isPaidPromotion,
       inReplyToTweetId: tweet.inReplyToTweetId,
+      quotedTweetAuthorId: tweet.quotedTweetAuthorId,
+      quotedTweetHasVideo: tweet.quotedTweetHasVideo,
     })),
     templatedReplyNetworkSize,
     replyHijackSwarmSize,
