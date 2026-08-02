@@ -5,11 +5,11 @@ import { getDashboardKpis, getLabelDistribution } from '@/lib/queries/dashboard'
 import { getRecentWeeklyRuns } from '@/lib/queries/weekly-runs'
 import { getRecentCrawlRuns } from '@/lib/queries/crawl-runs'
 import { LabelDistributionChart } from './label-distribution-chart'
+import { SectionRetry } from './section-retry'
 import { StatTile } from './stat-tile'
 import { StatusBadge } from './status-badge'
 
 const RECENT_RUN_COUNT = 5
-const LABEL_DISTRIBUTION_SKELETON_ENTRY_COUNT = 40
 
 interface DashboardSectionErrorProps {
   headingId: string
@@ -33,6 +33,7 @@ function DashboardSectionError({
       <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">
         {message}
       </p>
+      <SectionRetry />
     </section>
   )
 }
@@ -56,7 +57,7 @@ function Skeleton({ className }: { className: string }): React.ReactElement {
 
 export function DashboardSummarySkeleton(): React.ReactElement {
   return (
-    <section aria-label="Dashboard summary" className="flex flex-col gap-8">
+    <section aria-label="Dashboard summary">
       <LoadingStatus label="dashboard summary" />
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {Array.from({ length: 4 }, (_, index) => (
@@ -69,27 +70,26 @@ export function DashboardSummarySkeleton(): React.ReactElement {
           </div>
         ))}
       </div>
-      <div>
-        <Skeleton className="h-6 w-40" />
-        <div
-          aria-hidden="true"
-          className="mt-3 rounded-lg border bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
-        >
-          <div className="flex h-[1760px] flex-col gap-6">
-            {Array.from({ length: LABEL_DISTRIBUTION_SKELETON_ENTRY_COUNT }, (_, index) => (
-              <Skeleton
-                key={index}
-                className={
-                  index % 3 === 0 ? 'h-5 w-2/3' : index % 3 === 1 ? 'h-5 w-4/5' : 'h-5 w-1/2'
-                }
-              />
-            ))}
-          </div>
-          <div className="mt-4 flex flex-wrap gap-3 text-sm">
-            {Array.from({ length: LABEL_DISTRIBUTION_SKELETON_ENTRY_COUNT }, (_, index) => (
-              <Skeleton key={index} className="h-5 w-48 max-w-full" />
-            ))}
-          </div>
+    </section>
+  )
+}
+
+export function LabelDistributionSkeleton(): React.ReactElement {
+  return (
+    <section aria-labelledby="label-distribution-heading">
+      <LoadingStatus label="label distribution" />
+      <h2 id="label-distribution-heading" className="mb-3 text-lg font-semibold">
+        Label distribution
+      </h2>
+      <div
+        aria-hidden="true"
+        className="rounded-lg border bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+      >
+        <Skeleton className="h-64 w-full" />
+        <div className="mt-4 flex flex-wrap gap-3 text-sm">
+          {Array.from({ length: 4 }, (_, index) => (
+            <Skeleton key={index} className="h-5 w-48 max-w-full" />
+          ))}
         </div>
       </div>
     </section>
@@ -135,14 +135,10 @@ export function RunListSkeleton({
 
 export async function DashboardSummary(): Promise<React.ReactElement> {
   try {
-    const prisma = getPrismaClient()
-    const [kpis, distribution] = await Promise.all([
-      getDashboardKpis(prisma),
-      getLabelDistribution(prisma),
-    ])
+    const kpis = await getDashboardKpis(getPrismaClient())
 
     return (
-      <section aria-label="Dashboard summary" className="flex flex-col gap-8">
+      <section aria-label="Dashboard summary">
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <StatTile label="Total accounts" value={kpis.totalAccounts.toLocaleString()} />
           <StatTile label="Total tweets" value={kpis.totalTweets.toLocaleString()} />
@@ -152,19 +148,6 @@ export async function DashboardSummary(): Promise<React.ReactElement> {
             value={kpis.lastCrawledAt ? formatDateTime(kpis.lastCrawledAt) : '—'}
           />
         </div>
-
-        <section aria-labelledby="label-distribution-heading">
-          <h2 id="label-distribution-heading" className="mb-3 text-lg font-semibold">
-            Label distribution
-          </h2>
-          {distribution.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              No labels have been evaluated yet.
-            </p>
-          ) : (
-            <LabelDistributionChart entries={distribution} />
-          )}
-        </section>
       </section>
     )
   } catch (error) {
@@ -174,6 +157,35 @@ export async function DashboardSummary(): Promise<React.ReactElement> {
         headingId="dashboard-summary-heading"
         title="Dashboard summary"
         message="Failed to load the dashboard summary."
+      />
+    )
+  }
+}
+
+export async function LabelDistributionSection(): Promise<React.ReactElement> {
+  try {
+    const distribution = await getLabelDistribution(getPrismaClient())
+    return (
+      <section aria-labelledby="label-distribution-heading">
+        <h2 id="label-distribution-heading" className="mb-3 text-lg font-semibold">
+          Label distribution
+        </h2>
+        {distribution.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            No labels have been evaluated yet.
+          </p>
+        ) : (
+          <LabelDistributionChart entries={distribution} />
+        )}
+      </section>
+    )
+  } catch (error) {
+    console.error('Failed to load label distribution:', error)
+    return (
+      <DashboardSectionError
+        headingId="label-distribution-heading"
+        title="Label distribution"
+        message="Failed to load the label distribution."
       />
     )
   }

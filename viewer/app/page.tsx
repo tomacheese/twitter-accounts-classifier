@@ -2,6 +2,8 @@ import { Suspense } from 'react'
 import {
   DashboardSummary,
   DashboardSummarySkeleton,
+  LabelDistributionSection,
+  LabelDistributionSkeleton,
   RecentCrawlRuns,
   RecentWeeklyRuns,
   RunListSkeleton,
@@ -37,6 +39,9 @@ export default function DashboardPage(): React.ReactElement {
         }
       >
         <RecentCrawlRuns />
+      </Suspense>
+      <Suspense fallback={<LabelDistributionSkeleton />}>
+        <LabelDistributionSection />
       </Suspense>
     </div>
   )

@@ -1,4 +1,8 @@
-import { DashboardSummarySkeleton, RunListSkeleton } from './components/dashboard-sections'
+import {
+  DashboardSummarySkeleton,
+  LabelDistributionSkeleton,
+  RunListSkeleton,
+} from './components/dashboard-sections'
 
 export default function Loading(): React.ReactElement {
   return (
@@ -15,6 +19,7 @@ export default function Loading(): React.ReactElement {
         title="Recent crawl runs"
         contentLineCount={1}
       />
+      <LabelDistributionSkeleton />
     </div>
   )
 }

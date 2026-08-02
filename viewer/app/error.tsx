@@ -9,7 +9,6 @@
  * @returns the rendered error page
  */
 export default function SegmentError({
-  error,
   reset,
 }: {
   error: Error & { digest?: string }
@@ -18,8 +17,8 @@ export default function SegmentError({
   return (
     <div className="flex flex-col items-center gap-4 py-16 text-center">
       <h1 className="text-xl font-semibold">Something went wrong</h1>
-      <p className="max-w-md text-sm text-gray-600 dark:text-gray-400">
-        {error.message || 'The viewer could not load data from the database.'}
+      <p className="max-w-md text-sm text-gray-600 dark:text-gray-400" role="alert">
+        The viewer could not load data. Please try again.
       </p>
       <button
         type="button"

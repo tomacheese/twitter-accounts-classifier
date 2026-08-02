@@ -23,6 +23,7 @@ export function NavLink({
   return (
     <Link
       href={href}
+      aria-current={isActive ? 'page' : undefined}
       className={
         isActive
           ? 'text-blue-600 dark:text-blue-400'

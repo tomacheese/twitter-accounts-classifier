@@ -22,7 +22,10 @@ export function SiteNav(): React.ReactElement {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
   return (
-    <nav className="border-b bg-white px-4 py-3 shadow-sm sm:px-6 sm:py-4 dark:border-gray-700 dark:bg-gray-800">
+    <nav
+      aria-label="Primary navigation"
+      className="border-b bg-white px-4 py-3 shadow-sm sm:px-6 sm:py-4 dark:border-gray-700 dark:bg-gray-800"
+    >
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <button
           type="button"
