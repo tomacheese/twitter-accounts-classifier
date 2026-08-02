@@ -134,6 +134,38 @@ function retryOptions(deps: CrawlDependencies): {
 }
 
 /**
+ * Marks a `getUserTweetsAndReplies` failure caused by the underlying `twitter-openapi-typescript`
+ * library's optional-chaining bug (`e.data.user?.result.timeline.timeline`, where `?.` only
+ * guards `data.user` and not `result.timeline`), which throws a bare `TypeError` instead of a
+ * typed API error when an account's timeline is unreadable (e.g. protected, suspended). Wrapping
+ * it here, right at the call site, keeps the message-text match scoped to that one call instead
+ * of matching any `TypeError` raised anywhere in the per-author processing block below.
+ */
+class TimelineUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.name = 'TimelineUnavailableError'
+  }
+}
+
+/**
+ * Wraps `fetchRecentTweets` so the library bug described on `TimelineUnavailableError` above is
+ * normalized into a type `isExpectedAccountLookupError` can recognize precisely.
+ * @param fetch - the `fetchRecentTweets` call to guard
+ * @returns the fetch's result, or rethrows a `TimelineUnavailableError` for the known library bug
+ */
+async function guardTimelineFetch<T>(fetch: () => Promise<T>): Promise<T> {
+  try {
+    return await fetch()
+  } catch (error) {
+    if (error instanceof TypeError && error.message.includes("reading 'timeline'")) {
+      throw new TimelineUnavailableError(error)
+    }
+    throw error
+  }
+}
+
+/**
  * Distinguishes an author lookup failure that is an expected, routine occurrence — the
  * account was suspended, deleted, or made protected between being seen as a tweet author
  * and this loop reaching it — from a genuine infrastructure failure. Expected failures are
@@ -150,7 +182,7 @@ function isExpectedAccountLookupError(error: unknown): boolean {
     const status = (error as { response?: { status?: unknown } }).response?.status
     return status === 404
   }
-  return false
+  return error instanceof TimelineUnavailableError
 }
 
 /**
@@ -329,9 +361,11 @@ async function runAccountCycleBody(
       await deps.persistAccount(profile)
       succeededAuthorIds.add(authorId)
 
-      const { tweets: recentTweets, authors } = await withTwitterRetry(
-        () => fetchRecentTweets(userApi, authorId, deps.limits.recentTweetsPerAccount),
-        retryOptions(deps),
+      const { tweets: recentTweets, authors } = await guardTimelineFetch(() =>
+        withTwitterRetry(
+          () => fetchRecentTweets(userApi, authorId, deps.limits.recentTweetsPerAccount),
+          retryOptions(deps),
+        ),
       )
       profileTweets.push(...recentTweets)
       for (const author of authors) extraAuthors.set(author.id, author)
