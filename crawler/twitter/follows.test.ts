@@ -92,9 +92,8 @@ describe('fetchFollowing', () => {
   })
 
   it('marks reachedEnd false when the cursor-exhausting page also overshoots the limit', async () => {
-    // The limit (2) falls inside the first page (3 ids), which also happens to be the
-    // last page (no nextCursor) - the discarded tail (id '3') must not be treated as
-    // "confirmed gone" by the caller's prune logic.
+    // limit 超過分として破棄される末尾の id は、呼び出し側の prune 処理で
+    // 「もう存在しない」と誤判定されてはならない。
     const getFollowing = vi.fn().mockResolvedValueOnce(page(['1', '2', '3'], undefined))
     const client: FollowListApiLike = { getFollowing, getFollowers: vi.fn() }
 

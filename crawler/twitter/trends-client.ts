@@ -1,20 +1,14 @@
 import type { IssuedCookies } from '../auth/cookie-issuer-client'
 import type { TrendsScraperLike } from './timeline'
 
-// `@the-convocation/twitter-scraper`'s own getTrends() hits this same bearer token and
-// endpoint, but its installAuthCredentials() only fetches/attaches an `x-guest-token`
-// `if (!bearerTokenOverride)` — and getTrends() always passes this token as an override,
-// so it never attaches a guest token at all. `guide.json` then rejects the cookie-only
-// request with HTTP 400, code 215 "Bad Authentication data", confirmed by reading that
-// library's source directly (no fix available upstream as of 0.22.3). We reimplement the
-// request here so a guest token scoped to this same bearer token is actually attached.
+// `@the-convocation/twitter-scraper` の getTrends() は同じ bearer token・
+// エンドポイントを叩くが、その実装では bearer token を override として渡すと
+// guest token を付与しないため、guide.json が認証エラーで拒否してしまう。
+// アップストリームのライブラリ側に修正がない状態のため、このリクエストを自前で
+// 実装し直し、guest token を確実に付与するようにしている。
 const TRENDS_BEARER_TOKEN =
   'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
 
-/**
- * Shape of a `guide.json` response, down to the exact entry path
- * {@link parseTrendNames} reads trend names from.
- */
 interface GuideJsonResponse {
   timeline?: {
     instructions?: {
@@ -44,9 +38,6 @@ interface GuideJsonResponse {
 }
 
 /**
- * Activates a guest token scoped to {@link TRENDS_BEARER_TOKEN}, required to pair with
- * that bearer token on subsequent `guide.json` requests (see the comment above
- * {@link TRENDS_BEARER_TOKEN} for why this pairing is necessary).
  * @param fetchImpl - fetch implementation to issue the request with
  * @returns the activated guest token
  */
@@ -69,14 +60,12 @@ async function fetchGuestToken(fetchImpl: typeof fetch): Promise<string> {
 }
 
 /**
- * Extracts trend names from a `guide.json` response, mirroring the entry path
- * `@the-convocation/twitter-scraper`'s own `getTrends()` parser uses.
  * @param payload - the parsed `guide.json` response body
  * @returns the trend names found; an empty array means the response shape matched but
  * carried zero trend items
- * @throws if the response doesn't match the expected shape at all (e.g. X changed the
- * `guide.json` schema) — kept distinct from the empty-array case so callers don't
- * mistake a schema-drift break for a legitimate "no trends right now" response
+ * @throws レスポンス形状自体が想定と異なる場合。スキーマ変更による破壊的な失敗と
+ * 「今トレンドが 0 件」という正常なケースを呼び出し側が混同しないよう、
+ * 空配列を返す場合とは区別してエラーを投げる。
  */
 function parseTrendNames(payload: GuideJsonResponse): string[] {
   const instructions = payload.timeline?.instructions ?? []
@@ -100,9 +89,6 @@ function parseTrendNames(payload: GuideJsonResponse): string[] {
 }
 
 /**
- * Creates a {@link TrendsScraperLike} backed by our own `guide.json` request, correctly
- * pairing a guest token with the fixed bearer token the endpoint requires (see
- * {@link TRENDS_BEARER_TOKEN}'s comment for why the upstream scraper library cannot do this).
  * @param cookies - the account's ct0/auth_token cookie pair
  * @param fetchImpl - fetch implementation to issue requests with, e.g. a cycletls-backed
  * fetch presenting a genuine Chrome TLS fingerprint

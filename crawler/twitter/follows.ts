@@ -9,7 +9,7 @@ import { toAccountProfileInput, type RawUserResult } from './mappers'
 import { toRawUserResult } from './timeline'
 import type { AccountProfileInput } from '../db/account-repository'
 
-/** Fetches 200 entries per page — the page size `twitter-openapi-typescript`'s follow-list endpoints accept per request. */
+/** `twitter-openapi-typescript` のフォローリスト系エンドポイントが 1 リクエストで受け付ける上限が 200 件のため、この値を採用する。 */
 const PAGE_SIZE = 200
 
 export interface FollowListPage {
@@ -24,9 +24,9 @@ export interface FollowListApiLike {
 
 export interface FollowListResult {
   ids: string[]
-  /** Lightweight profiles of every discovered account, derived from the same list response (no extra per-account API call). */
+  /** アカウントごとに追加 API 呼び出しをして取得する代わりに、同一の一覧レスポンスから導出したプロフィール。 */
   authors: AccountProfileInput[]
-  /** True only if pagination stopped because the cursor was exhausted, not because `limit` was hit or a page fetch failed. Callers use this to decide whether it is safe to delete edges no longer present. */
+  /** カーソルが尽きて終了した場合のみ true。`limit` 到達やページ取得失敗による終了では true にしない。呼び出し側はこの値でエッジ削除の可否を判断する。 */
   reachedEnd: boolean
 }
 
@@ -52,10 +52,9 @@ async function paginate(
     cursor = page.nextCursor
   }
 
-  // A page can overshoot `limit` (a whole page is appended before the loop condition is
-  // re-checked). If that same page also exhausted the cursor, `reachedEnd` above is true
-  // even though the tail past `limit` is about to be discarded - the caller must not treat
-  // those discarded ids as "gone" and prune their edges.
+  // limit を超過した末尾は破棄するため、そのページでカーソルが尽きていても
+  // reachedEnd を true のままにはしない。破棄した id を呼び出し側が
+  // 「もう存在しない」と誤判定してエッジを削除しないようにするため。
   const truncated = ids.length > limit
   return {
     ids: ids.slice(0, limit),
@@ -65,8 +64,6 @@ async function paginate(
 }
 
 /**
- * Fetches the accounts a given account follows, paginating via cursor until either the
- * cursor is exhausted or `limit` total entries have been collected.
  * @param client - the follow-list API adapter
  * @param userId - the account whose following list is fetched
  * @param limit - the maximum number of entries to collect this call
@@ -81,8 +78,6 @@ export async function fetchFollowing(
 }
 
 /**
- * Fetches the accounts that follow a given account, paginating via cursor until either the
- * cursor is exhausted or `limit` total entries have been collected.
  * @param client - the follow-list API adapter
  * @param userId - the account whose follower list is fetched
  * @param limit - the maximum number of entries to collect this call
@@ -110,9 +105,6 @@ async function convertFollowListResponse(
 }
 
 /**
- * Wraps the real `twitter-openapi-typescript` user-list API (`client.getUserListApi()`)
- * into a `FollowListApiLike`, converting each response's `UserApiUtilsData[]` payload the
- * same way `./profile`'s `createUserApiLike` converts its own list responses.
  * @param userListApi - the real user-list API, e.g. from `TwitterOpenApiClient.getUserListApi()`
  * @returns a `FollowListApiLike` usable with {@link fetchFollowing} and {@link fetchFollowers}
  */

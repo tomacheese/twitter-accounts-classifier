@@ -4,16 +4,9 @@ import { convertTimelineResponse } from './timeline'
 import type { AccountProfileInput } from '../db/account-repository'
 import type { TweetInput } from '../db/tweet-repository'
 
-/**
- * Sorts tweets by descending engagement (retweetCount + likeCount).
- * @param tweets - tweets to sort
- * @returns a new array sorted by descending engagement
- */
 export function sortByEngagement(tweets: TweetInput[]): TweetInput[] {
-  // eslint-disable-next-line unicorn/no-array-sort -- toSorted() requires ES2023 lib, but tsconfig targets ES2022; sorting a spread copy avoids mutating the input
-  return [...tweets].sort(
-    (a, b) => b.retweetCount + b.likeCount - (a.retweetCount + a.likeCount),
-  )
+  // eslint-disable-next-line unicorn/no-array-sort -- tsconfig のターゲットが ES2022 のため toSorted() は使えず、入力を変更しないようスプレッドしたコピーに sort() している
+  return [...tweets].sort((a, b) => b.retweetCount + b.likeCount - (a.retweetCount + a.likeCount))
 }
 
 export interface TweetDetailApiLike {
@@ -23,13 +16,11 @@ export interface TweetDetailApiLike {
 export interface RepliesResult {
   authorReplies: TweetInput[]
   otherReplies: TweetInput[]
-  /** Profiles of every reply author, including non-timeline third parties, derived from the same response (no extra API calls). */
+  /** 返信者ごとに追加の API 呼び出しを行う代わりに、同一レスポンスから導出したプロフィール。 */
   authors: AccountProfileInput[]
 }
 
 /**
- * Fetches replies to a tweet and splits them into replies from the tweet's own author
- * (thread continuations) and replies from anyone else.
  * @param client - tweet detail API client
  * @param parentTweet - the tweet whose replies to fetch
  * @param limit - maximum number of replies to consider
@@ -56,11 +47,9 @@ export async function fetchReplies(
 }
 
 /**
- * Wraps the real `twitter-openapi-typescript` tweet API (`client.getTweetApi()`) into a
- * `TweetDetailApiLike`, converting `getTweetDetail`'s `TweetApiUtilsData[]` response into
- * `RawTweetResult[]` via {@link convertTimelineResponse} — `getTweetDetail`'s response
- * shape is identical to the timeline endpoints wrapped by `./timeline`'s
- * `createTweetApiLike`, so the same converter applies.
+ * `getTweetDetail` のレスポンス形状は `./timeline` の `createTweetApiLike` が変換する
+ * timeline 系エンドポイントと同一のため、専用の変換処理を新設せず
+ * {@link convertTimelineResponse} を流用する。
  * @param tweetApi - the real tweet API, e.g. from `TwitterOpenApiClient.getTweetApi()`
  * @returns a `TweetDetailApiLike` usable with {@link fetchReplies}
  */
