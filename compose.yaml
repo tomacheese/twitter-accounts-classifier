@@ -55,6 +55,7 @@ services:
       CRAWL_INTERVAL_SECONDS: "10800"
       CRAWL_STALE_THRESHOLD_MULTIPLIER: ${CRAWL_STALE_THRESHOLD_MULTIPLIER:-3}
       GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
+      CRAWL_WARNING_THRESHOLD: ${CRAWL_WARNING_THRESHOLD:-}
     volumes:
       # entrypoint.sh cds into /app/crawler before running anything, and
       # loadConfig()'s default path ('data/config.json') is relative to that

@@ -39,6 +39,7 @@ Twitter をクロールしてツイート・アカウント情報を収集し、
 | `CRAWL_INTERVAL_SECONDS` | - | クロール間隔 (秒)。デフォルト 21600 (6時間) |
 | `CRAWL_STALE_THRESHOLD_MULTIPLIER` | - | `running` のまま放置された CrawlRun を検出するしきい値の倍率 (クロール間隔の何倍か)。デフォルト 3 |
 | `GLITCHTIP_DSN` | - | GlitchTip (エラートラッキング) の DSN。未設定なら送信しない |
+| `CRAWL_WARNING_THRESHOLD` | - | 1 アカウントの crawl 1 回あたり、GlitchTip へ集約通知する warning 件数の閾値。デフォルト 5 |
 
 ## データ
 
