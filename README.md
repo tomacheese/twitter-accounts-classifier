@@ -37,6 +37,7 @@ Twitter をクロールしてツイート・アカウント情報を収集し、
 | `DATABASE_URL` | ○ | Postgres 接続文字列 |
 | `COOKIE_ISSUER_URL` | ○ | cookie-issuer サービスの URL。フォールバック値はないため未設定だと起動時にエラーになる |
 | `CRAWL_INTERVAL_SECONDS` | - | クロール間隔 (秒)。デフォルト 21600 (6時間) |
+| `CRAWL_STALE_THRESHOLD_MULTIPLIER` | - | `running` のまま放置された CrawlRun を検出するしきい値の倍率 (クロール間隔の何倍か)。デフォルト 3 |
 | `GLITCHTIP_DSN` | - | GlitchTip (エラートラッキング) の DSN。未設定なら送信しない |
 
 ## データ
