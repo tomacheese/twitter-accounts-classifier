@@ -175,6 +175,7 @@ model Follow {
 model CrawlRun {
   id               String                   @id @default(cuid())
   startedAt        DateTime
+  lastHeartbeatAt  DateTime
   finishedAt       DateTime?
   status           String
   accountRuns      CrawlAccountRun[]

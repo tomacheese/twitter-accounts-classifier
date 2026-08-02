@@ -14,17 +14,29 @@ const NSFW_PATTERN = /\bNSFW\b|R-?18|18禁|成人向け|アダルト|無修正/i
 // inside the same bio segment - no "|"/"｜" separator and no "@" in between - so that the
 // opposite, genuinely-NSFW "🔞NSFW Artist | MINORS DNI" and "nsfw @alt_account | minors
 // dni" phrasings, where DNI addresses minors rather than NSFW, keep matching.
+
+// A further recurring false-positive source, distinct from the DNI/"は✖" forms above: bios
+// that name an NSFW term only to decline it in prose ("アダルト系の話題はNG"), list it among
+// things to report/block ("アダルトやスパムのDMは...報告してからブロック"), or redirect it to a
+// separate account ("成人向け→@sub_account", meaning this account itself is all-ages).
+const JP_REJECT_OR_REDIRECT_PATTERNS = [
+  /(?:NSFW|R-?18|18禁|成人向け|アダルト|無修正)[^\n]{0,20}(?:受け付け(?:ません|ない)|お断り|禁止|NG)/i,
+  /(?:NSFW|R-?18|18禁|成人向け|アダルト|無修正)[^\n]{0,40}報告/i,
+  /(?:NSFW|R-?18|18禁|成人向け|アダルト|無修正)(?:版)?→@/i,
+]
+
 const ANTI_NSFW_PATTERNS = [
   /(?:\bNSFW\b|\bR-?18\b)[^|｜@\n]{0,20}\bDNI\b/i,
   /\bDNI\b[^|｜@\n]{0,20}(?:\bNSFW\b|\bR-?18\b)/i,
   /\b(?:not|never)\b[^|｜\n]{0,20}\b(?:support|post|do|draw|share)\b[^|｜\n]{0,40}(?:\bNSFW\b|\bR-?18\b)/i,
   /(?:NSFW|R-?18|18禁|成人向け|アダルト)(?:の[^|｜\n]{0,6})?は[✖×✗❌]/i,
+  ...JP_REJECT_OR_REDIRECT_PATTERNS,
 ]
 
 export const topicNsfwRule: LabelRule = {
   key: 'topic_nsfw',
   description: 'プロフィールでアダルト/NSFW コンテンツを投稿していることを自己申告している',
-  version: '1.1.0',
+  version: '1.2.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const value =

@@ -2,7 +2,12 @@ import { Logger } from '@book000/node-utils'
 import { captureException, captureMessage, initMonitoring } from './monitoring/sentry'
 import { loadConfig, type AppConfig } from './config/load-config'
 import { CRAWL_LIMITS, TWITTER_RETRY } from './config/crawl-limits'
-import { getCookieIssuerBaseUrl, getCrawlWarningThreshold } from './config/env'
+import {
+  getCookieIssuerBaseUrl,
+  getCrawlIntervalSeconds,
+  getCrawlStaleThresholdMultiplier,
+  getCrawlWarningThreshold,
+} from './config/env'
 import { withTwitterRetry } from './twitter/retry'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
@@ -63,6 +68,7 @@ import {
   completeCrawlAccountCheckpoint as completeCrawlAccountCheckpointRecord,
   loadCrawlAccountCheckpoints as loadCrawlAccountCheckpointsRecord,
   startOrResumeCrawlRun as startOrResumeCrawlRunRecord,
+  touchCrawlRunHeartbeat as touchCrawlRunHeartbeatRecord,
   finishCrawlRun as finishCrawlRunRecord,
   recordCrawlAccountRun as recordCrawlAccountRunRecord,
   type CrawlAccountCheckpointParams,
@@ -122,6 +128,11 @@ export interface CrawlDependencies {
   ) => Promise<Map<CrawlAccountCheckpointPhase, unknown>>
   completeCrawlAccountCheckpoint: (params: CrawlAccountCheckpointParams) => Promise<void>
   clearCrawlAccountCheckpoints: (crawlRunId: string) => Promise<void>
+  /**
+   * アカウント 1 件の処理を試みるたびに (成功・失敗を問わず) 呼び、放置判定の基準となる生存
+   * 時刻を更新する。checkpoint により処理自体を skip したアカウントでは呼ばれない。
+   */
+  touchCrawlRunHeartbeat: (crawlRunId: string) => Promise<void>
   /** Injectable so `withTwitterRetry`'s backoff and the author-loop throttle don't actually pause tests. */
   sleep: (ms: number) => Promise<void>
 }
@@ -132,6 +143,38 @@ function retryOptions(deps: CrawlDependencies): {
   sleepImpl: (ms: number) => Promise<void>
 } {
   return { ...TWITTER_RETRY, sleepImpl: deps.sleep }
+}
+
+/**
+ * Marks a `getUserTweetsAndReplies` failure caused by the underlying `twitter-openapi-typescript`
+ * library's optional-chaining bug (`e.data.user?.result.timeline.timeline`, where `?.` only
+ * guards `data.user` and not `result.timeline`), which throws a bare `TypeError` instead of a
+ * typed API error when an account's timeline is unreadable (e.g. protected, suspended). Wrapping
+ * it here, right at the call site, keeps the message-text match scoped to that one call instead
+ * of matching any `TypeError` raised anywhere in the per-author processing block below.
+ */
+class TimelineUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.name = 'TimelineUnavailableError'
+  }
+}
+
+/**
+ * Wraps `fetchRecentTweets` so the library bug described on `TimelineUnavailableError` above is
+ * normalized into a type `isExpectedAccountLookupError` can recognize precisely.
+ * @param fetch - the `fetchRecentTweets` call to guard
+ * @returns the fetch's result, or rethrows a `TimelineUnavailableError` for the known library bug
+ */
+async function guardTimelineFetch<T>(fetch: () => Promise<T>): Promise<T> {
+  try {
+    return await fetch()
+  } catch (error) {
+    if (error instanceof TypeError && error.message.includes("reading 'timeline'")) {
+      throw new TimelineUnavailableError(error)
+    }
+    throw error
+  }
 }
 
 /**
@@ -151,7 +194,7 @@ function isExpectedAccountLookupError(error: unknown): boolean {
     const status = (error as { response?: { status?: unknown } }).response?.status
     return status === 404
   }
-  return false
+  return error instanceof TimelineUnavailableError
 }
 
 /**
@@ -348,9 +391,11 @@ async function runAccountCycleBody(
       await deps.persistAccount(profile)
       succeededAuthorIds.add(authorId)
 
-      const { tweets: recentTweets, authors } = await withTwitterRetry(
-        () => fetchRecentTweets(userApi, authorId, deps.limits.recentTweetsPerAccount),
-        retryOptions(deps),
+      const { tweets: recentTweets, authors } = await guardTimelineFetch(() =>
+        withTwitterRetry(
+          () => fetchRecentTweets(userApi, authorId, deps.limits.recentTweetsPerAccount),
+          retryOptions(deps),
+        ),
       )
       profileTweets.push(...recentTweets)
       for (const author of authors) extraAuthors.set(author.id, author)
@@ -1052,6 +1097,12 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
         )
         accountStatuses.push('failed')
       }
+
+      try {
+        await deps.touchCrawlRunHeartbeat(crawlRunId)
+      } catch (error) {
+        logger.error(`Failed to update heartbeat for crawl run ${crawlRunId}`, error as Error)
+      }
     }
 
     const runStatus = accountStatuses.includes('failed')
@@ -1110,6 +1161,8 @@ async function main(): Promise<void> {
     baseUrl: getCookieIssuerBaseUrl(),
   })
 
+  const staleThresholdMs = getCrawlIntervalSeconds() * getCrawlStaleThresholdMultiplier() * 1000
+
   const deps: CrawlDependencies = {
     config: loadConfig(),
     limits: CRAWL_LIMITS,
@@ -1136,7 +1189,8 @@ async function main(): Promise<void> {
     },
     syncFollowing: (followerId, result) => syncFollowingEdges(prisma, followerId, result),
     syncFollowers: (followeeId, result) => syncFollowersEdges(prisma, followeeId, result),
-    startOrResumeCrawlRun: (startedAt) => startOrResumeCrawlRunRecord(prisma, startedAt),
+    startOrResumeCrawlRun: (startedAt) =>
+      startOrResumeCrawlRunRecord(prisma, startedAt, staleThresholdMs),
     finishCrawlRun: (id, finishedAt, status) =>
       finishCrawlRunRecord(prisma, id, finishedAt, status),
     recordCrawlAccountRun: (params) => recordCrawlAccountRunRecord(prisma, params),
@@ -1146,6 +1200,8 @@ async function main(): Promise<void> {
       completeCrawlAccountCheckpointRecord(prisma, params),
     clearCrawlAccountCheckpoints: (crawlRunId) =>
       clearCrawlAccountCheckpointsRecord(prisma, crawlRunId),
+    touchCrawlRunHeartbeat: (crawlRunId) =>
+      touchCrawlRunHeartbeatRecord(prisma, crawlRunId, new Date()),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }
 

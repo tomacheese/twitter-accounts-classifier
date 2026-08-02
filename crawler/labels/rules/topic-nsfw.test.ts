@@ -40,9 +40,8 @@ describe('topicNsfwRule', () => {
 
   it('is false for a bio listing NSFW in a "do not interact" list', () => {
     expect(
-      topicNsfwRule.evaluate(
-        makeBundle({ bio: 'I AM A MINOR | DNI: nsfw accounts, bigots' }),
-      ).value,
+      topicNsfwRule.evaluate(makeBundle({ bio: 'I AM A MINOR | DNI: nsfw accounts, bigots' }))
+        .value,
     ).toBe(false)
   })
 
@@ -62,21 +61,60 @@ describe('topicNsfwRule', () => {
 
   it('is false for a Japanese bio declaring R18 topics are off-limits', () => {
     expect(
-      topicNsfwRule.evaluate(makeBundle({ bio: '日々の話題を発信中！政治、R18の話題は✖です' })).value,
+      topicNsfwRule.evaluate(makeBundle({ bio: '日々の話題を発信中！政治、R18の話題は✖です' }))
+        .value,
     ).toBe(false)
   })
 
   it('is true for an NSFW artist whose "DNI" addresses minors rather than NSFW', () => {
     expect(
-      topicNsfwRule.evaluate(makeBundle({ bio: '🔞NSFW Artist 🔞 | All Ocs are Adults | MINORS DNI!' }))
-        .value,
+      topicNsfwRule.evaluate(
+        makeBundle({ bio: '🔞NSFW Artist 🔞 | All Ocs are Adults | MINORS DNI!' }),
+      ).value,
     ).toBe(true)
   })
 
   it('is true for a bio linking an NSFW alt account alongside a "minors dni" notice', () => {
     expect(
-      topicNsfwRule.evaluate(makeBundle({ bio: 'illustrator, gym rat. nsfw @alt_example. minors dni' }))
-        .value,
+      topicNsfwRule.evaluate(
+        makeBundle({ bio: 'illustrator, gym rat. nsfw @alt_example. minors dni' }),
+      ).value,
+    ).toBe(true)
+  })
+
+  it('is false for a Japanese bio prose-declining adult-related interaction', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({
+          bio: 'アニメと猫が好きな雑談アカウントです。気軽にフォローしてください。アダルト系の話題はNGでお願いします🙏',
+        }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('is false for a bio listing an NSFW term among things it reports and blocks', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({
+          bio: '怪しい勧誘は苦手です。アダルトやスパムのDMは運営へ報告してからブロックしています。',
+        }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('is false for an all-ages bio that redirects adult content to a separate account', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({
+          bio: 'ゲーム実況が好きなアカウントです。全年齢向けの内容のみ投稿しています。成人向け→@fictional_sub_acct',
+        }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('is true for a bio that self-declares adult content without a rejection/redirect phrase', () => {
+    expect(
+      topicNsfwRule.evaluate(makeBundle({ bio: 'アダルトグッズのレビューを投稿しています' })).value,
     ).toBe(true)
   })
 })

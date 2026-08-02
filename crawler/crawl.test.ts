@@ -133,6 +133,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
     loadCrawlAccountCheckpoints: vi.fn().mockResolvedValue(new Map()),
     completeCrawlAccountCheckpoint: vi.fn().mockResolvedValue(undefined),
     clearCrawlAccountCheckpoints: vi.fn().mockResolvedValue(undefined),
+    touchCrawlRunHeartbeat: vi.fn().mockResolvedValue(undefined),
     sleep: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
@@ -1041,6 +1042,46 @@ describe('runCrawlCycle', () => {
     expect(deps.clearCrawlAccountCheckpoints).toHaveBeenCalledWith('run1')
   })
 
+  it('touches the heartbeat once per account actually processed', async () => {
+    const deps = makeDeps({
+      config: {
+        accounts: [
+          { email: 'a@example.com', username: 'v', password: 'p', otpSecret: null },
+          { email: 'b@example.com', username: 'w', password: 'p', otpSecret: null },
+        ],
+      },
+      startOrResumeCrawlRun: vi.fn().mockResolvedValue({
+        id: 'run1',
+        latestAccountStatuses: new Map([['w', 'success']]),
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    // 'w' はチェックポイントで既にスキップされるため、実際に処理された 'v' の分だけ呼ばれる
+    expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledTimes(1)
+    expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledWith('run1')
+  })
+
+  it('touches the heartbeat even when an account fails', async () => {
+    const deps = makeDeps({
+      issueCookies: vi.fn().mockRejectedValue(new Error('cookie issuance failed')),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledTimes(1)
+    expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledWith('run1')
+  })
+
+  it('does not fail the cycle when touching the heartbeat itself fails', async () => {
+    const deps = makeDeps({
+      touchCrawlRunHeartbeat: vi.fn().mockRejectedValue(new Error('row missing')),
+    })
+
+    await expect(runCrawlCycle(deps)).resolves.toBeUndefined()
+  })
+
   it('resumes a run by retaining completed accounts and retrying all other configured accounts', async () => {
     const issueCookies = vi.fn().mockResolvedValue({ ct0: 'c0', authToken: 'a0' })
     const deps = makeDeps({
@@ -1460,6 +1501,88 @@ describe('runCrawlCycle', () => {
       expect.objectContaining({ status: 'success', warnings: [] }),
     )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'success')
+  })
+
+  it('treats the getUserTweetsAndReplies timeline TypeError as an expected unavailable account', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi
+              .fn()
+              .mockRejectedValue(
+                new TypeError("Cannot read properties of undefined (reading 'timeline')"),
+              ),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'success', warnings: [] }),
+    )
+    expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'success')
+  })
+
+  it('does not misclassify an unrelated TypeError from getUserTweetsAndReplies as an expected unavailable account', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi
+              .fn()
+              .mockRejectedValue(
+                new TypeError("Cannot read properties of undefined (reading 'legacy')"),
+              ),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'partial',
+        warnings: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'author_processing_failed',
+            authorId: 'author1',
+            errorMessage: "Cannot read properties of undefined (reading 'legacy')",
+          }),
+        ]),
+      }),
+    )
   })
 
   it('records a structured following_timeline_failed warning when the following timeline fetch fails', async () => {
