@@ -38,6 +38,7 @@ Twitter をクロールしてツイート・アカウント情報を収集し、
 | `COOKIE_ISSUER_URL` | ○ | cookie-issuer サービスの URL。フォールバック値はないため未設定だと起動時にエラーになる |
 | `CRAWL_INTERVAL_SECONDS` | - | クロール間隔 (秒)。デフォルト 21600 (6時間) |
 | `GLITCHTIP_DSN` | - | GlitchTip (エラートラッキング) の DSN。未設定なら送信しない |
+| `CRAWL_WARNING_THRESHOLD` | - | 1 アカウントの crawl 1 回あたり、GlitchTip へ集約通知する warning 件数の閾値。デフォルト 5 |
 
 ## データ
 
