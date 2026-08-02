@@ -1313,6 +1313,88 @@ describe('runCrawlCycle', () => {
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'success')
   })
 
+  it('treats the getUserTweetsAndReplies timeline TypeError as an expected unavailable account', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi
+              .fn()
+              .mockRejectedValue(
+                new TypeError("Cannot read properties of undefined (reading 'timeline')"),
+              ),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'success', warnings: [] }),
+    )
+    expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'success')
+  })
+
+  it('does not misclassify an unrelated TypeError from getUserTweetsAndReplies as an expected unavailable account', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi
+              .fn()
+              .mockRejectedValue(
+                new TypeError("Cannot read properties of undefined (reading 'legacy')"),
+              ),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'partial',
+        warnings: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'author_processing_failed',
+            authorId: 'author1',
+            errorMessage: "Cannot read properties of undefined (reading 'legacy')",
+          }),
+        ]),
+      }),
+    )
+  })
+
   it('records a structured following_timeline_failed warning when the following timeline fetch fails', async () => {
     const deps = makeDeps({
       createOpenApiClient: vi.fn().mockResolvedValue({
