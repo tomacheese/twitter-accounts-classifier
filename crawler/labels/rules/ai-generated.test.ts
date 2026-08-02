@@ -225,7 +225,7 @@ describe('aiGeneratedRule', () => {
   it('is false for a bio that blocks accounts posting AI-generated content, not declaring its own', () => {
     const result = aiGeneratedRule.evaluate(
       makeBundle({
-        bio: 'クソリプとスパムは即報告、ブロ。過度に差別発言＆RTする人もリムブロ。AI生成ブロ。',
+        bio: '無言フォローは即リムブロ。営業DMも報告してリムブロします。AI生成ブロ。',
       }),
     )
     expect(result.value).toBe(false)
@@ -234,7 +234,7 @@ describe('aiGeneratedRule', () => {
   it.each([
     [
       'a follow-back refusal aimed at other AI users',
-      '※生成AI利用してる方、基本フォロバしてません。V界隈を俯瞰で見るオタク。',
+      '※生成AI利用してる方、基本フォロバしてません。ゲーム実況の視聴が趣味です。',
     ],
     [
       'a block policy aimed at other AI users phrased with "使っている方"',
