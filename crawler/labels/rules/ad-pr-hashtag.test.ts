@@ -20,7 +20,9 @@ function makeBundle(recentTweets: AccountFeatureBundle['recentTweets']): Account
   }
 }
 
-function tweet(overrides: Partial<AccountFeatureBundle['recentTweets'][number]>): AccountFeatureBundle['recentTweets'][number] {
+function tweet(
+  overrides: Partial<AccountFeatureBundle['recentTweets'][number]>,
+): AccountFeatureBundle['recentTweets'][number] {
   return {
     id: 't1',
     fullText: 'hello',
@@ -74,13 +76,17 @@ describe('adPrHashtagRule', () => {
   })
 
   it('is false when neither signal is present', () => {
-    const result = adPrHashtagRule.evaluate(makeBundle([tweet({ fullText: '今日はいい天気ですね' })]))
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: '今日はいい天気ですね' })]),
+    )
     expect(result.value).toBe(false)
     expect(result.confidence).toBe(0)
   })
 
   it('does not match "#PR" as a substring of a longer hashtag', () => {
-    const result = adPrHashtagRule.evaluate(makeBundle([tweet({ fullText: '応援よろしく #PRIDE2026' })]))
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: '応援よろしく #PRIDE2026' })]),
+    )
     expect(result.value).toBe(false)
   })
 
@@ -97,14 +103,19 @@ describe('adPrHashtagRule', () => {
 
   it.each([
     ['a hashtag continuing in lowercase', '🌟おはよう🌟 #PRiSMサンプル #テスト'],
-    ['a hashtag continuing with an underscore', 'もし当選したら嬉しい… #GIVEAWAY #PRESENT_CAMPAIGN_2026'],
+    [
+      'a hashtag continuing with an underscore',
+      'もし当選したら嬉しい… #GIVEAWAY #PRESENT_CAMPAIGN_2026',
+    ],
   ])('still does not match "#PR" inside %s', (_label, fullText) => {
     expect(adPrHashtagRule.evaluate(makeBundle([tweet({ fullText })])).value).toBe(false)
   })
 
   it('does not treat an English "(PR)" as a Japanese sponsorship disclosure', () => {
     const result = adPrHashtagRule.evaluate(
-      makeBundle([tweet({ fullText: 'Finally merged the caching fix (PR) after three rounds of review.' })]),
+      makeBundle([
+        tweet({ fullText: 'Finally merged the caching fix (PR) after three rounds of review.' }),
+      ]),
     )
     expect(result.value).toBe(false)
   })
@@ -116,7 +127,7 @@ describe('adPrHashtagRule', () => {
     expect(result.value).toBe(false)
   })
 
-  it('is false when the only #PR-tagged tweet is a retweet of someone else\'s post', () => {
+  it("is false when the only #PR-tagged tweet is a retweet of someone else's post", () => {
     const result = adPrHashtagRule.evaluate(
       makeBundle([
         tweet({

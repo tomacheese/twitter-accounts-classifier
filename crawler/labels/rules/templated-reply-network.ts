@@ -1,9 +1,9 @@
 import type { LabelRule } from '../types'
 
-// Chatbot-driven reply networks auto-generate templated replies at scale. This targets a
-// signal the `bot` rule (posting frequency/reply ratio) and `ad_reply_hijack` rule (ad/crypto
-// pitch keywords) both miss: the reply text itself is shared verbatim across several distinct
-// accounts, regardless of what it says.
+// チャットボット駆動のリプライネットワークは、テンプレート化されたリプライを大量生成する。
+// このルールが捉えるのは、`bot` ルール(投稿頻度・返信比率)や `ad_reply_hijack` ルール
+// (広告・暗号資産の勧誘キーワード)のいずれも見逃す信号、すなわちリプライ本文そのものが
+// 内容に関わらず複数の別アカウント間で一字一句共有されているという点である。
 const MIN_NETWORK_SIZE = 5
 
 export const templatedReplyNetworkRule: LabelRule = {

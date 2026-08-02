@@ -1,23 +1,21 @@
 import type { LabelRule } from '../types'
 
-// This archetype - no organic content at all, every recent tweet a reply or a retweet, at a
-// velocity far beyond plausible human rates - is the mirror image of the `bot` rule's
-// near-zero-reply-ratio branch. It is deliberately kept as its own label rather than folded
-// into `bot`, so that rule's frequency-and-timing-regularity semantics do not turn into an
-// unrelated catch-all.
+// オリジナル投稿が一切なく、直近のツイートがすべてリプライまたはリツイートで、
+// 人間としてあり得ない頻度で投稿するアーキタイプは、`bot` ルールの
+// 「返信比率がほぼゼロ」の分岐と表裏一体だが、`bot` ルールの頻度・間隔の規則性という
+// 意味論を無関係な受け皿にしないよう、あえて独立したラベルとして扱う。
 const VELOCITY_THRESHOLD_PER_DAY = 150
-// Same corroboration requirement as the `bot` rule: decade-old, large verified Business
-// accounts can carry a `statuses_count` on X's own side that is wildly inflated relative to
-// their actual posting cadence, so `tweetCount / accountAge` alone falsely flags them as
-// high-velocity.
+// `bot` ルールと同じ裏付けを要求している。何年も前から稼働する大規模な認証済み
+// ビジネスアカウントは、X 側の `statuses_count` が実際の投稿頻度に対して
+// 大幅に水増しされていることがあるため、`tweetCount / accountAge` のみでは
+// 高頻度アカウントと誤判定してしまう。
 const RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY = 50
 const MIN_SAMPLE = 5
 const ORIGINAL_CONTENT_RATIO_THRESHOLD = 0.05
-// `originalContentRatio` counts retweets as "not original", so a pure retweeter - someone
-// who reposts others all day and writes nothing, not even replies - scores 0 and clears that
-// guard without ever having farmed a reply. Requiring the account's own tweets to actually
-// BE replies separates the two cleanly: in the sampled corpus the false positives sat at a
-// reply ratio of 0.10 or below and every genuine reply-farming account at exactly 1.00.
+// `originalContentRatio` はリツイートも「オリジナルでない」とみなすため、
+// 一日中他者を転載するだけで返信は一切しない純粋なリツイート主体アカウントも
+// このガードを素通りしてしまう。アカウント自身の投稿が実際に返信であることを
+// 要求することで、両者を明確に区別する。
 const REPLY_RATIO_THRESHOLD = 0.5
 
 function averageTweetsPerDay(tweetCount: number, accountCreatedAt: Date): number {
@@ -29,7 +27,10 @@ function averageTweetsPerDay(tweetCount: number, accountCreatedAt: Date): number
 function recentObservedTweetsPerDay(tweets: { createdAt: Date }[]): number {
   if (tweets.length < 2) return 0
   const timestamps = tweets.map((t) => t.createdAt.getTime())
-  const spanDays = Math.max((Math.max(...timestamps) - Math.min(...timestamps)) / (1000 * 60 * 60 * 24), 1 / 24)
+  const spanDays = Math.max(
+    (Math.max(...timestamps) - Math.min(...timestamps)) / (1000 * 60 * 60 * 24),
+    1 / 24,
+  )
   return (tweets.length - 1) / spanDays
 }
 
@@ -43,18 +44,16 @@ export const replyFarmingRule: LabelRule = {
     const sampled = bundle.recentTweets
     const tweetsPerDay = averageTweetsPerDay(tweetCount, accountCreatedAt)
     const recentTweetsPerDay = recentObservedTweetsPerDay(sampled)
-    // As in the `bot` rule, a high recent rate alone must never suffice: extrapolating a
-    // "per day" rate from a short burst of sampled tweets routinely exceeds 150/day for
-    // ordinary humans live-tweeting an event, even though their lifetime posting average is
-    // nowhere near bot-like (a standalone recent-rate branch measured 91% false positives,
-    // with no confirmed reply-farming account depending on it).
+    // `bot` ルールと同様、直近の投稿頻度が高いだけでは十分条件とせず、生涯平均も
+    // 同時に満たす必要がある。短時間のサンプルから「1日あたり」の頻度を外挿すると、
+    // イベントの実況などで密集投稿する人間の生涯平均は bot 的でなくても
+    // 閾値を容易に超えてしまうため。
     const isHighVelocity =
       tweetsPerDay >= VELOCITY_THRESHOLD_PER_DAY &&
       recentTweetsPerDay >= RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY
 
     const originalTweets = sampled.filter((t) => !t.isReply && !t.isRetweet)
-    const originalContentRatio =
-      sampled.length > 0 ? originalTweets.length / sampled.length : 1
+    const originalContentRatio = sampled.length > 0 ? originalTweets.length / sampled.length : 1
     const hasEnoughSample = sampled.length >= MIN_SAMPLE
     const hasNoOriginalContent =
       hasEnoughSample && originalContentRatio <= ORIGINAL_CONTENT_RATIO_THRESHOLD

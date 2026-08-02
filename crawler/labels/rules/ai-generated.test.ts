@@ -189,8 +189,8 @@ describe('aiGeneratedRule', () => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })
 
-  // The opposition check must stay narrow: genuine AI creators very commonly forbid
-  // reposting or training on their output in the same breath as declaring their own use.
+  // 対立表現の判定は狭いままにしておく必要がある。生成AI利用者自身も、
+  // 自己申告と同じ文中で無断転載や無断学習を拒否することが非常に多いため。
   it.each([
     [
       'a repost refusal aimed at a different object further along the bio',

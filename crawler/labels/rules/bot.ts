@@ -1,11 +1,11 @@
 import type { LabelRule } from '../types'
 
 const VELOCITY_THRESHOLD_PER_DAY = 150
-// Decade-old, large verified Business accounts can carry a `statuses_count` on X's own side
-// that is wildly inflated relative to their actual posting cadence, so `tweetCount /
-// accountAge` alone falsely flags them as high-velocity. Requiring the *observed* cadence
-// within the sampled tweets to also clear a bar corroborates the lifetime-average signal
-// instead of trusting it in isolation.
+// 何年も前から稼働する大規模な認証済みビジネスアカウントは、X 側の `statuses_count` が
+// 実際の投稿頻度に対して大幅に水増しされていることがあるため、
+// `tweetCount / accountAge` のみでは高頻度アカウントと誤判定してしまう。
+// サンプルした直近ツイートの実測頻度にも基準を課すことで、
+// 生涯平均の水増しに単独で依拠しないようにしている。
 const RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY = 50
 const MIN_SAMPLE_FOR_TIMING_SIGNALS = 5
 const REPLY_RATIO_THRESHOLD = 0.05
@@ -20,7 +20,10 @@ function averageTweetsPerDay(tweetCount: number, accountCreatedAt: Date): number
 function recentObservedTweetsPerDay(tweets: { createdAt: Date }[]): number {
   if (tweets.length < 2) return 0
   const timestamps = tweets.map((t) => t.createdAt.getTime())
-  const spanDays = Math.max((Math.max(...timestamps) - Math.min(...timestamps)) / (1000 * 60 * 60 * 24), 1 / 24)
+  const spanDays = Math.max(
+    (Math.max(...timestamps) - Math.min(...timestamps)) / (1000 * 60 * 60 * 24),
+    1 / 24,
+  )
   return (tweets.length - 1) / spanDays
 }
 
@@ -48,20 +51,18 @@ export const botRule: LabelRule = {
     const sampled = bundle.recentTweets
     const tweetsPerDay = averageTweetsPerDay(tweetCount, accountCreatedAt)
     const recentTweetsPerDay = recentObservedTweetsPerDay(sampled)
-    // Both rates must clear their bar; a high recent rate alone must never suffice.
-    // `recentObservedTweetsPerDay` extrapolates a "per day" rate from however many tweets
-    // were sampled, so for ordinary humans live-tweeting a short real-world event (a stream,
-    // a game, a drama episode) a tight cluster of tweets routinely blows past 150/day even
-    // though their lifetime average is nowhere near bot-like - a standalone recent-rate
-    // branch measured a 94% false-positive rate, with no genuine bot depending on it.
+    // 直近の投稿頻度が高いだけでは十分条件とせず、生涯平均も同時に満たす必要がある。
+    // `recentObservedTweetsPerDay` はサンプルした件数から「1日あたり」の頻度を
+    // 外挿するため、配信・ゲーム実況・ドラマ視聴などの短時間の実況で密集投稿する人間は、
+    // 生涯平均が bot 的でなくても閾値を容易に超えてしまう。
     const isHighVelocity =
       tweetsPerDay >= VELOCITY_THRESHOLD_PER_DAY &&
       recentTweetsPerDay >= RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY
-    // The ratio is taken over original posts only. A retweet can never be a reply, so
-    // counting retweets in the denominator pushes the ratio toward zero mechanically and
-    // turns this signal into a proxy for "retweets a lot" rather than "never converses" -
-    // Japanese X is full of prolific human retweeters (idol fandoms, 懸賞 accounts, political
-    // repost accounts) who were flagged on that alone, with 0-4 original posts out of 20.
+    // 比率はオリジナル投稿のみを対象とする。リツイートは返信になり得ないため、
+    // 分母にリツイートを含めると比率が機械的にゼロへ寄ってしまい、この信号が
+    // 「会話しないこと」ではなく「リツイートが多いこと」の代理指標になってしまう。
+    // 日本語 X には多数のリツイートを行う人間アカウント(推し活・懸賞・政治系の
+    // 転載アカウントなど)が多く、これらを誤検知しないためである。
     const originalPosts = sampled.filter((t) => !t.isRetweet)
     const replyRatio =
       originalPosts.length > 0

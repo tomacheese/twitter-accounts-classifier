@@ -146,7 +146,7 @@ describe('replyFarmingRule', () => {
 
   it('is false for a short reply burst from an account with an otherwise ordinary lifetime posting rate', () => {
     const bundle = makeBundle(
-      5.5, // ordinary lifetime average, far below the 150/day threshold
+      5.5, // 生涯平均の投稿頻度は閾値を大きく下回っている
       Array.from({ length: 20 }, () => ({ isReply: true })),
     )
 
