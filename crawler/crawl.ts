@@ -648,7 +648,7 @@ function isCrawlWarning(value: unknown): value is CrawlWarning {
 }
 
 function restoreWarnings(value: unknown): CrawlWarning[] | undefined {
-  if (!Array.isArray(value) || !value.every(isCrawlWarning)) return undefined
+  if (!Array.isArray(value) || !value.every((warning) => isCrawlWarning(warning))) return undefined
   return value
 }
 
@@ -714,14 +714,14 @@ function restoreTimelineResult(value: unknown):
     if (!isRecord(value_) || !isStoredTweetInput(value_)) return undefined
     const createdAt = restoreDate(value_.createdAt)
     if (!createdAt) return undefined
-    tweets.push({ ...(value_ as StoredTweetInput), createdAt })
+    tweets.push({ ...value_, createdAt })
   }
   const authors: AccountProfileInput[] = []
   for (const value_ of value.authors) {
     if (!isRecord(value_) || !isStoredAccountProfileInput(value_)) return undefined
     const accountCreatedAt = restoreDate(value_.accountCreatedAt)
     if (!accountCreatedAt) return undefined
-    authors.push({ ...(value_ as StoredAccountProfileInput), accountCreatedAt })
+    authors.push({ ...value_, accountCreatedAt })
   }
   return { tweets, authors }
 }
