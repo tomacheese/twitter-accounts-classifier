@@ -1,9 +1,7 @@
 import type { LabelRule } from '../types'
 
-// English terms are word-boundary-matched to avoid matching inside unrelated words
-// (e.g. "cinema" would not collide with anything common, but keeping the same convention
-// as the other topic_* rules for consistency). Japanese terms are left as substring matches
-// since word boundaries don't apply the same way to Japanese script.
+// 英単語は他の topic_* ルールとの表記統一のため単語境界で判定しており、
+// 日本語は単語境界の概念が同様には成り立たないため部分一致のままとしている。
 const MOVIE_PATTERN =
   /\b(movie|movies|film|cinema|moviegoer|cinephile)\b|映画|ドラマ|洋画|邦画|映画館|映画鑑賞/i
 

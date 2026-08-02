@@ -1,11 +1,10 @@
 import type { LabelRule } from '../types'
 
-// English terms are word-boundary-matched to avoid matching inside unrelated words
-// (e.g. "crypto" inside "cryptography"/"cryptographic"); "crypto" additionally excludes
-// the "-graph-" continuation via negative lookahead so it still matches legitimate
-// substrings like "cryptocurrency". Japanese terms are left as substring matches since
-// word boundaries don't apply the same way to Japanese script.
-const CRYPTO_PATTERN = /\b(crypto(?!graph)|bitcoin|nft|web3|blockchain)|仮想通貨|ビットコイン|ブロックチェーン/i
+// crypto は cryptography 等の無関係な語に含まれてしまうため単語境界で判定しつつ、
+// cryptocurrency のような正当な語は除外しないよう否定先読みを用いている。
+// 日本語は単語境界の概念が同様には成り立たないため部分一致のままとしている。
+const CRYPTO_PATTERN =
+  /\b(crypto(?!graph)|bitcoin|nft|web3|blockchain)|仮想通貨|ビットコイン|ブロックチェーン/i
 
 export const topicCryptoRule: LabelRule = {
   key: 'topic_crypto',

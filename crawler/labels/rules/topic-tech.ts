@@ -1,20 +1,14 @@
 import type { LabelRule } from '../types'
 
-// English terms are word-boundary-matched to avoid matching inside unrelated compound
-// words (e.g. "engineer" inside the game title "spaceengineers" / "Space Engineers").
-// Japanese terms are left as substring matches since word boundaries don't apply the
-// same way to Japanese script.
+// 英単語は無関係な複合語の内部に一致しないよう単語境界で判定し、日本語は単語境界の概念が
+// 同様には成り立たないため部分一致のままとしている。
 //
-// プログラマ/プログラミング (programmer/programming) are matched specifically rather than
-// the bare substring プログラ, which also matches unrelated uses of プログラム ("program" as
-// in "Amazonアソシエイトプログラム" affiliate program, "マイルプログラム" loyalty program,
-// "プログラムマネージャー" project manager).
+// プログラマ/プログラミングは、プログラム という語幹のみで判定するとアフィリエイトプログラムや
+// マイルプログラムなど技術と無関係な用法まで一致してしまうため、具体的な語形に限定している。
 //
-// "engineer" additionally excludes a preceding non-software engineering discipline
-// (civil/mechanical/audio/controls/... engineer) via negative lookbehind: the bare term
-// covers every engineering field, so without this exclusion any civil or audio engineer
-// gets tagged as a software/tech account. A bio that also carries a software marker
-// (software/developer/full-stack/エンジニア/...) still matches through those other terms.
+// engineer は分野を問わずあらゆる技術者に使われる語であるため、土木・機械・音響などソフトウェア
+// 以外の分野を示す語が直前にある場合は除外している。該当分野のエンジニアであっても
+// software/developer 等の他の技術シグナルを bio に含む場合は、それらの語で引き続き一致する。
 const NON_SOFTWARE_ENGINEER_DISCIPLINE =
   'civil|mechanical|electrical|chemical|structural|controls?|audio|sound|recording|mixing|mastering|aerospace|industrial|process|petroleum|mining|nuclear|marine|agricultural|biomedical|automotive'
 

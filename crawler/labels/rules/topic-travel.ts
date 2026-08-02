@@ -1,11 +1,10 @@
 import type { LabelRule } from '../types'
 
-// English terms are word-boundary-matched to avoid matching inside unrelated words;
-// Japanese terms are left as substring matches per this project's existing topic_*
-// convention.
+// 英単語は無関係な語の内部に一致しないよう単語境界で判定し、日本語は本プロジェクトの
+// topic_* ルール群の慣例に倣い部分一致としている。
 //
-// 旅 on its own is deliberately not matched: it is a common given-name and shop-name
-// character (旅人, 旅館 as an employer, etc.), so only the explicit compounds are used.
+// 旅 単体は人名や店舗名の一部としても一般的に使われる文字であるため対象語から除外し、
+// 明確な複合語のみを用いている。
 const TRAVEL_PATTERN =
   /旅行|旅好き|一人旅|旅が好き|温泉巡り|\b(travel|travels|traveling|travelling|traveler|traveller|backpacker)\b/i
 

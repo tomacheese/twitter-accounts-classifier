@@ -1,24 +1,18 @@
 import type { LabelRule } from '../types'
 
-// Deliberately restricted to explicit adult-content markers (age-rating labels and direct
-// self-identification terms) rather than broad innuendo, to keep false-positive risk low.
-// English terms are word-boundary-matched to avoid matching inside unrelated words.
+// 露骨な暗示表現まで対象にすると誤検知が増えるため、年齢区分ラベルや直接的な自己申告語のみに
+// 意図的に絞り込んでいる。英単語は無関係な語の内部に一致しないよう単語境界で判定している。
 const NSFW_PATTERN = /\bNSFW\b|R-?18|18禁|成人向け|アダルト|無修正/i
 
-// Bios that name an NSFW term only to declare they do NOT post or want it ("nsfw dni",
-// "DNI: nsfw accounts", "I do not support: Nsfw", "R18の話題は✖") are a recurring
-// false-positive source - often self-declared minors warning adult accounts away. Matching
-// any of these suppresses the label.
+// NSFW 語を含みつつ実際には投稿しない/望まない旨を宣言しているだけの bio は誤検知の主要因と
+// なるため、これらに一致した場合はラベルを抑制している。
 //
-// The "DNI" ("do not interact") forms are restricted to an NSFW term adjacent to DNI
-// inside the same bio segment - no "|"/"｜" separator and no "@" in between - so that the
-// opposite, genuinely-NSFW "🔞NSFW Artist | MINORS DNI" and "nsfw @alt_account | minors
-// dni" phrasings, where DNI addresses minors rather than NSFW, keep matching.
+// DNI 表現による抑制は、NSFW 語と DNI が同一セグメント内で隣接している場合に限定している。
+// 区切り文字や @ を挟む場合まで抑制対象にすると、DNI が未成年側を指す本来の NSFW アカウントの
+// 申告まで誤って抑制してしまうため。
 
-// A further recurring false-positive source, distinct from the DNI/"は✖" forms above: bios
-// that name an NSFW term only to decline it in prose ("アダルト系の話題はNG"), list it among
-// things to report/block ("アダルトやスパムのDMは...報告してからブロック"), or redirect it to a
-// separate account ("成人向け→@sub_account", meaning this account itself is all-ages).
+// NSFW 語を用いつつも、話題として拒否している、通報・ブロック対象として列挙している、あるいは
+// 別アカウントへ誘導しているだけの bio も同様に誤検知の原因となるため、抑制対象に含めている。
 const JP_REJECT_OR_REDIRECT_PATTERNS = [
   /(?:NSFW|R-?18|18禁|成人向け|アダルト|無修正)[^\n]{0,20}(?:受け付け(?:ません|ない)|お断り|禁止|NG)/i,
   /(?:NSFW|R-?18|18禁|成人向け|アダルト|無修正)[^\n]{0,40}報告/i,
