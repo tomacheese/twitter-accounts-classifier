@@ -1,4 +1,7 @@
+import { Logger } from '@book000/node-utils'
 import * as Sentry from '@sentry/node'
+
+const logger = Logger.configure('monitoring/sentry')
 
 let initialized = false
 
@@ -14,16 +17,27 @@ export function initMonitoring(): void {
 
 export function captureException(error: unknown, context?: Record<string, unknown>): void {
   if (!initialized) return
-  Sentry.captureException(error, context)
+  // Reporting to GlitchTip is best-effort: per the module-level invariant above, a throw
+  // here must never propagate into the caller's own error handling.
+  try {
+    Sentry.captureException(error, context)
+  } catch (reportError) {
+    logger.warn('Failed to report exception to GlitchTip', reportError as Error)
+  }
 }
 
 /**
  * Reports a non-exception event (e.g. an aggregated warning-count summary) to GlitchTip.
- * Mirrors captureException's initialized-guard: a no-op when GLITCHTIP_DSN is unset.
+ * Mirrors captureException's initialized-guard and never-throw guarantee: a no-op when
+ * GLITCHTIP_DSN is unset, and any failure to report is logged rather than propagated.
  * @param message - the summary text to report
  * @param context - additional structured data attached as the event's `extra` payload
  */
 export function captureMessage(message: string, context?: Record<string, unknown>): void {
   if (!initialized) return
-  Sentry.captureMessage(message, { level: 'warning', extra: context })
+  try {
+    Sentry.captureMessage(message, { level: 'warning', extra: context })
+  } catch (reportError) {
+    logger.warn('Failed to report message to GlitchTip', reportError as Error)
+  }
 }

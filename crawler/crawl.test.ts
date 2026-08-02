@@ -6,7 +6,10 @@ import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 
 const { captureMessageMock } = vi.hoisted(() => ({ captureMessageMock: vi.fn() }))
-vi.mock('./monitoring/sentry', () => ({ captureMessage: captureMessageMock }))
+vi.mock('./monitoring/sentry', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./monitoring/sentry')>()),
+  captureMessage: captureMessageMock,
+}))
 
 function rawUser(restId: string, screenName = 'someone') {
   return {
@@ -856,11 +859,66 @@ describe('runCrawlCycle', () => {
 
       expect(captureMessageMock).toHaveBeenCalledTimes(1)
       expect(captureMessageMock).toHaveBeenCalledWith(
-        expect.stringContaining('Crawl warnings threshold exceeded for v: 1 warnings'),
+        'Crawl warnings threshold exceeded for v',
         expect.objectContaining({
+          crawlRunId: 'run1',
           username: 'v',
           status: 'partial',
+          appVersion: expect.any(String),
+          warningCount: 1,
+          warningThreshold: 1,
           warningCounts: { own_account_sync_failed: 1 },
+        }),
+      )
+    } finally {
+      if (originalThreshold === undefined) {
+        delete process.env.CRAWL_WARNING_THRESHOLD
+      } else {
+        process.env.CRAWL_WARNING_THRESHOLD = originalThreshold
+      }
+    }
+  })
+
+  it('sums per-type counts separately when multiple warnings of the same type occur', async () => {
+    const originalThreshold = process.env.CRAWL_WARNING_THRESHOLD
+    process.env.CRAWL_WARNING_THRESHOLD = '1'
+    try {
+      const getUserByScreenName = vi.fn().mockRejectedValue(new Error('user not found'))
+      const getUserByRestId = vi.fn().mockRejectedValue(new Error('profile fetch failed'))
+      const deps = makeDeps({
+        createOpenApiClient: vi.fn().mockResolvedValue({
+          client: {
+            getTweetApi: () => ({
+              getHomeTimeline: vi.fn().mockResolvedValue({
+                data: {
+                  data: [
+                    rawTweet('tweet1', rawUser('author1')),
+                    rawTweet('tweet2', rawUser('author2')),
+                  ],
+                },
+              }),
+              getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            }),
+            getUserApi: () => ({
+              getUserByRestId,
+              getUserByScreenName,
+              getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            }),
+            getUserListApi: () => ({ getFollowing: vi.fn(), getFollowers: vi.fn() }),
+          },
+        }),
+      })
+
+      await runCrawlCycle(deps)
+
+      expect(captureMessageMock).toHaveBeenCalledTimes(1)
+      expect(captureMessageMock).toHaveBeenCalledWith(
+        'Crawl warnings threshold exceeded for v',
+        expect.objectContaining({
+          warningCount: 3,
+          warningCounts: { author_processing_failed: 2, own_account_sync_failed: 1 },
         }),
       )
     } finally {

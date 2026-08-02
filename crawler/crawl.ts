@@ -70,6 +70,7 @@ import {
   type CrawlRunStartResult,
   type RecordCrawlAccountRunParams,
   type CrawlWarning,
+  type CrawlWarningType,
 } from './db/crawl-run-repository'
 import { mergeTweetAdFlags, toAccountProfileInput } from './twitter/mappers'
 
@@ -170,8 +171,10 @@ function toErrorMessage(error: unknown): string {
  * @param warnings - the warnings accumulated for one account cycle
  * @returns a map of warning type to occurrence count; types with zero occurrences are omitted
  */
-function summarizeWarningsByType(warnings: CrawlWarning[]): Record<string, number> {
-  const counts: Record<string, number> = {}
+function summarizeWarningsByType(
+  warnings: CrawlWarning[],
+): Partial<Record<CrawlWarningType, number>> {
+  const counts: Partial<Record<CrawlWarningType, number>> = {}
   for (const warning of warnings) {
     counts[warning.type] = (counts[warning.type] ?? 0) + 1
   }
@@ -940,20 +943,6 @@ async function runAccountCycle(
     const warnings = [...metrics.warnings, ...following.warnings, ...followers.warnings]
     const status = warnings.length > 0 ? 'partial' : 'success'
 
-    const warningThreshold = getCrawlWarningThreshold()
-    if (warnings.length >= warningThreshold) {
-      captureMessage(
-        `Crawl warnings threshold exceeded for ${account.username}: ${warnings.length} warnings (threshold: ${warningThreshold})`,
-        {
-          crawlRunId,
-          username: account.username,
-          status,
-          appVersion: APP_VERSION,
-          warningCounts: summarizeWarningsByType(warnings),
-        },
-      )
-    }
-
     await deps.recordCrawlAccountRun({
       crawlRunId,
       username: account.username,
@@ -972,6 +961,26 @@ async function runAccountCycle(
       errorMessage: null,
       appVersion: APP_VERSION,
     })
+
+    // Runs after recordCrawlAccountRun so the persisted CrawlAccountRun always reflects the
+    // real outcome regardless of GlitchTip reachability - captureMessage itself never throws
+    // (see monitoring/sentry.ts), but keeping this the last step avoids any future coupling.
+    // The message text stays stable per account (no counts embedded) so GlitchTip groups
+    // repeated threshold breaches for the same account into one issue instead of fragmenting
+    // by warning count; the count itself is still visible via warningCount/warningCounts below.
+    const warningThreshold = getCrawlWarningThreshold()
+    if (warnings.length >= warningThreshold) {
+      captureMessage(`Crawl warnings threshold exceeded for ${account.username}`, {
+        crawlRunId,
+        username: account.username,
+        status,
+        appVersion: APP_VERSION,
+        warningCount: warnings.length,
+        warningThreshold,
+        warningCounts: summarizeWarningsByType(warnings),
+      })
+    }
+
     return status
   } catch (error) {
     await deps.recordCrawlAccountRun({

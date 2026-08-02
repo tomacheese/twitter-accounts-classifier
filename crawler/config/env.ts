@@ -15,9 +15,10 @@ const DEFAULT_CRAWL_WARNING_THRESHOLD = 5
 /**
  * Reads the per-account crawl-warning count threshold that triggers an aggregated
  * GlitchTip report (see crawl.ts's runAccountCycle). Unlike getCookieIssuerBaseUrl, this
- * value is optional operational tuning, not a hard requirement - an unset or unparsable
- * value falls back to a sane default instead of blocking the run.
- * @returns the configured threshold, or the default (5) if unset or invalid
+ * value is optional operational tuning, not a hard requirement - unset, non-positive, or
+ * non-integer values all fall back to DEFAULT_CRAWL_WARNING_THRESHOLD instead of blocking
+ * the run.
+ * @returns the configured threshold, or DEFAULT_CRAWL_WARNING_THRESHOLD if unset or invalid
  */
 export function getCrawlWarningThreshold(): number {
   const raw = process.env.CRAWL_WARNING_THRESHOLD
