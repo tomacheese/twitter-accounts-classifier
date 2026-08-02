@@ -2,18 +2,20 @@ import { Logger } from '@book000/node-utils'
 import { captureException, initMonitoring } from './monitoring/sentry'
 import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
-import { ensureLabelDefinitionsForRules, recordAccountLabel } from './db/label-repository'
+import { ensureLabelDefinitionsForRules, recordAccountLabelsBulk } from './db/label-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { CRAWL_LIMITS } from './config/crawl-limits'
 import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import { buildReplyHijackIndex } from './labels/reply-hijack-index'
-import type { AccountFeatureBundle, LabelRule } from './labels/types'
+import { runWithConcurrencyLimit } from './utils/concurrency-limit'
+import type { AccountFeatureBundle, LabelRule, LabelRuleResult } from './labels/types'
 
 const logger = Logger.configure('relabel')
 
 const ACCOUNT_BATCH_SIZE = 100
+const ACCOUNT_CONCURRENCY = 8
 
 interface LatestLabelRow {
   accountId: string
@@ -251,7 +253,7 @@ export async function runRelabelBackfill(
     // with real data. Skipping the persist loop entirely keeps them stale, so a future run
     // retries the fetch and relabels them properly once it succeeds.
     if (!tweetFetchFailed) {
-      for (const account of staleAccounts) {
+      await runWithConcurrencyLimit(staleAccounts, ACCOUNT_CONCURRENCY, async (account) => {
         try {
           const bundle = buildFeatureBundle(
             account,
@@ -259,25 +261,47 @@ export async function runRelabelBackfill(
             duplicateReplyIndex,
             replyHijackIndex,
           )
+          const labelsToPersist: {
+            labelDefinitionId: string
+            versionKey: string
+            method: string
+            ruleVersion: string
+            result: LabelRuleResult
+          }[] = []
           for (const { rule, result } of registry.applyAll(bundle)) {
             const labelDefinitionId = labelDefinitionIds.get(rule.key)
             if (!labelDefinitionId) {
-              logger.warn(`No LabelDefinition id found for rule "${rule.key}", skipping persistence`)
+              logger.warn(
+                `No LabelDefinition id found for rule "${rule.key}", skipping persistence`,
+              )
               continue
             }
             const versionKey = `${account.id}:${labelDefinitionId}`
             if (latestRuleVersions.get(versionKey) === rule.version) {
               continue
             }
-            await recordAccountLabel(prisma, {
-              accountId: account.id,
+            labelsToPersist.push({
               labelDefinitionId,
+              versionKey,
               method: rule.key,
               ruleVersion: rule.version,
               result,
             })
-            latestRuleVersions.set(versionKey, rule.version)
-            labelsPersisted++
+          }
+          if (labelsToPersist.length > 0) {
+            await recordAccountLabelsBulk(prisma, {
+              accountId: account.id,
+              labels: labelsToPersist.map(({ labelDefinitionId, method, ruleVersion, result }) => ({
+                labelDefinitionId,
+                method,
+                ruleVersion,
+                result,
+              })),
+            })
+            for (const { versionKey, ruleVersion } of labelsToPersist) {
+              latestRuleVersions.set(versionKey, ruleVersion)
+              labelsPersisted++
+            }
           }
           accountsProcessed++
         } catch (error) {
@@ -286,7 +310,7 @@ export async function runRelabelBackfill(
             error as Error,
           )
         }
-      }
+      })
     }
 
     if (accounts.length < ACCOUNT_BATCH_SIZE) break
