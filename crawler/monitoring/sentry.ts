@@ -16,3 +16,14 @@ export function captureException(error: unknown, context?: Record<string, unknow
   if (!initialized) return
   Sentry.captureException(error, context)
 }
+
+/**
+ * Reports a non-exception event (e.g. an aggregated warning-count summary) to GlitchTip.
+ * Mirrors captureException's initialized-guard: a no-op when GLITCHTIP_DSN is unset.
+ * @param message - the summary text to report
+ * @param context - additional structured data attached as the event's `extra` payload
+ */
+export function captureMessage(message: string, context?: Record<string, unknown>): void {
+  if (!initialized) return
+  Sentry.captureMessage(message, { level: 'warning', extra: context })
+}
