@@ -9,7 +9,6 @@
  * @returns the rendered error page
  */
 export default function GlobalError({
-  error,
   reset,
 }: {
   error: Error & { digest?: string }
@@ -19,8 +18,8 @@ export default function GlobalError({
     <html lang="en">
       <body className="flex min-h-screen flex-col items-center justify-center gap-4 bg-gray-50 p-16 text-center text-gray-900 dark:bg-gray-900 dark:text-gray-100">
         <h1 className="text-xl font-semibold">Something went wrong</h1>
-        <p className="max-w-md text-sm text-gray-600 dark:text-gray-400">
-          {error.message || 'The viewer could not load data from the database.'}
+        <p className="max-w-md text-sm text-gray-600 dark:text-gray-400" role="alert">
+          The viewer could not load data. Please try again.
         </p>
         <button
           type="button"

@@ -1,5 +1,6 @@
 'use client'
 
+import { useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 /**
@@ -15,6 +16,7 @@ export function LabelFilter({
 }): React.ReactElement {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const [isPending, startTransition] = useTransition()
   const selected = new Set(searchParams.getAll('label'))
 
   function toggle(labelKey: string): void {
@@ -33,22 +35,35 @@ export function LabelFilter({
       params.append('label', key)
     }
     params.delete('page')
-    router.push(`/accounts?${params.toString()}`)
+    startTransition(() => {
+      router.push(`/accounts?${params.toString()}`)
+    })
   }
 
   return (
-    <div className="flex flex-wrap gap-2">
+    <div
+      aria-busy={isPending}
+      aria-label="Label filters"
+      className="flex flex-wrap gap-2"
+      role="group"
+    >
+      {isPending && (
+        <span className="sr-only" role="status">
+          Updating accounts
+        </span>
+      )}
       {availableLabelKeys.map((labelKey) => (
         <button
           key={labelKey}
           type="button"
+          disabled={isPending}
           onClick={() => {
             toggle(labelKey)
           }}
           className={
             selected.has(labelKey)
-              ? 'rounded-full bg-blue-600 px-3 py-1 text-sm text-white'
-              : 'rounded-full border px-3 py-1 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-300'
+              ? 'rounded-full bg-blue-600 px-3 py-1 text-sm text-white disabled:cursor-wait disabled:opacity-60'
+              : 'rounded-full border px-3 py-1 text-sm text-gray-700 disabled:cursor-wait disabled:opacity-60 dark:border-gray-600 dark:text-gray-300'
           }
         >
           {labelKey}
