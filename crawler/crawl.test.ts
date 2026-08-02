@@ -981,7 +981,9 @@ describe('runCrawlCycle', () => {
 
   it('refetches timelines when a stored timeline checkpoint is incomplete', async () => {
     const author = rawUser('author1')
-    const getHomeTimeline = vi.fn().mockResolvedValue({ data: { data: [rawTweet('tweet1', author)] } })
+    const getHomeTimeline = vi
+      .fn()
+      .mockResolvedValue({ data: { data: [rawTweet('tweet1', author)] } })
     const deps = makeDeps({
       loadCrawlAccountCheckpoints: vi.fn().mockResolvedValue(
         new Map([
@@ -1259,6 +1261,7 @@ describe('runCrawlCycle', () => {
                 rateLimitLimit: 100,
                 rateLimitRemaining: 0,
                 rateLimitReset: 1_760_000_000,
+                appVersion: expect.any(String),
               },
             ]),
           }),

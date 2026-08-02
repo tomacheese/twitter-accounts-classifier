@@ -75,6 +75,10 @@ import { mergeTweetAdFlags, toAccountProfileInput } from './twitter/mappers'
 
 const logger = Logger.configure('crawl')
 
+// crawler/Dockerfile が build-arg APPLICATION_VERSION から ENV へ引き継いだ値。どのビルドが
+// crawl を実行したか CrawlAccountRun 側で事後追跡できるよう、warning と一緒に記録する。
+const APP_VERSION = process.env.APPLICATION_VERSION ?? 'unknown'
+
 export interface CrawlOpenApiClient {
   getTweetApi(): TweetApiLike & TweetDetailApiLike
   getUserApi(): UserApiLike
@@ -200,6 +204,7 @@ async function fetchTimelineSnapshot(
         username: account.username,
         errorMessage: toErrorMessage(error),
         rawResponseSnippet: getLastResponseMatching('HomeTimeline')?.body,
+        appVersion: APP_VERSION,
       })
       return emptyTimeline
     }),
@@ -215,6 +220,7 @@ async function fetchTimelineSnapshot(
         username: account.username,
         errorMessage: toErrorMessage(error),
         rawResponseSnippet: getLastResponseMatching('HomeLatestTimeline')?.body,
+        appVersion: APP_VERSION,
       })
       return emptyTimeline
     }),
@@ -236,6 +242,7 @@ async function fetchTimelineSnapshot(
         username: account.username,
         errorMessage: toErrorMessage(error),
         rawResponseSnippet: getLastResponseMatching('SearchTimeline')?.body,
+        appVersion: APP_VERSION,
       })
       return emptyTimeline
     }),
@@ -438,6 +445,7 @@ async function runAccountCycleBody(
           authorId,
           errorMessage: toErrorMessage(error),
           ...diagnostics,
+          appVersion: APP_VERSION,
         })
       }
     }
@@ -502,6 +510,7 @@ async function syncFollowingPhase(
           message,
           username: account.username,
           errorMessage: toErrorMessage(error),
+          appVersion: APP_VERSION,
         },
       ],
     }
@@ -526,6 +535,7 @@ async function syncFollowingPhase(
           message,
           username: account.username,
           errorMessage: toErrorMessage(error),
+          appVersion: APP_VERSION,
         },
       ],
     }
@@ -557,6 +567,7 @@ async function syncFollowersPhase(
           message,
           username: account.username,
           errorMessage: toErrorMessage(error),
+          appVersion: APP_VERSION,
         },
       ],
     }
@@ -657,7 +668,8 @@ function isCrawlWarning(value: unknown): value is CrawlWarning {
     typeof value.errorMessage === 'string' &&
     (value.username === undefined || typeof value.username === 'string') &&
     (value.authorId === undefined || typeof value.authorId === 'string') &&
-    (value.rawResponseSnippet === undefined || typeof value.rawResponseSnippet === 'string')
+    (value.rawResponseSnippet === undefined || typeof value.rawResponseSnippet === 'string') &&
+    (value.appVersion === undefined || typeof value.appVersion === 'string')
   )
 }
 
@@ -926,6 +938,7 @@ async function runAccountCycle(
       followersSynced: followers.synced,
       warnings,
       errorMessage: null,
+      appVersion: APP_VERSION,
     })
     return status
   } catch (error) {
@@ -945,6 +958,7 @@ async function runAccountCycle(
       followersSynced: false,
       warnings: [],
       errorMessage: String(error),
+      appVersion: APP_VERSION,
     })
     throw error
   }

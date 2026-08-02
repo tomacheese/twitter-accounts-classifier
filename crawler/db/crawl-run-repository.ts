@@ -40,6 +40,12 @@ export interface CrawlWarning {
   rateLimitLimit?: number
   rateLimitRemaining?: number
   rateLimitReset?: number
+  /**
+   * この warning を push した時点の APPLICATION_VERSION。phase 単位の再開 (中断・redeploy を
+   * 挟んで別プロセスが後続 phase を完了するケース) では `CrawlAccountRun.appVersion` (行を最終
+   * 確定させたビルド) と一致しないことがあるため、warning ごとに発生源のビルドを保持する。
+   */
+  appVersion?: string
 }
 
 export interface RecordCrawlAccountRunParams {
@@ -58,6 +64,11 @@ export interface RecordCrawlAccountRunParams {
   followersSynced: boolean
   warnings: CrawlWarning[]
   errorMessage: string | null
+  /**
+   * crawler image に埋め込まれた APPLICATION_VERSION。値が取れない場合は "unknown"。行を最終
+   * 確定させたビルドを表す — 個々の warning を生んだビルドは `CrawlWarning.appVersion` を見る。
+   */
+  appVersion: string
 }
 
 export const CRAWL_ACCOUNT_CHECKPOINT_PHASES = [
