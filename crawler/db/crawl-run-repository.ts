@@ -1,4 +1,7 @@
+import { Logger } from '@book000/node-utils'
 import type { Prisma, PrismaClient } from '../generated/prisma'
+
+const logger = Logger.configure('crawl-run-repository')
 
 /**
  * The fixed set of situations `runCrawlCycle` records as a warning against a
@@ -96,35 +99,18 @@ export interface CrawlRunStartResult {
 }
 
 /**
- * 単一の crawler プロセスだけが動作する環境で、中断された crawl run を再開し、存在しなければ新規に作成する。
+ * 実行中の CrawlRun の生存を記録する。放置判定 (startOrResumeCrawlRun) は
+ * この値を基準にするため、アカウント処理が進む限り定期的に呼び出す必要がある。
  * @param prisma - the Prisma client
- * @param startedAt - 新規 run の開始時刻
- * @returns run ID とアカウントごとの最新試行の status
+ * @param id - 対象の CrawlRun ID
+ * @param at - 記録する時刻
  */
-export async function startOrResumeCrawlRun(
+export async function touchCrawlRunHeartbeat(
   prisma: PrismaClient,
-  startedAt: Date,
-): Promise<CrawlRunStartResult> {
-  const existingRun = await prisma.crawlRun.findFirst({
-    where: { status: 'running' },
-    orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
-    select: { id: true },
-  })
-  if (existingRun) {
-    const accountRuns = await prisma.$queryRaw<{ username: string; status: string }[]>`
-      SELECT DISTINCT ON ("username") "username", "status"
-      FROM "CrawlAccountRun"
-      WHERE "crawlRunId" = ${existingRun.id}
-      ORDER BY "username", "startedAt" DESC, "id" DESC
-    `
-    const latestAccountStatuses = new Map(
-      accountRuns.map(({ username, status }) => [username, status]),
-    )
-    return { id: existingRun.id, latestAccountStatuses }
-  }
-
-  const run = await prisma.crawlRun.create({ data: { startedAt, status: 'running' } })
-  return { id: run.id, latestAccountStatuses: new Map() }
+  id: string,
+  at: Date,
+): Promise<void> {
+  await prisma.crawlRun.update({ where: { id }, data: { lastHeartbeatAt: at } })
 }
 
 /**
@@ -220,4 +206,63 @@ export async function clearCrawlAccountCheckpoints(
     prisma.crawlAccountCheckpoint.deleteMany({ where: { crawlRunId } }),
     prisma.crawlAccountLabelRun.deleteMany({ where: { crawlRunId } }),
   ])
+}
+
+/**
+ * 単一の crawler プロセスだけが動作する環境で、中断された crawl run を再開し、存在しなければ新規に作成する。
+ * 既存の `running` 行が見つかっても、その `lastHeartbeatAt` が `staleThresholdMs` を超えて
+ * 更新されていなければ放置されたものとみなし、`failed` として確定した上で新しい行を作る。
+ * @param prisma - the Prisma client
+ * @param startedAt - 新規 run の開始時刻
+ * @param staleThresholdMs - 放置判定のしきい値 (ミリ秒)。`startedAt - lastHeartbeatAt` がこれを
+ *   超えていれば放置とみなす
+ * @returns run ID とアカウントごとの最新試行の status
+ */
+export async function startOrResumeCrawlRun(
+  prisma: PrismaClient,
+  startedAt: Date,
+  staleThresholdMs: number,
+): Promise<CrawlRunStartResult> {
+  const existingRun = await prisma.crawlRun.findFirst({
+    where: { status: 'running' },
+    orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+    select: { id: true, lastHeartbeatAt: true },
+  })
+
+  if (existingRun) {
+    const isStale = startedAt.getTime() - existingRun.lastHeartbeatAt.getTime() > staleThresholdMs
+    if (!isStale) {
+      const accountRuns = await prisma.$queryRaw<{ username: string; status: string }[]>`
+        SELECT DISTINCT ON ("username") "username", "status"
+        FROM "CrawlAccountRun"
+        WHERE "crawlRunId" = ${existingRun.id}
+        ORDER BY "username", "startedAt" DESC, "id" DESC
+      `
+      const latestAccountStatuses = new Map(
+        accountRuns.map(({ username, status }) => [username, status]),
+      )
+      return { id: existingRun.id, latestAccountStatuses }
+    }
+
+    logger.warn(
+      `Abandoning stale crawl run ${existingRun.id}: last heartbeat at ` +
+        `${existingRun.lastHeartbeatAt.toISOString()}, exceeding staleThresholdMs=${staleThresholdMs}`,
+    )
+    try {
+      // lastHeartbeatAt (この行が最後に生存を示した時刻) を finishedAt とする。startedAt (新しい
+      // cycle の開始時刻) を使うと、実際にはとうに停止していた run の duration が放置時間の分だけ
+      // 水増しされてしまう。
+      await finishCrawlRun(prisma, existingRun.id, existingRun.lastHeartbeatAt, 'failed')
+      await clearCrawlAccountCheckpoints(prisma, existingRun.id)
+    } catch (error) {
+      // 片付けに失敗しても新しい run の作成は続行する。放置された行の checkpoint / label claim
+      // が残り続けるだけで、後続の cycle には影響しない。
+      logger.error(`Failed to finalize abandoned crawl run ${existingRun.id}`, error as Error)
+    }
+  }
+
+  const run = await prisma.crawlRun.create({
+    data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
+  })
+  return { id: run.id, latestAccountStatuses: new Map() }
 }

@@ -2,7 +2,11 @@ import { Logger } from '@book000/node-utils'
 import { captureException, initMonitoring } from './monitoring/sentry'
 import { loadConfig, type AppConfig } from './config/load-config'
 import { CRAWL_LIMITS, TWITTER_RETRY } from './config/crawl-limits'
-import { getCookieIssuerBaseUrl } from './config/env'
+import {
+  getCookieIssuerBaseUrl,
+  getCrawlIntervalSeconds,
+  getCrawlStaleThresholdMultiplier,
+} from './config/env'
 import { withTwitterRetry } from './twitter/retry'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
@@ -63,6 +67,7 @@ import {
   completeCrawlAccountCheckpoint as completeCrawlAccountCheckpointRecord,
   loadCrawlAccountCheckpoints as loadCrawlAccountCheckpointsRecord,
   startOrResumeCrawlRun as startOrResumeCrawlRunRecord,
+  touchCrawlRunHeartbeat as touchCrawlRunHeartbeatRecord,
   finishCrawlRun as finishCrawlRunRecord,
   recordCrawlAccountRun as recordCrawlAccountRunRecord,
   type CrawlAccountCheckpointParams,
@@ -121,6 +126,11 @@ export interface CrawlDependencies {
   ) => Promise<Map<CrawlAccountCheckpointPhase, unknown>>
   completeCrawlAccountCheckpoint: (params: CrawlAccountCheckpointParams) => Promise<void>
   clearCrawlAccountCheckpoints: (crawlRunId: string) => Promise<void>
+  /**
+   * アカウント 1 件の処理を試みるたびに (成功・失敗を問わず) 呼び、放置判定の基準となる生存
+   * 時刻を更新する。checkpoint により処理自体を skip したアカウントでは呼ばれない。
+   */
+  touchCrawlRunHeartbeat: (crawlRunId: string) => Promise<void>
   /** Injectable so `withTwitterRetry`'s backoff and the author-loop throttle don't actually pause tests. */
   sleep: (ms: number) => Promise<void>
 }
@@ -1046,6 +1056,12 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
         )
         accountStatuses.push('failed')
       }
+
+      try {
+        await deps.touchCrawlRunHeartbeat(crawlRunId)
+      } catch (error) {
+        logger.error(`Failed to update heartbeat for crawl run ${crawlRunId}`, error as Error)
+      }
     }
 
     const runStatus = accountStatuses.includes('failed')
@@ -1104,6 +1120,8 @@ async function main(): Promise<void> {
     baseUrl: getCookieIssuerBaseUrl(),
   })
 
+  const staleThresholdMs = getCrawlIntervalSeconds() * getCrawlStaleThresholdMultiplier() * 1000
+
   const deps: CrawlDependencies = {
     config: loadConfig(),
     limits: CRAWL_LIMITS,
@@ -1130,7 +1148,8 @@ async function main(): Promise<void> {
     },
     syncFollowing: (followerId, result) => syncFollowingEdges(prisma, followerId, result),
     syncFollowers: (followeeId, result) => syncFollowersEdges(prisma, followeeId, result),
-    startOrResumeCrawlRun: (startedAt) => startOrResumeCrawlRunRecord(prisma, startedAt),
+    startOrResumeCrawlRun: (startedAt) =>
+      startOrResumeCrawlRunRecord(prisma, startedAt, staleThresholdMs),
     finishCrawlRun: (id, finishedAt, status) =>
       finishCrawlRunRecord(prisma, id, finishedAt, status),
     recordCrawlAccountRun: (params) => recordCrawlAccountRunRecord(prisma, params),
@@ -1140,6 +1159,8 @@ async function main(): Promise<void> {
       completeCrawlAccountCheckpointRecord(prisma, params),
     clearCrawlAccountCheckpoints: (crawlRunId) =>
       clearCrawlAccountCheckpointsRecord(prisma, crawlRunId),
+    touchCrawlRunHeartbeat: (crawlRunId) =>
+      touchCrawlRunHeartbeatRecord(prisma, crawlRunId, new Date()),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }
 
