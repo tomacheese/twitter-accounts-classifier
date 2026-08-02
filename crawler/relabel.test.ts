@@ -292,7 +292,7 @@ describe('runRelabelBackfill', () => {
     expect(bundleAcc2?.recentTweets.map((tweet) => tweet.id)).toEqual(['t3'])
   })
 
-  it('wires quotedTweetAuthorId and quotedTweetHasVideo from the raw tweet row into the bundle', async () => {
+  it('wires video provenance and quoted-video metadata from the raw tweet row into the bundle', async () => {
     const tweetRow = {
       id: 't1',
       accountId: sampleAccount.id,
@@ -304,6 +304,7 @@ describe('runRelabelBackfill', () => {
       isRetweet: false,
       isPromoted: false,
       isPaidPromotion: false,
+      foreignVideoSourceCount: 1,
       inReplyToTweetId: null,
       quotedTweetAuthorId: 'bob',
       quotedTweetHasVideo: true,
@@ -327,6 +328,7 @@ describe('runRelabelBackfill', () => {
     await runRelabelBackfill(prisma, registry)
 
     expect(seenBundles[0]?.recentTweets[0]).toMatchObject({
+      foreignVideoSourceCount: 1,
       quotedTweetAuthorId: 'bob',
       quotedTweetHasVideo: true,
     })

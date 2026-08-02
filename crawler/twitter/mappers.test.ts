@@ -89,6 +89,7 @@ describe('toTweetInput', () => {
       isPaidPromotion: false,
       hasAiGeneratedMedia: null,
       aiGeneratedDetectionSource: null,
+      foreignVideoSourceCount: null,
       quotedTweetId: null,
       quotedTweetAuthorId: null,
       quotedTweetHasVideo: null,
@@ -102,6 +103,29 @@ describe('toTweetInput', () => {
     expect(input.quotedTweetId).toBeNull()
     expect(input.quotedTweetAuthorId).toBeNull()
     expect(input.quotedTweetHasVideo).toBeNull()
+  })
+
+  it('counts attached videos whose source account differs from the tweet author', () => {
+    const sourceAttributedTweet: RawTweetResult = {
+      ...rawTweet,
+      legacy: {
+        ...rawTweet.legacy,
+        extendedEntities: {
+          media: [
+            { type: 'video', sourceUserIdStr: 'source-author' },
+            { type: 'animated_gif', sourceUserIdStr: 'u1' },
+            { type: 'photo', sourceUserIdStr: 'another-author' },
+          ],
+        },
+      },
+    }
+
+    const input = toTweetInput(sourceAttributedTweet, {
+      source: 'recommended',
+      viewerAccountId: 'someone-else',
+    })
+
+    expect(input.foreignVideoSourceCount).toBe(1)
   })
 
   it('marks isAuthorReply true when the reply author matches the viewer account', () => {
@@ -248,6 +272,7 @@ function tweetInput(overrides: Partial<TweetInput> & { id: string }): TweetInput
     isPaidPromotion: false,
     hasAiGeneratedMedia: false,
     aiGeneratedDetectionSource: null,
+    foreignVideoSourceCount: null,
     quotedTweetId: null,
     quotedTweetAuthorId: null,
     quotedTweetHasVideo: null,
@@ -271,5 +296,14 @@ describe('mergeTweetAdFlags', () => {
     const merged = mergeTweetAdFlags([tweetInput({ id: 't1' }), tweetInput({ id: 't2' })])
 
     expect(merged.map((t) => t.id)).toEqual(expect.arrayContaining(['t1', 't2']))
+  })
+
+  it('keeps a previously observed foreign-video source count when a duplicate lacks it', () => {
+    const merged = mergeTweetAdFlags([
+      tweetInput({ id: 't1', foreignVideoSourceCount: 1 }),
+      tweetInput({ id: 't1', foreignVideoSourceCount: null }),
+    ])
+
+    expect(merged[0]).toMatchObject({ foreignVideoSourceCount: 1 })
   })
 })

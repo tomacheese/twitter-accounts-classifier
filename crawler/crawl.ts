@@ -399,6 +399,7 @@ async function runAccountCycleBody(
           isPaidPromotion: t.isPaidPromotion,
           hasAiGeneratedMedia: t.hasAiGeneratedMedia,
           aiGeneratedDetectionSource: t.aiGeneratedDetectionSource,
+          foreignVideoSourceCount: t.foreignVideoSourceCount,
           inReplyToTweetId: t.inReplyToTweetId,
           quotedTweetAuthorId: t.quotedTweetAuthorId,
           quotedTweetHasVideo: t.quotedTweetHasVideo,

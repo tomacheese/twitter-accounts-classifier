@@ -53,6 +53,11 @@ export interface AccountFeatureBundle {
      */
     aiGeneratedDetectionSource?: string | null
     /**
+     * X がこのツイートの投稿者以外を出典として示す添付動画の件数。過去の収集結果から
+     * 作られた bundle との互換性を保つため optional にする。
+     */
+    foreignVideoSourceCount?: number | null
+    /**
      * The author id of the tweet this one quotes, or `null`/absent if it isn't a quote
      * tweet or the quoted tweet's author id is unknown. Optional so bundles built by rule
      * unit tests that predate this field keep compiling unmodified.

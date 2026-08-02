@@ -245,6 +245,7 @@ function toRawTweetResult(data: TweetApiUtilsData): RawTweetResult | null {
       quoteCount: data.tweet.legacy.quoteCount,
       inReplyToStatusIdStr: data.tweet.legacy.inReplyToStatusIdStr ?? null,
       retweetedStatusIdStr: data.retweeted?.tweet.restId ?? null,
+      extendedEntities: data.tweet.legacy.extendedEntities,
       quotedStatusResult: data.quoted
         ? {
             result: {

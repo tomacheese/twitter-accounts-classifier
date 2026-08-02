@@ -20,6 +20,7 @@ const sampleTweet: TweetInput = {
   isPaidPromotion: false,
   hasAiGeneratedMedia: false,
   aiGeneratedDetectionSource: null,
+  foreignVideoSourceCount: null,
   quotedTweetId: null,
   quotedTweetAuthorId: null,
   quotedTweetHasVideo: null,
@@ -170,5 +171,41 @@ describe('upsertTweet quoted-tweet fields', () => {
       quotedTweetAuthorId: 'carol',
       quotedTweetHasVideo: false,
     })
+  })
+})
+
+describe('upsertTweet foreign-video-source count', () => {
+  it('passes the source-attributed video count through to both create and update', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
+    const findUnique = vi.fn().mockResolvedValue(null)
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    await upsertTweet(prisma, { ...sampleTweet, foreignVideoSourceCount: 2 })
+
+    const call = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(call.create).toMatchObject({ foreignVideoSourceCount: 2 })
+    expect(call.update).toMatchObject({ foreignVideoSourceCount: 2 })
+  })
+
+  it('does not let a re-crawl without the provenance field erase a previously-known count', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
+    const findUnique = vi.fn().mockResolvedValue({ foreignVideoSourceCount: 2 })
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    await upsertTweet(prisma, { ...sampleTweet, foreignVideoSourceCount: null })
+
+    const call = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(call.update).toMatchObject({ foreignVideoSourceCount: 2 })
+  })
+
+  it('does not let a zero count erase a previously-known source-attributed video', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
+    const findUnique = vi.fn().mockResolvedValue({ foreignVideoSourceCount: 2 })
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    await upsertTweet(prisma, { ...sampleTweet, foreignVideoSourceCount: 0 })
+
+    const call = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(call.update).toMatchObject({ foreignVideoSourceCount: 2 })
   })
 })
