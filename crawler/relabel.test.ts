@@ -345,4 +345,51 @@ describe('runRelabelBackfill', () => {
       quotedTweetHasVideo: true,
     })
   })
+
+  describe('progress logging', () => {
+    it('logs progress once accumulated processed accounts cross the configured interval', async () => {
+      const accounts = Array.from({ length: 3 }, (_, i) => ({
+        ...sampleAccount,
+        id: `acc${i}`,
+        screenName: `user${i}`,
+      }))
+      const { prisma, count } = makePrisma({ accounts: [accounts, []] })
+      count.mockResolvedValue(3)
+      const registry = new LabelRuleRegistry()
+      registry.register(makeRule('rule-a', '1.0.0'))
+      const { Logger } = await import('@book000/node-utils')
+      const info = vi.spyOn(Logger.configure('relabel'), 'info').mockImplementation(() => undefined)
+      let now = 0
+      vi.spyOn(Date, 'now').mockImplementation(() => {
+        now += 30_000
+        return now
+      })
+
+      const result = await runRelabelBackfill(prisma, registry, { progressLogIntervalAccounts: 2 })
+
+      expect(result).toEqual({ accountsProcessed: 3, labelsPersisted: 3 })
+      const progressLogs = info.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.startsWith('Relabel progress:'))
+      expect(progressLogs).toHaveLength(1)
+      expect(progressLogs[0]).toContain('2/3 accounts processed')
+      expect(progressLogs[0]).toContain('2 labels persisted')
+    })
+
+    it('does not log progress before the configured interval is reached', async () => {
+      const { prisma, count } = makePrisma({ accounts: [[sampleAccount], []] })
+      count.mockResolvedValue(1)
+      const registry = new LabelRuleRegistry()
+      registry.register(makeRule('rule-a', '1.0.0'))
+      const { Logger } = await import('@book000/node-utils')
+      const info = vi.spyOn(Logger.configure('relabel'), 'info').mockImplementation(() => undefined)
+
+      await runRelabelBackfill(prisma, registry, { progressLogIntervalAccounts: 1000 })
+
+      const progressLogs = info.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.startsWith('Relabel progress:'))
+      expect(progressLogs).toHaveLength(0)
+    })
+  })
 })

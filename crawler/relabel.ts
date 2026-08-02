@@ -16,6 +16,12 @@ const logger = Logger.configure('relabel')
 
 const ACCOUNT_BATCH_SIZE = 100
 const ACCOUNT_CONCURRENCY = 8
+const PROGRESS_LOG_INTERVAL = 1000
+
+export interface RelabelOptions {
+  /** 進捗ログを出力する処理済みアカウント数の間隔 (省略時は `PROGRESS_LOG_INTERVAL`)。 */
+  progressLogIntervalAccounts?: number
+}
 
 interface LatestLabelRow {
   accountId: string
@@ -205,7 +211,10 @@ function isFullyUpToDate(
 export async function runRelabelBackfill(
   prisma: PrismaClient,
   registry: LabelRuleRegistry,
+  options: RelabelOptions = {},
 ): Promise<RelabelResult> {
+  const progressLogIntervalAccounts = options.progressLogIntervalAccounts ?? PROGRESS_LOG_INTERVAL
+  const totalAccounts = await prisma.account.count()
   const labelDefinitionIds = await ensureLabelDefinitionsForRules(prisma, registry.getAll())
   const latestRuleVersions = await loadLatestRuleVersions(prisma)
   const replyCorpus = await loadReplyCorpus(prisma)
@@ -215,6 +224,34 @@ export async function runRelabelBackfill(
   let accountsProcessed = 0
   let labelsPersisted = 0
   let cursor: string | undefined
+  let lastLoggedAccountsProcessed = 0
+  let lastLoggedAt = Date.now()
+
+  /**
+   * 前回ログ出力からの処理済みアカウント数が `progressLogIntervalAccounts` を超えた
+   * タイミングで、累計進捗・直近区間の処理速度・残り時間の概算を1行ログ出力する。
+   * 経過時間が0に近い場合は速度算出をスキップし、件数のみ出力する。
+   */
+  function logProgressIfDue(): void {
+    const processedSinceLastLog = accountsProcessed - lastLoggedAccountsProcessed
+    if (processedSinceLastLog < progressLogIntervalAccounts) return
+
+    const now = Date.now()
+    const elapsedMinutes = (now - lastLoggedAt) / 60_000
+    let rateMessage = ''
+    if (elapsedMinutes > 0) {
+      const accountsPerMinute = processedSinceLastLog / elapsedMinutes
+      const remainingAccounts = totalAccounts - accountsProcessed
+      const etaMinutes =
+        accountsPerMinute > 0 ? Math.round(remainingAccounts / accountsPerMinute) : undefined
+      rateMessage = `, ${accountsPerMinute.toFixed(1)} accounts/min (recent), ETA ${etaMinutes ?? 'unknown'} min`
+    }
+    logger.info(
+      `Relabel progress: ${accountsProcessed}/${totalAccounts} accounts processed, ${labelsPersisted} labels persisted${rateMessage}`,
+    )
+    lastLoggedAccountsProcessed = accountsProcessed
+    lastLoggedAt = now
+  }
 
   for (;;) {
     const accounts: AccountRow[] = await prisma.account.findMany({
@@ -229,6 +266,7 @@ export async function runRelabelBackfill(
       (account) => !isFullyUpToDate(account, rules, labelDefinitionIds, latestRuleVersions),
     )
     accountsProcessed += accounts.length - staleAccounts.length
+    logProgressIfDue()
 
     let tweetsByAccount: Map<string, TweetRow[]>
     let tweetFetchFailed = false
@@ -304,6 +342,7 @@ export async function runRelabelBackfill(
             }
           }
           accountsProcessed++
+          logProgressIfDue()
         } catch (error) {
           logger.error(
             `Failed to relabel account ${account.id} (@${account.screenName}), skipping to next account`,
