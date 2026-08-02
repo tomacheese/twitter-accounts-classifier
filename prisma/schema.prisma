@@ -106,9 +106,13 @@ model AccountLabel {
   ruleVersion       String
   labeledAt         DateTime        @default(now())
 
+  // viewer/lib/queries/account-detail.ts の
+  // `accountLabel.findMany({ where: { accountId }, orderBy: { labeledAt: 'desc' } })` が
+  // 使う唯一の単一カラムインデックス。`labelDefinitionId` 単体・`labeledAt` 単体を
+  // 先頭カラムとする絞り込み/ソートを行うクエリはリポジトリ内に存在せず、それぞれの
+  // 単一カラムインデックスは書き込みコストだけを増やしていたため削除した
+  // (詳細は Issue #21、対応するマイグレーションのコメントを参照)。
   @@index([accountId])
-  @@index([labelDefinitionId])
-  @@index([labeledAt])
   // crawler/relabel.ts の loadLatestRuleVersions が実行する
   // `DISTINCT ON ("accountId", "labelDefinitionId") ... ORDER BY "accountId",
   // "labelDefinitionId", "labeledAt" DESC, "id" DESC` にそのまま一致させる
