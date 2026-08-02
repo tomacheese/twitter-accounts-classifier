@@ -197,7 +197,8 @@ model CrawlAccountRun {
   warnings           Json      @default("[]")
   errorMessage       String?
   /// crawler image に埋め込まれた APPLICATION_VERSION (Docker build-arg)。値が取れない場合は "unknown"。
-  /// author_processing_failed 等の warning がどのビルドで発生したかを事後に追跡するための記録。
+  /// 行を最終確定させたビルドを表す。個々の warning を生んだビルドは warnings 内の各要素が持つ
+  /// appVersion (CrawlWarning.appVersion) を参照する。
   appVersion         String    @default("unknown")
 
   @@index([crawlRunId])

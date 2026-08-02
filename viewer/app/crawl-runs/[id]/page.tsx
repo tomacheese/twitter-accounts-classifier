@@ -30,6 +30,8 @@ interface CrawlWarning {
   errorMessage: string
   /** The raw HTTP response body that caused the failure, when the crawler captured one. */
   rawResponseSnippet?: string
+  /** The crawler build (APPLICATION_VERSION) that produced this specific warning. */
+  appVersion?: string
 }
 
 /**
@@ -224,6 +226,9 @@ export default async function CrawlRunDetailPage({
                                             : ''}
                                           {' — '}
                                           {warning.errorMessage}
+                                          {warning.appVersion
+                                            ? ` (build: ${warning.appVersion})`
+                                            : ''}
                                           {warning.rawResponseSnippet && (
                                             <details className="mt-1">
                                               <summary className="cursor-pointer text-blue-600 hover:underline dark:text-blue-400">

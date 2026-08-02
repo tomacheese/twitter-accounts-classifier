@@ -204,6 +204,7 @@ async function fetchTimelineSnapshot(
         username: account.username,
         errorMessage: toErrorMessage(error),
         rawResponseSnippet: getLastResponseMatching('HomeTimeline')?.body,
+        appVersion: APP_VERSION,
       })
       return emptyTimeline
     }),
@@ -219,6 +220,7 @@ async function fetchTimelineSnapshot(
         username: account.username,
         errorMessage: toErrorMessage(error),
         rawResponseSnippet: getLastResponseMatching('HomeLatestTimeline')?.body,
+        appVersion: APP_VERSION,
       })
       return emptyTimeline
     }),
@@ -240,6 +242,7 @@ async function fetchTimelineSnapshot(
         username: account.username,
         errorMessage: toErrorMessage(error),
         rawResponseSnippet: getLastResponseMatching('SearchTimeline')?.body,
+        appVersion: APP_VERSION,
       })
       return emptyTimeline
     }),
@@ -442,6 +445,7 @@ async function runAccountCycleBody(
           authorId,
           errorMessage: toErrorMessage(error),
           ...diagnostics,
+          appVersion: APP_VERSION,
         })
       }
     }
@@ -506,6 +510,7 @@ async function syncFollowingPhase(
           message,
           username: account.username,
           errorMessage: toErrorMessage(error),
+          appVersion: APP_VERSION,
         },
       ],
     }
@@ -530,6 +535,7 @@ async function syncFollowingPhase(
           message,
           username: account.username,
           errorMessage: toErrorMessage(error),
+          appVersion: APP_VERSION,
         },
       ],
     }
@@ -561,6 +567,7 @@ async function syncFollowersPhase(
           message,
           username: account.username,
           errorMessage: toErrorMessage(error),
+          appVersion: APP_VERSION,
         },
       ],
     }
@@ -661,7 +668,8 @@ function isCrawlWarning(value: unknown): value is CrawlWarning {
     typeof value.errorMessage === 'string' &&
     (value.username === undefined || typeof value.username === 'string') &&
     (value.authorId === undefined || typeof value.authorId === 'string') &&
-    (value.rawResponseSnippet === undefined || typeof value.rawResponseSnippet === 'string')
+    (value.rawResponseSnippet === undefined || typeof value.rawResponseSnippet === 'string') &&
+    (value.appVersion === undefined || typeof value.appVersion === 'string')
   )
 }
 
