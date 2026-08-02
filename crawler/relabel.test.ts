@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from './generated/prisma'
 import { runRelabelBackfill } from './relabel'
 import { LabelRuleRegistry } from './labels/registry'
@@ -45,7 +45,7 @@ function makePrisma(overrides: {
     .fn()
     .mockImplementation(overrides.tweetFindManyImpl ?? (() => Promise.resolve([])))
   // recordAccountLabelsBulk の呼び出しは1アカウント分の複数ラベルを1本の $queryRaw に
-  // まとめる。SQL文が "UNNEST(" を含むかどうかで他の $queryRaw 呼び出しと区別できる。
+  // まとめる。SQL 文が "UNNEST(" を含むかどうかで他の $queryRaw 呼び出しと区別できる。
   // それ以外の $queryRaw は呼び出し順が固定であることを前提としており、1回目は
   // loadLatestRuleVersions、2回目以降は fetchTweetsForAccounts になる。
   const bulkPersist = vi.fn()
@@ -155,7 +155,8 @@ describe('runRelabelBackfill', () => {
     const result = await runRelabelBackfill(prisma, registry)
 
     expect(bulkPersist).toHaveBeenCalledTimes(2)
-    expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 1 })
+    // acc1 も失敗はしたが試行済みなので accountsProcessed にはカウントされる。
+    expect(result).toEqual({ accountsProcessed: 2, labelsPersisted: 1 })
   })
 
   it('paginates through multiple batches of accounts', async () => {
@@ -232,8 +233,10 @@ describe('runRelabelBackfill', () => {
     // The account is left un-persisted (not labeled from an empty, fetch-failure-induced
     // tweet sample) so it stays stale and a future run retries it with real data, rather
     // than the whole call rejecting or the account being wrongly marked up to date.
+    // It is still counted in accountsProcessed as attempted, so the progress log's
+    // denominator can still reach totalAccounts.
     expect(bulkPersist).not.toHaveBeenCalled()
-    expect(result).toEqual({ accountsProcessed: 0, labelsPersisted: 0 })
+    expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 0 })
   })
 
   it('retries a page left stale by a prior fetch failure once the fetch succeeds', async () => {
@@ -347,6 +350,13 @@ describe('runRelabelBackfill', () => {
   })
 
   describe('progress logging', () => {
+    afterEach(() => {
+      // Date.now と Logger.info をこのブロックのテストごとにスパイし直しており、
+      // 復元しないと後続のテスト (この describe 内・および同一ファイル内の
+      // 後続テスト) に漏れ出す。
+      vi.restoreAllMocks()
+    })
+
     it('logs progress once accumulated processed accounts cross the configured interval', async () => {
       const accounts = Array.from({ length: 3 }, (_, i) => ({
         ...sampleAccount,

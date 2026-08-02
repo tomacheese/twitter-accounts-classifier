@@ -108,9 +108,16 @@ model AccountLabel {
 
   // viewer/lib/queries/account-detail.ts の
   // `accountLabel.findMany({ where: { accountId }, orderBy: { labeledAt: 'desc' } })` が
-  // 使う唯一の単一カラムインデックス。`labelDefinitionId` 単体・`labeledAt` 単体を
-  // 先頭カラムとする絞り込み/ソートを行うクエリはリポジトリ内に存在せず、それぞれの
-  // 単一カラムインデックスは書き込みコストだけを増やしていたため削除した
+  // 使う唯一の単一カラムインデックス。下の複合インデックスも accountId を先頭カラムに
+  // 持つが、2番目のカラムが labelDefinitionId であるため、特定の labelDefinitionId に
+  // 絞らず全ラベル種別を labeledAt 降順で並べるこのクエリのソートには使えない
+  // (labelDefinitionId ごとにグループ化された順序にしかならない) ため、この単一カラム
+  // インデックスを別途維持する必要がある。`labelDefinitionId` 単体・`labeledAt` 単体を
+  // 先頭カラムとする絞り込み/ソートを行うクエリは crawler/viewer のホットパスには
+  // 存在しない。`.claude/skills/weekly-crawl-review/SKILL.md` の週次レビュー手順は
+  // `labelDefinitionId` での絞り込みと `labeledAt` でのソートの両方を行うが、週1回
+  // だけ実行される手動寄りのバッチ処理でレイテンシ要件がないため、単一カラム
+  // インデックスをこの用途のためだけに維持するコストには見合わないと判断した
   // (詳細は Issue #21、対応するマイグレーションのコメントを参照)。
   @@index([accountId])
   // crawler/relabel.ts の loadLatestRuleVersions が実行する
@@ -126,8 +133,8 @@ model AccountLabel {
 // 「account/label ごとの最新値」を導出すると全件スキャンになり、本番の
 // ダッシュボード/アカウント一覧クエリの statement_timeout を常態的に超過する
 // ようになった。このテーブルは (accountId, labelDefinitionId) ごとの最新値のみ
-// を保持し、recordAccountLabel が AccountLabel への履歴 INSERT と同時に upsert
-// する。そのためこれらの集計クエリは履歴の総件数ではなく (アカウント数 x
+// を保持し、recordCrawlAccountLabel / recordAccountLabelsBulk が AccountLabel
+// への履歴 INSERT と同時に upsert する。そのためこれらの集計クエリは履歴の総件数ではなく (アカウント数 x
 // ラベル数) で頭打ちになる。この経緯の説明はここを正としており、
 // crawler/db/label-repository.ts・viewer/lib/queries/dashboard.ts・
 // viewer/lib/queries/accounts.ts・対応するマイグレーションのコメントは

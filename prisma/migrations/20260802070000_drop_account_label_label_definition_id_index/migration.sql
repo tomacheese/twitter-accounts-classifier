@@ -2,8 +2,14 @@
 -- CONCURRENTLY で "AccountLabel" への crawler の書き込みをロックせずにインデックスを
 -- 削除する。Prisma Migrate はファイルが単一ステートメントのときのみトランザクションで
 -- 包まずに実行する (CONCURRENTLY はトランザクション内では実行できない) ため、この
--- マイグレーションは必ず1ステートメントのままにすること。リポジトリ内のクエリを調査
--- した結果、`labelDefinitionId` 単体を先頭カラムとする絞り込みを行うクエリは存在せず
--- (AccountLabelLatest 側の同名カラムとは別のインデックスである)、この単一カラム
--- インデックスは書き込みコストのみを増やしていたため削除する (詳細は Issue #21)。
+-- マイグレーションは必ず1ステートメントのままにすること。crawler/viewer 双方のクエリを
+-- 調査した結果、`labelDefinitionId` 単体を先頭カラムとする絞り込みを行うクエリは
+-- 存在しない (AccountLabelLatest 側の同名カラムとは別のインデックスである)。
+-- `.claude/skills/weekly-crawl-review/SKILL.md` の週次レビュー手順は `labelDefinitionId`
+-- 単体で絞り込むが、週1回だけ実行される手動寄りのバッチ処理でレイテンシ要件がないため、
+-- 単一カラムインデックスはこの用途のためだけに維持するコストには見合わないと判断した
+-- (詳細は Issue #21)。この単一カラムインデックスは AccountLabel_labelDefinitionId_fkey
+-- の被参照側インデックスも兼ねていたため、削除後は LabelDefinition 側の DELETE/UPDATE
+-- 時に本テーブルを全走査でロックする形になるが、現状そのような削除/キー変更を行う
+-- 経路は存在しないため許容する。
 DROP INDEX CONCURRENTLY IF EXISTS "AccountLabel_labelDefinitionId_idx";

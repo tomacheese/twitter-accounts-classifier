@@ -15,8 +15,18 @@ import type { AccountFeatureBundle, LabelRule, LabelRuleResult } from './labels/
 const logger = Logger.configure('relabel')
 
 const ACCOUNT_BATCH_SIZE = 100
+// `crawler/db/client.ts` does not set an explicit `connection_limit`, so Prisma falls back to
+// its default pool size (`num_physical_cpus * 2 + 1`). 8 concurrent accounts each holding at
+// most one connection for the duration of their `recordAccountLabelsBulk` call stays well
+// under that default on typical crawler hosts (2+ vCPUs), while still leaving headroom for
+// the crawler's own concurrent DB usage. A prior pool-exhaustion incident (commit 3fa6cd3)
+// is why this is called out explicitly rather than picked arbitrarily.
 const ACCOUNT_CONCURRENCY = 8
 const PROGRESS_LOG_INTERVAL = 1000
+// Below this, `processedSinceLastLog / elapsedMinutes` can produce a wildly inflated rate
+// (e.g. a batch that completes within the same millisecond as the previous log) rather than
+// a meaningful accounts/min figure.
+const MIN_ELAPSED_MINUTES_FOR_RATE = 1 / 60_000
 
 export interface RelabelOptions {
   /** 進捗ログを出力する処理済みアカウント数の間隔 (省略時は `PROGRESS_LOG_INTERVAL`)。 */
@@ -206,6 +216,7 @@ function isFullyUpToDate(
  * explicit backfill that closes that gap on demand.
  * @param prisma - the Prisma client to use
  * @param registry - the label rule registry to evaluate against every account
+ * @param options - optional overrides, e.g. the progress log interval
  * @returns the number of accounts processed and labels (re)persisted
  */
 export async function runRelabelBackfill(
@@ -230,7 +241,8 @@ export async function runRelabelBackfill(
   /**
    * 前回ログ出力からの処理済みアカウント数が `progressLogIntervalAccounts` を超えた
    * タイミングで、累計進捗・直近区間の処理速度・残り時間の概算を1行ログ出力する。
-   * 経過時間が0に近い場合は速度算出をスキップし、件数のみ出力する。
+   * 経過時間が MIN_ELAPSED_MINUTES_FOR_RATE 未満の場合は、ゼロ除算や桁溢れした
+   * 速度値を出力しないよう速度算出をスキップし、件数のみ出力する。
    */
   function logProgressIfDue(): void {
     const processedSinceLastLog = accountsProcessed - lastLoggedAccountsProcessed
@@ -239,7 +251,7 @@ export async function runRelabelBackfill(
     const now = Date.now()
     const elapsedMinutes = (now - lastLoggedAt) / 60_000
     let rateMessage = ''
-    if (elapsedMinutes > 0) {
+    if (elapsedMinutes > MIN_ELAPSED_MINUTES_FOR_RATE) {
       const accountsPerMinute = processedSinceLastLog / elapsedMinutes
       const remainingAccounts = totalAccounts - accountsProcessed
       const etaMinutes =
@@ -289,8 +301,13 @@ export async function runRelabelBackfill(
     // to the current rule version for every stale account in this page, so `isFullyUpToDate`
     // would wrongly treat them as current on the next run and they'd never be re-evaluated
     // with real data. Skipping the persist loop entirely keeps them stale, so a future run
-    // retries the fetch and relabels them properly once it succeeds.
-    if (!tweetFetchFailed) {
+    // retries the fetch and relabels them properly once it succeeds. `accountsProcessed`
+    // still counts them as attempted below, so the progress log's denominator can reach
+    // `totalAccounts` even on a run that hits fetch failures.
+    if (tweetFetchFailed) {
+      accountsProcessed += staleAccounts.length
+      logProgressIfDue()
+    } else {
       await runWithConcurrencyLimit(staleAccounts, ACCOUNT_CONCURRENCY, async (account) => {
         try {
           const bundle = buildFeatureBundle(
@@ -348,6 +365,11 @@ export async function runRelabelBackfill(
             `Failed to relabel account ${account.id} (@${account.screenName}), skipping to next account`,
             error as Error,
           )
+          // A failed account is still counted as processed: it was attempted this run, and
+          // without this the progress log's denominator could never reach `totalAccounts`
+          // on any run that hits a persistent per-account failure.
+          accountsProcessed++
+          logProgressIfDue()
         }
       })
     }

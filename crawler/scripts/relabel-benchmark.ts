@@ -6,9 +6,26 @@ import { runRelabelBackfill } from '../relabel'
 const SEED_ACCOUNT_COUNT = Number(process.env.BENCHMARK_ACCOUNT_COUNT ?? 2000)
 
 /**
- * `count` 件の架空アカウント (実在のTwitter/Xデータは一切含まない合成データ) を、それ
- * ぞれ1件のツイート付きで作成する。`runRelabelBackfill` が処理すべきstaleなアカウントを
- * 用意するための、ベンチマーク専用のシード処理。
+ * 誤って本番 DB に向けて実行してしまうことを防ぐガード。このスクリプトは
+ * `bench-*` の架空アカウントを大量に INSERT するため、本番相当の
+ * `AccountLabel`/`Account` 件数を汚染してしまう。`localhost`/`127.0.0.1` 以外の
+ * ホストへの接続はデフォルトで拒否し、どうしても別ホストで実行したい場合のみ
+ * `BENCHMARK_ALLOW_NON_LOCALHOST=1` の明示指定を必須にする。
+ * @param databaseUrl - 検証対象の `DATABASE_URL`
+ */
+function assertNotProductionDatabase(databaseUrl: string | undefined): void {
+  if (process.env.BENCHMARK_ALLOW_NON_LOCALHOST === '1') return
+  const host = databaseUrl ? new URL(databaseUrl).hostname : ''
+  if (host === 'localhost' || host === '127.0.0.1') return
+  throw new Error(
+    `Refusing to run relabel-benchmark against DATABASE_URL host "${host}": this script writes synthetic bench-* accounts and must only target a disposable local Postgres. Set BENCHMARK_ALLOW_NON_LOCALHOST=1 to override.`,
+  )
+}
+
+/**
+ * `count` 件の架空アカウント (実在の Twitter/X データは一切含まない合成データ) を、
+ * それぞれ1件のツイート付きで作成する。`runRelabelBackfill` が処理すべき stale な
+ * アカウントを用意するための、ベンチマーク専用のシード処理。
  * @param prisma - シード投入に使う Prisma クライアント
  * @param count - 作成する架空アカウント数
  */
@@ -49,6 +66,7 @@ async function seed(prisma: PrismaClient, count: number): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  assertNotProductionDatabase(process.env.DATABASE_URL)
   const prisma = new PrismaClient()
   try {
     console.log(`Seeding ${SEED_ACCOUNT_COUNT} synthetic accounts...`)
@@ -79,16 +97,18 @@ main().catch((error: unknown) => {
   process.exitCode = 1
 })
 
-// 実行手順 (本番DBには絶対に向けないこと。ローカルの使い捨てPostgresでのみ実行する):
+// 実行手順 (本番 DB には絶対に向けないこと。ローカルの使い捨て Postgres でのみ実行する。
+// PR ごとの before/after 比較の記録手順は、この場所ではなく各 PR の説明に記載する):
 //
-// 1. docker compose up -d postgres
+// 1. compose.yaml の postgres サービスはデフォルトでホストポートを公開していないため、
+//    ローカルから直接繋ぐには一時的にポートを公開する必要がある。例えば
+//    `docker compose run --rm -p 5432:5432 postgres` のように起動するか、
+//    `docker compose.override.yml` で一時的に `ports: ["5432:5432"]` を追加する。
 // 2. DATABASE_URL=postgresql://crawler:crawler@localhost:5432/twitter_accounts_classifier \
 //      pnpm --filter crawler exec prisma migrate deploy --schema=../prisma/schema.prisma
-// 3. このIssueの変更を含まないコミット (改善前) をチェックアウトした状態で実行し、
-//    出力された "Elapsed" / "accounts/min" を記録する:
-//      DATABASE_URL=postgresql://crawler:crawler@localhost:5432/twitter_accounts_classifier \
-//        pnpm --filter crawler exec tsx scripts/relabel-benchmark.ts
-// 4. docker compose down -v postgres && docker compose up -d postgres && 手順2を再実行し、
-//    DBをまっさらな状態に戻す。
-// 5. このIssueの変更を含むコミット (改善後) に戻して手順3を再実行し、出力を記録する。
-// 6. 両方の出力をこのIssueのPR説明に記録する。
+// 3. DATABASE_URL=postgresql://crawler:crawler@localhost:5432/twitter_accounts_classifier \
+//      pnpm --filter crawler exec tsx scripts/relabel-benchmark.ts
+// 4. DB をまっさらな状態に戻して再計測したい場合は、`./data/postgres` はコンテナ外の
+//    bind mount のため `docker compose down -v` では消えない。
+//    `docker compose down && rm -rf ./data/postgres` で明示的に削除してから
+//    手順1に戻ること。
