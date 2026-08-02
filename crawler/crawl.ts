@@ -7,7 +7,7 @@ import { withTwitterRetry } from './twitter/retry'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
-import { ensureLabelDefinitionsForRules, recordAccountLabel } from './db/label-repository'
+import { ensureLabelDefinitionsForRules, recordCrawlAccountLabel } from './db/label-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
@@ -59,9 +59,15 @@ import {
   syncFollowing as syncFollowingEdges,
 } from './db/follow-repository'
 import {
-  startCrawlRun as startCrawlRunRecord,
+  clearCrawlAccountCheckpoints as clearCrawlAccountCheckpointsRecord,
+  completeCrawlAccountCheckpoint as completeCrawlAccountCheckpointRecord,
+  loadCrawlAccountCheckpoints as loadCrawlAccountCheckpointsRecord,
+  startOrResumeCrawlRun as startOrResumeCrawlRunRecord,
   finishCrawlRun as finishCrawlRunRecord,
   recordCrawlAccountRun as recordCrawlAccountRunRecord,
+  type CrawlAccountCheckpointParams,
+  type CrawlAccountCheckpointPhase,
+  type CrawlRunStartResult,
   type RecordCrawlAccountRunParams,
   type CrawlWarning,
 } from './db/crawl-run-repository'
@@ -92,6 +98,8 @@ export interface CrawlDependencies {
   ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
   loadReplyCorpus: () => Promise<ReplyHijackCorpusEntry[]>
   persistLabel: (params: {
+    crawlRunId: string
+    username: string
     accountId: string
     labelDefinitionId: string
     method: string
@@ -100,9 +108,15 @@ export interface CrawlDependencies {
   }) => Promise<void>
   syncFollowing: (followerId: string, result: FollowListResult) => Promise<void>
   syncFollowers: (followeeId: string, result: FollowListResult) => Promise<void>
-  startCrawlRun: (startedAt: Date) => Promise<{ id: string }>
+  startOrResumeCrawlRun: (startedAt: Date) => Promise<CrawlRunStartResult>
   finishCrawlRun: (id: string, finishedAt: Date, status: string) => Promise<void>
   recordCrawlAccountRun: (params: RecordCrawlAccountRunParams) => Promise<void>
+  loadCrawlAccountCheckpoints: (
+    crawlRunId: string,
+    username: string,
+  ) => Promise<Map<CrawlAccountCheckpointPhase, unknown>>
+  completeCrawlAccountCheckpoint: (params: CrawlAccountCheckpointParams) => Promise<void>
+  clearCrawlAccountCheckpoints: (crawlRunId: string) => Promise<void>
   /** Injectable so `withTwitterRetry`'s backoff and the author-loop throttle don't actually pause tests. */
   sleep: (ms: number) => Promise<void>
 }
@@ -154,19 +168,20 @@ interface AccountCycleMetrics {
   warnings: CrawlWarning[]
 }
 
-async function runAccountCycleBody(
+interface TimelineSnapshot {
+  recommended: { tweets: TweetInput[]; authors: AccountProfileInput[] }
+  following: { tweets: TweetInput[]; authors: AccountProfileInput[] }
+  trending: { tweets: TweetInput[]; authors: AccountProfileInput[] }
+  warnings: CrawlWarning[]
+}
+
+async function fetchTimelineSnapshot(
   deps: CrawlDependencies,
-  registry: LabelRuleRegistry,
-  labelDefinitionIds: Map<string, string>,
-  duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
-  replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
   account: AppConfig['accounts'][number],
   trendsContext: { scraper: TrendsScraperLike },
   client: CrawlOpenApiClient,
-): Promise<AccountCycleMetrics> {
+): Promise<TimelineSnapshot> {
   const tweetApi = client.getTweetApi()
-  const userApi = client.getUserApi()
-
   const warnings: CrawlWarning[] = []
   const emptyTimeline: { tweets: TweetInput[]; authors: AccountProfileInput[] } = {
     tweets: [],
@@ -203,9 +218,6 @@ async function runAccountCycleBody(
       })
       return emptyTimeline
     }),
-    // The trends-driven search timeline depends on an extra scraper library and a
-    // legacy (non-GraphQL) endpoint, so it fails independently of the two OpenAPI
-    // timelines above more often in practice — do not let it discard their results.
     withTwitterRetry(
       () =>
         fetchTrendingTimeline(
@@ -228,6 +240,25 @@ async function runAccountCycleBody(
       return emptyTimeline
     }),
   ])
+  return { recommended, following, trending, warnings }
+}
+
+async function runAccountCycleBody(
+  deps: CrawlDependencies,
+  registry: LabelRuleRegistry,
+  labelDefinitionIds: Map<string, string>,
+  duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
+  replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
+  account: AppConfig['accounts'][number],
+  crawlRunId: string,
+  timelineSnapshot: TimelineSnapshot,
+  client: CrawlOpenApiClient,
+): Promise<AccountCycleMetrics> {
+  const tweetApi = client.getTweetApi()
+  const userApi = client.getUserApi()
+
+  const { recommended, following, trending } = timelineSnapshot
+  const warnings = [...timelineSnapshot.warnings]
 
   const allTweets = [...recommended.tweets, ...following.tweets, ...trending.tweets]
   const topTweets = sortByEngagement(allTweets).slice(0, deps.limits.topTweetsForReplies)
@@ -376,6 +407,8 @@ async function runAccountCycleBody(
           continue
         }
         await deps.persistLabel({
+          crawlRunId,
+          username: account.username,
           accountId: profile.id,
           labelDefinitionId,
           method: rule.key,
@@ -430,30 +463,23 @@ async function runAccountCycleBody(
   }
 }
 
-interface SyncFollowGraphResult {
-  followingSynced: boolean
-  followersSynced: boolean
+interface FollowingCheckpointData {
+  userId: string | null
+  synced: boolean
   warnings: CrawlWarning[]
 }
 
-/**
- * Syncs the login account's own following/follower lists against the `Follow` table.
- * Resolving the account's own user id and each direction's fetch-and-sync run in their
- * own independent try/catch: a failure resolving the id skips both directions, but once
- * resolved, a failure in one direction never prevents the other from running - and
- * neither ever aborts the rest of this account's crawl cycle.
- * @param deps - crawl dependencies (limits and the `syncFollowing`/`syncFollowers` persistence hooks)
- * @param account - the login account being crawled
- * @param client - the authenticated API client for this cycle
- * @returns which directions synced, plus a warning per step that failed
- */
-async function syncFollowGraph(
+interface FollowersCheckpointData {
+  synced: boolean
+  warnings: CrawlWarning[]
+}
+
+async function syncFollowingPhase(
   deps: CrawlDependencies,
   account: AppConfig['accounts'][number],
   client: CrawlOpenApiClient,
-): Promise<SyncFollowGraphResult> {
+): Promise<FollowingCheckpointData> {
   let userId: string
-  const warnings: CrawlWarning[] = []
   try {
     const response = await withTwitterRetry(
       () => client.getUserApi().getUserByScreenName({ screenName: account.username }),
@@ -467,54 +493,314 @@ async function syncFollowGraph(
   } catch (error) {
     const message = `Failed to resolve or persist own account for ${account.username}, skipping follow/follower sync`
     logger.error(message, error as Error)
-    warnings.push({
-      type: 'own_account_sync_failed',
-      message,
-      username: account.username,
-      errorMessage: toErrorMessage(error),
-    })
-    return { followingSynced: false, followersSynced: false, warnings }
+    return {
+      userId: null,
+      synced: false,
+      warnings: [
+        {
+          type: 'own_account_sync_failed',
+          message,
+          username: account.username,
+          errorMessage: toErrorMessage(error),
+        },
+      ],
+    }
   }
 
-  let followingSynced = false
   try {
     const following = await withTwitterRetry(
       () => fetchFollowing(client.getUserListApi(), userId, deps.limits.followEdgesPerAccount),
       retryOptions(deps),
     )
     await deps.syncFollowing(userId, following)
-    followingSynced = true
+    return { userId, synced: true, warnings: [] }
   } catch (error) {
     const message = `Failed to sync following for ${account.username}`
     logger.error(message, error as Error)
-    warnings.push({
-      type: 'following_sync_failed',
-      message,
-      username: account.username,
-      errorMessage: toErrorMessage(error),
-    })
+    return {
+      userId,
+      synced: false,
+      warnings: [
+        {
+          type: 'following_sync_failed',
+          message,
+          username: account.username,
+          errorMessage: toErrorMessage(error),
+        },
+      ],
+    }
   }
+}
 
-  let followersSynced = false
+async function syncFollowersPhase(
+  deps: CrawlDependencies,
+  account: AppConfig['accounts'][number],
+  client: CrawlOpenApiClient,
+  userId: string | null,
+): Promise<FollowersCheckpointData> {
+  if (!userId) return { synced: false, warnings: [] }
   try {
     const followers = await withTwitterRetry(
       () => fetchFollowers(client.getUserListApi(), userId, deps.limits.followEdgesPerAccount),
       retryOptions(deps),
     )
     await deps.syncFollowers(userId, followers)
-    followersSynced = true
+    return { synced: true, warnings: [] }
   } catch (error) {
     const message = `Failed to sync followers for ${account.username}`
     logger.error(message, error as Error)
-    warnings.push({
-      type: 'followers_sync_failed',
-      message,
-      username: account.username,
-      errorMessage: toErrorMessage(error),
-    })
+    return {
+      synced: false,
+      warnings: [
+        {
+          type: 'followers_sync_failed',
+          message,
+          username: account.username,
+          errorMessage: toErrorMessage(error),
+        },
+      ],
+    }
   }
+}
 
-  return { followingSynced, followersSynced, warnings }
+type StoredTweetInput = Omit<TweetInput, 'createdAt'> & { createdAt: string }
+type StoredAccountProfileInput = Omit<AccountProfileInput, 'accountCreatedAt'> & {
+  accountCreatedAt: string
+}
+
+interface StoredTimelineResult {
+  tweets: StoredTweetInput[]
+  authors: StoredAccountProfileInput[]
+}
+
+interface StoredTimelineSnapshot {
+  recommended: StoredTimelineResult
+  following: StoredTimelineResult
+  trending: StoredTimelineResult
+  warnings: CrawlWarning[]
+}
+
+function toCheckpointData(value: unknown): CrawlAccountCheckpointParams['data'] {
+  const serialized = JSON.stringify(value)
+  if (!serialized) throw new Error('Cannot serialize an empty crawl checkpoint')
+  return JSON.parse(serialized) as CrawlAccountCheckpointParams['data']
+}
+
+function storeTimelineResult(result: {
+  tweets: TweetInput[]
+  authors: AccountProfileInput[]
+}): StoredTimelineResult {
+  return {
+    tweets: result.tweets.map(({ createdAt, ...tweet }) => ({
+      ...tweet,
+      createdAt: createdAt.toISOString(),
+    })),
+    authors: result.authors.map(({ accountCreatedAt, ...author }) => ({
+      ...author,
+      accountCreatedAt: accountCreatedAt.toISOString(),
+    })),
+  }
+}
+
+function storeTimelineSnapshot(snapshot: TimelineSnapshot): StoredTimelineSnapshot {
+  return {
+    recommended: storeTimelineResult(snapshot.recommended),
+    following: storeTimelineResult(snapshot.following),
+    trending: storeTimelineResult(snapshot.trending),
+    warnings: snapshot.warnings,
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function restoreDate(value: unknown): Date | undefined {
+  if (typeof value !== 'string') return undefined
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string'
+}
+
+function isOptionalNullableString(value: unknown): value is string | null | undefined {
+  return value === undefined || isNullableString(value)
+}
+
+function isNullableBoolean(value: unknown): value is boolean | null {
+  return value === null || typeof value === 'boolean'
+}
+
+function isCrawlWarning(value: unknown): value is CrawlWarning {
+  if (!isRecord(value)) return false
+  if (
+    ![
+      'recommended_timeline_failed',
+      'following_timeline_failed',
+      'trending_timeline_failed',
+      'author_processing_failed',
+      'own_account_sync_failed',
+      'following_sync_failed',
+      'followers_sync_failed',
+    ].includes(value.type as string)
+  ) {
+    return false
+  }
+  return (
+    typeof value.message === 'string' &&
+    typeof value.errorMessage === 'string' &&
+    (value.username === undefined || typeof value.username === 'string') &&
+    (value.authorId === undefined || typeof value.authorId === 'string') &&
+    (value.rawResponseSnippet === undefined || typeof value.rawResponseSnippet === 'string')
+  )
+}
+
+function restoreWarnings(value: unknown): CrawlWarning[] | undefined {
+  if (!Array.isArray(value) || !value.every((warning) => isCrawlWarning(warning))) return undefined
+  return value
+}
+
+function isStoredTweetInput(value: Record<string, unknown>): value is StoredTweetInput {
+  return (
+    typeof value.id === 'string' &&
+    typeof value.accountId === 'string' &&
+    typeof value.fullText === 'string' &&
+    restoreDate(value.createdAt) !== undefined &&
+    isFiniteNumber(value.retweetCount) &&
+    isFiniteNumber(value.likeCount) &&
+    isFiniteNumber(value.replyCount) &&
+    isFiniteNumber(value.quoteCount) &&
+    typeof value.isReply === 'boolean' &&
+    isNullableString(value.inReplyToTweetId) &&
+    typeof value.isAuthorReply === 'boolean' &&
+    typeof value.isRetweet === 'boolean' &&
+    isNullableString(value.retweetedTweetId) &&
+    typeof value.isPromoted === 'boolean' &&
+    typeof value.isPaidPromotion === 'boolean' &&
+    isNullableBoolean(value.hasAiGeneratedMedia) &&
+    isNullableString(value.aiGeneratedDetectionSource) &&
+    isNullableString(value.quotedTweetId) &&
+    isNullableString(value.quotedTweetAuthorId) &&
+    isNullableBoolean(value.quotedTweetHasVideo) &&
+    ['recommended', 'following', 'trending', 'profile', 'manual'].includes(value.source as string)
+  )
+}
+
+function isStoredAccountProfileInput(
+  value: Record<string, unknown>,
+): value is StoredAccountProfileInput {
+  return (
+    typeof value.id === 'string' &&
+    typeof value.screenName === 'string' &&
+    typeof value.displayName === 'string' &&
+    isNullableString(value.bio) &&
+    isNullableString(value.profileImageUrl) &&
+    isFiniteNumber(value.followersCount) &&
+    isFiniteNumber(value.followingCount) &&
+    isFiniteNumber(value.tweetCount) &&
+    restoreDate(value.accountCreatedAt) !== undefined &&
+    isNullableString(value.location) &&
+    isNullableString(value.url) &&
+    typeof value.isBlueVerified === 'boolean' &&
+    isNullableString(value.verifiedType) &&
+    isOptionalNullableString(value.professionalType) &&
+    isOptionalNullableString(value.parodyCommentaryFanLabel)
+  )
+}
+
+function restoreTimelineResult(value: unknown):
+  | {
+      tweets: TweetInput[]
+      authors: AccountProfileInput[]
+    }
+  | undefined {
+  if (!isRecord(value) || !Array.isArray(value.tweets) || !Array.isArray(value.authors)) {
+    return undefined
+  }
+  const tweets: TweetInput[] = []
+  for (const value_ of value.tweets) {
+    if (!isRecord(value_) || !isStoredTweetInput(value_)) return undefined
+    const createdAt = restoreDate(value_.createdAt)
+    if (!createdAt) return undefined
+    tweets.push({ ...value_, createdAt })
+  }
+  const authors: AccountProfileInput[] = []
+  for (const value_ of value.authors) {
+    if (!isRecord(value_) || !isStoredAccountProfileInput(value_)) return undefined
+    const accountCreatedAt = restoreDate(value_.accountCreatedAt)
+    if (!accountCreatedAt) return undefined
+    authors.push({ ...value_, accountCreatedAt })
+  }
+  return { tweets, authors }
+}
+
+function restoreTimelineSnapshot(value: unknown): TimelineSnapshot | undefined {
+  if (!isRecord(value)) return undefined
+  const warnings = restoreWarnings(value.warnings)
+  if (!warnings) return undefined
+  const recommended = restoreTimelineResult(value.recommended)
+  const following = restoreTimelineResult(value.following)
+  const trending = restoreTimelineResult(value.trending)
+  if (!recommended || !following || !trending) return undefined
+  return {
+    recommended,
+    following,
+    trending,
+    warnings,
+  }
+}
+
+function restoreAccountCycleMetrics(value: unknown): AccountCycleMetrics | undefined {
+  if (!isRecord(value)) return undefined
+  const warnings = restoreWarnings(value.warnings)
+  if (!warnings) return undefined
+  const metricKeys: (keyof Omit<AccountCycleMetrics, 'warnings'>)[] = [
+    'recommendedCount',
+    'followingCount',
+    'trendingCount',
+    'replyCount',
+    'profileCount',
+    'labelsAppliedCount',
+  ]
+  if (metricKeys.some((key) => typeof value[key] !== 'number')) return undefined
+  return {
+    recommendedCount: value.recommendedCount as number,
+    followingCount: value.followingCount as number,
+    trendingCount: value.trendingCount as number,
+    replyCount: value.replyCount as number,
+    profileCount: value.profileCount as number,
+    labelsAppliedCount: value.labelsAppliedCount as number,
+    warnings,
+  }
+}
+
+function restoreFollowingCheckpoint(value: unknown): FollowingCheckpointData | undefined {
+  if (!isRecord(value) || typeof value.synced !== 'boolean') {
+    return undefined
+  }
+  const warnings = restoreWarnings(value.warnings)
+  if (!warnings) return undefined
+  if (value.userId !== null && typeof value.userId !== 'string') return undefined
+  return {
+    userId: value.userId,
+    synced: value.synced,
+    warnings,
+  }
+}
+
+function restoreFollowersCheckpoint(value: unknown): FollowersCheckpointData | undefined {
+  if (!isRecord(value) || typeof value.synced !== 'boolean') {
+    return undefined
+  }
+  const warnings = restoreWarnings(value.warnings)
+  if (!warnings) return undefined
+  return { synced: value.synced, warnings }
 }
 
 async function runAccountCycle(
@@ -528,41 +814,101 @@ async function runAccountCycle(
 ): Promise<'success' | 'partial'> {
   const startedAt = new Date()
   try {
-    const cookies = await deps.issueCookies({
-      username: account.username,
-      password: account.password,
-      otp_secret: account.otpSecret,
-    })
+    const checkpoints = await deps.loadCrawlAccountCheckpoints(crawlRunId, account.username)
+    let timelineSnapshot = restoreTimelineSnapshot(checkpoints.get('timelines'))
+    let metrics = restoreAccountCycleMetrics(checkpoints.get('authors'))
+    let following = restoreFollowingCheckpoint(checkpoints.get('following'))
+    let followers = restoreFollowersCheckpoint(checkpoints.get('followers'))
+    const needsTimeline = !metrics && !timelineSnapshot
+    const needsAuthors = !metrics
+    const needsFollowing = !following
+    const needsFollowers = !followers
 
-    const trendsContext = await deps.createTrendsScraper(cookies)
-    let metrics: AccountCycleMetrics
-    let syncResult: SyncFollowGraphResult
-    try {
-      const openApiContext = await deps.createOpenApiClient(cookies)
+    if (needsTimeline || needsAuthors || needsFollowing || needsFollowers) {
+      const cookies = await deps.issueCookies({
+        username: account.username,
+        password: account.password,
+        otp_secret: account.otpSecret,
+      })
+      const trendsContext = needsTimeline ? await deps.createTrendsScraper(cookies) : undefined
       try {
-        metrics = await runAccountCycleBody(
-          deps,
-          registry,
-          labelDefinitionIds,
-          duplicateReplyIndex,
-          replyHijackIndex,
-          account,
-          trendsContext,
-          openApiContext.client,
-        )
-        syncResult = await syncFollowGraph(deps, account, openApiContext.client)
+        const openApiContext = await deps.createOpenApiClient(cookies)
+        try {
+          if (needsTimeline) {
+            if (!trendsContext) throw new Error('Missing trends context for timeline checkpoint')
+            timelineSnapshot = await fetchTimelineSnapshot(
+              deps,
+              account,
+              trendsContext,
+              openApiContext.client,
+            )
+            await deps.completeCrawlAccountCheckpoint({
+              crawlRunId,
+              username: account.username,
+              phase: 'timelines',
+              data: toCheckpointData(storeTimelineSnapshot(timelineSnapshot)),
+            })
+          }
+          if (needsAuthors) {
+            if (!timelineSnapshot) throw new Error('Missing timeline checkpoint for author phase')
+            metrics = await runAccountCycleBody(
+              deps,
+              registry,
+              labelDefinitionIds,
+              duplicateReplyIndex,
+              replyHijackIndex,
+              account,
+              crawlRunId,
+              timelineSnapshot,
+              openApiContext.client,
+            )
+            await deps.completeCrawlAccountCheckpoint({
+              crawlRunId,
+              username: account.username,
+              phase: 'authors',
+              data: toCheckpointData(metrics),
+            })
+          }
+          if (needsFollowing) {
+            following = await syncFollowingPhase(deps, account, openApiContext.client)
+            await deps.completeCrawlAccountCheckpoint({
+              crawlRunId,
+              username: account.username,
+              phase: 'following',
+              data: toCheckpointData(following),
+            })
+          }
+          if (needsFollowers) {
+            followers = await syncFollowersPhase(
+              deps,
+              account,
+              openApiContext.client,
+              following?.userId ?? null,
+            )
+            await deps.completeCrawlAccountCheckpoint({
+              crawlRunId,
+              username: account.username,
+              phase: 'followers',
+              data: toCheckpointData(followers),
+            })
+          }
+        } finally {
+          await deps.closeOpenApiClient(openApiContext)
+        }
       } finally {
-        await deps.closeOpenApiClient(openApiContext)
+        if (trendsContext) await deps.closeTrendsScraper(trendsContext)
       }
-    } finally {
-      await deps.closeTrendsScraper(trendsContext)
+    }
+
+    if (!metrics || !following || !followers) {
+      throw new Error(`Incomplete crawl checkpoints for ${account.username}`)
     }
 
     // Every remaining warning has already survived retrying (withTwitterRetry, above) and
     // routine-failure filtering (isExpectedAccountLookupError, above) - what's left is a
     // fetch or sync step that failed with no fallback, so any single one is still worth
     // surfacing as 'partial' rather than being averaged away.
-    const warnings = [...metrics.warnings, ...syncResult.warnings]
+    const warnings = [...metrics.warnings, ...following.warnings, ...followers.warnings]
     const status = warnings.length > 0 ? 'partial' : 'success'
     await deps.recordCrawlAccountRun({
       crawlRunId,
@@ -576,8 +922,8 @@ async function runAccountCycle(
       replyCount: metrics.replyCount,
       profileCount: metrics.profileCount,
       labelsAppliedCount: metrics.labelsAppliedCount,
-      followingSynced: syncResult.followingSynced,
-      followersSynced: syncResult.followersSynced,
+      followingSynced: following.synced,
+      followersSynced: followers.synced,
       warnings,
       errorMessage: null,
     })
@@ -614,7 +960,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
   const replyHijackIndex = buildReplyHijackIndex(replyCorpus)
 
-  const { id: crawlRunId } = await deps.startCrawlRun(new Date())
+  const { id: crawlRunId, latestAccountStatuses } = await deps.startOrResumeCrawlRun(new Date())
 
   // Everything below this point is wrapped so that any exception - an unexpected
   // error escaping the per-account loop's own try/catch, for example - still
@@ -627,6 +973,12 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
     for (const account of deps.config.accounts) {
+      const previousStatus = latestAccountStatuses.get(account.username)
+      if (previousStatus === 'success' || previousStatus === 'partial') {
+        accountStatuses.push(previousStatus)
+        continue
+      }
+
       try {
         const status = await runAccountCycle(
           deps,
@@ -653,6 +1005,14 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
         ? 'partial'
         : 'success'
     await deps.finishCrawlRun(crawlRunId, new Date(), runStatus)
+    try {
+      await deps.clearCrawlAccountCheckpoints(crawlRunId)
+    } catch (error) {
+      logger.error(
+        `Failed to clear checkpoints for finalized crawl run ${crawlRunId}`,
+        error as Error,
+      )
+    }
   } catch (error) {
     try {
       await deps.finishCrawlRun(crawlRunId, new Date(), 'failed')
@@ -717,14 +1077,20 @@ async function main(): Promise<void> {
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: () => loadReplyCorpus(prisma),
     persistLabel: async (params) => {
-      await recordAccountLabel(prisma, params)
+      await recordCrawlAccountLabel(prisma, params)
     },
     syncFollowing: (followerId, result) => syncFollowingEdges(prisma, followerId, result),
     syncFollowers: (followeeId, result) => syncFollowersEdges(prisma, followeeId, result),
-    startCrawlRun: (startedAt) => startCrawlRunRecord(prisma, startedAt),
+    startOrResumeCrawlRun: (startedAt) => startOrResumeCrawlRunRecord(prisma, startedAt),
     finishCrawlRun: (id, finishedAt, status) =>
       finishCrawlRunRecord(prisma, id, finishedAt, status),
     recordCrawlAccountRun: (params) => recordCrawlAccountRunRecord(prisma, params),
+    loadCrawlAccountCheckpoints: (crawlRunId, username) =>
+      loadCrawlAccountCheckpointsRecord(prisma, crawlRunId, username),
+    completeCrawlAccountCheckpoint: (params) =>
+      completeCrawlAccountCheckpointRecord(prisma, params),
+    clearCrawlAccountCheckpoints: (crawlRunId) =>
+      clearCrawlAccountCheckpointsRecord(prisma, crawlRunId),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }
 
