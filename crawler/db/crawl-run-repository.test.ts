@@ -77,10 +77,12 @@ describe('startOrResumeCrawlRun', () => {
   })
 
   it('abandons a running row whose heartbeat exceeds the stale threshold and starts a new run', async () => {
+    const startedAt = new Date('2026-07-28T00:00:00Z')
+    // lastHeartbeatAt is startedAt minus 20 hours, exceeding staleThresholdMs (18 hours = 3 * 21600s)
+    const lastHeartbeatAt = new Date(startedAt.getTime() - 20 * 60 * 60 * 1000)
     const findFirst = vi.fn().mockResolvedValue({
       id: 'abandoned-run',
-      // startedAt から 20 時間経過 (しきい値 18 時間 = 3 * 21600s を超える)
-      lastHeartbeatAt: new Date('2026-07-27T04:00:00Z'),
+      lastHeartbeatAt,
     })
     const create = vi.fn().mockResolvedValue({ id: 'new-run' })
     const update = vi.fn().mockResolvedValue({})
@@ -93,14 +95,13 @@ describe('startOrResumeCrawlRun', () => {
       crawlAccountLabelRun: { deleteMany: deleteLabelClaims },
       $transaction: transaction,
     } as unknown as PrismaClient
-    const startedAt = new Date('2026-07-28T00:00:00Z')
 
     const result = await startOrResumeCrawlRun(prisma, startedAt, staleThresholdMs)
 
     expect(result).toEqual({ id: 'new-run', latestAccountStatuses: new Map() })
     expect(update).toHaveBeenCalledWith({
       where: { id: 'abandoned-run' },
-      data: { finishedAt: startedAt, status: 'failed' },
+      data: { finishedAt: lastHeartbeatAt, status: 'failed' },
     })
     expect(deleteCheckpoints).toHaveBeenCalledWith({ where: { crawlRunId: 'abandoned-run' } })
     expect(deleteLabelClaims).toHaveBeenCalledWith({ where: { crawlRunId: 'abandoned-run' } })

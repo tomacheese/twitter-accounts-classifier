@@ -50,17 +50,36 @@ describe('getCrawlIntervalSeconds', () => {
     expect(getCrawlIntervalSeconds()).toBe(3600)
   })
 
+  it('returns the default when set to an empty string', () => {
+    process.env.CRAWL_INTERVAL_SECONDS = ''
+    expect(getCrawlIntervalSeconds()).toBe(21_600)
+  })
+
   it('throws when the value is not a positive integer', () => {
     process.env.CRAWL_INTERVAL_SECONDS = '0'
     expect(() => getCrawlIntervalSeconds()).toThrow(
-      'CRAWL_INTERVAL_SECONDS environment variable must be a positive integer, got: 0',
+      'CRAWL_INTERVAL_SECONDS environment variable must be a positive integer',
     )
   })
 
   it('throws when the value is not an integer', () => {
     process.env.CRAWL_INTERVAL_SECONDS = '1.5'
     expect(() => getCrawlIntervalSeconds()).toThrow(
-      'CRAWL_INTERVAL_SECONDS environment variable must be a positive integer, got: 1.5',
+      'CRAWL_INTERVAL_SECONDS environment variable must be a positive integer',
+    )
+  })
+
+  it('throws when the value is exponential notation', () => {
+    process.env.CRAWL_INTERVAL_SECONDS = '1e30'
+    expect(() => getCrawlIntervalSeconds()).toThrow(
+      'CRAWL_INTERVAL_SECONDS environment variable must be a positive integer',
+    )
+  })
+
+  it('throws when the value is hexadecimal notation', () => {
+    process.env.CRAWL_INTERVAL_SECONDS = '0x10'
+    expect(() => getCrawlIntervalSeconds()).toThrow(
+      'CRAWL_INTERVAL_SECONDS environment variable must be a positive integer',
     )
   })
 })
@@ -89,7 +108,7 @@ describe('getCrawlStaleThresholdMultiplier', () => {
   it('throws when the value is not a positive integer', () => {
     process.env.CRAWL_STALE_THRESHOLD_MULTIPLIER = '-1'
     expect(() => getCrawlStaleThresholdMultiplier()).toThrow(
-      'CRAWL_STALE_THRESHOLD_MULTIPLIER environment variable must be a positive integer, got: -1',
+      'CRAWL_STALE_THRESHOLD_MULTIPLIER environment variable must be a positive integer',
     )
   })
 })

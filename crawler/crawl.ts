@@ -126,7 +126,10 @@ export interface CrawlDependencies {
   ) => Promise<Map<CrawlAccountCheckpointPhase, unknown>>
   completeCrawlAccountCheckpoint: (params: CrawlAccountCheckpointParams) => Promise<void>
   clearCrawlAccountCheckpoints: (crawlRunId: string) => Promise<void>
-  /** アカウント 1 件の処理が完了するたびに呼び、放置判定の基準となる生存時刻を更新する。 */
+  /**
+   * アカウント 1 件の処理を試みるたびに (成功・失敗を問わず) 呼び、放置判定の基準となる生存
+   * 時刻を更新する。checkpoint により処理自体を skip したアカウントでは呼ばれない。
+   */
   touchCrawlRunHeartbeat: (crawlRunId: string) => Promise<void>
   /** Injectable so `withTwitterRetry`'s backoff and the author-loop throttle don't actually pause tests. */
   sleep: (ms: number) => Promise<void>
