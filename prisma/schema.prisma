@@ -107,9 +107,15 @@ model AccountLabel {
   ruleVersion       String
   labeledAt         DateTime        @default(now())
 
+  // viewer/lib/queries/account-detail.ts の
+  // `accountLabel.findMany({ where: { accountId }, orderBy: { labeledAt: 'desc' } })` が
+  // 使う唯一の単体インデックス。下の複合インデックスは2番目のカラムが labelDefinitionId
+  // のため代用できない。`labelDefinitionId`・`labeledAt` 単体を先頭カラムとする絞り込み/
+  // ソートは crawler/viewer のホットパスには存在しない (`.claude/skills/weekly-crawl-review/
+  // SKILL.md` の週次レビューのみ両方使うが、週1回・レイテンシ要件のないバッチ処理のため
+  // 単体インデックス維持のコストに見合わないと判断した。詳細は Issue #21 と対応する
+  // マイグレーションのコメントを参照)。
   @@index([accountId])
-  @@index([labelDefinitionId])
-  @@index([labeledAt])
   // crawler/relabel.ts の loadLatestRuleVersions が実行する
   // `DISTINCT ON ("accountId", "labelDefinitionId") ... ORDER BY "accountId",
   // "labelDefinitionId", "labeledAt" DESC, "id" DESC` にそのまま一致させる
@@ -123,9 +129,9 @@ model AccountLabel {
 // 「account/label ごとの最新値」を導出すると全件スキャンになり、本番の
 // ダッシュボード/アカウント一覧クエリの statement_timeout を常態的に超過する
 // ようになった。このテーブルは (accountId, labelDefinitionId) ごとの最新値のみ
-// を保持し、recordAccountLabel が AccountLabel への履歴 INSERT と同時に upsert
-// する。そのためこれらの集計クエリは履歴の総件数ではなく (アカウント数 x
-// ラベル数) で頭打ちになる。この経緯の説明はここを正としており、
+// を保持し、recordCrawlAccountLabel / recordAccountLabelsBulk が AccountLabel
+// への履歴 INSERT と同時に upsert する。そのためこれらの集計クエリは履歴の総件数
+// ではなく (アカウント数 x ラベル数) で頭打ちになる。この経緯の説明はここを正としており、
 // crawler/db/label-repository.ts・viewer/lib/queries/dashboard.ts・
 // viewer/lib/queries/accounts.ts・対応するマイグレーションのコメントは
 // ここへの参照のみとする。

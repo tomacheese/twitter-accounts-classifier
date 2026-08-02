@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from './generated/prisma'
 import { runRelabelBackfill } from './relabel'
 import { LabelRuleRegistry } from './labels/registry'
@@ -32,7 +32,7 @@ function makePrisma(overrides: {
   tweetFindManyImpl?: () => Promise<unknown[]>
   queryRawTweetRows?: unknown[]
   queryRawTweetError?: Error
-  createImpl?: () => Promise<unknown>
+  bulkPersistImpl?: (accountId: string, labelCount: number) => Promise<unknown[]>
 }) {
   const accountBatches = overrides.accounts ?? [[sampleAccount], []]
   const findMany = vi.fn().mockImplementation(() => Promise.resolve(accountBatches.shift() ?? []))
@@ -41,23 +41,33 @@ function makePrisma(overrides: {
     .mockImplementation(({ create }: { create: { key: string } }) =>
       Promise.resolve({ id: `def-${create.key}`, ...create }),
     )
-  const create = vi
-    .fn()
-    .mockImplementation(overrides.createImpl ?? (() => Promise.resolve({ id: 'label1' })))
   const tweetFindMany = vi
     .fn()
     .mockImplementation(overrides.tweetFindManyImpl ?? (() => Promise.resolve([])))
-  // recordAccountLabel の呼び出しは history insert と AccountLabelLatest upsert を
-  // まとめた1本の $queryRaw であり、SQL 文が "INSERT INTO \"AccountLabel\"" を
-  // 含むかどうかで他の $queryRaw 呼び出しと区別できる。それ以外の $queryRaw は
-  // 呼び出し順が固定であることを前提としており、1回目は loadLatestRuleVersions、
-  // 2回目以降は fetchTweetsForAccounts になる。
+  // recordAccountLabelsBulk の呼び出しは1アカウント分の複数ラベルを1本の $queryRaw に
+  // まとめる。SQL 文が "UNNEST(" を含むかどうかで他の $queryRaw 呼び出しと区別できる。
+  // それ以外の $queryRaw は呼び出し順が固定であることを前提としており、1回目は
+  // loadLatestRuleVersions、2回目以降は fetchTweetsForAccounts になる。
+  const bulkPersist = vi.fn()
   let queryRawCalls = 0
-  const queryRaw = vi.fn().mockImplementation((strings: unknown) => {
-    if (Array.isArray(strings) && strings.join('').includes('INSERT INTO "AccountLabel"')) {
-      return (create() as Promise<Record<string, unknown>>).then((row) => [
-        { ...row, latestUpserted: true },
-      ])
+  const queryRaw = vi.fn().mockImplementation((strings: unknown, ...values: unknown[]) => {
+    if (Array.isArray(strings) && strings.join('').includes('UNNEST(')) {
+      const ids = values[0] as string[]
+      const accountIds = values[1] as string[]
+      const labelDefinitionIds = values[2] as string[]
+      const accountId = accountIds[0]
+      bulkPersist(accountId, ids.length)
+      return (
+        overrides.bulkPersistImpl?.(accountId, ids.length) ??
+        Promise.resolve(
+          labelDefinitionIds.map((labelDefinitionId) => ({
+            id: 'label1',
+            accountId,
+            labelDefinitionId,
+            latestUpserted: true,
+          })),
+        )
+      )
     }
     queryRawCalls++
     if (queryRawCalls === 1) {
@@ -68,31 +78,33 @@ function makePrisma(overrides: {
     }
     return Promise.resolve(overrides.queryRawTweetRows ?? [])
   })
+  const count = vi.fn().mockResolvedValue(0)
 
   const prisma = {
-    account: { findMany },
+    account: { findMany, count },
     tweet: { findMany: tweetFindMany },
     labelDefinition: { upsert },
     $queryRaw: queryRaw,
   } as unknown as PrismaClient
 
-  return { prisma, findMany, upsert, create, queryRaw, tweetFindMany }
+  return { prisma, findMany, upsert, bulkPersist, queryRaw, tweetFindMany, count }
 }
 
 describe('runRelabelBackfill', () => {
   it('persists a label for a rule the account has never been labeled with', async () => {
-    const { prisma, create } = makePrisma({ accounts: [[sampleAccount], []] })
+    const { prisma, bulkPersist } = makePrisma({ accounts: [[sampleAccount], []] })
     const registry = new LabelRuleRegistry()
     registry.register(makeRule('rule-a', '1.0.0'))
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    expect(create).toHaveBeenCalledTimes(1)
+    expect(bulkPersist).toHaveBeenCalledTimes(1)
+    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1)
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 1 })
   })
 
   it('skips a rule already at its current version for that account', async () => {
-    const { prisma, create } = makePrisma({
+    const { prisma, bulkPersist } = makePrisma({
       accounts: [[sampleAccount], []],
       latestRuleVersions: [
         { accountId: 'acc1', labelDefinitionId: 'def-rule-a', ruleVersion: '1.0.0' },
@@ -103,12 +115,12 @@ describe('runRelabelBackfill', () => {
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    expect(create).not.toHaveBeenCalled()
+    expect(bulkPersist).not.toHaveBeenCalled()
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 0 })
   })
 
   it('re-persists a rule whose stored version is stale', async () => {
-    const { prisma, create } = makePrisma({
+    const { prisma, bulkPersist } = makePrisma({
       accounts: [[sampleAccount], []],
       latestRuleVersions: [
         { accountId: 'acc1', labelDefinitionId: 'def-rule-a', ruleVersion: '1.0.0' },
@@ -119,23 +131,22 @@ describe('runRelabelBackfill', () => {
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    expect(create).toHaveBeenCalledTimes(1)
+    expect(bulkPersist).toHaveBeenCalledTimes(1)
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 1 })
   })
 
   it('continues to the next account after one account fails to persist its label', async () => {
     const account2 = { ...sampleAccount, id: 'acc2', screenName: 'other' }
-    let call = 0
-    const { prisma, create } = makePrisma({
+    const { prisma, bulkPersist } = makePrisma({
       accounts: [[sampleAccount, account2], []],
-      createImpl: () => {
-        call++
-        // Call 1 (acc1's persistence) is the one this test wants to fail; call 2 (acc2's)
-        // must still go through, proving the per-account try/catch keeps the batch going.
-        if (call === 1) {
-          return Promise.reject(new Error('db error'))
-        }
-        return Promise.resolve({ id: 'label1' })
+      // acc1 の永続化だけを失敗させ、acc2 は成功させる。アカウント単位の try/catch が
+      // バッチの残りを止めないことを、呼び出し順ではなく accountId で判定して検証する
+      // (並列処理下では呼び出し順が保証と見なせないため)。
+      bulkPersistImpl: (accountId) => {
+        if (accountId === 'acc1') return Promise.reject(new Error('db error'))
+        return Promise.resolve([
+          { id: 'label1', accountId, labelDefinitionId: 'def-rule-a', latestUpserted: true },
+        ])
       },
     })
     const registry = new LabelRuleRegistry()
@@ -143,8 +154,9 @@ describe('runRelabelBackfill', () => {
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    expect(create).toHaveBeenCalledTimes(2)
-    expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 1 })
+    expect(bulkPersist).toHaveBeenCalledTimes(2)
+    // acc1 も失敗はしたが試行済みなので accountsProcessed にはカウントされる。
+    expect(result).toEqual({ accountsProcessed: 2, labelsPersisted: 1 })
   })
 
   it('paginates through multiple batches of accounts', async () => {
@@ -154,14 +166,16 @@ describe('runRelabelBackfill', () => {
       screenName: `user${i}`,
     }))
     const secondBatch = [{ ...sampleAccount, id: 'acc100', screenName: 'user100' }]
-    const { prisma, findMany, create } = makePrisma({ accounts: [firstBatch, secondBatch, []] })
+    const { prisma, findMany, bulkPersist } = makePrisma({
+      accounts: [firstBatch, secondBatch, []],
+    })
     const registry = new LabelRuleRegistry()
     registry.register(makeRule('rule-a', '1.0.0'))
 
     const result = await runRelabelBackfill(prisma, registry)
 
     expect(findMany).toHaveBeenCalledTimes(2)
-    expect(create).toHaveBeenCalledTimes(101)
+    expect(bulkPersist).toHaveBeenCalledTimes(101)
     expect(result).toEqual({ accountsProcessed: 101, labelsPersisted: 101 })
   })
 
@@ -187,7 +201,7 @@ describe('runRelabelBackfill', () => {
   })
 
   it('still evaluates every rule for an account where only some rules are stale', async () => {
-    const { prisma, create } = makePrisma({
+    const { prisma, bulkPersist } = makePrisma({
       accounts: [[sampleAccount], []],
       latestRuleVersions: [
         { accountId: 'acc1', labelDefinitionId: 'def-rule-a', ruleVersion: '1.0.0' },
@@ -201,12 +215,13 @@ describe('runRelabelBackfill', () => {
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    expect(create).toHaveBeenCalledTimes(1)
+    expect(bulkPersist).toHaveBeenCalledTimes(1)
+    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1)
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 1 })
   })
 
   it('skips persisting a page whose batched tweet fetch fails, without rejecting the whole backfill', async () => {
-    const { prisma, create } = makePrisma({
+    const { prisma, bulkPersist } = makePrisma({
       accounts: [[sampleAccount], []],
       queryRawTweetError: new Error('connection reset'),
     })
@@ -218,8 +233,10 @@ describe('runRelabelBackfill', () => {
     // The account is left un-persisted (not labeled from an empty, fetch-failure-induced
     // tweet sample) so it stays stale and a future run retries it with real data, rather
     // than the whole call rejecting or the account being wrongly marked up to date.
-    expect(create).not.toHaveBeenCalled()
-    expect(result).toEqual({ accountsProcessed: 0, labelsPersisted: 0 })
+    // It is still counted in accountsProcessed as attempted, so the progress log's
+    // denominator can still reach totalAccounts.
+    expect(bulkPersist).not.toHaveBeenCalled()
+    expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 0 })
   })
 
   it('retries a page left stale by a prior fetch failure once the fetch succeeds', async () => {
@@ -236,7 +253,7 @@ describe('runRelabelBackfill', () => {
       isPaidPromotion: false,
       inReplyToTweetId: null,
     }
-    const { prisma, create } = makePrisma({
+    const { prisma, bulkPersist } = makePrisma({
       accounts: [[sampleAccount], []],
       queryRawTweetRows: [tweetRow],
     })
@@ -245,7 +262,7 @@ describe('runRelabelBackfill', () => {
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    expect(create).toHaveBeenCalledTimes(1)
+    expect(bulkPersist).toHaveBeenCalledTimes(1)
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 1 })
   })
 
@@ -331,6 +348,60 @@ describe('runRelabelBackfill', () => {
       foreignVideoSourceCount: 1,
       quotedTweetAuthorId: 'bob',
       quotedTweetHasVideo: true,
+    })
+  })
+
+  describe('progress logging', () => {
+    afterEach(() => {
+      // Date.now と Logger.info をこのブロックのテストごとにスパイし直しており、
+      // 復元しないと後続のテスト (この describe 内・および同一ファイル内の
+      // 後続テスト) に漏れ出す。
+      vi.restoreAllMocks()
+    })
+
+    it('logs progress once accumulated processed accounts cross the configured interval', async () => {
+      const accounts = Array.from({ length: 3 }, (_, i) => ({
+        ...sampleAccount,
+        id: `acc${i}`,
+        screenName: `user${i}`,
+      }))
+      const { prisma, count } = makePrisma({ accounts: [accounts, []] })
+      count.mockResolvedValue(3)
+      const registry = new LabelRuleRegistry()
+      registry.register(makeRule('rule-a', '1.0.0'))
+      const { Logger } = await import('@book000/node-utils')
+      const info = vi.spyOn(Logger.configure('relabel'), 'info').mockImplementation(() => undefined)
+      let now = 0
+      vi.spyOn(Date, 'now').mockImplementation(() => {
+        now += 30_000
+        return now
+      })
+
+      const result = await runRelabelBackfill(prisma, registry, { progressLogIntervalAccounts: 2 })
+
+      expect(result).toEqual({ accountsProcessed: 3, labelsPersisted: 3 })
+      const progressLogs = info.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.startsWith('Relabel progress:'))
+      expect(progressLogs).toHaveLength(1)
+      expect(progressLogs[0]).toContain('2/3 accounts processed')
+      expect(progressLogs[0]).toContain('2 labels persisted')
+    })
+
+    it('does not log progress before the configured interval is reached', async () => {
+      const { prisma, count } = makePrisma({ accounts: [[sampleAccount], []] })
+      count.mockResolvedValue(1)
+      const registry = new LabelRuleRegistry()
+      registry.register(makeRule('rule-a', '1.0.0'))
+      const { Logger } = await import('@book000/node-utils')
+      const info = vi.spyOn(Logger.configure('relabel'), 'info').mockImplementation(() => undefined)
+
+      await runRelabelBackfill(prisma, registry, { progressLogIntervalAccounts: 1000 })
+
+      const progressLogs = info.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.startsWith('Relabel progress:'))
+      expect(progressLogs).toHaveLength(0)
     })
   })
 })

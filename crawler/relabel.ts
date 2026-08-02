@@ -2,18 +2,31 @@ import { Logger } from '@book000/node-utils'
 import { captureException, initMonitoring } from './monitoring/sentry'
 import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
-import { ensureLabelDefinitionsForRules, recordAccountLabel } from './db/label-repository'
+import { ensureLabelDefinitionsForRules, recordAccountLabelsBulk } from './db/label-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { CRAWL_LIMITS } from './config/crawl-limits'
 import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import { buildReplyHijackIndex } from './labels/reply-hijack-index'
-import type { AccountFeatureBundle, LabelRule } from './labels/types'
+import { runWithConcurrencyLimit } from './utils/concurrency-limit'
+import type { AccountFeatureBundle, LabelRule, LabelRuleResult } from './labels/types'
 
 const logger = Logger.configure('relabel')
 
 const ACCOUNT_BATCH_SIZE = 100
+// crawler/db/client.ts は connection_limit を明示しないため、Prisma のデフォルトプールサイズ
+// (num_physical_cpus * 2 + 1) に従う。過去のプール枯渇 (commit 3fa6cd3) を踏まえ、
+// 8 はそれに対して十分な余裕を残す値として選んだ。
+const ACCOUNT_CONCURRENCY = 8
+const PROGRESS_LOG_INTERVAL = 1000
+// これ未満の経過時間では速度算出がゼロ除算に近くなり異常値になるため、算出をスキップする閾値。
+const MIN_ELAPSED_MINUTES_FOR_RATE = 1 / 60_000
+
+export interface RelabelOptions {
+  /** 進捗ログを出力する処理済みアカウント数の間隔 (省略時は `PROGRESS_LOG_INTERVAL`)。 */
+  progressLogIntervalAccounts?: number
+}
 
 interface LatestLabelRow {
   accountId: string
@@ -192,20 +205,23 @@ function isFullyUpToDate(
 }
 
 /**
- * Re-evaluates every registered label rule against every account, persisting
- * a new `AccountLabel` row only for (account, rule) pairs whose stored
- * `ruleVersion` is stale or missing. Live crawling only re-evaluates an
- * account's labels the next time that account happens to be crawled again —
- * there is no automatic re-labeling when a rule's logic changes. This is the
- * explicit backfill that closes that gap on demand.
- * @param prisma - the Prisma client to use
- * @param registry - the label rule registry to evaluate against every account
- * @returns the number of accounts processed and labels (re)persisted
+ * 登録済みの全ラベルルールを全アカウントに対して再評価し、保存済み `ruleVersion` が
+ * 古いか未評価の (account, rule) ペアについてのみ新しい `AccountLabel` 行を永続化する。
+ * 通常のクロールでは対象アカウントが次に再クロールされるまでラベルは再評価されない
+ * (ルールのロジック変更に対する自動再評価はない) ため、そのギャップをオンデマンドで
+ * 埋める明示的なバックフィル処理。
+ * @param prisma - 使用する Prisma クライアント
+ * @param registry - 全アカウントに対して評価するラベルルールのレジストリ
+ * @param options - 任意の上書き設定 (例: 進捗ログの出力間隔)
+ * @returns 処理したアカウント数と (再) 永続化したラベル数
  */
 export async function runRelabelBackfill(
   prisma: PrismaClient,
   registry: LabelRuleRegistry,
+  options: RelabelOptions = {},
 ): Promise<RelabelResult> {
+  const progressLogIntervalAccounts = options.progressLogIntervalAccounts ?? PROGRESS_LOG_INTERVAL
+  const totalAccounts = await prisma.account.count()
   const labelDefinitionIds = await ensureLabelDefinitionsForRules(prisma, registry.getAll())
   const latestRuleVersions = await loadLatestRuleVersions(prisma)
   const replyCorpus = await loadReplyCorpus(prisma)
@@ -215,6 +231,35 @@ export async function runRelabelBackfill(
   let accountsProcessed = 0
   let labelsPersisted = 0
   let cursor: string | undefined
+  let lastLoggedAccountsProcessed = 0
+  let lastLoggedAt = Date.now()
+
+  /**
+   * 前回ログ出力からの処理済みアカウント数が `progressLogIntervalAccounts` を超えた
+   * タイミングで、累計進捗・直近区間の処理速度・残り時間の概算を1行ログ出力する。
+   * 経過時間が MIN_ELAPSED_MINUTES_FOR_RATE 未満の場合は、ゼロ除算や桁溢れした
+   * 速度値を出力しないよう速度算出をスキップし、件数のみ出力する。
+   */
+  function logProgressIfDue(): void {
+    const processedSinceLastLog = accountsProcessed - lastLoggedAccountsProcessed
+    if (processedSinceLastLog < progressLogIntervalAccounts) return
+
+    const now = Date.now()
+    const elapsedMinutes = (now - lastLoggedAt) / 60_000
+    let rateMessage = ''
+    if (elapsedMinutes > MIN_ELAPSED_MINUTES_FOR_RATE) {
+      const accountsPerMinute = processedSinceLastLog / elapsedMinutes
+      const remainingAccounts = totalAccounts - accountsProcessed
+      const etaMinutes =
+        accountsPerMinute > 0 ? Math.round(remainingAccounts / accountsPerMinute) : undefined
+      rateMessage = `, ${accountsPerMinute.toFixed(1)} accounts/min (recent), ETA ${etaMinutes ?? 'unknown'} min`
+    }
+    logger.info(
+      `Relabel progress: ${accountsProcessed}/${totalAccounts} accounts processed, ${labelsPersisted} labels persisted${rateMessage}`,
+    )
+    lastLoggedAccountsProcessed = accountsProcessed
+    lastLoggedAt = now
+  }
 
   for (;;) {
     const accounts: AccountRow[] = await prisma.account.findMany({
@@ -229,6 +274,7 @@ export async function runRelabelBackfill(
       (account) => !isFullyUpToDate(account, rules, labelDefinitionIds, latestRuleVersions),
     )
     accountsProcessed += accounts.length - staleAccounts.length
+    logProgressIfDue()
 
     let tweetsByAccount: Map<string, TweetRow[]>
     let tweetFetchFailed = false
@@ -247,13 +293,16 @@ export async function runRelabelBackfill(
       tweetFetchFailed = true
     }
 
-    // Persisting labels built from an empty tweet sample here would set `latestRuleVersions`
-    // to the current rule version for every stale account in this page, so `isFullyUpToDate`
-    // would wrongly treat them as current on the next run and they'd never be re-evaluated
-    // with real data. Skipping the persist loop entirely keeps them stale, so a future run
-    // retries the fetch and relabels them properly once it succeeds.
-    if (!tweetFetchFailed) {
-      for (const account of staleAccounts) {
+    // ここで空のツイートサンプルからラベルを永続化すると、このページの全 stale アカウントの
+    // latestRuleVersions が現在のルールバージョンに更新され、isFullyUpToDate に最新と
+    // みなされて再評価されなくなる。永続化をスキップして stale なまま残し、次回実行で
+    // 再取得・再評価させる。accountsProcessed には試行済みとしてカウントするため、
+    // フェッチ失敗時も進捗ログの分母が totalAccounts に到達する。
+    if (tweetFetchFailed) {
+      accountsProcessed += staleAccounts.length
+      logProgressIfDue()
+    } else {
+      await runWithConcurrencyLimit(staleAccounts, ACCOUNT_CONCURRENCY, async (account) => {
         try {
           const bundle = buildFeatureBundle(
             account,
@@ -261,34 +310,60 @@ export async function runRelabelBackfill(
             duplicateReplyIndex,
             replyHijackIndex,
           )
+          const labelsToPersist: {
+            labelDefinitionId: string
+            versionKey: string
+            method: string
+            ruleVersion: string
+            result: LabelRuleResult
+          }[] = []
           for (const { rule, result } of registry.applyAll(bundle)) {
             const labelDefinitionId = labelDefinitionIds.get(rule.key)
             if (!labelDefinitionId) {
-              logger.warn(`No LabelDefinition id found for rule "${rule.key}", skipping persistence`)
+              logger.warn(
+                `No LabelDefinition id found for rule "${rule.key}", skipping persistence`,
+              )
               continue
             }
             const versionKey = `${account.id}:${labelDefinitionId}`
             if (latestRuleVersions.get(versionKey) === rule.version) {
               continue
             }
-            await recordAccountLabel(prisma, {
-              accountId: account.id,
+            labelsToPersist.push({
               labelDefinitionId,
+              versionKey,
               method: rule.key,
               ruleVersion: rule.version,
               result,
             })
-            latestRuleVersions.set(versionKey, rule.version)
-            labelsPersisted++
+          }
+          if (labelsToPersist.length > 0) {
+            await recordAccountLabelsBulk(prisma, {
+              accountId: account.id,
+              labels: labelsToPersist.map(({ labelDefinitionId, method, ruleVersion, result }) => ({
+                labelDefinitionId,
+                method,
+                ruleVersion,
+                result,
+              })),
+            })
+            for (const { versionKey, ruleVersion } of labelsToPersist) {
+              latestRuleVersions.set(versionKey, ruleVersion)
+              labelsPersisted++
+            }
           }
           accountsProcessed++
+          logProgressIfDue()
         } catch (error) {
           logger.error(
             `Failed to relabel account ${account.id} (@${account.screenName}), skipping to next account`,
             error as Error,
           )
+          // 失敗しても試行済みとしてカウントする (でなければ進捗ログの分母が totalAccounts に到達しない)
+          accountsProcessed++
+          logProgressIfDue()
         }
-      }
+      })
     }
 
     if (accounts.length < ACCOUNT_BATCH_SIZE) break
