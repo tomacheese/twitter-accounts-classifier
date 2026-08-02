@@ -1,16 +1,15 @@
-// Shared by reply-flooding.ts (one account flooding a single target with paraphrased
-// replies) and reply-hijack-index.ts (many accounts each replying once to one target with
-// paraphrased text): both measure paraphrase-level textual similarity, differing only in
-// the axis they group by.
+// reply-flooding.ts (単一アカウントが1つの対象へ言い換えたリプライを連投する検出)と
+// reply-hijack-index.ts (複数アカウントがそれぞれ1つの対象へ言い換えたリプライを送る検出)の
+// 両方から共有され、いずれも言い換えレベルの文章類似度を測る点は同じで、グループ化する軸だけが異なる。
 const URL_PATTERN = /https?:\/\/\S+/g
 const MENTION_PATTERN = /@\w+/g
 const WHITESPACE_PATTERN = /\s+/g
 
 /**
- * Normalizes text for pairwise similarity comparison: strips URLs and @mentions (which
- * differ between otherwise-identical paraphrases), collapses whitespace, and lowercases.
- * @param text - the raw tweet text
- * @returns the normalized text
+ * ペアワイズ類似度比較用にテキストを正規化する。
+ * URL と @mention (言い換え間で異なる部分)を除去し、空白を畳んで小文字化する。
+ * @param text - ツイートの生本文
+ * @returns 正規化後のテキスト
  */
 export function normalizeForSimilarity(text: string): string {
   return text
@@ -22,13 +21,13 @@ export function normalizeForSimilarity(text: string): string {
 }
 
 /**
- * Builds the set of character bigrams (2-character substrings) in `text`.
+ * `text` 中の文字バイグラム (2文字の部分文字列)集合を構築する。
  *
- * Character bigrams rather than word tokens: Japanese text has no whitespace between
- * words, so a word-boundary tokenizer would treat most Japanese replies as a single token
- * and never detect their overlap.
- * @param text - already-normalized text
- * @returns the set of bigrams; a single-character string yields a one-element set
+ * 単語トークンではなく文字バイグラムを用いるのは、日本語は単語間に空白がなく、
+ * 単語境界によるトークナイザでは大半の日本語リプライが1トークンとなり、
+ * 重なりを検出できなくなるため。
+ * @param text - 正規化済みのテキスト
+ * @returns バイグラムの集合。1文字の文字列は要素数1の集合になる
  */
 export function bigramSet(text: string): Set<string> {
   const bigrams = new Set<string>()
@@ -41,10 +40,10 @@ export function bigramSet(text: string): Set<string> {
 }
 
 /**
- * Computes the Jaccard similarity (intersection over union) between two bigram sets.
- * @param a - first bigram set
- * @param b - second bigram set
- * @returns a value in `[0, 1]`, or 0 if either set is empty
+ * 2つのバイグラム集合間の Jaccard 類似度 (積集合を和集合で割った値)を計算する。
+ * @param a - 1つ目のバイグラム集合
+ * @param b - 2つ目のバイグラム集合
+ * @returns `[0, 1]` の範囲の値。いずれかの集合が空の場合は0
  */
 export function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) return 0
@@ -56,10 +55,9 @@ export function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
 }
 
 /**
- * Computes the average Jaccard similarity across every distinct pair of texts, after
- * normalizing and bigram-tokenizing each.
- * @param texts - raw texts to compare pairwise
- * @returns the average pairwise similarity, or 0 if fewer than 2 texts are given
+ * 各テキストを正規化・バイグラム化したうえで、すべての異なるペアの Jaccard 類似度の平均を計算する。
+ * @param texts - ペアワイズ比較する生テキスト
+ * @returns ペアワイズ類似度の平均。テキストが2件未満の場合は0
  */
 export function averagePairwiseSimilarity(texts: string[]): number {
   const bigramSets = texts.map((text) => bigramSet(normalizeForSimilarity(text)))
