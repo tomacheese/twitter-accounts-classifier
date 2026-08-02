@@ -105,6 +105,7 @@ describe('recordCrawlAccountRun', () => {
       followersSynced: true,
       warnings: [],
       errorMessage: null,
+      appVersion: 'v1.2.3',
     })
 
     expect(create).toHaveBeenCalledWith({
@@ -124,6 +125,7 @@ describe('recordCrawlAccountRun', () => {
         followersSynced: true,
         warnings: [],
         errorMessage: null,
+        appVersion: 'v1.2.3',
       },
     })
   })

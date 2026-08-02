@@ -58,6 +58,8 @@ export interface RecordCrawlAccountRunParams {
   followersSynced: boolean
   warnings: CrawlWarning[]
   errorMessage: string | null
+  /** crawler image に埋め込まれた APPLICATION_VERSION。値が取れない場合は "unknown"。 */
+  appVersion: string
 }
 
 export const CRAWL_ACCOUNT_CHECKPOINT_PHASES = [

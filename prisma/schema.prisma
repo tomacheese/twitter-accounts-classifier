@@ -196,6 +196,9 @@ model CrawlAccountRun {
   followersSynced    Boolean   @default(false)
   warnings           Json      @default("[]")
   errorMessage       String?
+  /// crawler image に埋め込まれた APPLICATION_VERSION (Docker build-arg)。値が取れない場合は "unknown"。
+  /// author_processing_failed 等の warning がどのビルドで発生したかを事後に追跡するための記録。
+  appVersion         String    @default("unknown")
 
   @@index([crawlRunId])
   @@index([startedAt])

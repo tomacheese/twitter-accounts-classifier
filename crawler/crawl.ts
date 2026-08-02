@@ -75,6 +75,10 @@ import { mergeTweetAdFlags, toAccountProfileInput } from './twitter/mappers'
 
 const logger = Logger.configure('crawl')
 
+// crawler/Dockerfile が build-arg APPLICATION_VERSION から ENV へ引き継いだ値。どのビルドが
+// crawl を実行したか CrawlAccountRun 側で事後追跡できるよう、warning と一緒に記録する。
+const APP_VERSION = process.env.APPLICATION_VERSION ?? 'unknown'
+
 export interface CrawlOpenApiClient {
   getTweetApi(): TweetApiLike & TweetDetailApiLike
   getUserApi(): UserApiLike
@@ -926,6 +930,7 @@ async function runAccountCycle(
       followersSynced: followers.synced,
       warnings,
       errorMessage: null,
+      appVersion: APP_VERSION,
     })
     return status
   } catch (error) {
@@ -945,6 +950,7 @@ async function runAccountCycle(
       followersSynced: false,
       warnings: [],
       errorMessage: String(error),
+      appVersion: APP_VERSION,
     })
     throw error
   }
