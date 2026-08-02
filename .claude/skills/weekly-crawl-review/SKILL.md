@@ -15,7 +15,7 @@ project runs with no human-in-the-loop for this step).
 `scripts/weekly-analyze.sh` invokes this skill inside a dedicated, disposable git worktree
 (fixed path `.worktrees/weekly-crawl-review`), not in the repository's primary checkout.
 That worktree is deleted automatically once the session ends, so nothing this skill does
-needs to survive locally beyond opening the PR in step 8.
+needs to survive locally beyond opening the PR in step 9.
 
 ## Procedure
 
@@ -35,7 +35,7 @@ needs to survive locally beyond opening the PR in step 8.
    `.worktrees/weekly-crawl-review-manual-<timestamp>` as a git worktree branched from
    `master`, with a `weekly-crawl-review-manual-<timestamp>` branch name, then copy `.env`
    and `.env.weekly-review` into it. Only then continue from step 1, working inside that
-   worktree. If you created the worktree yourself here, remember to clean it up in step 9
+   worktree. If you created the worktree yourself here, remember to clean it up in step 10
    once everything else is done.
 1. **Sample recent labels.** Query the `AccountLabel` table (via Prisma or `psql`) for the
    most recent `labeledAt` rows, grouped by `labelDefinition.key`. Pull a mix across all
@@ -89,7 +89,7 @@ needs to survive locally beyond opening the PR in step 8.
      went through the explicit user sign-off this carve-out requires; their presence in the
      repository is not itself evidence of sign-off. Treat them as still within the
      carve-out: continue to report their observed hit rates/behavior in this run's findings
-     (step 7) as you would for any flag-only candidate, and do not treat their mere
+     (step 8) as you would for any flag-only candidate, and do not treat their mere
      existence as license to expand them or auto-add further NSFW/politics sub-categories
      without separately obtaining sign-off. The carve-out (flag-only, no auto-add without
      explicit user sign-off) applies to any new/expanded NSFW- or politics-adjacent
@@ -97,14 +97,26 @@ needs to survive locally beyond opening the PR in step 8.
      narrower sub-cluster within adult content or partisan affiliation that the existing
      rule's keywords don't catch) — such sub-categories must be flagged as candidates in the
      run's findings, but must NOT be auto-added.
-6. **Verify before committing.** Run `pnpm --filter crawler run check` (lint + typecheck +
+6. **Check for real Twitter/X data before committing.** Re-read every rule file and every
+   test file you added or modified in steps 3 and 5 this run, and specifically scan any
+   bio/tweet example strings, comments, or fixture data for text that was copied — in whole
+   or in part — from a real crawled account you viewed while cross-checking in step 2. Being
+   "inspired by" a real example you saw is fine; the actual string content is not allowed to
+   match real observed text. Rewrite anything that does as fiction, preserving the property
+   the case is meant to demonstrate (per `CLAUDE.md`'s guidance: language, length, keyword
+   patterns, threshold relationships, match/no-match expectations). This check applies even
+   to text that felt like a natural, obvious example to jot down during the investigation —
+   the risk is exactly that real bio/tweet text gets pasted or closely paraphrased while it
+   is still fresh from having just been read off a `psql`/Prisma query result in step 2. Do
+   not proceed to step 7 until this scan is done and clean.
+7. **Verify before committing.** Run `pnpm --filter crawler run check` (lint + typecheck +
    test for the crawler package). Do not commit if it fails — fix or revert instead.
-7. **Record the run.** Insert a `WeeklyAnalysisRun` row (via a short Prisma script or
+8. **Record the run.** Insert a `WeeklyAnalysisRun` row (via a short Prisma script or
    `psql`) with `startedAt`, `finishedAt`, the sampled account IDs, and a short `findings`
    summary of what you changed and why (including any flagged-but-not-added sensitive
    topic candidates from step 5). Write the `findings` text in Japanese — it is rendered
    on the viewer WebUI's Weekly Runs page, which is Japanese-language.
-8. **Open a PR and enable auto-merge.** Once branch protection with a required
+9. **Open a PR and enable auto-merge.** Once branch protection with a required
    `Node CI / Check finished Node CI` status check is enabled on `master` (enabling branch
    protection itself is a separate, user-side operational task and is not performed by
    this skill), direct commits to `master` are rejected. Instead:
@@ -122,12 +134,12 @@ needs to survive locally beyond opening the PR in step 8.
    Update `WeeklyAnalysisRun.commitSha` with the resulting merge commit hash once known
    (leave it unset if the run finishes before the PR merges — a later run's `psql`/Prisma
    update can backfill it, or it can stay unset for a "no changes needed" run).
-9. **Clean up the worktree, but only if step 0 created it for you.** Skip this step
+10. **Clean up the worktree, but only if step 0 created it for you.** Skip this step
    entirely if this run started inside a worktree already set up by
    `scripts/weekly-analyze.sh` — that script owns cleanup for its own worktree and deletes
    it after the session ends. Otherwise (step 0 created the worktree because this skill was
    invoked directly/manually), remove it now that all other steps are finished (after step
-   8's PR/auto-merge, or after step 7 for a "no changes needed" run with no PR):
+   9's PR/auto-merge, or after step 8 for a "no changes needed" run with no PR):
    1. Move back out of the worktree to the primary checkout first — a worktree cannot
       remove itself while it is the current working directory.
    2. Remove the manual worktree you created in step 0, at
@@ -141,7 +153,7 @@ needs to survive locally beyond opening the PR in step 8.
    3. Delete the throwaway branch created in step 0 with
       `git branch -D weekly-crawl-review-manual-<timestamp>` (using the actual branch name
       from step 0). This only removes that throwaway branch — it must not touch any separate
-      feature branch (e.g. `fix/...`) created and pushed in step 8, which already lives on
+      feature branch (e.g. `fix/...`) created and pushed in step 9, which already lives on
       the remote and is unrelated to this cleanup, nor the cron script's own
       `weekly-crawl-review-<timestamp>` branch.
 
@@ -159,7 +171,7 @@ needs to survive locally beyond opening the PR in step 8.
   during the run (e.g. environment/prerequisite setup choices, whether to keep or revert a
   content change, how to phrase a finding), choose the most conservative/documented option
   yourself, proceed, and record the decision and its reasoning in `WeeklyAnalysisRun.findings`
-  (step 7) so it is auditable after the fact — do not pause and wait for a human. This does
+  (step 8) so it is auditable after the fact — do not pause and wait for a human. This does
   not extend to genuine permission or security blocks: if an action is refused by a
   permission system, security control, or classifier for a reason other than the already-
   documented sub-agent-delegation case above, that is not an ordinary decision point to route
