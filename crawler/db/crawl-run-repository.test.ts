@@ -7,31 +7,35 @@ import {
   loadCrawlAccountCheckpoints,
   recordCrawlAccountRun,
   startOrResumeCrawlRun,
+  touchCrawlRunHeartbeat,
 } from './crawl-run-repository'
 
 describe('startOrResumeCrawlRun', () => {
+  const staleThresholdMs = 3 * 21_600 * 1000
+
   it('creates a CrawlRun row when no interrupted run exists', async () => {
     const findFirst = vi.fn().mockResolvedValue(null)
     const create = vi.fn().mockResolvedValue({ id: 'run1' })
     const prisma = { crawlRun: { findFirst, create } } as unknown as PrismaClient
     const startedAt = new Date('2026-07-28T00:00:00Z')
 
-    const result = await startOrResumeCrawlRun(prisma, startedAt)
+    const result = await startOrResumeCrawlRun(prisma, startedAt, staleThresholdMs)
 
     expect(result).toEqual({ id: 'run1', latestAccountStatuses: new Map() })
     expect(findFirst).toHaveBeenCalledWith({
       where: { status: 'running' },
       orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
-      select: { id: true },
+      select: { id: true, lastHeartbeatAt: true },
     })
     expect(create).toHaveBeenCalledWith({
-      data: { startedAt, status: 'running' },
+      data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
     })
   })
 
-  it('reuses the newest interrupted run and keeps only each account’s latest status', async () => {
+  it('reuses the newest interrupted run when its heartbeat is within the threshold', async () => {
     const findFirst = vi.fn().mockResolvedValue({
       id: 'run2',
+      lastHeartbeatAt: new Date('2026-07-27T23:00:00Z'),
     })
     let sqlQuery: TemplateStringsArray | undefined
     let requestedRunId: string | undefined
@@ -44,12 +48,17 @@ describe('startOrResumeCrawlRun', () => {
       ])
     })
     const create = vi.fn()
+    const update = vi.fn()
     const prisma = {
-      crawlRun: { findFirst, create },
+      crawlRun: { findFirst, create, update },
       $queryRaw: queryRaw,
     } as unknown as PrismaClient
 
-    const result = await startOrResumeCrawlRun(prisma, new Date('2026-07-28T00:00:00Z'))
+    const result = await startOrResumeCrawlRun(
+      prisma,
+      new Date('2026-07-28T00:00:00Z'),
+      staleThresholdMs,
+    )
 
     expect(result).toEqual({
       id: 'run2',
@@ -64,6 +73,74 @@ describe('startOrResumeCrawlRun', () => {
     expect(sqlQuery.join('')).toContain('ORDER BY "username", "startedAt" DESC, "id" DESC')
     expect(requestedRunId).toBe('run2')
     expect(create).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('abandons a running row whose heartbeat exceeds the stale threshold and starts a new run', async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      id: 'abandoned-run',
+      // startedAt から 20 時間経過 (しきい値 18 時間 = 3 * 21600s を超える)
+      lastHeartbeatAt: new Date('2026-07-27T04:00:00Z'),
+    })
+    const create = vi.fn().mockResolvedValue({ id: 'new-run' })
+    const update = vi.fn().mockResolvedValue({})
+    const deleteCheckpoints = vi.fn().mockReturnValue({})
+    const deleteLabelClaims = vi.fn().mockReturnValue({})
+    const transaction = vi.fn().mockResolvedValue([])
+    const prisma = {
+      crawlRun: { findFirst, create, update },
+      crawlAccountCheckpoint: { deleteMany: deleteCheckpoints },
+      crawlAccountLabelRun: { deleteMany: deleteLabelClaims },
+      $transaction: transaction,
+    } as unknown as PrismaClient
+    const startedAt = new Date('2026-07-28T00:00:00Z')
+
+    const result = await startOrResumeCrawlRun(prisma, startedAt, staleThresholdMs)
+
+    expect(result).toEqual({ id: 'new-run', latestAccountStatuses: new Map() })
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'abandoned-run' },
+      data: { finishedAt: startedAt, status: 'failed' },
+    })
+    expect(deleteCheckpoints).toHaveBeenCalledWith({ where: { crawlRunId: 'abandoned-run' } })
+    expect(deleteLabelClaims).toHaveBeenCalledWith({ where: { crawlRunId: 'abandoned-run' } })
+    expect(create).toHaveBeenCalledWith({
+      data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
+    })
+  })
+
+  it('resumes a running row exactly at the stale threshold boundary (not stale)', async () => {
+    const startedAt = new Date('2026-07-28T00:00:00Z')
+    const lastHeartbeatAt = new Date(startedAt.getTime() - staleThresholdMs)
+    const findFirst = vi.fn().mockResolvedValue({ id: 'run3', lastHeartbeatAt })
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const create = vi.fn()
+    const update = vi.fn()
+    const prisma = {
+      crawlRun: { findFirst, create, update },
+      $queryRaw: queryRaw,
+    } as unknown as PrismaClient
+
+    const result = await startOrResumeCrawlRun(prisma, startedAt, staleThresholdMs)
+
+    expect(result.id).toBe('run3')
+    expect(create).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
+  })
+})
+
+describe('touchCrawlRunHeartbeat', () => {
+  it('updates lastHeartbeatAt for the given run id', async () => {
+    const update = vi.fn().mockResolvedValue({})
+    const prisma = { crawlRun: { update } } as unknown as PrismaClient
+    const at = new Date('2026-07-28T00:10:00Z')
+
+    await touchCrawlRunHeartbeat(prisma, 'run1', at)
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'run1' },
+      data: { lastHeartbeatAt: at },
+    })
   })
 })
 

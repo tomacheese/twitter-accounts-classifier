@@ -97,34 +97,65 @@ export interface CrawlRunStartResult {
 
 /**
  * 単一の crawler プロセスだけが動作する環境で、中断された crawl run を再開し、存在しなければ新規に作成する。
+ * 既存の `running` 行が見つかっても、その `lastHeartbeatAt` が `staleThresholdMs` を超えて
+ * 更新されていなければ放置されたものとみなし、`failed` として確定した上で新しい行を作る。
  * @param prisma - the Prisma client
  * @param startedAt - 新規 run の開始時刻
+ * @param staleThresholdMs - 放置判定のしきい値 (ミリ秒)。`startedAt - lastHeartbeatAt` がこれを
+ *   超えていれば放置とみなす
  * @returns run ID とアカウントごとの最新試行の status
  */
 export async function startOrResumeCrawlRun(
   prisma: PrismaClient,
   startedAt: Date,
+  staleThresholdMs: number,
 ): Promise<CrawlRunStartResult> {
   const existingRun = await prisma.crawlRun.findFirst({
     where: { status: 'running' },
     orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
-    select: { id: true },
+    select: { id: true, lastHeartbeatAt: true },
   })
+
   if (existingRun) {
-    const accountRuns = await prisma.$queryRaw<{ username: string; status: string }[]>`
-      SELECT DISTINCT ON ("username") "username", "status"
-      FROM "CrawlAccountRun"
-      WHERE "crawlRunId" = ${existingRun.id}
-      ORDER BY "username", "startedAt" DESC, "id" DESC
-    `
-    const latestAccountStatuses = new Map(
-      accountRuns.map(({ username, status }) => [username, status]),
-    )
-    return { id: existingRun.id, latestAccountStatuses }
+    const isStale = startedAt.getTime() - existingRun.lastHeartbeatAt.getTime() > staleThresholdMs
+    if (!isStale) {
+      const accountRuns = await prisma.$queryRaw<{ username: string; status: string }[]>`
+        SELECT DISTINCT ON ("username") "username", "status"
+        FROM "CrawlAccountRun"
+        WHERE "crawlRunId" = ${existingRun.id}
+        ORDER BY "username", "startedAt" DESC, "id" DESC
+      `
+      const latestAccountStatuses = new Map(
+        accountRuns.map(({ username, status }) => [username, status]),
+      )
+      return { id: existingRun.id, latestAccountStatuses }
+    }
+
+    // 放置された行を failed として確定し、二度と参照されないチェックポイント・
+    // label claim を片付ける。この行の id は以降どこからも再利用されない。
+    await finishCrawlRun(prisma, existingRun.id, startedAt, 'failed')
+    await clearCrawlAccountCheckpoints(prisma, existingRun.id)
   }
 
-  const run = await prisma.crawlRun.create({ data: { startedAt, status: 'running' } })
+  const run = await prisma.crawlRun.create({
+    data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
+  })
   return { id: run.id, latestAccountStatuses: new Map() }
+}
+
+/**
+ * 実行中の CrawlRun の生存を記録する。放置判定 (startOrResumeCrawlRun) は
+ * この値を基準にするため、アカウント処理が進む限り定期的に呼び出す必要がある。
+ * @param prisma - the Prisma client
+ * @param id - 対象の CrawlRun ID
+ * @param at - 記録する時刻
+ */
+export async function touchCrawlRunHeartbeat(
+  prisma: PrismaClient,
+  id: string,
+  at: Date,
+): Promise<void> {
+  await prisma.crawlRun.update({ where: { id }, data: { lastHeartbeatAt: at } })
 }
 
 /**
