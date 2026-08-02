@@ -40,47 +40,45 @@ function tweet(
 }
 
 describe('videoRepostRule', () => {
-  it('is false when there are no quoted-video candidates', () => {
+  it('is false when there are no source-attributed videos', () => {
     const result = videoRepostRule.evaluate(makeBundle([tweet({ quotedTweetAuthorId: null })]))
     expect(result.value).toBe(false)
     expect(result.confidence).toBe(0)
+    expect(result.reason).toBe('foreignVideoPostCount=0 (n=1)')
   })
 
-  it('is false when candidates are below the minimum sample size', () => {
-    const result = videoRepostRule.evaluate(makeBundle([tweet({ id: 't1' }), tweet({ id: 't2' })]))
-    expect(result.value).toBe(false)
-    expect(result.confidence).toBe(0)
-  })
-
-  it('is true when there are enough quoted-video candidates', () => {
+  it('does not treat repeated quote-posts of another account video as reuse', () => {
     const result = videoRepostRule.evaluate(
       makeBundle([tweet({ id: 't1' }), tweet({ id: 't2' }), tweet({ id: 't3' })]),
     )
+    expect(result.value).toBe(false)
+    expect(result.confidence).toBe(0)
+    expect(result.reason).toBe('foreignVideoPostCount=0 (n=3)')
+  })
+
+  it('is true when X reports three direct videos from other source accounts', () => {
+    const result = videoRepostRule.evaluate(
+      makeBundle([
+        tweet({ id: 't1', foreignVideoSourceCount: 1 }),
+        tweet({ id: 't2', foreignVideoSourceCount: 1 }),
+        tweet({ id: 't3', foreignVideoSourceCount: 1 }),
+      ]),
+    )
     expect(result.value).toBe(true)
     expect(result.confidence).toBe(1)
+    expect(result.reason).toBe('foreignVideoPostCount=3 (n=3)')
   })
 
-  it('excludes tweets quoting the account own video from candidates', () => {
+  it('excludes native retweets even when they carry source metadata', () => {
     const result = videoRepostRule.evaluate(
       makeBundle([
-        tweet({ id: 't1', quotedTweetAuthorId: 'alice' }),
-        tweet({ id: 't2', quotedTweetAuthorId: 'alice' }),
-        tweet({ id: 't3', quotedTweetAuthorId: 'alice' }),
+        tweet({ id: 't1', isRetweet: true, foreignVideoSourceCount: 1 }),
+        tweet({ id: 't2', isRetweet: true, foreignVideoSourceCount: 1 }),
+        tweet({ id: 't3', isRetweet: true, foreignVideoSourceCount: 1 }),
       ]),
     )
     expect(result.value).toBe(false)
     expect(result.confidence).toBe(0)
-  })
-
-  it('excludes tweets whose quoted content has no video (photo-only, or unevaluated)', () => {
-    const result = videoRepostRule.evaluate(
-      makeBundle([
-        tweet({ id: 't1', quotedTweetHasVideo: false }),
-        tweet({ id: 't2', quotedTweetHasVideo: null }),
-        tweet({ id: 't3', quotedTweetHasVideo: undefined }),
-      ]),
-    )
-    expect(result.value).toBe(false)
-    expect(result.confidence).toBe(0)
+    expect(result.reason).toBe('foreignVideoPostCount=0 (n=3)')
   })
 })

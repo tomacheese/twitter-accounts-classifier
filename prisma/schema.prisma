@@ -78,6 +78,7 @@ model Tweet {
   quotedTweetId              String?
   quotedTweetAuthorId        String?
   quotedTweetHasVideo        Boolean?
+  foreignVideoSourceCount    Int?
   source                     String
   collectedAt                DateTime @default(now())
 

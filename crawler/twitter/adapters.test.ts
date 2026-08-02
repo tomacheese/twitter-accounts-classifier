@@ -98,6 +98,29 @@ describe('createTweetApiLike (real-shape adapter)', () => {
 
     expect(result.data.data[0].legacy.retweetedStatusIdStr).toBe('original1')
   })
+
+  it('preserves source-user metadata on directly attached video media', async () => {
+    const sourceAttributedVideo = makeRealTweet({
+      tweet: {
+        restId: 't-source-attributed',
+        legacy: {
+          ...makeRealTweet().tweet.legacy,
+          extendedEntities: {
+            media: [{ type: 'video', sourceUserIdStr: 'source-author' }],
+          },
+        },
+      } as RealTweet,
+    })
+    const getHomeTimeline = vi.fn().mockReturnValue(makeTimelineResponse([sourceAttributedVideo]))
+    const tweetApi: TweetApiUtils = { getHomeTimeline } as unknown as TweetApiUtils
+
+    const adapter = createTweetApiLike(tweetApi)
+    const result = await adapter.getHomeTimeline({ count: 20 })
+
+    expect(result.data.data[0].legacy.extendedEntities?.media).toEqual([
+      { type: 'video', sourceUserIdStr: 'source-author' },
+    ])
+  })
 })
 
 describe('createUserApiLike (real-shape adapter)', () => {

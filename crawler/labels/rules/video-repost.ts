@@ -1,24 +1,19 @@
 import type { LabelRule } from '../types'
 
-const MIN_QUOTE_SAMPLE = 3
-
 export const videoRepostRule: LabelRule = {
   key: 'video_repost',
-  description: '他者が投稿した動画付きツイートを引用ツイートし、自分のコメントを付けている',
-  version: '1.0.0',
+  description: '他者アカウントを動画の出典として X が示す動画を再利用している',
+  version: '2.0.0',
   evaluate(bundle) {
     const candidates = bundle.recentTweets.filter(
-      (t) =>
-        t.quotedTweetAuthorId != null &&
-        t.quotedTweetAuthorId !== bundle.account.id &&
-        t.quotedTweetHasVideo === true,
+      (tweet) => !tweet.isRetweet && (tweet.foreignVideoSourceCount ?? 0) > 0,
     )
-    const value = candidates.length >= MIN_QUOTE_SAMPLE
+    const value = candidates.length >= 3
 
     return {
       value,
       confidence: value ? 1 : 0,
-      reason: `videoRepostQuoteCount=${candidates.length} (n=${bundle.recentTweets.length})`,
+      reason: `foreignVideoPostCount=${candidates.length} (n=${bundle.recentTweets.length})`,
     }
   },
 }

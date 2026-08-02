@@ -23,6 +23,7 @@ export interface TweetInput {
   isPaidPromotion: boolean
   hasAiGeneratedMedia: boolean | null
   aiGeneratedDetectionSource: string | null
+  foreignVideoSourceCount?: number | null
   quotedTweetId: string | null
   quotedTweetAuthorId: string | null
   quotedTweetHasVideo: boolean | null
@@ -48,6 +49,7 @@ export async function upsertTweet(prisma: PrismaClient, input: TweetInput): Prom
       isPaidPromotion: true,
       hasAiGeneratedMedia: true,
       aiGeneratedDetectionSource: true,
+      foreignVideoSourceCount: true,
       quotedTweetId: true,
       quotedTweetAuthorId: true,
       quotedTweetHasVideo: true,
@@ -68,6 +70,10 @@ export async function upsertTweet(prisma: PrismaClient, input: TweetInput): Prom
       hasAiGeneratedMedia: input.hasAiGeneratedMedia ?? existing?.hasAiGeneratedMedia ?? null,
       aiGeneratedDetectionSource:
         input.aiGeneratedDetectionSource ?? existing?.aiGeneratedDetectionSource ?? null,
+      foreignVideoSourceCount:
+        input.foreignVideoSourceCount == null
+          ? (existing?.foreignVideoSourceCount ?? null)
+          : Math.max(input.foreignVideoSourceCount, existing?.foreignVideoSourceCount ?? 0),
       quotedTweetId: input.quotedTweetId ?? existing?.quotedTweetId ?? null,
       quotedTweetAuthorId: input.quotedTweetAuthorId ?? existing?.quotedTweetAuthorId ?? null,
       quotedTweetHasVideo: input.quotedTweetHasVideo ?? existing?.quotedTweetHasVideo ?? null,

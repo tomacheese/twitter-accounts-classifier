@@ -36,6 +36,9 @@ export interface RawTweetResult {
     isPaidPromotion?: boolean
     hasAiGeneratedMedia?: boolean | null
     aiGeneratedDetectionSource?: string | null
+    extendedEntities?: {
+      media?: { type: string; sourceUserIdStr?: string | null }[]
+    }
     quotedStatusResult?: {
       result: {
         restId: string
@@ -80,6 +83,15 @@ export interface ToTweetInputContext {
   viewerAccountId: string
 }
 
+function mergeForeignVideoSourceCount(
+  current: number | null | undefined,
+  previous: number | null | undefined,
+): number | null {
+  if (current == null) return previous ?? null
+  if (previous == null) return current
+  return Math.max(current, previous)
+}
+
 /**
  * Deduplicates tweets by id, OR-ing `isPromoted`/`isPaidPromotion` and coalescing the
  * quoted-tweet fields across duplicate copies of the same tweet id. The same tweet can
@@ -103,6 +115,10 @@ export function mergeTweetAdFlags(tweets: TweetInput[]): TweetInput[] {
       ...tweet,
       isPromoted: tweet.isPromoted || (existing?.isPromoted ?? false),
       isPaidPromotion: tweet.isPaidPromotion || (existing?.isPaidPromotion ?? false),
+      foreignVideoSourceCount: mergeForeignVideoSourceCount(
+        tweet.foreignVideoSourceCount,
+        existing?.foreignVideoSourceCount,
+      ),
       quotedTweetId: tweet.quotedTweetId ?? existing?.quotedTweetId ?? null,
       quotedTweetAuthorId: tweet.quotedTweetAuthorId ?? existing?.quotedTweetAuthorId ?? null,
       quotedTweetHasVideo: tweet.quotedTweetHasVideo ?? existing?.quotedTweetHasVideo ?? null,
@@ -124,6 +140,14 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
         (media) => media.type === 'video' || media.type === 'animated_gif',
       )
     : null
+  const foreignVideoSourceCount = raw.legacy.extendedEntities
+    ? raw.legacy.extendedEntities.media?.filter(
+        (media) =>
+          (media.type === 'video' || media.type === 'animated_gif') &&
+          media.sourceUserIdStr != null &&
+          media.sourceUserIdStr !== raw.user.restId,
+      ).length ?? 0
+    : null
 
   return {
     id: raw.restId,
@@ -143,6 +167,7 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
     isPaidPromotion: raw.legacy.isPaidPromotion ?? false,
     hasAiGeneratedMedia: raw.legacy.hasAiGeneratedMedia ?? null,
     aiGeneratedDetectionSource: raw.legacy.aiGeneratedDetectionSource ?? null,
+    foreignVideoSourceCount,
     quotedTweetId: quotedResult?.restId ?? null,
     quotedTweetAuthorId: quotedResult?.user?.restId ?? null,
     quotedTweetHasVideo,
