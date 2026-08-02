@@ -22,10 +22,9 @@ export async function ensureLabelDefinition(
 }
 
 /**
- * Ensures a `LabelDefinition` exists for every given rule.
- * @param prisma - the Prisma client
- * @param rules - the rules to ensure `LabelDefinition`s for
- * @returns a map from each rule's key to its `LabelDefinition` id
+ * @param prisma - Prisma クライアント
+ * @param rules - `LabelDefinition` の存在を保証する対象ルール
+ * @returns 各ルールの key からその `LabelDefinition` id へのマップ
  */
 export async function ensureLabelDefinitionsForRules(
   prisma: PrismaClient,

@@ -1,20 +1,13 @@
 import type { PrismaClient } from '../generated/prisma'
 import type { ReplyHijackCorpusEntry } from '../labels/reply-hijack-index'
 
-// Bounded by row count (matching this project's existing `take`-based limits elsewhere)
-// rather than a date window: the current reply-tweet volume (a few thousand rows) is
-// small enough that a straight recency cap is simpler than introducing a new
-// time-window concept.
+// 日付レンジではなく件数で上限を区切る: 新しい時間窓の概念を導入するより、既存の
+// `take` ベースの上限に合わせるほうがシンプルなため。
 const REPLY_CORPUS_LIMIT = 20_000
 
 /**
- * Loads a bounded corpus of reply tweets across all accounts, most recent first. The
- * returned shape is a superset of `ReplyCorpusEntry` (see
- * `crawler/labels/duplicate-reply-index.ts`), so this one loader feeds both
- * `buildDuplicateReplyIndex` and `buildReplyHijackIndex` (see
- * `crawler/labels/reply-hijack-index.ts`).
- * @param prisma - the Prisma client to query
- * @returns the reply corpus, most recently collected first
+ * @param prisma - Prisma クライアント
+ * @returns 収集日時が新しい順の返信コーパス
  */
 export async function loadReplyCorpus(prisma: PrismaClient): Promise<ReplyHijackCorpusEntry[]> {
   return prisma.tweet.findMany({

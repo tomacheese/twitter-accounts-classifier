@@ -5,10 +5,8 @@ import type { FollowListResult } from '../twitter/follows'
 
 const logger = Logger.configure('follow-repository')
 
-// Each account is upserted independently, mirroring `upsertTweets`' per-item error
-// handling in `./tweet-repository` - a single bad profile (e.g. a suspended account
-// appearing in a follow list) must not stop the rest of the batch, nor the edge sync
-// that follows it, from being persisted.
+// `./tweet-repository` の `upsertTweets` と同様、アカウントごとに個別に upsert する:
+// 1 件の不正なプロフィールで、残りのバッチや後続の edge 同期まで止めてはならないため。
 async function upsertFollowAuthors(prisma: PrismaClient, result: FollowListResult): Promise<void> {
   for (const author of result.authors) {
     try {
@@ -23,14 +21,11 @@ async function upsertFollowAuthors(prisma: PrismaClient, result: FollowListResul
 }
 
 /**
- * Syncs the `Follow` edges for the accounts a given account follows: upserts an `Account`
- * row for each discovered account, then upserts a `Follow` edge per id. When `result.reachedEnd`
- * is true (the full following list was enumerated), also deletes edges for accounts no
- * longer present, detecting unfollows. The edge upserts and the prune run in a single
- * transaction so a mid-sync failure never leaves stale and fresh edges inconsistently mixed.
- * @param prisma - the Prisma client
- * @param followerId - the account whose following list this is
- * @param result - the fetched following list
+ * edge の upsert と削除を 1 つのトランザクションにまとめる: 同期途中の失敗で、新旧の
+ * edge が中途半端に混在した状態を残さないため。
+ * @param prisma - Prisma クライアント
+ * @param followerId - フォロー中リストの対象アカウント
+ * @param result - 取得したフォロー中リスト
  */
 export async function syncFollowing(
   prisma: PrismaClient,
@@ -57,12 +52,9 @@ export async function syncFollowing(
       })
     }
 
-    // `reachedEnd` alone isn't enough to gate pruning: an empty `result.ids` compiles
-    // `notIn: []` to a match-everything predicate, so a single transient empty-page
-    // response (rate limiting, an auth hiccup) would wipe every recorded edge instead of
-    // just the ones actually gone. Requiring at least one confirmed-current id anchors
-    // the comparison; an account that genuinely unfollows everyone keeps its last stale
-    // edge until a future cycle observes at least one live id again.
+    // `reachedEnd` だけでは削除の可否を判断しない: `result.ids` が空だと `notIn: []` は
+    // 全件一致の条件になってしまい、一時的な空応答 (レート制限や認証エラー) だけで
+    // 記録済みの edge を全消去しかねないため、確認済みの id が 1 件以上ある場合のみ削除する。
     if (result.reachedEnd && result.ids.length > 0) {
       await tx.follow.deleteMany({
         where: { followerId, followeeId: { notIn: result.ids } },
@@ -72,11 +64,10 @@ export async function syncFollowing(
 }
 
 /**
- * Syncs the `Follow` edges for the accounts that follow a given account - the symmetric
- * counterpart of {@link syncFollowing}, fixing `followeeId` instead of `followerId`.
- * @param prisma - the Prisma client
- * @param followeeId - the account whose follower list this is
- * @param result - the fetched follower list
+ * {@link syncFollowing} の対称版: `followerId` の代わりに `followeeId` を固定する。
+ * @param prisma - Prisma クライアント
+ * @param followeeId - フォロワーリストの対象アカウント
+ * @param result - 取得したフォロワーリスト
  */
 export async function syncFollowers(
   prisma: PrismaClient,
@@ -103,7 +94,7 @@ export async function syncFollowers(
       })
     }
 
-    // See the matching comment in `syncFollowing` above.
+    // `syncFollowing` 側の同じコメントを参照。
     if (result.reachedEnd && result.ids.length > 0) {
       await tx.follow.deleteMany({
         where: { followeeId, followerId: { notIn: result.ids } },
