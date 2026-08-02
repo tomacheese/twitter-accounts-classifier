@@ -3,24 +3,19 @@ import { getPrismaClient } from '@/lib/prisma'
 import { getAllWeeklyRuns } from '@/lib/queries/weekly-runs'
 import { ErrorFallback } from '../components/error-fallback'
 
-// This page always reads live data, so opt it out of static prerendering:
-// without this, `next build` tries to statically generate it at build time,
-// when no database connection is available.
+// このページは常に最新データを読むため、静的プリレンダリングの対象から外している。
+// 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
 
 /**
- * Weekly analysis run history page: the full list of `WeeklyAnalysisRun`
- * records, most recent first, with each run's full findings text available
- * behind an expandable disclosure.
- * @returns the rendered weekly run history page
+ * @returns 週次分析実行履歴ページの描画結果
  */
 export default async function WeeklyRunsPage(): Promise<React.ReactElement> {
   let runs: Awaited<ReturnType<typeof getAllWeeklyRuns>>
   try {
     runs = await getAllWeeklyRuns(getPrismaClient())
   } catch (error) {
-    // Log the full error server-side but show the client a generic message:
-    // error.message can leak SQL/connection details from the driver.
+    // エラーの詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため。
     console.error('Failed to load weekly analysis runs:', error)
     return <ErrorFallback message="Failed to load weekly analysis runs." />
   }

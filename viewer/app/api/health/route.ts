@@ -1,13 +1,8 @@
 import { NextResponse } from 'next/server'
 
-// Liveness probe only — deliberately does not touch the database.
-//
-// The Docker healthcheck targets this route rather than '/', whose
-// KPI/label-distribution queries read AccountLabelLatest but can still stall
-// under unrelated disk I/O contention or during a rollout where the table's
-// migration hasn't landed yet — longer than a healthcheck should wait.
-// Whether the process is up and serving is a separate question from whether
-// one such query is currently fast.
+// 生存確認のみを目的としており、意図的に DB へはアクセスしない。
+// Docker のヘルスチェックは '/' ではなくこのルートを対象にしている。
+// '/' の KPI・ラベル分布クエリはディスク I/O 競合やロールアウト中のマイグレーション未適用によって詰まることがあり、プロセスの生死とクエリ1件が現在高速かどうかは別の問題として扱う必要があるため。
 export function GET(): NextResponse {
   return NextResponse.json({ status: 'ok' })
 }

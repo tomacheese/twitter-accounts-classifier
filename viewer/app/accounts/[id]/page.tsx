@@ -9,9 +9,8 @@ import { ErrorFallback } from '../../components/error-fallback'
 const RECENT_TWEET_COUNT = 20
 
 /**
- * Account detail page: profile, full label history, and recent tweets.
- * @param props - the route's `id` path parameter
- * @returns the rendered account detail page
+ * @param props - ルートの `id` パスパラメータ
+ * @returns アカウント詳細ページの描画結果
  */
 export default async function AccountDetailPage({
   params,
@@ -23,8 +22,7 @@ export default async function AccountDetailPage({
   try {
     detail = await getAccountDetail(getPrismaClient(), id, RECENT_TWEET_COUNT)
   } catch (error) {
-    // Log the full error server-side but show the client a generic message:
-    // error.message can leak SQL/connection details from the driver.
+    // エラーの詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため。
     console.error('Failed to load account detail:', error)
     return <ErrorFallback message="Failed to load the account." />
   }

@@ -6,14 +6,12 @@ const JST_FORMATTER = new Intl.DateTimeFormat('en-US', {
   hour: '2-digit',
   minute: '2-digit',
   second: '2-digit',
-  // `hour12: false` alone can render midnight as "24:00:00" in some ICU implementations;
-  // `hourCycle: 'h23'` pins it to the expected 00:00:00-23:59:59 range.
+  // hour12: false だけでは ICU の実装によっては深夜0時が "24:00:00" と表示されることがあるため、hourCycle: 'h23' で 00:00:00〜23:59:59 の範囲に固定している。
   hourCycle: 'h23',
 })
 
 /**
- * Formats a Date as `yyyy/MM/dd HH:mm:ss` in JST (Asia/Tokyo), regardless of the
- * server/client's local timezone.
+ * サーバー・クライアントのローカルタイムゾーンに関わらず、日付を JST (Asia/Tokyo) の `yyyy/MM/dd HH:mm:ss` 形式でフォーマットする。
  */
 export function formatDateTime(date: Date): string {
   const parts = Object.fromEntries(

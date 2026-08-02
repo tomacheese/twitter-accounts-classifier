@@ -5,24 +5,19 @@ import { getAllCrawlRuns } from '@/lib/queries/crawl-runs'
 import { ErrorFallback } from '../components/error-fallback'
 import { StatusBadge } from '../components/status-badge'
 
-// This page always reads live data, so opt it out of static prerendering:
-// without this, `next build` tries to statically generate it at build time,
-// when no database connection is available.
+// このページは常に最新データを読むため、静的プリレンダリングの対象から外している。
+// 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
 
 /**
- * Crawl run history page: a lightweight summary of every `CrawlRun` record, most
- * recent first, each linking to its dedicated detail page for the per-account
- * breakdown.
- * @returns the rendered crawl run history page
+ * @returns クロール実行履歴ページの描画結果
  */
 export default async function CrawlRunsPage(): Promise<React.ReactElement> {
   let runs: Awaited<ReturnType<typeof getAllCrawlRuns>>
   try {
     runs = await getAllCrawlRuns(getPrismaClient())
   } catch (error) {
-    // Log the full error server-side but show the client a generic message:
-    // error.message can leak SQL/connection details from the driver.
+    // エラーの詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため。
     console.error('Failed to load crawl runs:', error)
     return <ErrorFallback message="Failed to load crawl runs." />
   }

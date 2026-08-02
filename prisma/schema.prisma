@@ -3,10 +3,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// crawler and viewer are independent pnpm workspace packages, each with its own
-// node_modules tree, so a default (output-less) generator's implicit
-// `node_modules/.prisma/client` resolution can't be reached from either package's
-// own dependency tree. A custom `output` sidesteps node_modules resolution entirely.
+// crawler と viewer は別々の pnpm ワークスペースパッケージであり、それぞれ独立した node_modules を持つため、output を指定しないデフォルトの生成先はどちらのパッケージからも解決できない。
+// そのため output で生成先を明示的に指定している。
 generator client {
   provider = "prisma-client-js"
   output   = "../crawler/generated/prisma"
@@ -42,10 +40,7 @@ model Account {
   followerEdges            Follow[]       @relation("FollowerEdges")
   followeeEdges            Follow[]       @relation("FolloweeEdges")
 
-  // The Accounts page (viewer/lib/queries/accounts.ts's listAccounts) sorts by
-  // whichever of these three columns the user picked, with no other filter in
-  // the common case - without an index Postgres has to sort the whole table
-  // on every page load as Account grows.
+  // この3カラムはいずれもフィルタなしで並び替えに使われうるため、インデックスがないと Account の行数が増えるほどページ表示のたびに全件ソートが発生する。
   @@index([followersCount])
   @@index([tweetCount])
   @@index([lastCrawledAt])
@@ -68,13 +63,10 @@ model Tweet {
   retweetedTweetId           String?
   isPromoted                 Boolean  @default(false)
   isPaidPromotion            Boolean  @default(false)
-  // No default (null): rows collected before this column existed were never evaluated
-  // for AI-generated media at all, and null keeps that "unknown" state distinct from a
-  // real false/true reported by a subsequent fetch. See the migration for detail.
+  // この列が存在する前に収集された行は AI 生成メディアの判定自体が行われていないため、デフォルトを false ではなく null にすることで、未評価の状態と実際に false/true と判定された状態を区別している。
   hasAiGeneratedMedia        Boolean?
   aiGeneratedDetectionSource String?
-  // No default (null), same "unknown vs. confirmed" convention as hasAiGeneratedMedia
-  // above. See the migration for detail.
+  // hasAiGeneratedMedia と同じ理由で、デフォルトは false ではなく null にしている。
   quotedTweetId              String?
   quotedTweetAuthorId        String?
   quotedTweetHasVideo        Boolean?
@@ -107,34 +99,15 @@ model AccountLabel {
   ruleVersion       String
   labeledAt         DateTime        @default(now())
 
-  // viewer/lib/queries/account-detail.ts の
-  // `accountLabel.findMany({ where: { accountId }, orderBy: { labeledAt: 'desc' } })` が
-  // 使う唯一の単体インデックス。下の複合インデックスは2番目のカラムが labelDefinitionId
-  // のため代用できない。`labelDefinitionId`・`labeledAt` 単体を先頭カラムとする絞り込み/
-  // ソートは crawler/viewer のホットパスには存在しない (`.claude/skills/weekly-crawl-review/
-  // SKILL.md` の週次レビューのみ両方使うが、週1回・レイテンシ要件のないバッチ処理のため
-  // 単体インデックス維持のコストに見合わないと判断した。詳細は Issue #21 と対応する
-  // マイグレーションのコメントを参照)。
+  // アカウント詳細ページが labeledAt 降順で取得する際に使う唯一の単体インデックス。下の複合インデックスは2番目のカラムが labelDefinitionId のため代用できない。
+  // labelDefinitionId や labeledAt を先頭カラムとする単体インデックスは、crawler・viewer の主要な処理経路では使われないため用意していない。
   @@index([accountId])
-  // crawler/relabel.ts の loadLatestRuleVersions が実行する
-  // `DISTINCT ON ("accountId", "labelDefinitionId") ... ORDER BY "accountId",
-  // "labelDefinitionId", "labeledAt" DESC, "id" DESC` にそのまま一致させる
-  // ためのインデックス。AccountLabelLatest は ruleVersion を持たないため、
-  // このバックフィル用クエリだけは AccountLabel の履歴を直接引き続ける。
+  // AccountLabelLatest は ruleVersion を保持していないため、ルールバージョン別の再ラベリング処理は AccountLabel の履歴を直接参照する必要があり、そのための複合インデックス。
   @@index([accountId, labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])
 }
 
-// 履歴テーブルである AccountLabel (アカウント詳細ページの監査証跡として全件を
-// 保持し続けるため、クロールを重ねるたびに際限なく増える) から DISTINCT ON で
-// 「account/label ごとの最新値」を導出すると全件スキャンになり、本番の
-// ダッシュボード/アカウント一覧クエリの statement_timeout を常態的に超過する
-// ようになった。このテーブルは (accountId, labelDefinitionId) ごとの最新値のみ
-// を保持し、recordCrawlAccountLabel / recordAccountLabelsBulk が AccountLabel
-// への履歴 INSERT と同時に upsert する。そのためこれらの集計クエリは履歴の総件数
-// ではなく (アカウント数 x ラベル数) で頭打ちになる。この経緯の説明はここを正としており、
-// crawler/db/label-repository.ts・viewer/lib/queries/dashboard.ts・
-// viewer/lib/queries/accounts.ts・対応するマイグレーションのコメントは
-// ここへの参照のみとする。
+// AccountLabel は監査証跡としてほぼ無制限に増え続ける履歴テーブルであり、そこから DISTINCT ON で最新値を都度導出すると、ダッシュボードやアカウント一覧のクエリが全件スキャンになり本番の応答時間を守れない。
+// そのため (accountId, labelDefinitionId) ごとの最新値のみを保持する専用テーブルとして用意し、recordCrawlAccountLabel / recordAccountLabelsBulk が AccountLabel への履歴 INSERT と同時に upsert する。
 model AccountLabelLatest {
   accountId         String
   account           Account         @relation(fields: [accountId], references: [id])
@@ -144,7 +117,6 @@ model AccountLabelLatest {
   labeledAt         DateTime
 
   @@id([accountId, labelDefinitionId])
-  // value = true で絞り込む dashboard.ts/accounts.ts の各クエリを支える。
   @@index([labelDefinitionId, value])
   @@index([value, accountId])
 }
@@ -204,9 +176,8 @@ model CrawlAccountRun {
   followersSynced    Boolean   @default(false)
   warnings           Json      @default("[]")
   errorMessage       String?
-  /// crawler image に埋め込まれた APPLICATION_VERSION (Docker build-arg)。値が取れない場合は "unknown"。
-  /// 行を最終確定させたビルドを表す。個々の warning を生んだビルドは warnings 内の各要素が持つ
-  /// appVersion (CrawlWarning.appVersion) を参照する。
+  /// crawler イメージに埋め込まれた APPLICATION_VERSION (Docker のビルド引数)。値が取得できない場合は "unknown" になる。
+  /// この行を最終的に確定させたビルドを表しており、個々の warning を発生させたビルドは warnings 内の各要素が持つ appVersion (CrawlWarning.appVersion) を参照する。
   appVersion         String    @default("unknown")
 
   @@index([crawlRunId])

@@ -38,9 +38,7 @@ const SAMPLE_ROW: MockRow = {
   ],
 }
 
-// getLatestLabelsSummary はモジュールスコープでキャッシュを保持するため、
-// テストごとに vi.resetModules() でモジュールを再ロードし、キャッシュ状態が
-// 前のテストから漏れ出さないようにする。
+// getLatestLabelsSummary はモジュールスコープでキャッシュを保持するため、テストごとに vi.resetModules() でモジュールを再ロードし、キャッシュ状態が前のテストから漏れ出さないようにする。
 beforeEach(() => {
   vi.resetModules()
 })

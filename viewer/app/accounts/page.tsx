@@ -19,23 +19,19 @@ const SORTABLE_COLUMNS: { field: AccountSortField; label: string }[] = [
 ]
 
 /**
- * Narrows a raw `sort` search param to a sort field the query layer accepts.
- * @param value - the raw search param value
- * @returns true if the value names a supported sort field
+ * @param value - 生の検索パラメータの値
+ * @returns サポートされているソートフィールドを表す値であれば true
  */
 function isAccountSortField(value: string): value is AccountSortField {
   return (SORT_FIELDS as string[]).includes(value)
 }
 
 /**
- * Builds the `href` for a sortable column header: clicking a column that is
- * not the current sort switches to it (descending by default); clicking the
- * current sort column flips its direction.
- * @param currentParams - the current search params, carried forward as-is
- * @param field - the column's sort field
- * @param currentSort - the currently active sort field
- * @param currentDirection - the currently active sort direction
- * @returns the link target for this column header
+ * @param currentParams - 現在の検索パラメータ。そのまま引き継ぐ
+ * @param field - この列のソートフィールド
+ * @param currentSort - 現在有効なソートフィールド
+ * @param currentDirection - 現在有効なソート方向
+ * @returns この列見出しのリンク先
  */
 function buildSortHref(
   currentParams: URLSearchParams,
@@ -51,13 +47,13 @@ function buildSortHref(
 }
 
 /**
- * Builds the `href` for a Previous/Next pagination link, preserving all
- * repeated `label` params (unlike round-tripping through a plain object).
- * @param currentParams - the current search params, carried forward as-is
- * @param sortBy - the currently active sort field
- * @param sortDirection - the currently active sort direction
- * @param targetPage - the page number the link should navigate to
- * @returns the link target for this pagination link
+ * プレーンオブジェクトへ往復させると繰り返し指定された `label` パラメータを失うため、
+ * `URLSearchParams` をそのまま引き継いで組み立てる。
+ * @param currentParams - 現在の検索パラメータ。そのまま引き継ぐ
+ * @param sortBy - 現在有効なソートフィールド
+ * @param sortDirection - 現在有効なソート方向
+ * @param targetPage - リンク先とするページ番号
+ * @returns このページネーションリンクのリンク先
  */
 function buildPageHref(
   currentParams: URLSearchParams,
@@ -73,9 +69,8 @@ function buildPageHref(
 }
 
 /**
- * Account list page: a filterable, sortable, paginated table of accounts.
- * @param props - the incoming `label` (repeatable), `sort`, `direction`, and `page` search params
- * @returns the rendered account list page
+ * @param props - `label` (繰り返し指定可能)・`sort`・`direction`・`page` の各検索パラメータ
+ * @returns アカウント一覧ページの描画結果
  */
 export default async function AccountsPage({
   searchParams,
@@ -114,8 +109,7 @@ export default async function AccountsPage({
       getLabelKeys(prisma),
     ])
   } catch (error) {
-    // Log the full error server-side but show the client a generic message:
-    // error.message can leak SQL/connection details from the driver.
+    // エラーの詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため。
     console.error('Failed to load account list or label keys:', error)
     return <ErrorFallback message="Failed to load the account list." />
   }

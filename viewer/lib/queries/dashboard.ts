@@ -1,8 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma'
 
-/**
- * The top-level KPI figures shown on the dashboard.
- */
 export interface DashboardKpis {
   totalAccounts: number
   totalTweets: number
@@ -10,9 +7,6 @@ export interface DashboardKpis {
   lastCrawledAt: Date | null
 }
 
-/**
- * One label's distribution across all evaluated accounts.
- */
 export interface LabelDistributionEntry {
   labelKey: string
   labelDescription: string
@@ -20,8 +14,7 @@ export interface LabelDistributionEntry {
   totalAccounts: number
 }
 
-// json_agg() が返す distribution の要素はすでに JSON としてパース済みのため、
-// trueCount/totalAccounts はここでは(直接の bigint 列とは異なり)number で届く。
+// json_agg() が返す distribution の要素はすでに JSON としてパース済みのため、trueCount/totalAccounts はここでは(直接の bigint 列とは異なり)number で届く。
 interface LabelDistributionJsonRow {
   labelKey: string
   labelDescription: string
@@ -40,16 +33,8 @@ interface LatestLabelsSummary {
 }
 
 /**
- * 集計クエリ `latest_labels` をまとめて実行する: ラベル付けずみアカウント数と
- * ラベルごとの分布を、`AccountLabelLatest` を1回だけ読んでダッシュボードの
- * ページロードのたびに同じ集計を二重に実行しないようにする (テーブルの設計
- * 意図は prisma/schema.prisma の AccountLabelLatest コメントを参照)。
- * `latest_labels` は `NOT MATERIALIZED` を指定し、`value = true` の絞り込みを
- * `label_counts`/最上位 SELECT 側からプランナーが押し下げられるようにしている。
- * `MATERIALIZED` を指定すると常に Seq Scan + 一時領域への実体化が強制され、
- * `AccountLabelLatest_value_accountId_idx` を使った index-only scan が選ばれず
- * 数倍遅くなる。無関係なディスク I/O 競合でクエリが詰まった場合に備え、念のため
- * statement_timeout も設定し、コネクションプールの枠を握ったままにしない。
+ * `latest_labels` を `NOT MATERIALIZED` にしているのは、`MATERIALIZED` では Seq Scan と一時領域への実体化が強制され、`AccountLabelLatest_value_accountId_idx` を使った index-only scan が選ばれなくなるため。
+ * 無関係なディスク I/O 競合でクエリが詰まった場合に備え、statement_timeout も設定している。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ラベル付けずみアカウント数とラベル分布
  */
@@ -81,9 +66,7 @@ async function queryLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLab
   ])
   const rows = result[1]
 
-  // トップレベルの SELECT に FROM 句がなく常に1行だけ返るが、Prisma の
-  // $queryRaw の戻り値の型は配列であり要素数を型では保証できないため、
-  // Array#at() で undefined を許容する型のまま安全に取り出す。
+  // トップレベルの SELECT に FROM 句がなく常に1行だけ返るが、Prisma の $queryRaw の戻り値の型は配列であり要素数を型では保証できないため、Array#at() で undefined を許容する型のまま安全に取り出す。
   const row = rows.at(0)
   return {
     labeledAccounts: Number(row?.labeledAccounts ?? 0),
@@ -102,13 +85,8 @@ const CACHE_TTL_MS = 15 * 60 * 1000
 let cached: { promise: Promise<LatestLabelsSummary>; expiresAt: number } | undefined
 
 /**
- * 集計済みの latest_labels summary を返す。実行中または直近に解決した
- * promise があればそれを再利用する。解決済みの値だけでなく実行中の promise
- * 自体をキャッシュすることで、getDashboardKpis と getLabelDistribution を
- * ダッシュボードページから Promise.all で同時に呼んだ場合でも、実際のクエリは
- * 1回にまとめられる。以後 CACHE_TTL_MS の間は同じ結果を返し続ける。失敗した
- * クエリはキャッシュしないため、次回呼び出し時は TTL 内であっても DB へ
- * 再試行する(同じエラーを TTL 満了まで返し続けることはない)。
+ * 解決済みの値だけでなく実行中の promise 自体もキャッシュすることで、getDashboardKpis と getLabelDistribution を Promise.all で同時に呼んだ場合でも、実際のクエリは1回にまとめられる。
+ * 失敗したクエリはキャッシュしないため、次回呼び出し時は TTL 内であっても DB へ再試行する。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ラベル付けずみアカウント数とラベル分布
  */
@@ -131,10 +109,6 @@ function getLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSumma
 }
 
 /**
- * ダッシュボードの上部に表示する KPI を読み込む: 累計アカウント数・ツイート数、
- * 現在少なくとも1つのラベルが true になっているアカウント数 (各ラベルの
- * 最新評価のみを使う点は {@link getLabelDistribution} と同じ)、全アカウント中
- * 最新のクロール日時。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ダッシュボードの KPI
  */
@@ -155,9 +129,6 @@ export async function getDashboardKpis(prisma: PrismaClient): Promise<DashboardK
 }
 
 /**
- * ダッシュボードに表示するラベルごとの分布を読み込む: 各 `LabelDefinition`
- * について、これまでに評価されたアカウント数のうち現在の最新評価が `true`
- * であるアカウント数を返す。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ラベル定義ごとの分布 (ラベルキー順)
  */
