@@ -15,17 +15,12 @@ import type { AccountFeatureBundle, LabelRule, LabelRuleResult } from './labels/
 const logger = Logger.configure('relabel')
 
 const ACCOUNT_BATCH_SIZE = 100
-// `crawler/db/client.ts` does not set an explicit `connection_limit`, so Prisma falls back to
-// its default pool size (`num_physical_cpus * 2 + 1`). 8 concurrent accounts each holding at
-// most one connection for the duration of their `recordAccountLabelsBulk` call stays well
-// under that default on typical crawler hosts (2+ vCPUs), while still leaving headroom for
-// the crawler's own concurrent DB usage. A prior pool-exhaustion incident (commit 3fa6cd3)
-// is why this is called out explicitly rather than picked arbitrarily.
+// crawler/db/client.ts は connection_limit を明示しないため、Prisma のデフォルトプールサイズ
+// (num_physical_cpus * 2 + 1) に従う。過去のプール枯渇 (commit 3fa6cd3) を踏まえ、
+// 8 はそれに対して十分な余裕を残す値として選んだ。
 const ACCOUNT_CONCURRENCY = 8
 const PROGRESS_LOG_INTERVAL = 1000
-// Below this, `processedSinceLastLog / elapsedMinutes` can produce a wildly inflated rate
-// (e.g. a batch that completes within the same millisecond as the previous log) rather than
-// a meaningful accounts/min figure.
+// これ未満の経過時間では速度算出がゼロ除算に近くなり異常値になるため、算出をスキップする閾値。
 const MIN_ELAPSED_MINUTES_FOR_RATE = 1 / 60_000
 
 export interface RelabelOptions {
@@ -208,16 +203,15 @@ function isFullyUpToDate(
 }
 
 /**
- * Re-evaluates every registered label rule against every account, persisting
- * a new `AccountLabel` row only for (account, rule) pairs whose stored
- * `ruleVersion` is stale or missing. Live crawling only re-evaluates an
- * account's labels the next time that account happens to be crawled again —
- * there is no automatic re-labeling when a rule's logic changes. This is the
- * explicit backfill that closes that gap on demand.
- * @param prisma - the Prisma client to use
- * @param registry - the label rule registry to evaluate against every account
- * @param options - optional overrides, e.g. the progress log interval
- * @returns the number of accounts processed and labels (re)persisted
+ * 登録済みの全ラベルルールを全アカウントに対して再評価し、保存済み `ruleVersion` が
+ * 古いか未評価の (account, rule) ペアについてのみ新しい `AccountLabel` 行を永続化する。
+ * 通常のクロールでは対象アカウントが次に再クロールされるまでラベルは再評価されない
+ * (ルールのロジック変更に対する自動再評価はない) ため、そのギャップをオンデマンドで
+ * 埋める明示的なバックフィル処理。
+ * @param prisma - 使用する Prisma クライアント
+ * @param registry - 全アカウントに対して評価するラベルルールのレジストリ
+ * @param options - 任意の上書き設定 (例: 進捗ログの出力間隔)
+ * @returns 処理したアカウント数と (再) 永続化したラベル数
  */
 export async function runRelabelBackfill(
   prisma: PrismaClient,
@@ -297,13 +291,11 @@ export async function runRelabelBackfill(
       tweetFetchFailed = true
     }
 
-    // Persisting labels built from an empty tweet sample here would set `latestRuleVersions`
-    // to the current rule version for every stale account in this page, so `isFullyUpToDate`
-    // would wrongly treat them as current on the next run and they'd never be re-evaluated
-    // with real data. Skipping the persist loop entirely keeps them stale, so a future run
-    // retries the fetch and relabels them properly once it succeeds. `accountsProcessed`
-    // still counts them as attempted below, so the progress log's denominator can reach
-    // `totalAccounts` even on a run that hits fetch failures.
+    // ここで空のツイートサンプルからラベルを永続化すると、このページの全 stale アカウントの
+    // latestRuleVersions が現在のルールバージョンに更新され、isFullyUpToDate に最新と
+    // みなされて再評価されなくなる。永続化をスキップして stale なまま残し、次回実行で
+    // 再取得・再評価させる。accountsProcessed には試行済みとしてカウントするため、
+    // フェッチ失敗時も進捗ログの分母が totalAccounts に到達する。
     if (tweetFetchFailed) {
       accountsProcessed += staleAccounts.length
       logProgressIfDue()
@@ -365,9 +357,7 @@ export async function runRelabelBackfill(
             `Failed to relabel account ${account.id} (@${account.screenName}), skipping to next account`,
             error as Error,
           )
-          // A failed account is still counted as processed: it was attempted this run, and
-          // without this the progress log's denominator could never reach `totalAccounts`
-          // on any run that hits a persistent per-account failure.
+          // 失敗しても試行済みとしてカウントする (でなければ進捗ログの分母が totalAccounts に到達しない)
           accountsProcessed++
           logProgressIfDue()
         }

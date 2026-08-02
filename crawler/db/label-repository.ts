@@ -75,18 +75,14 @@ interface RecordAccountLabelsBulkRow extends AccountLabel {
 }
 
 /**
- * 1アカウント分のルール評価結果をまとめて記録する: ラベル1件ごとに個別の
- * `$queryRaw` を逐次発行する代わりに、ラベルごとの値を列単位の配列にまとめて
- * `UNNEST` で展開し、`AccountLabel` への INSERT と `AccountLabelLatest` への
- * UPSERT を1回のラウンドトリップにまとめる。共有する `now()`、`labeledAt` に
- * よる UPSERT ガード、guard skip 時の警告ログといった意味論は、ラベルを1件ずつ
- * 記録する場合と変わらない (詳細は `recordCrawlAccountLabel` のコメントを参照)。
+ * 1アカウント分の評価結果をまとめて記録する: ラベルごとに `$queryRaw` を逐次発行する
+ * 代わりに、列単位の配列を `UNNEST` で展開し、`AccountLabel` への INSERT と
+ * `AccountLabelLatest` への UPSERT を1ラウンドトリップにまとめる。UPSERT ガードの
+ * 意味論は `recordCrawlAccountLabel` と同じ。
  * @param prisma - Prisma クライアント
- * @param params - 記録対象のアカウントと、そのアカウントに対する評価結果一覧
- * @returns 作成された `AccountLabel` 履歴行の配列。SELECT に `ORDER BY` を
- *   指定していないため `labels` と同じ順序である保証はない。呼び出し元が
- *   各行を入力ラベルに対応付ける必要がある場合は `labelDefinitionId` で
- *   突き合わせること。
+ * @param params - 記録対象のアカウントと評価結果一覧
+ * @returns 作成された `AccountLabel` 履歴行。SELECT に `ORDER BY` がないため `labels`
+ *   と同じ順序である保証はなく、対応付けが必要なら `labelDefinitionId` で突き合わせる。
  */
 export async function recordAccountLabelsBulk(
   prisma: PrismaClient,

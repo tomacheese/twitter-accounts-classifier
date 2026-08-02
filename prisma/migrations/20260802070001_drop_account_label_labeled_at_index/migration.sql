@@ -1,13 +1,7 @@
 -- DropIndex
--- CONCURRENTLY で "AccountLabel" への crawler の書き込みをロックせずにインデックスを
--- 削除する。単一ステートメントのみに保つ理由は、この隣にある
--- prisma/migrations/20260802070000_drop_account_label_label_definition_id_index/
--- migration.sql のコメントを参照。crawler/viewer 双方のクエリを調査した結果、
--- `labeledAt` 単体を先頭カラムとするソート・絞り込みを行うクエリは存在しない
--- (viewer/lib/queries/account-detail.ts のクエリは accountId で絞り込んでから
--- labeledAt でソートしており、先頭カラムが accountId のインデックスで満たせる)。
--- `.claude/skills/weekly-crawl-review/SKILL.md` の週次レビュー手順は `labeledAt` で
--- ソートするが、週1回だけ実行される手動寄りのバッチ処理でレイテンシ要件がないため、
--- 単一カラムインデックスはこの用途のためだけに維持するコストには見合わないと判断した
--- (詳細は Issue #21)。
+-- CONCURRENTLY で "AccountLabel" への書き込みをロックせずに削除する。単一ステートメントのみ
+-- 許可する理由は隣の 20260802070000 マイグレーションのコメントを参照。削除理由は
+-- prisma/schema.prisma の AccountLabel.accountId インデックスコメント、Issue #21 を参照
+-- (account-detail.ts のクエリは accountId で絞ってからソートするため accountId 単体の
+-- インデックスで足りる)。
 DROP INDEX CONCURRENTLY IF EXISTS "AccountLabel_labeledAt_idx";

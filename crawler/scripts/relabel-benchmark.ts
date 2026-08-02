@@ -6,11 +6,9 @@ import { runRelabelBackfill } from '../relabel'
 const SEED_ACCOUNT_COUNT = Number(process.env.BENCHMARK_ACCOUNT_COUNT ?? 2000)
 
 /**
- * 誤って本番 DB に向けて実行してしまうことを防ぐガード。このスクリプトは
- * `bench-*` の架空アカウントを大量に INSERT するため、本番相当の
- * `AccountLabel`/`Account` 件数を汚染してしまう。`localhost`/`127.0.0.1` 以外の
- * ホストへの接続はデフォルトで拒否し、どうしても別ホストで実行したい場合のみ
- * `BENCHMARK_ALLOW_NON_LOCALHOST=1` の明示指定を必須にする。
+ * 本番 DB への誤実行を防ぐガード。`bench-*` の架空アカウントを大量 INSERT するため、
+ * `localhost`/`127.0.0.1` 以外への接続はデフォルトで拒否する。別ホストで実行する場合は
+ * `BENCHMARK_ALLOW_NON_LOCALHOST=1` を明示指定する。
  * @param databaseUrl - 検証対象の `DATABASE_URL`
  */
 function assertNotProductionDatabase(databaseUrl: string | undefined): void {
@@ -23,9 +21,8 @@ function assertNotProductionDatabase(databaseUrl: string | undefined): void {
 }
 
 /**
- * `count` 件の架空アカウント (実在の Twitter/X データは一切含まない合成データ) を、
- * それぞれ1件のツイート付きで作成する。`runRelabelBackfill` が処理すべき stale な
- * アカウントを用意するための、ベンチマーク専用のシード処理。
+ * `count` 件の架空アカウント (実在データを含まない合成データ) をツイート1件付きで作成する。
+ * `runRelabelBackfill` が処理する stale なアカウントを用意するベンチマーク専用のシード処理。
  * @param prisma - シード投入に使う Prisma クライアント
  * @param count - 作成する架空アカウント数
  */
@@ -97,18 +94,15 @@ main().catch((error: unknown) => {
   process.exitCode = 1
 })
 
-// 実行手順 (本番 DB には絶対に向けないこと。ローカルの使い捨て Postgres でのみ実行する。
-// PR ごとの before/after 比較の記録手順は、この場所ではなく各 PR の説明に記載する):
+// 実行手順 (本番 DB には向けないこと。ローカルの使い捨て Postgres でのみ実行する。
+// PRごとの before/after 比較記録は各 PR の説明に記載する):
 //
-// 1. compose.yaml の postgres サービスはデフォルトでホストポートを公開していないため、
-//    ローカルから直接繋ぐには一時的にポートを公開する必要がある。例えば
-//    `docker compose run --rm -p 5432:5432 postgres` のように起動するか、
-//    `docker compose.override.yml` で一時的に `ports: ["5432:5432"]` を追加する。
+// 1. compose.yaml の postgres はデフォルトでホストポートを公開しないため、
+//    `docker compose run --rm -p 5432:5432 postgres` などで一時的に公開する。
 // 2. DATABASE_URL=postgresql://crawler:crawler@localhost:5432/twitter_accounts_classifier \
 //      pnpm --filter crawler exec prisma migrate deploy --schema=../prisma/schema.prisma
 // 3. DATABASE_URL=postgresql://crawler:crawler@localhost:5432/twitter_accounts_classifier \
 //      pnpm --filter crawler exec tsx scripts/relabel-benchmark.ts
-// 4. DB をまっさらな状態に戻して再計測したい場合は、`./data/postgres` はコンテナ外の
-//    bind mount のため `docker compose down -v` では消えない。
-//    `docker compose down && rm -rf ./data/postgres` で明示的に削除してから
-//    手順1に戻ること。
+// 4. 再計測のため DB をまっさらに戻す場合、`./data/postgres` はバインドマウントのため
+//    `docker compose down -v` では消えない。
+//    `docker compose down && rm -rf ./data/postgres` で明示的に削除してから手順1に戻る。
