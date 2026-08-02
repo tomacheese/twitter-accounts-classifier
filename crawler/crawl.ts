@@ -1,8 +1,8 @@
 import { Logger } from '@book000/node-utils'
-import { captureException, initMonitoring } from './monitoring/sentry'
+import { captureException, captureMessage, initMonitoring } from './monitoring/sentry'
 import { loadConfig, type AppConfig } from './config/load-config'
 import { CRAWL_LIMITS, TWITTER_RETRY } from './config/crawl-limits'
-import { getCookieIssuerBaseUrl } from './config/env'
+import { getCookieIssuerBaseUrl, getCrawlWarningThreshold } from './config/env'
 import { withTwitterRetry } from './twitter/retry'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
@@ -160,6 +160,22 @@ function isExpectedAccountLookupError(error: unknown): boolean {
  */
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Aggregates a run's warnings by type, for inclusion in the threshold-exceeded GlitchTip
+ * summary (see runAccountCycle) - individual warnings already have their own errorMessage
+ * persisted on CrawlAccountRun.warnings, so only per-type counts are forwarded here to
+ * keep the GlitchTip payload small.
+ * @param warnings - the warnings accumulated for one account cycle
+ * @returns a map of warning type to occurrence count; types with zero occurrences are omitted
+ */
+function summarizeWarningsByType(warnings: CrawlWarning[]): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const warning of warnings) {
+    counts[warning.type] = (counts[warning.type] ?? 0) + 1
+  }
+  return counts
 }
 
 interface AccountCycleMetrics {
@@ -923,6 +939,21 @@ async function runAccountCycle(
     // surfacing as 'partial' rather than being averaged away.
     const warnings = [...metrics.warnings, ...following.warnings, ...followers.warnings]
     const status = warnings.length > 0 ? 'partial' : 'success'
+
+    const warningThreshold = getCrawlWarningThreshold()
+    if (warnings.length >= warningThreshold) {
+      captureMessage(
+        `Crawl warnings threshold exceeded for ${account.username}: ${warnings.length} warnings (threshold: ${warningThreshold})`,
+        {
+          crawlRunId,
+          username: account.username,
+          status,
+          appVersion: APP_VERSION,
+          warningCounts: summarizeWarningsByType(warnings),
+        },
+      )
+    }
+
     await deps.recordCrawlAccountRun({
       crawlRunId,
       username: account.username,
