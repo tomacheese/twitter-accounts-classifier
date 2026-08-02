@@ -65,14 +65,25 @@ function isTopicInterestMention(bio: string): boolean {
 //   - the refusal word must sit close to the AI term, so a refusal aimed at a different
 //     object further along the bio (e.g. a plain 無断転載 notice) does not veto.
 const AI_OPPOSITION_PATTERN =
-  /反生成AI|反AI生成|(?:生成AI|AI生成)(?:に|には)?反対|無断生成AI|(?:生成AI|AI生成).{0,15}(?:嫌い|きらい|認めません|認めない)|(?:生成AI|AI生成)(?:は)?(?:一切)?(?:不使用|使用していません|使っていません|使いません)|(?:生成AI|AI生成).{0,6}(?:お断り|お断わり)/i
+  /反生成AI|反AI生成|(?:生成AI|AI生成)(?:に|には)?反対|無断生成AI|(?:生成AI|AI生成).{0,15}(?:嫌い|きらい|認めません|認めない|ブロ(?:ック)?)|(?:生成AI|AI生成)(?:は)?(?:一切)?(?:不使用|使用していません|使っていません|使いません)|(?:生成AI|AI生成).{0,6}(?:お断り|お断わり)/i
+
+// "〜している方" ("people who do ~") is a Japanese third-person construct: it describes a
+// policy toward OTHER accounts (e.g. a follow-back refusal aimed at AI users), not a
+// self-declaration of what this account posts. Vetoed the same way as institutional/topic
+// mentions, unless paired with an explicit personal-content phrase.
+const THIRD_PARTY_REFERENCE_PATTERN =
+  /(?:生成AI|AI生成).{0,10}(?:して(?:る|いる)|使って(?:る|いる))方/
+
+function isThirdPartyReference(bio: string): boolean {
+  return THIRD_PARTY_REFERENCE_PATTERN.test(bio) && !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
+}
 
 const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?作成した/i
 
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.6.0',
+  version: '1.7.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
@@ -81,7 +92,8 @@ export const aiGeneratedRule: LabelRule = {
       !isNegatedDeclaration(bio) &&
       !AI_OPPOSITION_PATTERN.test(bio) &&
       !isInstitutionalMention(bio) &&
-      !isTopicInterestMention(bio)
+      !isTopicInterestMention(bio) &&
+      !isThirdPartyReference(bio)
 
     const sampled = bundle.recentTweets
     const hasCorroboratingTweet = sampled.some((t) => TWEET_BOILERPLATE_PATTERN.test(t.fullText))

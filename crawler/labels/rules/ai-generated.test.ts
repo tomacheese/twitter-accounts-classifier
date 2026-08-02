@@ -89,7 +89,9 @@ describe('aiGeneratedRule', () => {
   })
 
   it('is false for a regulation-advocacy bio that mentions generative AI as a policy topic, not a self-declaration', () => {
-    const result = aiGeneratedRule.evaluate(makeBundle({ bio: '生成AI規制派としての意見用アカウント' }))
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: '生成AI規制派としての意見用アカウント' }),
+    )
     expect(result.value).toBe(false)
   })
 
@@ -130,12 +132,16 @@ describe('aiGeneratedRule', () => {
   })
 
   it('is false for a bio that denies AI generation using the "NG" prohibition marker', () => {
-    const result = aiGeneratedRule.evaluate(makeBundle({ bio: '手描きイラスト専門。AI生成NGです。' }))
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: '手描きイラスト専門。AI生成NGです。' }),
+    )
     expect(result.value).toBe(false)
   })
 
   it('is false for a bio that denies AI generation using a prohibition emoji placed before the term', () => {
-    const result = aiGeneratedRule.evaluate(makeBundle({ bio: '🚫AI生成・無断転載は厳禁です。全て自作イラストです。' }))
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: '🚫AI生成・無断転載は厳禁です。全て自作イラストです。' }),
+    )
     expect(result.value).toBe(false)
   })
 
@@ -171,7 +177,10 @@ describe('aiGeneratedRule', () => {
       'a refusal to permit AI use',
       '生成AIは完全オプトイン以外いっさい認めません 無断でAI学習させないで',
     ],
-    ['an AI-training refusal placed next to the term', '旅の記録を残しています。画像本文転載･生成AI学習お断り 連絡はDMへ'],
+    [
+      'an AI-training refusal placed next to the term',
+      '旅の記録を残しています。画像本文転載･生成AI学習お断り 連絡はDMへ',
+    ],
     [
       'a non-use declaration later in the bio than the first mention',
       '猫と暮らしています。⚠️生成AI利用・無断編集・無断転載お断り 投稿/画像はすべて【生成AI不使用】です',
@@ -196,11 +205,42 @@ describe('aiGeneratedRule', () => {
   })
 
   it.each([
-    ['work-efficiency framing', '猫とインドカレーとランニングが好き、生成AIで効率化、英語学習／投資'],
-    ['business-improvement framing', '建設業15年以上。Googleスプレッドシート・生成AI・GASで業務改善。'],
-    ['an interest statement using "関心"', '昼の仕事はデータアナリスト/ 最近の関心は生成AI(LLM)/ Like:音楽, 3DCG'],
+    [
+      'work-efficiency framing',
+      '猫とインドカレーとランニングが好き、生成AIで効率化、英語学習／投資',
+    ],
+    [
+      'business-improvement framing',
+      '建設業15年以上。Googleスプレッドシート・生成AI・GASで業務改善。',
+    ],
+    [
+      'an interest statement using "関心"',
+      '昼の仕事はデータアナリスト/ 最近の関心は生成AI(LLM)/ Like:音楽, 3DCG',
+    ],
     ['topic-watching framing', '会社員。生成AIによる著作権問題と犯罪、政治等ウォチ。ねこ好き。'],
   ])('is false for a bio that mentions generative AI via %s', (_label, bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('is false for a bio that blocks accounts posting AI-generated content, not declaring its own', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({
+        bio: 'クソリプとスパムは即報告、ブロ。過度に差別発言＆RTする人もリムブロ。AI生成ブロ。',
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it.each([
+    [
+      'a follow-back refusal aimed at other AI users',
+      '※生成AI利用してる方、基本フォロバしてません。V界隈を俯瞰で見るオタク。',
+    ],
+    [
+      'a block policy aimed at other AI users phrased with "使っている方"',
+      '手描きイラスト専門の趣味垢。AI生成使っている方はご遠慮ください。',
+    ],
+  ])('is false for a bio describing a policy toward other accounts via %s', (_label, bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })
 })
