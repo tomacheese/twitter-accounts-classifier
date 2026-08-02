@@ -268,7 +268,9 @@ describe('crawl account checkpoints', () => {
   })
 
   it('clears transient resume state for a normally completed crawl run', async () => {
-    const checkpointOperation = {} as ReturnType<PrismaClient['crawlAccountCheckpoint']['deleteMany']>
+    const checkpointOperation = {} as ReturnType<
+      PrismaClient['crawlAccountCheckpoint']['deleteMany']
+    >
     const labelClaimOperation = {} as ReturnType<PrismaClient['crawlAccountLabelRun']['deleteMany']>
     const deleteCheckpoints = vi.fn().mockReturnValue(checkpointOperation)
     const deleteLabelClaims = vi.fn().mockReturnValue(labelClaimOperation)
@@ -283,9 +285,6 @@ describe('crawl account checkpoints', () => {
 
     expect(deleteCheckpoints).toHaveBeenCalledWith({ where: { crawlRunId: 'run1' } })
     expect(deleteLabelClaims).toHaveBeenCalledWith({ where: { crawlRunId: 'run1' } })
-    expect(transaction).toHaveBeenCalledWith([
-      checkpointOperation,
-      labelClaimOperation,
-    ])
+    expect(transaction).toHaveBeenCalledWith([checkpointOperation, labelClaimOperation])
   })
 })

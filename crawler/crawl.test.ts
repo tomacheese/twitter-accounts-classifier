@@ -127,6 +127,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
     loadCrawlAccountCheckpoints: vi.fn().mockResolvedValue(new Map()),
     completeCrawlAccountCheckpoint: vi.fn().mockResolvedValue(undefined),
     clearCrawlAccountCheckpoints: vi.fn().mockResolvedValue(undefined),
+    touchCrawlRunHeartbeat: vi.fn().mockResolvedValue(undefined),
     sleep: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
@@ -890,6 +891,46 @@ describe('runCrawlCycle', () => {
     )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'success')
     expect(deps.clearCrawlAccountCheckpoints).toHaveBeenCalledWith('run1')
+  })
+
+  it('touches the heartbeat once per account actually processed', async () => {
+    const deps = makeDeps({
+      config: {
+        accounts: [
+          { email: 'a@example.com', username: 'v', password: 'p', otpSecret: null },
+          { email: 'b@example.com', username: 'w', password: 'p', otpSecret: null },
+        ],
+      },
+      startOrResumeCrawlRun: vi.fn().mockResolvedValue({
+        id: 'run1',
+        latestAccountStatuses: new Map([['w', 'success']]),
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    // 'w' はチェックポイントで既にスキップされるため、実際に処理された 'v' の分だけ呼ばれる
+    expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledTimes(1)
+    expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledWith('run1')
+  })
+
+  it('touches the heartbeat even when an account fails', async () => {
+    const deps = makeDeps({
+      issueCookies: vi.fn().mockRejectedValue(new Error('cookie issuance failed')),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledTimes(1)
+    expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledWith('run1')
+  })
+
+  it('does not fail the cycle when touching the heartbeat itself fails', async () => {
+    const deps = makeDeps({
+      touchCrawlRunHeartbeat: vi.fn().mockRejectedValue(new Error('row missing')),
+    })
+
+    await expect(runCrawlCycle(deps)).resolves.toBeUndefined()
   })
 
   it('resumes a run by retaining completed accounts and retrying all other configured accounts', async () => {

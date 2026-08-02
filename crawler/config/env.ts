@@ -7,6 +7,22 @@ export function getCookieIssuerBaseUrl(): string {
 }
 
 /**
+ * 環境変数を正の整数として読み取る。未設定・空文字ならデフォルト値を返す。
+ * @param name - 環境変数名
+ * @param defaultValue - 未設定・空文字時のデフォルト値
+ * @returns 読み取った正の整数
+ */
+function parsePositiveIntEnv(name: string, defaultValue: number): number {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return defaultValue
+  const parsed = Number(raw)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} environment variable must be a positive integer, got: ${raw}`)
+  }
+  return parsed
+}
+
+/**
  * クロール間隔 (秒)。entrypoint.sh のサイクル間 sleep 時間と同じ環境変数を読み、
  * TypeScript 側でも放置判定のしきい値算出に利用する。未設定時は README 記載の
  * entrypoint.sh 側デフォルトと合わせて 21600 (6時間) とする。
@@ -24,20 +40,4 @@ export function getCrawlIntervalSeconds(): number {
  */
 export function getCrawlStaleThresholdMultiplier(): number {
   return parsePositiveIntEnv('CRAWL_STALE_THRESHOLD_MULTIPLIER', 3)
-}
-
-/**
- * 環境変数を正の整数として読み取る。未設定・空文字ならデフォルト値を返す。
- * @param name - 環境変数名
- * @param defaultValue - 未設定・空文字時のデフォルト値
- * @returns 読み取った正の整数
- */
-function parsePositiveIntEnv(name: string, defaultValue: number): number {
-  const raw = process.env[name]
-  if (raw === undefined || raw === '') return defaultValue
-  const parsed = Number(raw)
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${name} environment variable must be a positive integer, got: ${raw}`)
-  }
-  return parsed
 }
