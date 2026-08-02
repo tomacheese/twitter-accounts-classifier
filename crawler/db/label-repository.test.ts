@@ -5,6 +5,7 @@ import {
   ensureLabelDefinition,
   ensureLabelDefinitionsForRules,
   recordAccountLabel,
+  recordAccountLabelsBulk,
   recordCrawlAccountLabel,
 } from './label-repository'
 
@@ -129,6 +130,96 @@ describe('recordAccountLabel', () => {
     })
 
     expect(result).toEqual({ id: 'al1' })
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('recordAccountLabelsBulk', () => {
+  it('does not call queryRaw when there are no labels to persist', async () => {
+    const queryRaw = vi.fn()
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const result = await recordAccountLabelsBulk(prisma, { accountId: 'u1', labels: [] })
+
+    expect(result).toEqual([])
+    expect(queryRaw).not.toHaveBeenCalled()
+  })
+
+  it('persists every label for an account via a single queryRaw call bound with UNNEST arrays', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([
+      { id: 'al1', latestUpserted: true },
+      { id: 'al2', latestUpserted: true },
+    ])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const result = await recordAccountLabelsBulk(prisma, {
+      accountId: 'u1',
+      labels: [
+        {
+          labelDefinitionId: 'ld1',
+          result: { value: true, confidence: 1, reason: 'because a' },
+          method: 'rule-a',
+          ruleVersion: '1.0.0',
+        },
+        {
+          labelDefinitionId: 'ld2',
+          result: { value: false, confidence: 0.5, reason: 'because b' },
+          method: 'rule-b',
+          ruleVersion: '2.0.0',
+        },
+      ],
+    })
+
+    expect(result).toEqual([{ id: 'al1' }, { id: 'al2' }])
+    expect(queryRaw).toHaveBeenCalledTimes(1)
+    const [sql, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    expect(sql.join('')).toContain('UNNEST(')
+    expect(sql.join('')).toContain('INSERT INTO "AccountLabel"')
+    expect(sql.join('')).toContain('INSERT INTO "AccountLabelLatest"')
+    // UNNEST に渡す配列は列ごとにまとめており、位置がずれると全ラベルの
+    // 値が一斉に入れ替わる。列の並びどおりに配列で比較し、取り違えを検知する。
+    expect(values).toEqual([
+      ['mock-id', 'mock-id'],
+      ['u1', 'u1'],
+      ['ld1', 'ld2'],
+      [true, false],
+      [1, 0.5],
+      ['because a', 'because b'],
+      ['rule-a', 'rule-b'],
+      ['1.0.0', '2.0.0'],
+    ])
+  })
+
+  it('logs a warning for each row where the AccountLabelLatest upsert guard skipped the write', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([
+      { id: 'al1', latestUpserted: false },
+      { id: 'al2', latestUpserted: true },
+    ])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+    const { Logger } = await import('@book000/node-utils')
+    const warn = vi
+      .spyOn(Logger.configure('label-repository'), 'warn')
+      .mockImplementation(() => undefined)
+
+    const result = await recordAccountLabelsBulk(prisma, {
+      accountId: 'u1',
+      labels: [
+        {
+          labelDefinitionId: 'ld1',
+          result: { value: true, confidence: 1, reason: 'because a' },
+          method: 'rule-a',
+          ruleVersion: '1.0.0',
+        },
+        {
+          labelDefinitionId: 'ld2',
+          result: { value: false, confidence: 0.5, reason: 'because b' },
+          method: 'rule-b',
+          ruleVersion: '2.0.0',
+        },
+      ],
+    })
+
+    expect(result).toHaveLength(2)
     expect(warn).toHaveBeenCalledTimes(1)
   })
 })

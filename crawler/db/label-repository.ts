@@ -125,6 +125,91 @@ export async function recordAccountLabel(
   return history
 }
 
+export interface RecordAccountLabelsBulkParams {
+  accountId: string
+  labels: {
+    labelDefinitionId: string
+    result: LabelRuleResult
+    method: string
+    ruleVersion: string
+  }[]
+}
+
+interface RecordAccountLabelsBulkRow extends AccountLabel {
+  latestUpserted: boolean
+}
+
+/**
+ * 1アカウント分のルール評価結果をまとめて記録する: `recordAccountLabel` を
+ * ラベルの数だけ逐次呼び出す代わりに、8列の配列を `UNNEST` で展開して
+ * `AccountLabel` へのINSERTと `AccountLabelLatest` へのUPSERTを1回のラウンド
+ * トリップにまとめる。ラウンドトリップ数の削減以外の意味論(共有 `now()`、
+ * `labeledAt` によるUPSERTガード、guard skip 時の警告ログ)は
+ * `recordAccountLabel` と同じ。
+ * @param prisma - Prisma クライアント
+ * @param params - 記録対象のアカウントと、そのアカウントに対する評価結果一覧
+ * @returns 作成された `AccountLabel` 履歴行の配列 (`labels` と同じ順序)
+ */
+export async function recordAccountLabelsBulk(
+  prisma: PrismaClient,
+  params: RecordAccountLabelsBulkParams,
+): Promise<AccountLabel[]> {
+  if (params.labels.length === 0) return []
+
+  const ids = params.labels.map(() => randomUUID())
+  const accountIds = params.labels.map(() => params.accountId)
+  const labelDefinitionIds = params.labels.map((label) => label.labelDefinitionId)
+  const values = params.labels.map((label) => label.result.value)
+  const confidences = params.labels.map((label) => label.result.confidence)
+  const reasons = params.labels.map((label) => label.result.reason)
+  const methods = params.labels.map((label) => label.method)
+  const ruleVersions = params.labels.map((label) => label.ruleVersion)
+
+  const rows = await prisma.$queryRaw<RecordAccountLabelsBulkRow[]>`
+    WITH shared_now AS (
+      SELECT now() AS "labeledAt"
+    ),
+    inserted_history AS (
+      INSERT INTO "AccountLabel"
+        ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt")
+      SELECT u.*, shared_now."labeledAt"
+      FROM UNNEST(${ids}::text[], ${accountIds}::text[], ${labelDefinitionIds}::text[], ${values}::boolean[], ${confidences}::double precision[], ${reasons}::text[], ${methods}::text[], ${ruleVersions}::text[])
+        AS u("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion")
+      CROSS JOIN shared_now
+      RETURNING *
+    ),
+    upserted_latest AS (
+      INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "labeledAt")
+      SELECT ih."accountId", ih."labelDefinitionId", ih."value", ih."labeledAt"
+      FROM inserted_history ih
+      ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
+      SET "value" = EXCLUDED."value", "labeledAt" = EXCLUDED."labeledAt"
+      WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
+      RETURNING "accountId", "labelDefinitionId"
+    )
+    SELECT
+      ih.*,
+      EXISTS (
+        SELECT 1 FROM upserted_latest ul
+        WHERE ul."accountId" = ih."accountId" AND ul."labelDefinitionId" = ih."labelDefinitionId"
+      ) AS "latestUpserted"
+    FROM inserted_history ih
+  `
+
+  const history: AccountLabel[] = []
+  for (const row of rows) {
+    const { latestUpserted, ...rest } = row
+    if (!latestUpserted) {
+      logger.warn(
+        `recordAccountLabelsBulk: AccountLabelLatest upsert guard skipped the write (accountId=${rest.accountId}, labelDefinitionId=${rest.labelDefinitionId})`,
+      )
+    }
+    history.push(rest)
+  }
+
+  return history
+}
+
 /**
  * crawl 中のラベル評価結果を記録する。同じ crawl run・ログインアカウント・対象アカウント・
  * ルールを 1 回だけ claim するため、author phase の永続化後に停止しても再開時に
