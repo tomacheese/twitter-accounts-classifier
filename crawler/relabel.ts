@@ -16,8 +16,8 @@ const logger = Logger.configure('relabel')
 
 const ACCOUNT_BATCH_SIZE = 100
 // crawler/db/client.ts は connection_limit を明示しないため、Prisma のデフォルトプールサイズ
-// (num_physical_cpus * 2 + 1) に従う。過去のプール枯渇 (commit 3fa6cd3) を踏まえ、
-// 8 はそれに対して十分な余裕を残す値として選んだ。
+// (num_physical_cpus * 2 + 1) に従う。過去のプール枯渇を踏まえ、
+// 8 はそれに対して余裕を残せる値として選んでいる。
 const ACCOUNT_CONCURRENCY = 8
 const PROGRESS_LOG_INTERVAL = 1000
 // これ未満の経過時間では速度算出がゼロ除算に近くなり異常値になるため、算出をスキップする閾値。
@@ -35,12 +35,11 @@ interface LatestLabelRow {
 }
 
 /**
- * Loads each (account, rule) pair's most recently recorded `ruleVersion`.
- * `AccountLabel` rows are append-only (see `recordAccountLabel`), so this is
- * how the backfill tells a pair that already reflects the rule's current
- * version apart from one that is stale or has never been labeled.
- * @param prisma - the Prisma client to query
- * @returns a map from `${accountId}:${labelDefinitionId}` to its latest ruleVersion
+ * 各 (account, rule) ペアの直近の ruleVersion を取得する。
+ * `AccountLabel` は追記のみで更新されないため、この集計なしには
+ * 最新ラベルが現在のルールバージョンを反映済みかどうか判別できない。
+ * @param prisma - 問い合わせに使う Prisma クライアント
+ * @returns `${accountId}:${labelDefinitionId}` から最新の ruleVersion へのマップ
  */
 async function loadLatestRuleVersions(prisma: PrismaClient): Promise<Map<string, string>> {
   const rows = await prisma.$queryRaw<LatestLabelRow[]>`
@@ -85,14 +84,14 @@ interface TweetRow {
 }
 
 /**
- * Fetches the top `limitPerAccount` most recent tweets for each of `accountIds` in a
- * single query, using `ROW_NUMBER() OVER (PARTITION BY "accountId" ORDER BY "createdAt"
- * DESC)` to express the same "top N per account" semantics Prisma's query builder cannot
- * do directly without one query per account.
- * @param prisma - the Prisma client to query
- * @param accountIds - the accounts to fetch tweets for
- * @param limitPerAccount - how many of each account's most recent tweets to keep
- * @returns a map from accountId to that account's top tweets, most recent first
+ * `accountIds` それぞれについて、直近 `limitPerAccount` 件のツイートを1回のクエリで取得する。
+ * Prisma のクエリビルダーではアカウントごとに1クエリを発行しない限り
+ * 「アカウントごとの上位 N 件」を表現できないため、`ROW_NUMBER()` を使った
+ * 生 SQL で取得している。
+ * @param prisma - 問い合わせに使う Prisma クライアント
+ * @param accountIds - ツイートを取得する対象アカウント
+ * @param limitPerAccount - アカウントごとに保持する直近ツイート件数
+ * @returns アカウント ID から、そのアカウントの直近ツイート (新しい順) へのマップ
  */
 async function fetchTweetsForAccounts(
   prisma: PrismaClient,
@@ -125,14 +124,14 @@ async function fetchTweetsForAccounts(
 }
 
 /**
- * Builds the `AccountFeatureBundle` a label rule evaluates, from the given account row
- * plus its already-fetched tweets — the same shape `runCrawlCycle` builds live, so a rule
- * behaves identically whether it runs during a crawl or during this backfill.
- * @param account - the account to build a bundle for
- * @param recentTweets - this account's most recent tweets, already fetched
- * @param duplicateReplyIndex - the shared cross-account duplicate-reply index
- * @param replyHijackIndex - the shared cross-account reply-hijack-swarm index
- * @returns the account's feature bundle
+ * アカウント行と取得済みツイートから、ラベルルールが評価する `AccountFeatureBundle` を
+ * 組み立てる。通常のクロール時 (`runCrawlCycle`) が作る形と同一にすることで、
+ * ルールがクロール実行時とこの再評価バックフィルとで異なる挙動にならないようにしている。
+ * @param account - バンドルを組み立てる対象アカウント
+ * @param recentTweets - 取得済みの、このアカウントの直近ツイート
+ * @param duplicateReplyIndex - アカウント横断で共有する重複返信インデックス
+ * @param replyHijackIndex - アカウント横断で共有するリプライハイジャック群インデックス
+ * @returns アカウントの feature bundle
  */
 function buildFeatureBundle(
   account: AccountRow,
@@ -184,12 +183,12 @@ export interface RelabelResult {
 }
 
 /**
- * @param account - the account to check
- * @param rules - every registered rule
- * @param labelDefinitionIds - rule key to LabelDefinition id
- * @param latestRuleVersions - the account/rule pair's most recently persisted ruleVersion
- * @returns true if every registered rule's version is already current for this account,
- *   meaning it can be skipped without fetching its tweets at all
+ * @param account - 判定対象のアカウント
+ * @param rules - 登録済みの全ルール
+ * @param labelDefinitionIds - ルールキーから LabelDefinition の id へのマップ
+ * @param latestRuleVersions - アカウント・ルールの組ごとに直近で永続化された ruleVersion
+ * @returns 登録済みの全ルールについて、このアカウントのバージョンが既に最新であれば true
+ *   (true の場合、ツイートを取得せずスキップできる)
  */
 function isFullyUpToDate(
   account: AccountRow,
@@ -390,9 +389,10 @@ async function main(): Promise<void> {
   }
 }
 
-// Guarded so importing this module (e.g. from relabel.test.ts) never triggers a real
-// backfill run - only running it directly (`node dist/relabel.js`) does. require/module
-// are the correct CommonJS-native way to detect this (project is CommonJS, not ESM).
+// このモジュールを import しただけ (relabel.test.ts からの import など) では
+// 実際のバックフィルが走らないようにするガード。直接実行 (`node dist/relabel.js`)
+// した場合のみ動作する。require/module は、CommonJS を採用する本プロジェクトで
+// これを判定するのに適した手段である。
 // eslint-disable-next-line unicorn/prefer-module
 if (require.main === module) {
   initMonitoring()

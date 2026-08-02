@@ -191,11 +191,10 @@ describe('runRelabelBackfill', () => {
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    // $queryRaw is called exactly once, for loadLatestRuleVersions - since the only
-    // account is already fully up to date, fetchTweetsForAccounts's batched raw query is
-    // never issued at all.
+    // $queryRaw が呼ばれるのは loadLatestRuleVersions の1回のみ。唯一のアカウントが
+    // 既に最新のため、fetchTweetsForAccounts のバッチ取得クエリはそもそも発行されない。
     expect(queryRaw).toHaveBeenCalledTimes(1)
-    // tweet.findMany is only ever used for the shared reply corpus load, never per account.
+    // tweet.findMany は共有の返信コーパス読み込みでのみ使われ、アカウント単位では使われない。
     expect(tweetFindMany).toHaveBeenCalledTimes(1)
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 0 })
   })
@@ -230,11 +229,10 @@ describe('runRelabelBackfill', () => {
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    // The account is left un-persisted (not labeled from an empty, fetch-failure-induced
-    // tweet sample) so it stays stale and a future run retries it with real data, rather
-    // than the whole call rejecting or the account being wrongly marked up to date.
-    // It is still counted in accountsProcessed as attempted, so the progress log's
-    // denominator can still reach totalAccounts.
+    // 取得失敗で空になったツイートサンプルでラベル付けしてしまわないよう永続化せずに残し、
+    // stale なまま次回実行で実データを使って再試行できるようにしている。呼び出し全体を
+    // reject させたり、誤って最新済み扱いにしたりはしない。試行済みとして
+    // accountsProcessed にはカウントするため、進捗ログの分母は totalAccounts に到達できる。
     expect(bulkPersist).not.toHaveBeenCalled()
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 0 })
   })

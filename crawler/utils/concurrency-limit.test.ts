@@ -8,7 +8,7 @@ describe('runWithConcurrencyLimit', () => {
       seen.push(item)
       return Promise.resolve()
     })
-    // eslint-disable-next-line unicorn/no-array-sort -- toSorted() requires ES2023 lib, but tsconfig targets ES2022; sorting a spread copy avoids mutating the input
+    // eslint-disable-next-line unicorn/no-array-sort -- toSorted() は ES2023 lib が必要だが tsconfig は ES2022 を対象としているため、複製した配列をソートして入力の変更を避けている
     expect([...seen].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5])
   })
 
@@ -53,7 +53,7 @@ describe('runWithConcurrencyLimit', () => {
     // item 1/3 の1msタイマーが発火する前に到達する。既に開始済みのタスクが
     // キャンセルされていないことを確認する前に、その完了を待つ猶予を与える。
     await new Promise((resolve) => setTimeout(resolve, 10))
-    // eslint-disable-next-line unicorn/no-array-sort -- toSorted() requires ES2023 lib, but tsconfig targets ES2022; sorting a spread copy avoids mutating the input
+    // eslint-disable-next-line unicorn/no-array-sort -- toSorted() は ES2023 lib が必要だが tsconfig は ES2022 を対象としているため、複製した配列をソートして入力の変更を避けている
     expect([...completed].sort((a, b) => a - b)).toEqual([1, 3])
   })
 

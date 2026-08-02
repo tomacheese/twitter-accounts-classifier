@@ -1,8 +1,8 @@
-// vitest's own type declarations import from 'vite', which in turn references
-// 'rollup/parseAst' — a subpath export only resolvable under moduleResolution
-// "node16"/"nodenext"/"bundler". This project's moduleResolution is "Node10"
-// (required by the rest of the CommonJS toolchain), so tsc otherwise fails
-// with TS2307 while type-checking any file that imports from 'vitest'. This
-// ambient shim only satisfies module resolution for that unused re-export —
-// no code in this project imports 'rollup/parseAst' directly.
+// vitest の型定義は 'vite' を import しており、'vite' はさらに 'rollup/parseAst' を
+// 参照する。この subpath export は moduleResolution が "node16"/"nodenext"/"bundler" の
+// 場合しか解決できないが、本プロジェクトの moduleResolution は CommonJS ツールチェイン
+// 全体の都合で "Node10" のため、'vitest' を import するファイルの型チェックで
+// tsc がエラーになってしまう。このアンビエントシムは、実際には使われない re-export の
+// ためだけにモジュール解決を成立させるものであり、このプロジェクトのコードが
+// 'rollup/parseAst' を直接 import することはない。
 declare module 'rollup/parseAst'
