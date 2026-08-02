@@ -10,6 +10,7 @@
     "build": "tsc -p tsconfig.json && cp -r generated dist/generated",
     "crawl": "node dist/crawl.js",
     "relabel": "node dist/relabel.js",
+    "benchmark:relabel": "tsx scripts/relabel-benchmark.ts",
     "lint": "eslint .",
     "format": "prettier --check .",
     "typecheck": "tsc --noEmit",
