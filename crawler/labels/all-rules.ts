@@ -29,6 +29,7 @@ import { topicPoliticsRule } from './rules/topic-politics'
 import { topicSportsRule } from './rules/topic-sports'
 import { topicMusicRule } from './rules/topic-music'
 import { topicFoodRule } from './rules/topic-food'
+import { topicMovieRule } from './rules/topic-movie'
 import { topicParentingRule } from './rules/topic-parenting'
 import { topicTravelRule } from './rules/topic-travel'
 import { templatedReplyNetworkRule } from './rules/templated-reply-network'
@@ -74,6 +75,7 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   topicSportsRule,
   topicMusicRule,
   topicFoodRule,
+  topicMovieRule,
   topicParentingRule,
   topicTravelRule,
   templatedReplyNetworkRule,
