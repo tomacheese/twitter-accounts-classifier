@@ -5,7 +5,7 @@ import type { RawUserResult } from './mappers'
 /**
  * GraphQL persisted query id for the "BlockedAccountsAll" operation. `twitter-openapi-typescript`
  * has no built-in method for this endpoint, so the id/name were confirmed by directly reading
- * X's shipped web client bundle (see docs/superpowers/plans/2026-08-03-blocks-endpoint-findings.md).
+ * X's shipped web client bundle and issuing one live authenticated request.
  */
 const BLOCKS_QUERY_ID = '5oNXfRkE7HVkDX1Fd1gn3g'
 const BLOCKS_OPERATION_NAME = 'BlockedAccountsAll'
