@@ -18,6 +18,10 @@ import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import { buildReplyHijackIndex, type ReplyHijackCorpusEntry } from './labels/reply-hijack-index'
+import {
+  buildFollowGraphLabelIndex,
+  type FollowGraphLabelIndex,
+} from './labels/follow-graph-label-index'
 import { createCookieIssuerClient, type IssuedCookies } from './auth/cookie-issuer-client'
 import { getLastResponseMatching } from './twitter/response-capture'
 import {
@@ -63,6 +67,7 @@ import {
   syncFollowers as syncFollowersEdges,
   syncFollowing as syncFollowingEdges,
 } from './db/follow-repository'
+import { replaceLabelingFollowSample as replaceLabelingFollowSampleRecord } from './db/labeling-follow-sample-repository'
 import { fetchBlocks, type BlockListApiLike, type BlockListResult } from './twitter/blocks'
 import { syncBlocks as syncBlocksEdges } from './db/block-repository'
 import {
@@ -109,6 +114,9 @@ export interface CrawlDependencies {
   persistTweets: (inputs: TweetInput[]) => Promise<void>
   ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
   loadReplyCorpus: () => Promise<ReplyHijackCorpusEntry[]>
+  loadFollowGraphLabelIndex: (
+    labelDefinitionIds: Map<string, string>,
+  ) => Promise<FollowGraphLabelIndex>
   persistLabel: (params: {
     crawlRunId: string
     username: string
@@ -118,6 +126,7 @@ export interface CrawlDependencies {
     ruleVersion: string
     result: { value: boolean; confidence: number; reason: string }
   }) => Promise<void>
+  replaceLabelingFollowSample: (accountId: string, result: FollowListResult) => Promise<void>
   syncFollowing: (followerId: string, result: FollowListResult) => Promise<void>
   syncFollowers: (followeeId: string, result: FollowListResult) => Promise<void>
   syncBlocks: (blockerId: string, result: BlockListResult) => Promise<void>
@@ -307,6 +316,7 @@ async function runAccountCycleBody(
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
+  followGraphLabelIndex: FollowGraphLabelIndex,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
   timelineSnapshot: TimelineSnapshot,
@@ -381,6 +391,31 @@ async function runAccountCycleBody(
       profileTweets.push(...recentTweets)
       for (const author of authors) extraAuthors.set(author.id, author)
 
+      // フォロー先サンプルの取得はラベリング精度を補強する追加シグナルに過ぎないため、
+      // 失敗してもキーワードベースのラベリングまで止めない。
+      try {
+        const followSample = await withTwitterRetry(
+          () =>
+            fetchFollowing(
+              client.getUserListApi(),
+              authorId,
+              deps.limits.followEdgesPerLabeledAccount,
+            ),
+          retryOptions(deps),
+        )
+        await deps.replaceLabelingFollowSample(authorId, followSample)
+      } catch (error) {
+        const message = `Failed to fetch labeling follow sample for author ${authorId}, continuing without it`
+        logger.error(message, error as Error)
+        warnings.push({
+          type: 'labeling_follow_sample_failed',
+          message,
+          authorId,
+          errorMessage: toErrorMessage(error),
+          appVersion: APP_VERSION,
+        })
+      }
+
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
       // profileTweets は他者に帰属する会話スレッドの文脈ツイートもそのまま保持するが、
       // ラベル評価用のバンドルには含めない。
@@ -447,6 +482,7 @@ async function runAccountCycleBody(
         })),
         templatedReplyNetworkSize,
         replyHijackSwarmSize,
+        followGraphLabelSignals: followGraphLabelIndex.signalsFor(profile.id),
       }
 
       for (const { rule, result } of registry.applyAll(bundle)) {
@@ -735,6 +771,7 @@ function isCrawlWarning(value: unknown): value is CrawlWarning {
       'following_sync_failed',
       'followers_sync_failed',
       'blocks_sync_failed',
+      'labeling_follow_sample_failed',
     ].includes(value.type as string)
   ) {
     return false
@@ -911,6 +948,7 @@ async function runAccountCycle(
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
+  followGraphLabelIndex: FollowGraphLabelIndex,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
 ): Promise<'success' | 'partial'> {
@@ -961,6 +999,7 @@ async function runAccountCycle(
               labelDefinitionIds,
               duplicateReplyIndex,
               replyHijackIndex,
+              followGraphLabelIndex,
               account,
               crawlRunId,
               timelineSnapshot,
@@ -1097,6 +1136,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   const registry = new LabelRuleRegistry()
   for (const rule of ALL_LABEL_RULES) registry.register(rule)
   const labelDefinitionIds = await deps.ensureLabelDefinitions(registry)
+  const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(labelDefinitionIds)
   // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
   // アカウントごとではなくサイクルごとに 1 回だけ構築する。
   const replyCorpus = await deps.loadReplyCorpus()
@@ -1125,6 +1165,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
           labelDefinitionIds,
           duplicateReplyIndex,
           replyHijackIndex,
+          followGraphLabelIndex,
           account,
           crawlRunId,
         )
@@ -1220,9 +1261,13 @@ async function main(): Promise<void> {
     },
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: () => loadReplyCorpus(prisma),
+    loadFollowGraphLabelIndex: (labelDefinitionIds) =>
+      buildFollowGraphLabelIndex(prisma, labelDefinitionIds),
     persistLabel: async (params) => {
       await recordCrawlAccountLabel(prisma, params)
     },
+    replaceLabelingFollowSample: (accountId, result) =>
+      replaceLabelingFollowSampleRecord(prisma, accountId, result),
     syncFollowing: (followerId, result) => syncFollowingEdges(prisma, followerId, result),
     syncFollowers: (followeeId, result) => syncFollowersEdges(prisma, followeeId, result),
     syncBlocks: (blockerId, result) => syncBlocksEdges(prisma, blockerId, result),

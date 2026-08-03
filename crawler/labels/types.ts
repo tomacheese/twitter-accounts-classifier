@@ -1,3 +1,5 @@
+import type { FollowGraphLabelSignal } from './follow-graph-label-index'
+
 export interface AccountFeatureBundle {
   account: {
     id: string
@@ -86,6 +88,14 @@ export interface AccountFeatureBundle {
    * この点は `templatedReplyNetworkSize` と同じ。
    */
   replyHijackSwarmSize?: number
+  /**
+   * このアカウントのフォロー先・フォロワーにおける、ラベルごとの既存付与状況。
+   * ルールごとではなく実行ごとに共有インデックスから一度算出する（`buildFollowGraphLabelIndex` 参照）。
+   * 今回の実行で新たに確定したラベルは含まず、
+   * 実行開始時点で `AccountLabelLatest` に永続化済みだった値のみを反映する。
+   * この値を持たない bundle（多くのルール単体テストなど）では空オブジェクトとして扱う。
+   */
+  followGraphLabelSignals?: Record<string, FollowGraphLabelSignal | undefined>
 }
 
 export interface LabelRuleResult {

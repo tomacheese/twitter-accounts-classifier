@@ -34,17 +34,17 @@ const ANTI_NSFW_PATTERNS = [
 export const topicNsfwRule: LabelRule = {
   key: 'topic_nsfw',
   description: 'プロフィールでアダルト/NSFW コンテンツを投稿していることを自己申告している',
-  version: '1.2.0',
+  // 性的指向に関わる機微カテゴリであり、
+  // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
+  version: '1.3.0',
   evaluate(bundle) {
     const { bio } = bundle.account
-    const value =
-      bio !== null &&
-      NSFW_PATTERN.test(bio) &&
-      !ANTI_NSFW_PATTERNS.some((pattern) => pattern.test(bio))
+    const optedOut = bio !== null && ANTI_NSFW_PATTERNS.some((pattern) => pattern.test(bio))
+    const keywordMatch = bio !== null && NSFW_PATTERN.test(bio) && !optedOut
     return {
-      value,
-      confidence: value ? 0.8 : 0,
-      reason: `bio nsfw-keyword match=${value}`,
+      value: keywordMatch,
+      confidence: keywordMatch ? 0.8 : 0,
+      reason: `bio nsfw-keyword match=${keywordMatch}`,
     }
   },
 }

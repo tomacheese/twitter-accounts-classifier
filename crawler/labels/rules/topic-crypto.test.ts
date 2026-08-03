@@ -48,4 +48,37 @@ describe('topicCryptoRule', () => {
       topicCryptoRule.evaluate(makeBundle({ bio: 'Cryptography researcher, security nerd' })).value,
     ).toBe(false)
   })
+
+  it('bio・ツイートにキーワードを含まず、フォローグラフシグナルがしきい値を満たす場合は value: true・confidence: 0.5 になる', () => {
+    const bundle = {
+      ...makeBundle({}),
+      followGraphLabelSignals: {
+        topic_crypto: {
+          followeeLabeledCount: 5,
+          followeeTotalCount: 15,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    }
+    const result = topicCryptoRule.evaluate(bundle)
+    expect(result.value).toBe(true)
+    expect(result.confidence).toBe(0.5)
+  })
+
+  it('フォローグラフシグナルがしきい値未満の場合は value: false のままになる', () => {
+    const bundle = {
+      ...makeBundle({}),
+      followGraphLabelSignals: {
+        topic_crypto: {
+          followeeLabeledCount: 0,
+          followeeTotalCount: 15,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    }
+    const result = topicCryptoRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+  })
 })

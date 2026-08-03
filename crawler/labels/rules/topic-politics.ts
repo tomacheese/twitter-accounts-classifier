@@ -11,14 +11,16 @@ const POLITICS_PATTERN =
 export const topicPoliticsRule: LabelRule = {
   key: 'topic_politics',
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
-  version: '1.0.0',
+  // 政治的意見に関わる機微カテゴリであり、
+  // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
+  version: '1.1.0',
   evaluate(bundle) {
     const { bio } = bundle.account
-    const value = bio !== null && POLITICS_PATTERN.test(bio)
+    const keywordMatch = bio !== null && POLITICS_PATTERN.test(bio)
     return {
-      value,
-      confidence: value ? 0.8 : 0,
-      reason: `bio politics-keyword match=${value}`,
+      value: keywordMatch,
+      confidence: keywordMatch ? 0.8 : 0,
+      reason: `bio politics-keyword match=${keywordMatch}`,
     }
   },
 }

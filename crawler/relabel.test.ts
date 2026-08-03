@@ -33,6 +33,7 @@ function makePrisma(overrides: {
   queryRawTweetRows?: unknown[]
   queryRawTweetError?: Error
   bulkPersistImpl?: (accountId: string, labelCount: number) => Promise<unknown[]>
+  followGraphRows?: unknown[]
 }) {
   const accountBatches = overrides.accounts ?? [[sampleAccount], []]
   const findMany = vi.fn().mockImplementation(() => Promise.resolve(accountBatches.shift() ?? []))
@@ -44,19 +45,17 @@ function makePrisma(overrides: {
   const tweetFindMany = vi
     .fn()
     .mockImplementation(overrides.tweetFindManyImpl ?? (() => Promise.resolve([])))
-  // recordAccountLabelsBulk の呼び出しは1アカウント分の複数ラベルを1本の $queryRaw にまとめる。
-  // SQL 文が "UNNEST(" を含むかどうかで他の $queryRaw 呼び出しと区別できる。
-  // それ以外の $queryRaw は呼び出し順が固定であることを前提としており、
-  // 1回目は loadLatestRuleVersions、2回目以降は fetchTweetsForAccounts になる。
+  // 呼び出し順序ではなく SQL 文の内容で判定するため、新しい集約クエリが追加されても影響を受けない。
   const bulkPersist = vi.fn()
-  let queryRawCalls = 0
   const queryRaw = vi.fn().mockImplementation((strings: unknown, ...values: unknown[]) => {
-    if (Array.isArray(strings) && strings.join('').includes('UNNEST(')) {
+    const sql = Array.isArray(strings) ? strings.join('') : ''
+    if (sql.includes('UNNEST(')) {
       const ids = values[0] as string[]
       const accountIds = values[1] as string[]
       const labelDefinitionIds = values[2] as string[]
+      const resultValues = values[3] as boolean[]
       const accountId = accountIds[0]
-      bulkPersist(accountId, ids.length)
+      bulkPersist(accountId, ids.length, resultValues)
       return (
         overrides.bulkPersistImpl?.(accountId, ids.length) ??
         Promise.resolve(
@@ -69,8 +68,10 @@ function makePrisma(overrides: {
         )
       )
     }
-    queryRawCalls++
-    if (queryRawCalls === 1) {
+    if (sql.includes('"Follow"')) {
+      return Promise.resolve(overrides.followGraphRows ?? [])
+    }
+    if (sql.includes('DISTINCT ON')) {
       return Promise.resolve(overrides.latestRuleVersions ?? [])
     }
     if (overrides.queryRawTweetError) {
@@ -99,7 +100,7 @@ describe('runRelabelBackfill', () => {
     const result = await runRelabelBackfill(prisma, registry)
 
     expect(bulkPersist).toHaveBeenCalledTimes(1)
-    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1)
+    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1, [true])
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 1 })
   })
 
@@ -191,10 +192,10 @@ describe('runRelabelBackfill', () => {
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    // $queryRaw が呼ばれるのは loadLatestRuleVersions の1回のみ。
+    // $queryRaw が呼ばれるのは、フォローグラフ集約2本と loadLatestRuleVersions の1本のみ。
     // 唯一のアカウントが既に最新のため、
     // fetchTweetsForAccounts のバッチ取得クエリはそもそも発行されない。
-    expect(queryRaw).toHaveBeenCalledTimes(1)
+    expect(queryRaw).toHaveBeenCalledTimes(3)
     // tweet.findMany は共有の返信コーパス読み込みでのみ使われ、アカウント単位では使われない。
     expect(tweetFindMany).toHaveBeenCalledTimes(1)
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 0 })
@@ -216,7 +217,7 @@ describe('runRelabelBackfill', () => {
     const result = await runRelabelBackfill(prisma, registry)
 
     expect(bulkPersist).toHaveBeenCalledTimes(1)
-    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1)
+    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1, [true])
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 1 })
   })
 
@@ -349,6 +350,33 @@ describe('runRelabelBackfill', () => {
       quotedTweetAuthorId: 'bob',
       quotedTweetHasVideo: true,
     })
+  })
+
+  it('followGraphLabelSignals がラベルルールの評価に渡る', async () => {
+    const rule: LabelRule = {
+      key: 'topic_food',
+      description: 'test rule topic_food',
+      version: '1.0.0',
+      evaluate: (bundle: AccountFeatureBundle) => ({
+        value: bundle.followGraphLabelSignals?.topic_food !== undefined,
+        confidence: 1,
+        reason: 'test',
+      }),
+    }
+    const { prisma, bulkPersist } = makePrisma({
+      accounts: [[sampleAccount], []],
+      followGraphRows: [
+        { accountId: 'acc1', labelDefinitionId: 'def-topic_food', labeledCount: 5, totalCount: 15 },
+      ],
+    })
+    const registry = new LabelRuleRegistry()
+    registry.register(rule)
+
+    await runRelabelBackfill(prisma, registry)
+
+    // 永続化の有無は ruleVersion の新旧のみで決まり、evaluate の結果値には依存しないため、
+    // ラベルの真偽値そのものを検証することで followGraphLabelSignals が実際に bundle に渡っているかどうかを区別できるようにしている。
+    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1, [true])
   })
 
   describe('progress logging', () => {

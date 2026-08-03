@@ -1,3 +1,4 @@
+import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 import type { LabelRule } from '../types'
 
 // 英単語は他の topic_* ルールとの表記統一のため単語境界で判定しており、
@@ -8,14 +9,16 @@ const MOVIE_PATTERN =
 export const topicMovieRule: LabelRule = {
   key: 'topic_movie',
   description: 'プロフィールで映画・ドラマ鑑賞を中心的な関心事として挙げている',
-  version: '1.0.0',
+  version: '1.1.0',
   evaluate(bundle) {
     const { bio } = bundle.account
-    const value = bio !== null && MOVIE_PATTERN.test(bio)
+    const keywordMatch = bio !== null && MOVIE_PATTERN.test(bio)
+    const followGraphMatch = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_movie)
+    const value = keywordMatch || followGraphMatch
     return {
       value,
-      confidence: value ? 0.8 : 0,
-      reason: `bio movie-keyword match=${value}`,
+      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
+      reason: `bio movie-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
     }
   },
 }

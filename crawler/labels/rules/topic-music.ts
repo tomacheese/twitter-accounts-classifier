@@ -1,3 +1,4 @@
+import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 import type { LabelRule } from '../types'
 
 // band は husband/abandon 等の無関係な語に含まれてしまうため、
@@ -9,14 +10,16 @@ const MUSIC_PATTERN =
 export const topicMusicRule: LabelRule = {
   key: 'topic_music',
   description: 'プロフィールで音楽を中心的な関心事として挙げている',
-  version: '1.0.0',
+  version: '1.1.0',
   evaluate(bundle) {
     const { bio } = bundle.account
-    const value = bio !== null && MUSIC_PATTERN.test(bio)
+    const keywordMatch = bio !== null && MUSIC_PATTERN.test(bio)
+    const followGraphMatch = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_music)
+    const value = keywordMatch || followGraphMatch
     return {
       value,
-      confidence: value ? 0.8 : 0,
-      reason: `bio music-keyword match=${value}`,
+      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
+      reason: `bio music-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
     }
   },
 }

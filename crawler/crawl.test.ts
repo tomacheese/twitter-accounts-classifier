@@ -89,6 +89,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       trendsPerCycle: 5,
       followEdgesPerAccount: 2000,
       blockEdgesPerAccount: 2000,
+      followEdgesPerLabeledAccount: 200,
       authorFetchDelayMs: 300,
     },
     issueCookies: vi.fn().mockResolvedValue({ ct0: 'c0', authToken: 'a0' }),
@@ -125,7 +126,9 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       .fn()
       .mockResolvedValue(new Map([['verified_blue_individual', 'ld1']])),
     loadReplyCorpus: vi.fn().mockResolvedValue([]),
+    loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
     persistLabel: vi.fn().mockResolvedValue(undefined),
+    replaceLabelingFollowSample: vi.fn().mockResolvedValue(undefined),
     syncFollowing: vi.fn().mockResolvedValue(undefined),
     syncFollowers: vi.fn().mockResolvedValue(undefined),
     syncBlocks: vi.fn().mockResolvedValue(undefined),
@@ -171,6 +174,64 @@ describe('runCrawlCycle', () => {
     )
     expect(deps.closeTrendsScraper).toHaveBeenCalled()
     expect(deps.closeOpenApiClient).toHaveBeenCalled()
+  })
+
+  it('投稿者ごとにフォロー先サンプルを取得し、replaceLabelingFollowSample へ渡す', async () => {
+    const deps = makeDeps()
+    await runCrawlCycle(deps)
+
+    expect(deps.replaceLabelingFollowSample).toHaveBeenCalled()
+    const [accountId, result] = (deps.replaceLabelingFollowSample as ReturnType<typeof vi.fn>).mock
+      .calls[0]
+    expect(typeof accountId).toBe('string')
+    expect(result).toEqual({ ids: [], authors: [], reachedEnd: true })
+  })
+
+  it('フォロー先サンプルの取得に失敗しても、投稿者本体のラベリングは継続する', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockRejectedValue(new Error('follow list unavailable')),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    // サンプル取得は失敗として記録されるが、
+    // フォロー先サンプルはラベリング精度を補強する追加シグナルに過ぎないため、
+    // 投稿者本体の persistAccount・persistLabel は通常どおり実行される。
+    expect(deps.replaceLabelingFollowSample).not.toHaveBeenCalled()
+    expect(deps.persistAccount).toHaveBeenCalled()
+    expect(deps.persistLabel).toHaveBeenCalled()
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'partial',
+        warnings: expect.arrayContaining([
+          expect.objectContaining({ type: 'labeling_follow_sample_failed' }),
+        ]),
+      }),
+    )
   })
 
   it('passes the registry to ensureLabelDefinitions so every registered rule gets a LabelDefinition', async () => {
@@ -227,6 +288,10 @@ describe('runCrawlCycle', () => {
             getUserByRestId,
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -279,6 +344,10 @@ describe('runCrawlCycle', () => {
             getUserByRestId,
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -328,6 +397,10 @@ describe('runCrawlCycle', () => {
             // ラベル評価が上記の otherReplies 経由でのみ hijack replies を見られるようにする。
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -370,6 +443,10 @@ describe('runCrawlCycle', () => {
             getUserTweetsAndReplies: vi
               .fn()
               .mockResolvedValue({ data: { data: [templatedReply] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),
@@ -445,6 +522,10 @@ describe('runCrawlCycle', () => {
             getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [ownReply] } }),
           }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -455,6 +536,39 @@ describe('runCrawlCycle', () => {
       .map((call) => call[0])
       .find((bundle) => bundle.account.id === 'author1')
     expect(bundleForAuthor?.replyHijackSwarmSize).toBe(5)
+
+    applyAllSpy.mockRestore()
+  })
+
+  it('labelDefinitionIds を loadFollowGraphLabelIndex に渡し、bundle に followGraphLabelSignals を設定する', async () => {
+    const signalsFor = vi.fn().mockReturnValue({
+      topic_food: {
+        followeeLabeledCount: 5,
+        followeeTotalCount: 15,
+        followerLabeledCount: 0,
+        followerTotalCount: 0,
+      },
+    })
+    const applyAllSpy = vi.spyOn(LabelRuleRegistry.prototype, 'applyAll')
+    const deps = makeDeps({
+      loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(signalsFor).toHaveBeenCalled()
+    const bundles = applyAllSpy.mock.calls.map((call) => call[0])
+    expect(bundles.length).toBeGreaterThan(0)
+    for (const bundle of bundles) {
+      expect(bundle.followGraphLabelSignals).toEqual({
+        topic_food: {
+          followeeLabeledCount: 5,
+          followeeTotalCount: 15,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      })
+    }
 
     applyAllSpy.mockRestore()
   })
@@ -556,6 +670,10 @@ describe('runCrawlCycle', () => {
             // プロフィール取得側にはこのツイートを含めない: タイムライン注入経由でのみ観測させる。
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -602,6 +720,10 @@ describe('runCrawlCycle', () => {
               .fn()
               .mockResolvedValue({ data: { data: [notPromotedInProfile] } }),
           }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -644,6 +766,10 @@ describe('runCrawlCycle', () => {
             getUserTweetsAndReplies: vi
               .fn()
               .mockResolvedValue({ data: { data: [ownReply, foreignParentTweet] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),
@@ -694,6 +820,10 @@ describe('runCrawlCycle', () => {
             getUserTweetsAndReplies: vi
               .fn()
               .mockResolvedValue({ data: { data: [notPromotedInProfile] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),
@@ -866,7 +996,10 @@ describe('runCrawlCycle', () => {
               getUserByScreenName,
               getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
             }),
-            getUserListApi: () => ({ getFollowing: vi.fn(), getFollowers: vi.fn() }),
+            getUserListApi: () => ({
+              getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+              getFollowers: vi.fn(),
+            }),
             getBlocksApi: () => ({
               getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             }),
