@@ -1,8 +1,7 @@
 import Link from 'next/link'
 
 /**
- * Rendered when `getCrawlRunDetail` returns `null` for the requested ID.
- * @returns the not-found message for the crawl run detail page
+ * @returns クロールラン詳細ページ向けの not-found メッセージ
  */
 export default function CrawlRunNotFound(): React.ReactElement {
   return (

@@ -4,11 +4,10 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 /**
- * A top-nav link that highlights itself when its `href` matches the current route
- * (exact match for `/`, prefix match otherwise so nested routes like
- * `/accounts/[id]` still highlight "Accounts").
- * @param props - the link's target and label
- * @returns the rendered nav link
+ * `/` だけは完全一致にし、それ以外は前方一致で判定する。
+ * 前方一致にしないと `/accounts/[id]` のようなネストしたルートで「Accounts」がハイライトされない。
+ * @param props - リンク先とラベル
+ * @returns 描画されたナビリンク
  */
 export function NavLink({
   href,

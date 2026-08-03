@@ -7,11 +7,8 @@ import type { LabelDistributionEntry } from '@/lib/queries/dashboard'
 const BAR_COLOR = '#2563eb'
 
 /**
- * Renders a horizontal bar chart of how many accounts carry each label as
- * `true`, out of the accounts evaluated for it. Each bar links to the
- * account list pre-filtered to that label.
- * @param props - the label distribution entries to chart
- * @returns the rendered chart
+ * @param props - グラフ化するラベル分布のエントリ一覧
+ * @returns 描画されたチャート
  */
 export function LabelDistributionChart({
   entries,

@@ -1,8 +1,7 @@
 import Link from 'next/link'
 
 /**
- * Rendered when `getAccountDetail` returns `null` for the requested ID.
- * @returns the not-found message for the account detail page
+ * @returns アカウント詳細ページ向けの not-found メッセージ
  */
 export default function AccountNotFound(): React.ReactElement {
   return (

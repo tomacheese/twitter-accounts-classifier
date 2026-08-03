@@ -10,11 +10,9 @@ const STATUS_STYLES: Partial<Record<CrawlRunStatus, string>> = {
 const FALLBACK_STYLE = 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
 
 /**
- * Renders a `CrawlRun`/`CrawlAccountRun` status ('running' | 'success' | 'partial' |
- * 'failed') as a colored pill. Any other value falls back to a neutral gray pill
- * instead of throwing, since the underlying column is a plain string, not an enum.
- * @param props - the status string to render
- * @returns the rendered status badge
+ * 対象カラムは enum ではなく素の文字列のため、未知の値でも例外にせずグレーのピルにフォールバックする。
+ * @param props - 表示するステータス文字列
+ * @returns 描画されたステータスバッジ
  */
 export function StatusBadge({ status }: { status: string }): React.ReactElement {
   const style = STATUS_STYLES[status as CrawlRunStatus] ?? FALLBACK_STYLE

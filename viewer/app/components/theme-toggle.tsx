@@ -5,24 +5,19 @@ import { useEffect, useState } from 'react'
 const STORAGE_KEY = 'theme'
 
 /**
- * Reads the theme the blocking inline script in the root layout already
- * applied to `<html>` before hydration, via the `dark` class it set there.
- * @returns `true` if dark mode is currently active
+ * ルートレイアウトのブロッキングインラインスクリプトが `<html>` に付与済みの `dark` クラスから、
+ * ハイドレーション前に確定済みのテーマを読み取る。
+ * @returns ダークモードが有効なら `true`
  */
 function readInitialIsDark(): boolean {
   return document.documentElement.classList.contains('dark')
 }
 
 /**
- * A manual light/dark theme toggle. Persists the user's explicit choice
- * to `localStorage` so it overrides the OS-level `prefers-color-scheme`
- * on every later visit.
- *
- * Initial render always shows the light-mode label to match the server's
- * markup, then syncs to the real value on mount — reading `document`
- * directly in the `useState` initializer would mismatch whenever the
- * resolved theme is dark, since the server has no `document` to read.
- * @returns the rendered toggle button
+ * 初期レンダリングは常にライトモード表示に固定し、マウント後に実際の値へ同期する。
+ * `useState` の初期化子で `document` を直接読むと、サーバーには `document` がなく、
+ * ダークモード確定時にサーバーとクライアントの描画結果が一致しなくなる。
+ * @returns 描画されたトグルボタン
  */
 export function ThemeToggle(): React.ReactElement {
   const [isDark, setIsDark] = useState(false)
@@ -31,7 +26,6 @@ export function ThemeToggle(): React.ReactElement {
     setIsDark(readInitialIsDark())
   }, [])
 
-  /** Flips the active theme, applies it to `<html>`, and persists the choice. */
   function toggle(): void {
     const next = !isDark
     setIsDark(next)

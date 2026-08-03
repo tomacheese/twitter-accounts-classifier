@@ -1,12 +1,10 @@
 'use client'
 
 /**
- * Segment-level error boundary for the viewer app. Rendered whenever a
- * page's data fetch throws (most commonly a database connection failure).
- * Distinct from `global-error.tsx`, which only fires for errors that escape
- * the root layout itself.
- * @param props - the caught error and a function to retry rendering
- * @returns the rendered error page
+ * ルートレイアウト自体から漏れた失敗のみを拾う `global-error.tsx` とは異なり、
+ * こちらは各セグメント配下でのデータ取得失敗を拾う。
+ * @param props - 捕捉したエラーと再描画をリトライする関数
+ * @returns 描画されたエラーページ
  */
 export default function SegmentError({
   reset,
