@@ -51,6 +51,9 @@ function groupWarningsByType(warnings: CrawlWarning[]): [CrawlWarningType, Crawl
 const ACCOUNT_RUN_COLUMNS = [
   'Username',
   'Status',
+  'Started at',
+  'Finished at',
+  'Duration',
   'Recommended timeline tweets',
   'Following timeline tweets',
   'Trending timeline tweets',
@@ -120,6 +123,15 @@ export default async function CrawlRunDetailPage({
             <dt className="text-gray-500 dark:text-gray-400">Accounts processed</dt>
             <dd>{run.accountRuns.length.toLocaleString()}</dd>
           </div>
+          {run.status === 'running' && run.currentUsername && run.currentAccountStartedAt && (
+            <div>
+              <dt className="text-gray-500 dark:text-gray-400">Currently processing</dt>
+              <dd>
+                @{run.currentUsername} (
+                {formatDuration(run.currentAccountStartedAt, new Date())} elapsed)
+              </dd>
+            </div>
+          )}
         </dl>
         {run.accountRuns.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-2 text-sm">
@@ -168,6 +180,15 @@ export default async function CrawlRunDetailPage({
                       <td className="p-2">{accountRun.username}</td>
                       <td className="p-2">
                         <StatusBadge status={accountRun.status} />
+                      </td>
+                      <td className="p-2">{formatDateTime(accountRun.startedAt)}</td>
+                      <td className="p-2">
+                        {accountRun.finishedAt ? formatDateTime(accountRun.finishedAt) : '—'}
+                      </td>
+                      <td className="p-2">
+                        {accountRun.finishedAt
+                          ? formatDuration(accountRun.startedAt, accountRun.finishedAt)
+                          : '—'}
                       </td>
                       <td className="p-2">{accountRun.recommendedCount}</td>
                       <td className="p-2">{accountRun.followingCount}</td>
