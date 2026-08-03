@@ -21,7 +21,8 @@ async function upsertBlockAuthors(prisma: PrismaClient, result: BlockListResult)
 
 /**
  * ログインアカウントがブロックしているユーザーの `Block` 行を同期する。
- * `result.reachedEnd` が true のときのみ現存しない `blockedId` の行を削除し、ブロック解除を検知する。
+ * `result.reachedEnd` が true かつ `result.ids` が空でないときのみ、現存しない `blockedId`
+ * の行を削除してブロック解除を検知する (空レスポンスによる全件削除事故を防ぐガード)。
  * @param prisma - Prisma クライアント
  * @param blockerId - このブロック一覧の持ち主のアカウント
  * @param result - 取得したブロック一覧

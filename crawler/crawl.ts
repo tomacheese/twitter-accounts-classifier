@@ -641,6 +641,7 @@ async function syncBlocksPhase(
           message,
           username: account.username,
           errorMessage: toErrorMessage(error),
+          rawResponseSnippet: getLastResponseMatching('BlockedAccountsAll')?.body,
           appVersion: APP_VERSION,
         },
       ],
@@ -1172,7 +1173,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
 
 /**
  * @param realClient - 認証済みの実際の `TwitterOpenApiClient`
- * @param blocksClient - `OpenApiClientContext` の生リクエスト blocks クライアント
+ * @param blocksClient - `OpenApiClientContext` のラップ済み `BlockListApiLike` blocks クライアント
  * @returns {@link runCrawlCycle} で使用できる `CrawlOpenApiClient`
  */
 function toCrawlOpenApiClient(

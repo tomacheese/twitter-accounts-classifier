@@ -78,6 +78,19 @@ describe('fetchBlocks', () => {
 
     await expect(fetchBlocks(client, 100)).rejects.toThrow('rate limited')
   })
+
+  it('marks reachedEnd false when the cursor-exhausting page also overshoots the limit', async () => {
+    // limit (2) は最初のページ (3 件) の内側に収まるが、そのページはカーソルも尽きている
+    // (nextCursor なし) - 切り捨てられた末尾 (id '3') を呼び出し側の prune 処理が
+    // 「もう存在しない」と誤解してはならない。
+    const getBlocks = vi.fn().mockResolvedValueOnce(page(['1', '2', '3'], undefined))
+    const client: BlockListApiLike = { getBlocks }
+
+    const result = await fetchBlocks(client, 2)
+
+    expect(result.ids).toEqual(['1', '2'])
+    expect(result.reachedEnd).toBe(false)
+  })
 })
 
 describe('createBlockListApiLike', () => {
