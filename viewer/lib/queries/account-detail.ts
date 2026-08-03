@@ -70,6 +70,8 @@ export interface AccountDetail {
 const FOLLOW_LIST_LIMIT = 100
 // history の件数を無制限に返すと再ラベリングを繰り返したアカウントほどページの転送量が増え続けるため、上限を設けて打ち切る。
 const LABEL_HISTORY_LIMIT = 20
+// ラベルルールが true/false を繰り返した場合でも 1 アカウントのページ読み込みが際限なく重くならないための防御的な上限。
+const ACCOUNT_LABEL_FETCH_LIMIT = 2000
 
 /**
  * labeledAt 降順、id 降順で取得した AccountLabel の一覧を labelDefinitionId ごとに集約する。
@@ -152,6 +154,7 @@ export async function getAccountDetail(
       where: { accountId },
       // 再ラベリングが短時間に連続すると labeledAt が同一になりうるため、id をタイブレークにして順序を固定する。
       orderBy: [{ labeledAt: 'desc' }, { id: 'desc' }],
+      take: ACCOUNT_LABEL_FETCH_LIMIT,
       include: { labelDefinition: true },
     }),
     prisma.tweet.findMany({

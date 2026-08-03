@@ -404,4 +404,38 @@ describe('getAccountDetail', () => {
     expect(result?.labels).toHaveLength(1)
     expect(result?.labels[0].history).toHaveLength(20)
   })
+
+  it('caps the total number of AccountLabel rows fetched per account', async () => {
+    const account = {
+      id: 'a6',
+      screenName: 'frank',
+      displayName: 'Frank',
+      bio: null,
+      profileImageUrl: null,
+      followersCount: 0,
+      followingCount: 0,
+      tweetCount: 0,
+      accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
+      isBlueVerified: false,
+      verifiedType: null,
+    }
+    const labelFindMany = vi.fn().mockResolvedValue([])
+    const prisma = {
+      account: { findUnique: vi.fn().mockResolvedValue(account) },
+      accountLabel: { findMany: labelFindMany },
+      tweet: { findMany: vi.fn().mockResolvedValue([]) },
+      follow: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+      block: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+    } as unknown as PrismaClient
+
+    await getAccountDetail(prisma, 'a6', 10)
+
+    expect(labelFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 2000 }))
+  })
 })
