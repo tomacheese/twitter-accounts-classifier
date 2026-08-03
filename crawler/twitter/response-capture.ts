@@ -29,9 +29,9 @@ const TRUNCATION_MARKER = '... [truncated]'
 let responseBuffer: CapturedResponse[] = []
 
 /**
- * @param url - the request URL the response was received for
- * @param status - the response's HTTP status
- * @param body - the response body text
+ * @param url - レスポンスを受け取ったリクエストの URL
+ * @param status - レスポンスの HTTP ステータス
+ * @param body - レスポンス本文のテキスト
  */
 function recordResponse(url: string, status: number, body: string): void {
   const truncatedBody =
@@ -71,8 +71,8 @@ export function wrapFetchWithResponseCapture(fetchImpl: typeof fetch): typeof fe
 /**
  * fetch 層でリクエストとレスポンスを紐付ける仕組みを別途用意せずに済むよう、
  * エンドポイントのパス断片による検索だけで該当レスポンスを引けるようにしている。
- * @param urlSubstring - a substring identifying the endpoint, e.g. `HomeTimeline`
- * @returns the matching response, or `undefined` if none was captured
+ * @param urlSubstring - エンドポイントを識別する部分文字列 (例: `HomeTimeline`)
+ * @returns 一致したレスポンス、キャプチャされていなければ `undefined`
  */
 export function getLastResponseMatching(urlSubstring: string): CapturedResponse | undefined {
   for (let i = responseBuffer.length - 1; i >= 0; i--) {

@@ -21,10 +21,10 @@ export interface RepliesResult {
 }
 
 /**
- * @param client - tweet detail API client
- * @param parentTweet - the tweet whose replies to fetch
- * @param limit - maximum number of replies to consider
- * @returns replies split into `authorReplies` and `otherReplies`, plus the replies' author profiles
+ * @param client - ツイート詳細 API クライアント
+ * @param parentTweet - 返信を取得する対象のツイート
+ * @param limit - 考慮する返信の最大件数
+ * @returns `authorReplies` と `otherReplies` に分けた返信、および返信者のプロフィール
  */
 export async function fetchReplies(
   client: TweetDetailApiLike,
@@ -47,11 +47,10 @@ export async function fetchReplies(
 }
 
 /**
- * `getTweetDetail` のレスポンス形状は `./timeline` の `createTweetApiLike` が変換する
- * timeline 系エンドポイントと同一のため、専用の変換処理を新設せず
- * {@link convertTimelineResponse} を流用する。
- * @param tweetApi - the real tweet API, e.g. from `TwitterOpenApiClient.getTweetApi()`
- * @returns a `TweetDetailApiLike` usable with {@link fetchReplies}
+ * `getTweetDetail` のレスポンス形状は `./timeline` の `createTweetApiLike` が変換する timeline 系エンドポイントと同一のため、
+ * 専用の変換処理を新設せず {@link convertTimelineResponse} を流用する。
+ * @param tweetApi - 実際のツイート API (例: `TwitterOpenApiClient.getTweetApi()`)
+ * @returns {@link fetchReplies} で使う `TweetDetailApiLike`
  */
 export function createTweetDetailApiLike(tweetApi: TweetApiUtils): TweetDetailApiLike {
   return {

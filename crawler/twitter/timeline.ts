@@ -14,9 +14,9 @@ import type { AccountProfileInput } from '../db/account-repository'
 import type { TweetInput } from '../db/tweet-repository'
 
 /**
- * `rawCount` を `data.data` とは別に持つのは、全件が広告・tombstone などで
- * フィルタされ 0 件になったページと、データが尽きたページを `data.data` だけでは
- * 区別できないため。
+ * `rawCount` を `data.data` とは別に持つのは、
+ * 広告や tombstone などで全件がフィルタされ 0 件になったページと、
+ * データが尽きたページを `data.data` だけでは区別できないため。
  */
 export interface TimelinePage {
   data: { data: RawTweetResult[]; cursor?: string; rawCount: number }
@@ -56,23 +56,22 @@ function mapEach(
 }
 
 /**
- * カーソルが壊れて同じ値を繰り返し返し続けた場合の保険としてすでに同一カーソル
- * 検知を入れているが、それだけに頼らず無条件の上限も設けている。
+ * カーソルが同じ値を繰り返し返す場合の保険として、すでに同一カーソル検知を入れているが、
+ * それだけに頼らず無条件の上限も設けている。
  */
 const MAX_PAGES_PER_TIMELINE = 50
 
 /**
- * ホームタイムライン・検索エンドポイントは広告混在やアルゴリズムの都合で
- * 1 回の呼び出しでは `count` まで埋まらないことがあるため、`limit` に達するか
- * カーソルが尽きるまで呼び出しを繰り返す。
+ * ホームタイムライン・検索エンドポイントは広告混在やアルゴリズムの都合で 1 回の呼び出しでは `count` まで埋まらないことがあるため、
+ * `limit` に達するかカーソルが尽きるまで呼び出しを繰り返す。
  *
- * マッピング後の件数が 0 件のページでも、`rawCount` が正でカーソルが残っていれば
- * データ終端とは限らないため、そのまま次のページを取得し続ける。カーソルが
- * 同じ値のまま進まない場合や {@link MAX_PAGES_PER_TIMELINE} に達した場合は、
+ * マッピング後の件数が 0 件のページでも、`rawCount` が正でカーソルが残っていればデータ終端とは限らないため、
+ * そのまま次のページを取得し続ける。
+ * カーソルが同じ値のまま進まない場合や {@link MAX_PAGES_PER_TIMELINE} に達した場合は、
  * `rawCount` やカーソル判定が効かないケースへの保険として、強制的にループを止める。
- * @param fetchPage - fetches one page for a given cursor (`undefined` for the first page)
- * @param limit - the maximum number of tweets to collect
- * @returns the collected tweets, truncated to `limit`
+ * @param fetchPage - 指定したカーソルに対応する 1 ページを取得する関数 (先頭ページの場合は `undefined`)
+ * @param limit - 収集するツイートの最大件数
+ * @returns 収集したツイート (`limit` 件に切り詰め済み)
  */
 async function paginateTimeline(
   fetchPage: (cursor: string | undefined) => Promise<TimelinePage>,
@@ -98,9 +97,9 @@ async function paginateTimeline(
 }
 
 /**
- * @param client - the tweet API adapter
- * @param limit - the maximum number of tweets to collect
- * @returns the collected tweets and their authors' profiles
+ * @param client - ツイート API アダプター
+ * @param limit - 収集するツイートの最大件数
+ * @returns 収集したツイートとその投稿者のプロフィール
  */
 export async function fetchRecommendedTimeline(
   client: TweetApiLike,
@@ -114,9 +113,9 @@ export async function fetchRecommendedTimeline(
 }
 
 /**
- * @param client - the tweet API adapter
- * @param limit - the maximum number of tweets to collect
- * @returns the collected tweets and their authors' profiles
+ * @param client - ツイート API アダプター
+ * @param limit - 収集するツイートの最大件数
+ * @returns 収集したツイートとその投稿者のプロフィール
  */
 export async function fetchFollowingTimeline(
   client: TweetApiLike,
@@ -130,14 +129,14 @@ export async function fetchFollowingTimeline(
 }
 
 /**
- * トレンドごとに独立してページングするため、この関数全体で発行される API 呼び出し
- * 回数は `maxTrends` にほぼ比例する。トレンドごとの検索結果は少ないページ数で
- * 収まることが多く、許容できると判断している。
- * @param scraper - fetches the current trend names
- * @param client - the tweet API adapter
- * @param limitPerTrend - the maximum number of tweets to collect per trend
- * @param maxTrends - the maximum number of trends to consult
- * @returns the collected tweets (across all consulted trends) and their authors' profiles
+ * トレンドごとに独立してページングするため、
+ * この関数全体で発行される API 呼び出し回数は `maxTrends` にほぼ比例する。
+ * トレンドごとの検索結果は少ないページ数で収まることが多く、許容できると判断している。
+ * @param scraper - 現在のトレンド名を取得する
+ * @param client - ツイート API アダプター
+ * @param limitPerTrend - トレンドごとに収集するツイートの最大件数
+ * @param maxTrends - 参照するトレンドの最大件数
+ * @returns 参照した全トレンドを合わせて収集したツイートとその投稿者のプロフィール
  */
 export async function fetchTrendingTimeline(
   scraper: TrendsScraperLike,
@@ -165,15 +164,15 @@ export async function fetchTrendingTimeline(
 }
 
 /**
- * `screenName`・`name`・`createdAt` は X の実レスポンスでは `user.core` 側に
- * 移っており、`legacy` 側の同名フィールドは省略されることが一般的なため、
- * `legacy` 単独の型では値を取りこぼす。`user.core` を優先し、古い・異なる形状の
- * レスポンスに備えて `legacy` をフォールバックとして読む。`verifiedType` も
- * 同様に `RawUserResult` が想定するトップレベルではなく
- * `user.verification?.verifiedType` に存在するため変換が必要になる。
+ * `screenName`・`name`・`createdAt` は X の実レスポンスでは `user.core` 側に移っており、
+ * `legacy` 側の同名フィールドは省略されることが一般的なため、
+ * `legacy` 単独の型では値を取りこぼす。
+ * `user.core` を優先し、
+ * 古い・異なる形状のレスポンスに備えて `legacy` をフォールバックとして読む。
+ * `verifiedType` も同様に `RawUserResult` が想定するトップレベルではなく `user.verification?.verifiedType` に存在するため変換が必要になる。
  * `./profile` の `createUserApiLike` からも同じ形状の変換として再利用される。
- * @param user - a user object as returned inside a real timeline/user API response
- * @returns the same user in the `RawUserResult` shape
+ * @param user - 実際のタイムライン・ユーザー API レスポンス内に含まれるユーザーオブジェクト
+ * @returns 同じユーザーを `RawUserResult` 形状に変換したもの
  */
 export function toRawUserResult(user: TweetApiUtilsData['user']): RawUserResult {
   return {
@@ -198,16 +197,17 @@ export function toRawUserResult(user: TweetApiUtilsData['user']): RawUserResult 
 }
 
 /**
- * `legacy` を持たないエントリ (tombstone・非表示のツイートなど) はテキストや
- * エンゲージメント件数を持たないため `null` を返し、マッピング対象から除外する。
+ * `legacy` を持たないエントリ (tombstone・非表示のツイートなど) はテキストやエンゲージメント件数を持たないため `null` を返し、
+ * マッピング対象から除外する。
  *
- * `retweetedStatusIdStr` は実際の `TweetLegacy` 型には存在せず、リツイートは
- * `TweetApiUtilsData.retweeted` がリツイート元エントリ全体を保持する形で表現
- * されるため、そこから id を読み出す。引用ツイートも同じ形状で
- * `TweetApiUtilsData.quoted` に保持され、その `legacy` も欠落し得るため、
+ * `retweetedStatusIdStr` は実際の `TweetLegacy` 型には存在せず、
+ * リツイートは `TweetApiUtilsData.retweeted` がリツイート元エントリ全体を保持する形で表現されるため、
+ * そこから id を読み出す。
+ * 引用ツイートも同じ形状で `TweetApiUtilsData.quoted` に保持され、
+ * その `legacy` も欠落し得るため、
  * 常に存在する前提を置かず欠落時は `undefined` のままにしている。
- * @param data - one real timeline entry
- * @returns the entry as a `RawTweetResult`, or `null` if it carries no `legacy` payload
+ * @param data - 実際のタイムラインエントリ 1 件分
+ * @returns `RawTweetResult` に変換したエントリ、`legacy` を持たない場合は `null`
  */
 function toRawTweetResult(data: TweetApiUtilsData): RawTweetResult | null {
   if (!data.tweet.legacy) return null
@@ -257,11 +257,10 @@ function toRawTweetResults(data: TweetApiUtilsData[]): RawTweetResult[] {
 }
 
 /**
- * `./engagement` の `TweetDetailApiLike` が `TweetApiUtils.getTweetDetail` をラップ
- * する際にもこの関数を再利用している。`getTweetDetail` のレスポンスも同じ
- * `TwitterApiUtilsResponse<TimelineApiUtilsResponse<TweetApiUtilsData>>` 形状のため。
- * @param response - the pending API response
- * @returns the converted page
+ * `./engagement` の `TweetDetailApiLike` が `TweetApiUtils.getTweetDetail` をラップする際にもこの関数を再利用している。
+ * `getTweetDetail` のレスポンスも同じ `TwitterApiUtilsResponse<TimelineApiUtilsResponse<TweetApiUtilsData>>` 形状のため。
+ * @param response - 保留中の API レスポンス
+ * @returns 変換後のページ
  */
 export async function convertTimelineResponse(
   response: Promise<TwitterApiUtilsResponse<TimelineApiUtilsResponse<TweetApiUtilsData>>>,
@@ -277,8 +276,8 @@ export async function convertTimelineResponse(
 }
 
 /**
- * @param tweetApi - the real tweet API, e.g. from `TwitterOpenApiClient.getTweetApi()`
- * @returns a `TweetApiLike` usable with {@link fetchRecommendedTimeline}, {@link fetchFollowingTimeline}, and {@link fetchTrendingTimeline}
+ * @param tweetApi - 実際のツイート API (例: `TwitterOpenApiClient.getTweetApi()`)
+ * @returns {@link fetchRecommendedTimeline}・{@link fetchFollowingTimeline}・{@link fetchTrendingTimeline} で使う `TweetApiLike`
  */
 export function createTweetApiLike(tweetApi: TweetApiUtils): TweetApiLike {
   return {

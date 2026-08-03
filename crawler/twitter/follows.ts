@@ -64,10 +64,10 @@ async function paginate(
 }
 
 /**
- * @param client - the follow-list API adapter
- * @param userId - the account whose following list is fetched
- * @param limit - the maximum number of entries to collect this call
- * @returns the collected ids/profiles and whether the full list was reached
+ * @param client - フォローリスト API アダプター
+ * @param userId - フォロー一覧を取得する対象のアカウント
+ * @param limit - この呼び出しで収集するエントリの最大件数
+ * @returns 収集した id・プロフィールと、一覧の終端まで到達したかどうか
  */
 export async function fetchFollowing(
   client: FollowListApiLike,
@@ -78,10 +78,10 @@ export async function fetchFollowing(
 }
 
 /**
- * @param client - the follow-list API adapter
- * @param userId - the account whose follower list is fetched
- * @param limit - the maximum number of entries to collect this call
- * @returns the collected ids/profiles and whether the full list was reached
+ * @param client - フォローリスト API アダプター
+ * @param userId - フォロワー一覧を取得する対象のアカウント
+ * @param limit - この呼び出しで収集するエントリの最大件数
+ * @returns 収集した id・プロフィールと、一覧の終端まで到達したかどうか
  */
 export async function fetchFollowers(
   client: FollowListApiLike,
@@ -105,8 +105,8 @@ async function convertFollowListResponse(
 }
 
 /**
- * @param userListApi - the real user-list API, e.g. from `TwitterOpenApiClient.getUserListApi()`
- * @returns a `FollowListApiLike` usable with {@link fetchFollowing} and {@link fetchFollowers}
+ * @param userListApi - 実際のユーザーリスト API (例: `TwitterOpenApiClient.getUserListApi()`)
+ * @returns {@link fetchFollowing}・{@link fetchFollowers} で使う `FollowListApiLike`
  */
 export function createFollowListApiLike(userListApi: UserListApiUtils): FollowListApiLike {
   return {

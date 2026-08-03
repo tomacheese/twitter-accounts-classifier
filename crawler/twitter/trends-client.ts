@@ -39,8 +39,8 @@ interface GuideJsonResponse {
 }
 
 /**
- * @param fetchImpl - fetch implementation to issue the request with
- * @returns the activated guest token
+ * @param fetchImpl - リクエストを発行する fetch 実装
+ * @returns 有効化した guest token
  */
 async function fetchGuestToken(fetchImpl: typeof fetch): Promise<string> {
   const response = await fetchImpl('https://api.x.com/1.1/guest/activate.json', {
@@ -61,11 +61,10 @@ async function fetchGuestToken(fetchImpl: typeof fetch): Promise<string> {
 }
 
 /**
- * @param payload - the parsed `guide.json` response body
- * @returns the trend names found; an empty array means the response shape matched but
- * carried zero trend items
- * @throws レスポンス形状自体が想定と異なる場合。スキーマ変更による破壊的な失敗と
- * 「今トレンドが 0 件」という正常なケースを呼び出し側が混同しないよう、
+ * @param payload - パースした `guide.json` レスポンス本文
+ * @returns 見つかったトレンド名の配列。空配列はレスポンス形状が一致した上でトレンド項目が 0 件だったことを意味する
+ * @throws レスポンス形状自体が想定と異なる場合。
+ * スキーマ変更による破壊的な失敗と「今トレンドが 0 件」という正常なケースを呼び出し側が混同しないよう、
  * 空配列を返す場合とは区別してエラーを投げる。
  */
 function parseTrendNames(payload: GuideJsonResponse): string[] {
@@ -90,10 +89,9 @@ function parseTrendNames(payload: GuideJsonResponse): string[] {
 }
 
 /**
- * @param cookies - the account's ct0/auth_token cookie pair
- * @param fetchImpl - fetch implementation to issue requests with, e.g. a cycletls-backed
- * fetch presenting a genuine Chrome TLS fingerprint
- * @returns an object exposing `getTrends()`
+ * @param cookies - アカウントの ct0・auth_token クッキーペア
+ * @param fetchImpl - リクエストを発行する fetch 実装 (例: 本物の Chrome TLS フィンガープリントを提示する cycletls ベースの fetch)
+ * @returns `getTrends()` を公開するオブジェクト
  */
 export function createTrendsClient(
   cookies: IssuedCookies,

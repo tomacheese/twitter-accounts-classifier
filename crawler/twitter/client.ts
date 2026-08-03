@@ -15,12 +15,12 @@ interface OpenApiFactory {
 }
 
 /**
- * Obtains an authenticated client from the given factory.
- * Split out from {@link createOpenApiClient} so tests can inject a fake factory instead
- * of constructing the real `TwitterOpenApi` class, which reaches out to the network.
- * @param factory - object exposing `getClientFromCookies`, typically a `TwitterOpenApi` instance
- * @param cookies - cookies issued for the Twitter account
- * @returns an authenticated `TwitterOpenApiClient`
+ * ネットワークに実際に到達する `TwitterOpenApi` クラスをテストで直接使わずに済むよう、
+ * {@link createOpenApiClient} からこの部分だけを切り出し、
+ * テストではフェイクな factory を注入できるようにしている。
+ * @param factory - `getClientFromCookies` を持つオブジェクト。通常は `TwitterOpenApi` のインスタンス
+ * @param cookies - Twitter アカウントに対して発行されたクッキー
+ * @returns 認証済みの `TwitterOpenApiClient`
  */
 export async function createOpenApiClientWith(
   factory: OpenApiFactory,
@@ -33,13 +33,12 @@ export async function createOpenApiClientWith(
 }
 
 /**
- * Builds a `fetch` implementation backed by `cycletls`, presenting a genuine Chrome
- * TLS/JA3 fingerprint instead of Node's default `fetch` fingerprint. Shared by
- * {@link createTrendsScraper} and {@link createOpenApiClient}, since X's real GraphQL
- * endpoints reject Node's default fingerprint with a Cloudflare block (HTTP 403), just
- * as the legacy trends endpoint does.
- * @param cycleTLS - an initialized `cycletls` client
- * @returns a `fetch`-compatible function routing requests through `cycleTLS`
+ * X の実際の GraphQL エンドポイントは Node の既定の `fetch` フィンガープリントを
+ * Cloudflare のブロックで拒否する (HTTP 403) ため、legacy trends エンドポイントと同様、
+ * `cycletls` で本物の Chrome TLS/JA3 フィンガープリントを提示する `fetch` 実装を用意し、
+ * {@link createTrendsScraper} と {@link createOpenApiClient} の双方で共有している。
+ * @param cycleTLS - 初期化済みの `cycletls` クライアント
+ * @returns `cycleTLS` 経由でリクエストを送る `fetch` 互換の関数
  */
 export function createCycleTLSFetch(cycleTLS: CycleTLSClient): typeof fetch {
   return async (input, init) => {
@@ -69,14 +68,12 @@ export interface OpenApiClientContext {
 }
 
 /**
- * Creates an authenticated `twitter-openapi-typescript` client from issued cookies,
- * routed through a `cycletls`-backed Chrome-fingerprinted fetch (see
- * {@link createCycleTLSFetch}) so GraphQL requests aren't blocked by Cloudflare's
- * bot-detection challenge, which Node's default `fetch` fingerprint triggers. Also
- * wrapped with {@link wrapFetchWithResponseCapture} so a raw response can still be
- * recovered after a parse failure inside the library, which otherwise discards it.
- * @param cookies - cookies issued for the Twitter account
- * @returns the client together with the `cycletls` client it depends on, so callers can close it
+ * Node の既定の `fetch` フィンガープリントは Cloudflare のボット検知でブロックされるため、
+ * `cycletls` ベースの Chrome フィンガープリント fetch ({@link createCycleTLSFetch} 参照) を経由させている。
+ * また、ライブラリ内部でパースに失敗すると生レスポンスが失われてしまうため、
+ * {@link wrapFetchWithResponseCapture} でラップして事後に復元できるようにしている。
+ * @param cookies - Twitter アカウントに対して発行されたクッキー
+ * @returns クライアントと、それが依存する `cycletls` クライアント。呼び出し側でクローズできるようにするため
  */
 export async function createOpenApiClient(cookies: IssuedCookies): Promise<OpenApiClientContext> {
   const cycleTLS = await initCycleTLS()
@@ -86,9 +83,10 @@ export async function createOpenApiClient(cookies: IssuedCookies): Promise<OpenA
 }
 
 /**
- * Releases the `cycletls` client backing an OpenAPI client. Must be called once the
- * client is no longer needed, otherwise the underlying `cycletls` process leaks.
- * @param context - the context returned by {@link createOpenApiClient}
+ * OpenAPI クライアントが依存する `cycletls` クライアントを解放する。
+ * クライアントが不要になった時点で必ず呼び出さないと、
+ * 内部の `cycletls` プロセスがリークする。
+ * @param context - {@link createOpenApiClient} が返したコンテキスト
  */
 export async function closeOpenApiClient(context: OpenApiClientContext): Promise<void> {
   await context.cycleTLS.exit()
@@ -100,13 +98,12 @@ export interface TrendsScraperContext {
 }
 
 /**
- * Creates a {@link TrendsScraperLike} backed by our own trends client (see
- * {@link createTrendsClient}), routed through a `cycletls`-backed Chrome-fingerprinted
- * fetch so requests present a genuine Chrome TLS/JA3 fingerprint instead of Node's
- * default `fetch` fingerprint. Also wrapped with {@link wrapFetchWithResponseCapture},
- * for the same diagnostic reason as {@link createOpenApiClient}.
- * @param cookies - cookies issued for the Twitter account
- * @returns the scraper together with the `cycletls` client it depends on, so callers can close it
+ * 自前の trends クライアント ({@link createTrendsClient} 参照) を、
+ * Node の既定のフィンガープリントではなく本物の Chrome TLS/JA3 フィンガープリントを提示する `cycletls` ベースの fetch 経由で動かす {@link TrendsScraperLike} を作る。
+ * {@link createOpenApiClient} と同じ診断上の理由から、
+ * {@link wrapFetchWithResponseCapture} でもラップしている。
+ * @param cookies - Twitter アカウントに対して発行されたクッキー
+ * @returns スクレイパーと、それが依存する `cycletls` クライアント。呼び出し側でクローズできるようにするため
  */
 export async function createTrendsScraper(cookies: IssuedCookies): Promise<TrendsScraperContext> {
   const cycleTLS = await initCycleTLS()
@@ -119,9 +116,10 @@ export async function createTrendsScraper(cookies: IssuedCookies): Promise<Trend
 }
 
 /**
- * Releases the `cycletls` client backing a trends scraper. Must be called once the
- * scraper is no longer needed, otherwise the underlying `cycletls` process leaks.
- * @param context - the context returned by {@link createTrendsScraper}
+ * トレンドスクレイパーが依存する `cycletls` クライアントを解放する。
+ * スクレイパーが不要になった時点で必ず呼び出さないと、
+ * 内部の `cycletls` プロセスがリークする。
+ * @param context - {@link createTrendsScraper} が返したコンテキスト
  */
 export async function closeTrendsScraper(context: TrendsScraperContext): Promise<void> {
   await context.cycleTLS.exit()
