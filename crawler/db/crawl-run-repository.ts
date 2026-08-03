@@ -121,7 +121,30 @@ export async function finishCrawlRun(
   finishedAt: Date,
   status: string,
 ): Promise<void> {
-  await prisma.crawlRun.update({ where: { id }, data: { finishedAt, status } })
+  await prisma.crawlRun.update({
+    where: { id },
+    data: { finishedAt, status, currentUsername: null, currentAccountStartedAt: null },
+  })
+}
+
+/**
+ * 次のアカウントの処理開始や {@link finishCrawlRun} がこのフィールドを上書き・クリアする。
+ * そのため呼び出し側で明示的なクリア処理は不要。
+ * @param prisma - Prisma クライアント
+ * @param crawlRunId - 対象の CrawlRun ID
+ * @param username - 処理を開始したアカウントの username
+ * @param startedAt - そのアカウントの処理を開始した時刻
+ */
+export async function setCurrentAccount(
+  prisma: PrismaClient,
+  crawlRunId: string,
+  username: string,
+  startedAt: Date,
+): Promise<void> {
+  await prisma.crawlRun.update({
+    where: { id: crawlRunId },
+    data: { currentUsername: username, currentAccountStartedAt: startedAt },
+  })
 }
 
 /**

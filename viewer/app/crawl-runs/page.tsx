@@ -1,5 +1,7 @@
 import Link from 'next/link'
+import { isCurrentAccountStale } from '@/lib/crawl-run-progress'
 import { formatDateTime } from '@/lib/format-date'
+import { formatDuration } from '@/lib/format-duration'
 import { getPrismaClient } from '@/lib/prisma'
 import { getAllCrawlRuns } from '@/lib/queries/crawl-runs'
 import { ErrorFallback } from '../components/error-fallback'
@@ -47,7 +49,18 @@ export default async function CrawlRunsPage(): Promise<React.ReactElement> {
                   <td className="p-3">{formatDateTime(run.startedAt)}</td>
                   <td className="p-3">{run.finishedAt ? formatDateTime(run.finishedAt) : '—'}</td>
                   <td className="p-3">
-                    <StatusBadge status={run.status} />
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={run.status} />
+                      {run.status === 'running' &&
+                        run.currentUsername &&
+                        run.currentAccountStartedAt &&
+                        !isCurrentAccountStale(run.currentAccountStartedAt, new Date()) && (
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            → @{run.currentUsername} (
+                            {formatDuration(run.currentAccountStartedAt, new Date())} elapsed)
+                          </span>
+                        )}
+                    </div>
                   </td>
                   <td className="p-3">{run.accountRunCount.toLocaleString()}</td>
                   <td className="p-3">

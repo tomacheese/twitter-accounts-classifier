@@ -138,6 +138,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
     }),
     finishCrawlRun: vi.fn().mockResolvedValue(undefined),
     recordCrawlAccountRun: vi.fn().mockResolvedValue(undefined),
+    setCurrentAccount: vi.fn().mockResolvedValue(undefined),
     loadCrawlAccountCheckpoints: vi.fn().mockResolvedValue(new Map()),
     completeCrawlAccountCheckpoint: vi.fn().mockResolvedValue(undefined),
     clearCrawlAccountCheckpoints: vi.fn().mockResolvedValue(undefined),
@@ -174,6 +175,7 @@ describe('runCrawlCycle', () => {
     )
     expect(deps.closeTrendsScraper).toHaveBeenCalled()
     expect(deps.closeOpenApiClient).toHaveBeenCalled()
+    expect(deps.setCurrentAccount).toHaveBeenCalledWith('run1', 'v', expect.any(Date))
   })
 
   it('投稿者ごとにフォロー先サンプルを取得し、replaceLabelingFollowSample へ渡す', async () => {
@@ -1317,6 +1319,18 @@ describe('runCrawlCycle', () => {
     })
 
     await expect(runCrawlCycle(deps)).resolves.toBeUndefined()
+  })
+
+  it('still records the account run when setCurrentAccount fails', async () => {
+    const deps = makeDeps({
+      setCurrentAccount: vi.fn().mockRejectedValue(new Error('row missing')),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'success' }),
+    )
   })
 
   it('resumes a run by retaining completed accounts and retrying all other configured accounts', async () => {

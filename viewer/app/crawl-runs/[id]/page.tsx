@@ -1,10 +1,18 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { formatDateTime } from '@/lib/format-date'
+import { isCurrentAccountStale } from '@/lib/crawl-run-progress'
+import { formatDuration } from '@/lib/format-duration'
 import { getPrismaClient } from '@/lib/prisma'
 import { getCrawlRunDetail } from '@/lib/queries/crawl-runs'
 import { ErrorFallback } from '../../components/error-fallback'
 import { StatusBadge } from '../../components/status-badge'
+
+// このページは処理中アカウントの経過時間などリクエスト時点の値を描画するため、
+// 静的プリレンダリングの対象から外している。指定しないと、
+// Prisma 経由の読み取りは Next.js のキャッシュ無効化の対象にならず、
+// 経過時間などの値が初回レンダー時点のまま固定されてしまう。
+export const dynamic = 'force-dynamic'
 
 /** crawler が発行する警告種別。障害の発生箇所ごとに1つ。 */
 type CrawlWarningType =
@@ -50,6 +58,9 @@ function groupWarningsByType(warnings: CrawlWarning[]): [CrawlWarningType, Crawl
 const ACCOUNT_RUN_COLUMNS = [
   'Username',
   'Status',
+  'Started at',
+  'Finished at',
+  'Duration',
   'Recommended timeline tweets',
   'Following timeline tweets',
   'Trending timeline tweets',
@@ -62,21 +73,6 @@ const ACCOUNT_RUN_COLUMNS = [
   'Warnings',
   'Error',
 ] as const
-
-/**
- * @param startedAt - 開始時刻
- * @param finishedAt - 終了時刻
- * @returns 人間が読める形式の経過時間
- */
-function formatDuration(startedAt: Date, finishedAt: Date): string {
-  const totalSeconds = Math.max(0, Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000))
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-  const parts = hours > 0 ? [`${hours}h`, `${String(minutes).padStart(2, '0')}m`] : [`${minutes}m`]
-  parts.push(`${String(seconds).padStart(2, '0')}s`)
-  return parts.join(' ')
-}
 
 /**
  * @param props - ルートの `id` パスパラメータ
@@ -134,6 +130,18 @@ export default async function CrawlRunDetailPage({
             <dt className="text-gray-500 dark:text-gray-400">Accounts processed</dt>
             <dd>{run.accountRuns.length.toLocaleString()}</dd>
           </div>
+          {run.status === 'running' &&
+            run.currentUsername &&
+            run.currentAccountStartedAt &&
+            !isCurrentAccountStale(run.currentAccountStartedAt, new Date()) && (
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">Currently processing</dt>
+                <dd>
+                  @{run.currentUsername} ({formatDuration(run.currentAccountStartedAt, new Date())}{' '}
+                  elapsed)
+                </dd>
+              </div>
+            )}
         </dl>
         {run.accountRuns.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-2 text-sm">
@@ -182,6 +190,15 @@ export default async function CrawlRunDetailPage({
                       <td className="p-2">{accountRun.username}</td>
                       <td className="p-2">
                         <StatusBadge status={accountRun.status} />
+                      </td>
+                      <td className="p-2">{formatDateTime(accountRun.startedAt)}</td>
+                      <td className="p-2">
+                        {accountRun.finishedAt ? formatDateTime(accountRun.finishedAt) : '—'}
+                      </td>
+                      <td className="p-2">
+                        {accountRun.finishedAt
+                          ? formatDuration(accountRun.startedAt, accountRun.finishedAt)
+                          : '—'}
                       </td>
                       <td className="p-2">{accountRun.recommendedCount}</td>
                       <td className="p-2">{accountRun.followingCount}</td>
