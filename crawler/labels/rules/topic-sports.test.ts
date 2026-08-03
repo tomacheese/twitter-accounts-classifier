@@ -26,15 +26,16 @@ function makeBundle(
 describe('topicSportsRule', () => {
   it('is true for a Japanese sports bio', () => {
     expect(
-      topicSportsRule.evaluate(makeBundle({ bio: '野球が好きでプロ野球やドラフトの情報をつぶやきます' }))
-        .value,
+      topicSportsRule.evaluate(
+        makeBundle({ bio: '野球が好きでプロ野球やドラフトの情報をつぶやきます' }),
+      ).value,
     ).toBe(true)
   })
 
   it('is true for an English sports bio', () => {
-    expect(topicSportsRule.evaluate(makeBundle({ bio: 'NBA fan | basketball highlights daily' })).value).toBe(
-      true,
-    )
+    expect(
+      topicSportsRule.evaluate(makeBundle({ bio: 'NBA fan | basketball highlights daily' })).value,
+    ).toBe(true)
   })
 
   it('is false for an unrelated bio', () => {
@@ -64,6 +65,8 @@ describe('topicSportsRule', () => {
   })
 
   it('is true for a plain スポーツ bio', () => {
-    expect(topicSportsRule.evaluate(makeBundle({ bio: 'スポーツ観戦が大好きです🎵' })).value).toBe(true)
+    expect(topicSportsRule.evaluate(makeBundle({ bio: 'スポーツ観戦が大好きです🎵' })).value).toBe(
+      true,
+    )
   })
 })

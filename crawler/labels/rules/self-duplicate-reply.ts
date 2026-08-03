@@ -1,10 +1,11 @@
 import type { LabelRule } from '../types'
 import { normalizeReplyText } from '../duplicate-reply-index'
 
-// Impression-farming ("インプレゾンビ") accounts post identical content both as a standalone
-// tweet and as an @-reply under someone else's viral tweet, double-dipping engagement across
-// many unrelated threads. Requiring the pair to recur rules out the ordinary case of a single
-// tweet that happens to be quoted back at its own author.
+// インプレッション稼ぎ(「インプレゾンビ」)アカウントは、
+// 同一内容を単独ツイートと他者のバズ投稿への @リプライの両方として投稿し、
+// 無関係な複数のスレッドにまたがってエンゲージメントを二重取りする。
+// ペアの再現を要求することで、
+// 自身のツイートがたまたま自分宛てに引用されただけの通常のケースを除外する。
 const MIN_DUPLICATE_PAIRS = 2
 
 export const selfDuplicateReplyRule: LabelRule = {

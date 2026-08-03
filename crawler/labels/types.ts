@@ -11,14 +11,14 @@ export interface AccountFeatureBundle {
     isBlueVerified: boolean
     verifiedType: string | null
     /**
-     * `user.professional?.professionalType` from the X API ('Business' | 'Creator').
-     * Optional so bundles built by rule unit tests that predate this field keep
-     * compiling unmodified.
+     * X API の `user.professional?.professionalType`（'Business' | 'Creator'）に対応する値。
+     * この項目が存在する前に作られたルール単体テストの bundle も無修正でコンパイルが通るよう、
+     * 任意項目にする。
      */
     professionalType?: string | null
     /**
-     * `user.parodyCommentaryFanLabel` from the X API ('None' | 'Parody' | 'Commentary' |
-     * 'Fan'). Optional for the same reason as `professionalType` above.
+     * X API の `user.parodyCommentaryFanLabel`（'None' | 'Parody' | 'Commentary' | 'Fan'）の値。
+     * 任意項目にする理由は `professionalType` と同じ。
      */
     parodyCommentaryFanLabel?: string | null
   }
@@ -33,60 +33,57 @@ export interface AccountFeatureBundle {
     isPromoted: boolean
     isPaidPromotion: boolean
     /**
-     * The tweet this one is a direct reply to, or `null`/absent if it isn't a reply or
-     * the parent id is unknown. Optional so bundles built by rule unit tests that predate
-     * this field keep compiling unmodified.
+     * このツイートが直接リプライしている先のツイート ID。リプライでない場合、
+     * または親ツイート ID が不明な場合は `null`/未設定にする。
+     * 任意項目にする理由は `professionalType` と同じ。
      */
     inReplyToTweetId?: string | null
     /**
-     * Whether X's content-disclosure API flagged this tweet as containing AI-generated
-     * media. `null` means this was never evaluated (either the tweet predates this column,
-     * or the fetch path that observed it didn't carry the disclosure) - distinct from
-     * `false`, which means a fetch positively confirmed no AI-generated media. Optional
-     * for the same reason as `inReplyToTweetId` above.
+     * X のコンテンツ開示 API が、このツイートに AI 生成メディアが含まれると判定したか。
+     * `null` は「一度も評価されていない」(旧ツイートや開示情報のない取得経路) ことを表し、
+     * 「取得の結果 AI 生成メディアなしと確定した」ことを表す `false` とは区別する。
+     * 任意項目にする理由は `inReplyToTweetId` と同じ。
      */
     hasAiGeneratedMedia?: boolean | null
     /**
-     * How the AI-generated-media flag above was determined
-     * (`'C2paClient' | 'ContentDisclosureAiGeneratedDisclosure' | 'UserDeclared'`), or
-     * `null`/absent when `hasAiGeneratedMedia` is not `true`.
+     * 上記の AI 生成メディアフラグをどう判定したか。
+     * 値は `'C2paClient' | 'ContentDisclosureAiGeneratedDisclosure' | 'UserDeclared'`。
+     * `hasAiGeneratedMedia` が `true` でない場合は `null`/未設定にする。
      */
     aiGeneratedDetectionSource?: string | null
     /**
-     * X がこのツイートの投稿者以外を出典として示す添付動画の件数。過去の収集結果から
-     * 作られた bundle との互換性を保つため optional にする。
+     * X がこのツイートの投稿者以外を出典として示す添付動画の件数。
+     * 過去の収集結果から作られた bundle との互換性を保つため optional にする。
      */
     foreignVideoSourceCount?: number | null
     /**
-     * The author id of the tweet this one quotes, or `null`/absent if it isn't a quote
-     * tweet or the quoted tweet's author id is unknown. Optional so bundles built by rule
-     * unit tests that predate this field keep compiling unmodified.
+     * このツイートが引用しているツイートの投稿者 ID。引用ツイートでない場合、
+     * または引用先ツイートの投稿者 ID が不明な場合は `null`/未設定にする。
+     * 任意項目にする理由は `inReplyToTweetId` と同じ。
      */
     quotedTweetAuthorId?: string | null
     /**
-     * Whether the quoted tweet's own media contains a video or animated GIF. Same
-     * "unknown (`null`) vs. confirmed" convention as `hasAiGeneratedMedia` above - see
-     * `prisma/schema.prisma`'s `Tweet.quotedTweetHasVideo` for detail. Optional for the
-     * same reason as `quotedTweetAuthorId` above.
+     * 引用元ツイート自体のメディアに動画または GIF が含まれるか。
+     * 「未確認 (`null`) か確定済みか」という区別は `hasAiGeneratedMedia` と同じ規約で、
+     * 詳細は `prisma/schema.prisma` の `Tweet.quotedTweetHasVideo` を参照。
+     * 任意項目にする理由は `quotedTweetAuthorId` と同じ。
      */
     quotedTweetHasVideo?: boolean | null
   }[]
   /**
-   * The largest number of distinct OTHER accounts observed posting a reply whose text
-   * (after stripping URLs/mentions) exactly matches one of this account's own reply
-   * tweets - a signature of templated, bulk-generated reply-bot networks. Computed once
-   * per crawl/relabel run from a shared corpus (see `buildDuplicateReplyIndex`), not
-   * per-rule, since a single rule only ever sees one account's bundle. Absent (treated
-   * as 0) in bundles that don't populate it, e.g. most rules' own unit tests.
+   * URL・メンション除去後、この投稿者自身のいずれかのリプライ本文と完全一致するリプライを投稿した、
+   * 他アカウントの最大観測数。定型文を使い回す量産型リプライボット網の特徴を示す。
+   * ルールごとではなく実行ごとに共有コーパスから一度算出する（`buildDuplicateReplyIndex` 参照）。
+   * 1つのルールは1アカウント分の bundle しか見ないため。
+   * この値を持たない bundle（多くのルール単体テストなど）では 0 として扱う。
    */
   templatedReplyNetworkSize?: number
   /**
-   * The size of the largest "reply-hijack swarm" this account has taken part in - a
-   * group of 5+ distinct accounts (this one included) that each posted exactly one
-   * paraphrased-similar reply to the same target tweet within a 24-hour window, farming
-   * impressions off someone else's viral tweet. 0 (or absent) if none. Computed once per
-   * crawl/relabel run from a shared corpus (see `buildReplyHijackIndex`), not per-rule -
-   * same convention as `templatedReplyNetworkSize`.
+   * このアカウントが参加した「リプライハイジャック集団」の最大規模。
+   * 5アカウント以上（本人含む）が24時間以内に同一対象へ言い換えつつ類似リプライを1件だけ投稿し、
+   * 他人のバズったツイートの露出を横取りする集団を指す。該当なしの場合は 0（または未設定）。
+   * ルールごとではなく実行ごとに共有コーパスから一度算出する（`buildReplyHijackIndex` 参照）。
+   * この点は `templatedReplyNetworkSize` と同じ。
    */
   replyHijackSwarmSize?: number
 }
@@ -94,11 +91,10 @@ export interface AccountFeatureBundle {
 export interface LabelRuleResult {
   value: boolean
   /**
-   * How much evidence supports the positive (`value: true`) case, roughly in the
-   * `[0, 1]` range. `confidence` is only meaningful together with `value`: when `value`
-   * is `false`, `confidence` may still be nonzero (individual rules may use it to reflect
-   * partial/borderline signal strength even in the negative case). Do not treat
-   * `confidence` as meaningful independent of `value` without checking `value` first.
+   * 陽性判定（`value: true`）をどれだけの証拠が裏付けているかを表す、
+   * おおよそ `[0, 1]` の範囲の値。`confidence` は `value` と組み合わせて初めて意味を持つ。
+   * `value` が `false` でも `confidence` は非ゼロになり得る（陰性側の兆候の強さを表す場合がある）。
+   * `value` を確認せずに `confidence` 単体で意味があるものとみなさないこと。
    */
   confidence: number
   reason: string

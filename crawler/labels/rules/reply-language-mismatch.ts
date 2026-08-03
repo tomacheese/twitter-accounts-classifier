@@ -1,8 +1,8 @@
 import type { LabelRule } from '../types'
 
-// Restricted to Japanese-script detection (hiragana/katakana/kanji) rather than full
-// language identification, matching this project's existing Japanese/English-focused
-// keyword rules (topic_tech, topic_finance, etc.) - the crawl targets Japanese Twitter.
+// 完全な言語判定ではなく日本語スクリプト(ひらがな/カタカナ/漢字)の有無のみを判定する。
+// 既存のトピック系ルール群(topic_tech、topic_finance など)と同様、
+// このプロジェクトが対象とするのは日本語 Twitter であるため。
 const JAPANESE_SCRIPT_PATTERN = /[぀-ヿ一-鿿]/
 
 const MIN_SAMPLE_PER_SIDE = 3
@@ -13,11 +13,11 @@ function japaneseScriptRatio(texts: string[]): number {
   return texts.filter((text) => JAPANESE_SCRIPT_PATTERN.test(text)).length / texts.length
 }
 
-// A reply whose text is nothing but a bare t.co link scores as script-ratio 0 regardless of
-// language, since it carries no linguistic content to begin with - that is an empty sample,
-// not evidence of a language *mismatch*, and a dozen such replies drive `replyJapaneseRatio`
-// to 0.00 by construction. Strip URLs/mentions/the self-retweet prefix and require genuine
-// remaining text before counting a tweet toward either side of the ratio.
+// リンクのみのリプライは、言語に関わらずスクリプト比率が0になり、
+// 言語の「不一致」の根拠ではなく、
+// 単に言語的内容を持たない空サンプルにすぎない。
+// URL・メンション・自己リツイートの接頭辞を除去し、
+// 実質的なテキストが残っている場合のみ、どちらか一方の比率に算入する。
 function hasLinguisticContent(text: string): boolean {
   const stripped = text
     .replace(/^RT @\w+:\s*/i, '')
@@ -38,15 +38,14 @@ export const replyLanguageMismatchRule: LabelRule = {
       (t) => !t.isReply && !t.isRetweet && hasLinguisticContent(t.fullText),
     )
 
-    // A "retweet" whose quoted text is credited to the account's own screen name is not
-    // genuine third-party content - it is the account amplifying its own reply, which is
-    // where the mismatched-language reply content actually lives in confirmed cases: those
-    // accounts retweet their own replies rather than leaving them as plain replies.
+    // 自身のスクリーンネームが引用元として表示される「リツイート」は、
+    // 実質的には他者のコンテンツではなく、
+    // 自身のリプライを自己拡散しているものである。
     //
-    // The content after that prefix must itself look like a reply (start with an
-    // `@mention`), otherwise this also matches link-only self-retweets (e.g.
-    // `RT @screenName: https://t.co/xxx` with no reply text at all), which score as
-    // script-ratio 0 regardless of the account's actual reply language.
+    // 接頭辞の後に続く内容自体がリプライらしい形(`@メンション` で始まる)をしていることも要求する。
+    // そうしないと、
+    // 本文のないリンクのみの自己リツイート(例: `RT @foo: https://t.co/xxx`)にも一致してしまうため。
+    // アカウント本来のリプライ言語に関わらずスクリプト比率が0と判定されてしまうため。
     const selfRetweetPrefix = `RT @${screenName}:`
     const isSelfRetweetedReply = (text: string): boolean =>
       text.startsWith(selfRetweetPrefix) &&

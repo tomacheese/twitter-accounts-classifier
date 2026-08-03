@@ -5,9 +5,10 @@ const logger = Logger.configure('monitoring/sentry')
 
 let initialized = false
 
-// GLITCHTIP_DSN is only configured in the production compose file and is expected to be
-// unset for local development runs, so a missing DSN is a deliberate no-op rather than a
-// throw - unlike COOKIE_ISSUER_URL, monitoring must never block a run.
+// GLITCHTIP_DSN はローカル開発では未設定になり得るため、
+// COOKIE_ISSUER_URL とは異なり、
+// 未設定時に throw はせず意図的に no-op にしている。
+// 監視処理がクロール実行そのものを止めてはならないため。
 export function initMonitoring(): void {
   const dsn = process.env.GLITCHTIP_DSN
   if (!dsn) return
@@ -17,8 +18,8 @@ export function initMonitoring(): void {
 
 export function captureException(error: unknown, context?: Record<string, unknown>): void {
   if (!initialized) return
-  // Reporting to GlitchTip is best-effort: per the module-level invariant above, a throw
-  // here must never propagate into the caller's own error handling.
+  // GlitchTip への報告はベストエフォートであり、
+  // ここでの throw を呼び出し元のエラーハンドリングに伝播させてはならない。
   try {
     Sentry.captureException(error, context)
   } catch (reportError) {
@@ -27,11 +28,11 @@ export function captureException(error: unknown, context?: Record<string, unknow
 }
 
 /**
- * Reports a non-exception event (e.g. an aggregated warning-count summary) to GlitchTip.
- * Mirrors captureException's initialized-guard and never-throw guarantee: a no-op when
- * GLITCHTIP_DSN is unset, and any failure to report is logged rather than propagated.
- * @param message - the summary text to report
- * @param context - additional structured data attached as the event's `extra` payload
+ * 例外以外のイベントを GlitchTip に報告する。initMonitoring 未実行時は何もせず戻る。
+ * captureException と同様、送信失敗で throw すると呼び出し元の処理を止めてしまうため、
+ * その場合のみ例外を投げずログ出力に留める。
+ * @param message - 報告する概要テキスト
+ * @param context - イベントの `extra` として付与する追加の構造化データ
  */
 export function captureMessage(message: string, context?: Record<string, unknown>): void {
   if (!initialized) return

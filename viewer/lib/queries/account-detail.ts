@@ -1,8 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma'
 
-/**
- * The account profile fields shown at the top of the account detail page.
- */
 export interface AccountDetailProfile {
   id: string
   screenName: string
@@ -17,9 +14,6 @@ export interface AccountDetailProfile {
   verifiedType: string | null
 }
 
-/**
- * A single `AccountLabel` history row for an account, shown on the detail page.
- */
 export interface AccountDetailLabel {
   labelKey: string
   value: boolean
@@ -30,9 +24,6 @@ export interface AccountDetailLabel {
   labeledAt: Date
 }
 
-/**
- * A single recent tweet shown on the account detail page.
- */
 export interface AccountDetailTweet {
   id: string
   fullText: string
@@ -45,9 +36,6 @@ export interface AccountDetailTweet {
   isPaidPromotion: boolean
 }
 
-/**
- * One account shown in an account's following/followers list.
- */
 export interface AccountDetailFollowEntry {
   id: string
   screenName: string
@@ -55,17 +43,11 @@ export interface AccountDetailFollowEntry {
   profileImageUrl: string | null
 }
 
-/**
- * A capped list of following/follower entries, plus the true total count.
- */
 export interface AccountDetailFollowList {
   entries: AccountDetailFollowEntry[]
   totalCount: number
 }
 
-/**
- * The full account detail view: profile, complete label history, and recent tweets.
- */
 export interface AccountDetail {
   account: AccountDetailProfile
   labels: AccountDetailLabel[]
@@ -74,17 +56,14 @@ export interface AccountDetail {
   followers: AccountDetailFollowList
 }
 
-/** The maximum number of following/follower rows returned per direction. */
 const FOLLOW_LIST_LIMIT = 100
 
 /**
- * Loads the full detail view for a single account: its profile, its
- * complete `AccountLabel` history (not just the latest evaluation per
- * label), and its most recent tweets.
- * @param prisma - the Prisma client to query
- * @param accountId - the account's ID
- * @param tweetLimit - the maximum number of recent tweets to include
- * @returns the account detail, or `null` if no account with that ID exists
+ * 各ラベルの最新評価のみではなく、AccountLabel の履歴全体を返す。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @param accountId - アカウントの ID
+ * @param tweetLimit - 含める直近ツイートの最大件数
+ * @returns アカウント詳細、該当する ID のアカウントが存在しない場合は `null`
  */
 export async function getAccountDetail(
   prisma: PrismaClient,
@@ -110,9 +89,8 @@ export async function getAccountDetail(
       }),
       prisma.follow.findMany({
         where: { followerId: accountId },
-        // A crawl cycle stamps every edge in a direction with the same `lastSeenAt`, so
-        // ties need a stable tiebreaker or the capped list's contents could vary between
-        // page loads with no underlying data change.
+        // 1回のクロールで同じ方向の全エッジに同一の lastSeenAt が付くため、
+        // タイブレークを固定しないとページ読み込みごとに一覧の中身が変動しうる。
         orderBy: [{ lastSeenAt: 'desc' }, { followeeId: 'asc' }],
         take: FOLLOW_LIST_LIMIT,
         include: { followee: true },

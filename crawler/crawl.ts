@@ -82,8 +82,6 @@ import { mergeTweetAdFlags, toAccountProfileInput } from './twitter/mappers'
 
 const logger = Logger.configure('crawl')
 
-// crawler/Dockerfile が build-arg APPLICATION_VERSION から ENV へ引き継いだ値。どのビルドが
-// crawl を実行したか CrawlAccountRun 側で事後追跡できるよう、warning と一緒に記録する。
 const APP_VERSION = process.env.APPLICATION_VERSION ?? 'unknown'
 
 export interface CrawlOpenApiClient {
@@ -129,11 +127,11 @@ export interface CrawlDependencies {
   completeCrawlAccountCheckpoint: (params: CrawlAccountCheckpointParams) => Promise<void>
   clearCrawlAccountCheckpoints: (crawlRunId: string) => Promise<void>
   /**
-   * アカウント 1 件の処理を試みるたびに (成功・失敗を問わず) 呼び、放置判定の基準となる生存
-   * 時刻を更新する。checkpoint により処理自体を skip したアカウントでは呼ばれない。
+   * checkpoint で skip したアカウントでは呼ばない: 放置判定の基準となる生存時刻を、
+   * 実際に処理を試みたアカウントの分だけ進めるため。
    */
   touchCrawlRunHeartbeat: (crawlRunId: string) => Promise<void>
-  /** Injectable so `withTwitterRetry`'s backoff and the author-loop throttle don't actually pause tests. */
+  /** テスト時に `withTwitterRetry` のバックオフや author ループの待機を無効化する注入。 */
   sleep: (ms: number) => Promise<void>
 }
 
@@ -146,12 +144,8 @@ function retryOptions(deps: CrawlDependencies): {
 }
 
 /**
- * Marks a `getUserTweetsAndReplies` failure caused by the underlying `twitter-openapi-typescript`
- * library's optional-chaining bug (`e.data.user?.result.timeline.timeline`, where `?.` only
- * guards `data.user` and not `result.timeline`), which throws a bare `TypeError` instead of a
- * typed API error when an account's timeline is unreadable (e.g. protected, suspended). Wrapping
- * it here, right at the call site, keeps the message-text match scoped to that one call instead
- * of matching any `TypeError` raised anywhere in the per-author processing block below.
+ * 呼び出し箇所ごとに個別にラップする: per-author 処理全体で TypeError を捕捉すると、
+ * この既知のライブラリ不具合以外の TypeError まで誤って対象にしてしまうため。
  */
 class TimelineUnavailableError extends Error {
   constructor(cause: unknown) {
@@ -161,10 +155,12 @@ class TimelineUnavailableError extends Error {
 }
 
 /**
- * Wraps `fetchRecentTweets` so the library bug described on `TimelineUnavailableError` above is
- * normalized into a type `isExpectedAccountLookupError` can recognize precisely.
- * @param fetch - the `fetchRecentTweets` call to guard
- * @returns the fetch's result, or rethrows a `TimelineUnavailableError` for the known library bug
+ * `twitter-openapi-typescript` は `e.data.user?.result.timeline.timeline` の
+ * オプショナルチェイニングが `data.user` しか保護しておらず、`result.timeline` が
+ * 欠けている場合に型付きエラーではなく素の TypeError を投げるため、
+ * 型で判定できず message 文字列の一致で見分けている。
+ * @param fetch - ガード対象の `fetchRecentTweets` 呼び出し
+ * @returns 呼び出し結果。既知のライブラリ不具合の場合は `TimelineUnavailableError` を rethrow する
  */
 async function guardTimelineFetch<T>(fetch: () => Promise<T>): Promise<T> {
   try {
@@ -178,14 +174,10 @@ async function guardTimelineFetch<T>(fetch: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Distinguishes an author lookup failure that is an expected, routine occurrence — the
- * account was suspended, deleted, or made protected between being seen as a tweet author
- * and this loop reaching it — from a genuine infrastructure failure. Expected failures are
- * logged but excluded from `warnings`: counting them would make almost every crawl cycle
- * "partial" purely because Twitter accounts churn, drowning out warnings that actually
- * indicate a problem worth investigating.
- * @param error - the error thrown while processing one author
- * @returns true if this failure is a routine account-lookup miss, not an infra problem
+ * 想定内のアカウント利用不可 (凍結・削除・鍵アカウント化) は warning に含めない。
+ * 日常的に発生するものまで数えると、本当に調査すべき警告が埋もれてしまうため。
+ * @param error - 1 アカウントの処理中に捕捉したエラー
+ * @returns 想定内のアカウント利用不可であれば true
  */
 function isExpectedAccountLookupError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
@@ -197,22 +189,15 @@ function isExpectedAccountLookupError(error: unknown): boolean {
   return error instanceof TimelineUnavailableError
 }
 
-/**
- * Extracts a warning-safe message from a caught value.
- * @param error - the caught value, typically from a `catch (error)` block
- * @returns an `Error`'s `message`, or a stringified fallback for anything else thrown
- */
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
 /**
- * Aggregates a run's warnings by type, for inclusion in the threshold-exceeded GlitchTip
- * summary (see runAccountCycle) - individual warnings already have their own errorMessage
- * persisted on CrawlAccountRun.warnings, so only per-type counts are forwarded here to
- * keep the GlitchTip payload small.
- * @param warnings - the warnings accumulated for one account cycle
- * @returns a map of warning type to occurrence count; types with zero occurrences are omitted
+ * 個々の警告の詳細は CrawlAccountRun.warnings に既に保存済みのため、
+ * GlitchTip へ送るサマリーには種類ごとの件数のみを含め、ペイロードを膨らませない。
+ * @param warnings - 1 アカウントサイクル分の警告
+ * @returns 警告種類ごとの件数。0 件の種類は含まない
  */
 function summarizeWarningsByType(
   warnings: CrawlWarning[],
@@ -332,27 +317,21 @@ async function runAccountCycleBody(
   const allTweets = [...recommended.tweets, ...following.tweets, ...trending.tweets]
   const topTweets = sortByEngagement(allTweets).slice(0, deps.limits.topTweetsForReplies)
 
-  // Authors of any tweet (timeline, reply, or profile) are not necessarily authors whose
-  // full profile gets fetched below, e.g. a third party replying to a tracked tweet, or a
-  // timeline author whose dedicated profile fetch fails (suspended/deleted account). Yet
-  // Tweet.accountId is a required FK to Account, so every such author must be upserted
-  // before persistTweets runs — falling back to the lighter profile data already embedded
-  // in the tweet responses when a dedicated fetch never happened or failed.
+  // Tweet.accountId は Account への必須外部キーであるため、
+  // 専用のプロフィール取得が行われないか失敗した投稿者についても、
+  // 埋め込みプロフィールをフォールバックとして必ず upsert する。
   const extraAuthors = new Map<string, AccountProfileInput>()
   for (const author of [...recommended.authors, ...following.authors, ...trending.authors]) {
     extraAuthors.set(author.id, author)
   }
   const replyTweets: TweetInput[] = []
-  // Third parties replying to someone else's high-engagement tweet are exactly the
-  // accounts ad_reply_hijack (and other behavioral rules) need to see - a reply-hijacker
-  // who never posts a viral tweet of their own would otherwise never enter the label
-  // evaluation loop below, since that loop is keyed off timeline tweet authors.
+  // ラベル評価ループをタイムライン投稿者だけに絞ると、
+  // 自分ではバズる投稿をしない reply-hijack 系アカウントを一切評価できなくなるため、
+  // 候補として別途集める。
   const replyHijackCandidateIds = new Set<string>()
-  // The observed hijack reply itself is the actual evidence ad_reply_hijack needs to see -
-  // without keeping it here, the candidate's label bundle below would only ever be built
-  // from a separately-fetched, unrelated slice of their own tweet history (which may not
-  // even include replies, depending on the endpoint), silently discarding the one reply
-  // that got them flagged as a candidate in the first place.
+  // 候補を検出した実際の返信そのものを保持しないと、
+  // ラベル評価は候補者について別途取得した投稿履歴だけに頼ることになり、
+  // 判定の根拠となった返信自体が失われてしまう。
   const otherRepliesByAuthor = new Map<string, TweetInput[]>()
   for (const topTweet of topTweets) {
     const { authorReplies, otherReplies, authors } = await withTwitterRetry(
@@ -377,9 +356,7 @@ async function runAccountCycleBody(
   let labelsAppliedCount = 0
 
   for (const [authorIndex, authorId] of uniqueAuthorIds.entries()) {
-    // Throttles the sequential per-author fetch loop against the same login account's
-    // rate limit window — skipped before the first author since there is nothing to pace
-    // against yet.
+    // 最初のアカウントの前は待つ対象がないため、sleep はスキップする。
     if (authorIndex > 0) {
       await deps.sleep(deps.limits.authorFetchDelayMs)
     }
@@ -401,12 +378,9 @@ async function runAccountCycleBody(
       for (const author of authors) extraAuthors.set(author.id, author)
 
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
-      // getUserTweetsAndReplies returns conversation-thread context alongside the
-      // account's own posts - e.g. the parent tweet a reply is answering, authored by
-      // someone else entirely. profileTweets above intentionally keeps those (each is
-      // persisted under its own real author), but the label bundle must not: an
-      // unrelated account's tweet leaking in here would corrupt every rule that reads
-      // bundle.recentTweets for authorId.
+      // profileTweets は他者に帰属する会話スレッドの文脈ツイートもそのまま保持するが、
+      // ラベル評価用のバンドルには含めない。
+      // 混入すると authorId 向けの全ルールが誤った recentTweets を読むことになるため。
       const authorOwnRecentTweets = recentTweets.filter((t) => t.accountId === authorId)
       const authorOtherReplies = otherRepliesByAuthor.get(authorId) ?? []
       const bundleTweets = mergeTweetAdFlags([
@@ -415,9 +389,8 @@ async function runAccountCycleBody(
         ...authorOtherReplies,
       ])
 
-      // The largest network size across this account's own reply tweets, since a single
-      // account can post several different templated replies drawn from different
-      // networks - the highest one is the strongest signal available.
+      // 複数の異なるテンプレ返信ネットワークに属することがあるため、
+      // 合計や平均ではなく最大値を最も強いシグナルとして採用する。
       let templatedReplyNetworkSize = 0
       for (const t of bundleTweets) {
         if (!t.isReply) continue
@@ -559,9 +532,9 @@ async function syncFollowingPhase(
       retryOptions(deps),
     )
     userId = response.data.restId
-    // The Follow table's `followerId`/`followeeId` are hard FKs to Account, and this
-    // login account may never appear as a tweet/reply author elsewhere in this cycle -
-    // so its own Account row must be upserted here, or every edge upsert below fails.
+    // Follow テーブルの followerId/followeeId は Account への必須外部キーであり、
+    // このログインアカウントは今回のサイクル中に投稿者として現れるとは限らないため、
+    // ここで自身の Account 行を upsert しないと以降の edge upsert が失敗する。
     await deps.persistAccount(toAccountProfileInput(response.data))
   } catch (error) {
     const message = `Failed to resolve or persist own account for ${account.username}, skipping follow/follower sync`
@@ -981,10 +954,8 @@ async function runAccountCycle(
       throw new Error(`Incomplete crawl checkpoints for ${account.username}`)
     }
 
-    // Every remaining warning has already survived retrying (withTwitterRetry, above) and
-    // routine-failure filtering (isExpectedAccountLookupError, above) - what's left is a
-    // fetch or sync step that failed with no fallback, so any single one is still worth
-    // surfacing as 'partial' rather than being averaged away.
+    // 残った warning はリトライと想定内エラーの除外を経ても解消しなかったものであるため、
+    // 1 件でも 'partial' として扱う。
     const warnings = [...metrics.warnings, ...following.warnings, ...followers.warnings]
     const status = warnings.length > 0 ? 'partial' : 'success'
 
@@ -1007,12 +978,10 @@ async function runAccountCycle(
       appVersion: APP_VERSION,
     })
 
-    // Runs after recordCrawlAccountRun so the persisted CrawlAccountRun always reflects the
-    // real outcome regardless of GlitchTip reachability - captureMessage itself never throws
-    // (see monitoring/sentry.ts), but keeping this the last step avoids any future coupling.
-    // The message text stays stable per account (no counts embedded) so GlitchTip groups
-    // repeated threshold breaches for the same account into one issue instead of fragmenting
-    // by warning count; the count itself is still visible via warningCount/warningCounts below.
+    // recordCrawlAccountRun の後に実行する: GlitchTip への到達性に関わらず、
+    // 永続化された CrawlAccountRun には常に実際の結果を反映させるため。
+    // メッセージ文言には件数を埋め込まない:埋め込むと件数ごとに別イシューへ分裂してしまい、
+    // 同一アカウントの繰り返し超過を 1 つのイシューにまとめられなくなるため。
     const warningThreshold = getCrawlWarningThreshold()
     if (warnings.length >= warningThreshold) {
       captureMessage(`Crawl warnings threshold exceeded for ${account.username}`, {
@@ -1054,21 +1023,17 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   const registry = new LabelRuleRegistry()
   for (const rule of ALL_LABEL_RULES) registry.register(rule)
   const labelDefinitionIds = await deps.ensureLabelDefinitions(registry)
-  // Built once per cycle from the whole reply corpus, not per-account, since detecting a
-  // templated-reply network is inherently a cross-account comparison.
+  // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
+  // アカウントごとではなくサイクルごとに 1 回だけ構築する。
   const replyCorpus = await deps.loadReplyCorpus()
   const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
   const replyHijackIndex = buildReplyHijackIndex(replyCorpus)
 
   const { id: crawlRunId, latestAccountStatuses } = await deps.startOrResumeCrawlRun(new Date())
 
-  // Everything below this point is wrapped so that any exception - an unexpected
-  // error escaping the per-account loop's own try/catch, for example - still
-  // finalizes the CrawlRun as 'failed' instead of leaving it at the 'running'
-  // placeholder forever. Two cases can't be covered: a killed process (OOM, forced
-  // container stop), where no code runs to react to it; and the finalize write
-  // itself failing (see the inner try/catch below), where the failure that put us
-  // here is also what stops us from recording it.
+  // ここから下を try で囲む: 捕捉しないと CrawlRun が 'running' のまま残ってしまうため、
+  // 必ず 'failed' として確定させる。ただしプロセスの強制終了と、
+  // この確定処理自体の失敗の 2 つは検知できない。
   try {
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
@@ -1123,10 +1088,9 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
     try {
       await deps.finishCrawlRun(crawlRunId, new Date(), 'failed')
     } catch (finalizeError) {
-      // The DB write that would mark this CrawlRun as 'failed' failed itself (most
-      // likely the same outage that caused `error` in the first place). Log it and
-      // still rethrow the original `error` below - losing that in favor of this
-      // secondary failure would be worse, and the row is left at 'running' either way.
+      // この二次的な失敗を優先して投げず、
+      // 元の error をそのまま rethrow する: 原因の手がかりを失うほうが影響が大きく、
+      // いずれにせよ行は 'running' のまま残るため。
       logger.error('Failed to finalize the CrawlRun as failed', finalizeError as Error)
     }
     throw error
@@ -1134,13 +1098,8 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
 }
 
 /**
- * Wraps the real `twitter-openapi-typescript` client into a `CrawlOpenApiClient`,
- * combining `./twitter/timeline`'s and `./twitter/engagement`'s adapters (both wrap the
- * same underlying real tweet API) into a single object satisfying the
- * `TweetApiLike & TweetDetailApiLike` intersection, and `./twitter/profile`'s adapter for
- * the user API.
- * @param realClient - an authenticated real `TwitterOpenApiClient`
- * @returns a `CrawlOpenApiClient` usable with {@link runCrawlCycle}
+ * @param realClient - 認証済みの実際の `TwitterOpenApiClient`
+ * @returns {@link runCrawlCycle} で使用できる `CrawlOpenApiClient`
  */
 function toCrawlOpenApiClient(
   realClient: Awaited<ReturnType<typeof createRealOpenApiClient>>['client'],
@@ -1212,9 +1171,7 @@ async function main(): Promise<void> {
   }
 }
 
-// Guarded so importing this module (e.g. from crawl.test.ts) never triggers a real
-// crawl cycle — only running it directly (`node dist/crawl.js`) does. require/module
-// are the correct CommonJS-native way to detect this (project is CommonJS, not ESM).
+// import.meta ではなく require/module を使う: このプロジェクトは CommonJS であり ESM ではないため。
 // eslint-disable-next-line unicorn/prefer-module
 if (require.main === module) {
   initMonitoring()

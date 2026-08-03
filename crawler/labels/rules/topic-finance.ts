@@ -1,14 +1,9 @@
 import type { LabelRule } from '../types'
 
-// English terms are word-boundary-matched to avoid matching inside unrelated words
-// (e.g. "invest" inside "investigative"/"investigator"); "invest" additionally excludes
-// the "-igat-" continuation via negative lookahead so it still matches legitimate
-// substrings like "investing"/"investment"/"investor". Japanese terms are left as
-// substring matches since word boundaries don't apply the same way to Japanese script,
-// except "株式" which excludes the "会社" continuation via negative lookahead - "株式会社"
-// is the ubiquitous Japanese corporate suffix ("Co., Ltd."/"Inc.") that nearly every
-// company bio carries regardless of industry, so without this exclusion it falsely
-// flags any company account as finance-focused.
+// invest は investigative 等の無関係な語に含まれてしまうため単語境界で判定しつつ、
+// investing のような正当な語は除外しないよう否定先読みを用いている。
+// 株式 も同様に 株式会社 という法人格の表記を除外している。
+// 除外しなければ業種を問わずあらゆる企業アカウントを金融関心ありと誤判定してしまうため。
 const FINANCE_PATTERN =
   /\b(trading|invest(?!igat)|broker|finance|financial)|証券|株式(?!会社)|資産運用/i
 

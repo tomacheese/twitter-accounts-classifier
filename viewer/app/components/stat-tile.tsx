@@ -1,8 +1,6 @@
 /**
- * A single KPI stat tile: a label and a large value, used in a row across
- * the top of the dashboard.
- * @param props - the tile's label and value to display
- * @returns the rendered stat tile
+ * @param props - タイルに表示するラベルと値
+ * @returns 描画された stat タイル
  */
 export function StatTile({ label, value }: { label: string; value: string }): React.ReactElement {
   return (

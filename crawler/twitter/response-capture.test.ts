@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { getLastResponseMatching, wrapFetchWithResponseCapture } from './response-capture'
 
-// The captured-response buffer is module-level state shared across every test in this
-// file (matching `db/client.ts`'s singleton style), so each test uses its own unique URL
-// substring to avoid reading a previous test's entry.
+// キャプチャ用バッファはこのファイル内の全テストで共有されるモジュールレベルの状態のため、
+// 各テストは前のテストのエントリを読んでしまわないよう、
+// それぞれ固有の URL 部分文字列を使っている。
 
 describe('wrapFetchWithResponseCapture', () => {
   it('captures a response url/status/body without altering what the caller receives', async () => {
@@ -47,8 +47,9 @@ describe('wrapFetchWithResponseCapture', () => {
       .mockImplementation((input: string) => Promise.resolve(new Response(input, { status: 200 })))
     const wrapped = wrapFetchWithResponseCapture(fetchImpl as unknown as typeof fetch)
 
-    // The buffer caps at 20 entries; pushing 25 unique-URL responses must evict the
-    // first 5, leaving only EvictionTest-5..24 findable afterwards.
+    // バッファの上限は 20 件のため、
+    // URL が異なる 25 件を積むと先頭 5 件が追い出され、
+    // EvictionTest-5..24 だけが残るはず。
     for (let i = 0; i < 25; i++) {
       await wrapped(`https://x.com/graphql/abc/EvictionTest-${String(i)}`)
     }

@@ -42,8 +42,7 @@ export interface RawTweetResult {
     quotedStatusResult?: {
       result: {
         restId: string
-        // Absent when the quoted tweet itself is tombstoned/withheld (mirrors the
-        // outer tweet's own optional `legacy`, see `toRawTweetResult`).
+        // 引用元ツイートが tombstone・非表示の場合に欠落するため optional にしている。
         legacy?: {
           extendedEntities?: {
             media?: { type: string }[]
@@ -93,19 +92,13 @@ function mergeForeignVideoSourceCount(
 }
 
 /**
- * Deduplicates tweets by id, OR-ing `isPromoted`/`isPaidPromotion` and coalescing the
- * quoted-tweet fields across duplicate copies of the same tweet id. The same tweet can
- * be observed multiple times through different fetch paths (e.g. a timeline injection
- * and the author's own profile-fetched tweet list), and only one of those paths may
- * carry the ad-disclosure metadata (e.g. `promotedMetadata`) or the quoted tweet's
- * `legacy` payload needed to evaluate `quotedTweetHasVideo` - a plain overwrite would
- * let whichever copy is merged/persisted last silently discard a `true` flag or a
- * resolved quote observed via another path.
- * @param tweets - tweets that may contain duplicate ids
- * @returns one tweet per id, keeping the last-seen copy's other fields but with
- * `isPromoted`/`isPaidPromotion` OR'd, and the quoted-tweet fields coalesced (prefer the
- * current copy's non-null value, falling back to the previously merged copy's), across
- * all copies of that id
+ * 同一ツイートが複数の取得経路で観測された際、
+ * 広告開示メタデータや引用先の `legacy` を保持しているのは一部の経路だけということがあり得るため、
+ * id ごとに単純に上書きするのではなく OR 結合・coalesce によってフィールドを統合している。
+ * @param tweets - 重複する id を含み得るツイート
+ * @returns id ごとに 1 件へ統合したツイート。他のフィールドは最後に観測したコピーの値を保持しつつ、
+ *   `isPromoted`・`isPaidPromotion` は OR 結合し、引用ツイート関連のフィールドは coalesce する。
+ *   coalesce では同一 id の全コピー中で非 null 値を優先し、なければ統合値にフォールバックする。
  */
 export function mergeTweetAdFlags(tweets: TweetInput[]): TweetInput[] {
   const byId = new Map<string, TweetInput>()
@@ -132,21 +125,21 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
   const isRetweet = raw.legacy.retweetedStatusIdStr !== null
 
   const quotedResult = raw.legacy.quotedStatusResult?.result ?? null
-  // `null` means "no quoted tweet, or its video status was never evaluated" (quoted
-  // tweet tombstoned/withheld, so its `legacy` is absent); `false` means the quoted
-  // tweet's `legacy` was present but carried no video/GIF media.
+  // 引用先が tombstone・非表示で判定不能な場合と、
+  // 判定した結果として動画がない場合を区別できるよう、
+  // 単純な boolean ではなく null を未評価として使い分ける。
   const quotedTweetHasVideo = quotedResult?.legacy
     ? (quotedResult.legacy.extendedEntities?.media ?? []).some(
         (media) => media.type === 'video' || media.type === 'animated_gif',
       )
     : null
   const foreignVideoSourceCount = raw.legacy.extendedEntities
-    ? raw.legacy.extendedEntities.media?.filter(
+    ? (raw.legacy.extendedEntities.media?.filter(
         (media) =>
           (media.type === 'video' || media.type === 'animated_gif') &&
           media.sourceUserIdStr != null &&
           media.sourceUserIdStr !== raw.user.restId,
-      ).length ?? 0
+      ).length ?? 0)
     : null
 
   return {

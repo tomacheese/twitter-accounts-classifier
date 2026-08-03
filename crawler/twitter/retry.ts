@@ -1,19 +1,19 @@
-/** HTTP status codes worth retrying: rate limiting and transient server-side failures. */
+/** リトライする価値がある HTTP ステータスコード: レート制限と一時的なサーバー側障害。 */
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504])
 
 /**
- * Decides whether an error surfaced by `twitter-openapi-typescript`/`cycletls` is worth
- * retrying. Duck-typed on `.name` rather than `instanceof` against the generated client's
- * error classes (`ResponseError`, `FetchError`) to avoid depending on their exact export
- * path; both classes are documented as always setting that name.
+ * `twitter-openapi-typescript`・`cycletls` が投げるエラーがリトライする価値があるかを判定する。
+ * 生成クライアントのエラークラス (`ResponseError`・`FetchError`) の export パスに依存しないよう、
+ * `instanceof` ではなく `.name` によるダックタイピングで判定している。
+ * 両クラスとも常にこの `name` を設定することがドキュメントされている。
  *
- * `ResponseError` (an HTTP response came back, but not 2xx) is retryable only for rate
- * limiting and server-side failures — a 4xx like 401/404 signals a real problem (bad auth,
- * suspended account) that retrying cannot fix. `FetchError` (the request itself failed
- * before any response, e.g. cycletls TLS handshake reset) is always retryable, since it
- * carries no status to inspect and network blips are exactly what a retry is for.
- * @param error - the error thrown by a Twitter API call
- * @returns true if retrying the same call again is worth attempting
+ * `ResponseError` (2xx 以外のレスポンス時) はレート制限とサーバー側障害のみリトライ対象とする。
+ * 401/404 等 4xx は認証不備やアカウント停止などリトライで解決しない問題を示すため対象外にする。
+ * `FetchError` (リクエスト自体が失敗。例: TLS ハンドシェイクリセット) はステータスを持たず、
+ * ネットワークの一時的な不調こそリトライで対処すべきものであるため、
+ * 常にリトライ対象としている。
+ * @param error - Twitter API 呼び出しが投げたエラー
+ * @returns 同じ呼び出しを再試行する価値があれば true
  */
 export function isRetryableTwitterError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
@@ -32,13 +32,11 @@ export interface RetryOptions {
 }
 
 /**
- * Runs `fn`, retrying with linear backoff (`delayMs * attempt`) while
- * {@link isRetryableTwitterError} judges the failure transient. An error that is not
- * retryable, or the last attempt's error, is rethrown immediately.
- * @param fn - the Twitter API call to run
- * @param options - retry tuning: `maxAttempts` (default 3), `delayMs` (default 1000), and an
- * injectable `sleepImpl` for tests
- * @returns the resolved value of `fn`
+ * `maxAttempts` に達しても失敗した場合は、その最後のエラーをそのまま呼び出し側に投げ返す。
+ * リトライを使い切ったことを示すための専用エラーには包み直さない。
+ * @param fn - 実行する Twitter API 呼び出し
+ * @param options - リトライ調整用。`maxAttempts`(既定 3)・`delayMs`(既定 1000)・注入用 `sleepImpl`
+ * @returns `fn` の解決値
  */
 export async function withTwitterRetry<T>(
   fn: () => Promise<T>,

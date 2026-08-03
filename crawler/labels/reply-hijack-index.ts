@@ -2,37 +2,22 @@ import { averagePairwiseSimilarity, normalizeForSimilarity } from './text-simila
 
 const MIN_DISTINCT_AUTHORS = 5
 const WINDOW_HOURS = 24
-// Tuned by simulating this index over a 20,000-reply production corpus. A threshold of
-// 0.03 flagged 5.3% of the entire account database, sweeping in clearly organic mass
-// reactions (condolence replies, congratulation pile-ons, hashtag campaigns). 0.1 still
-// clears the spec's confirmed spam exemplar comfortably (it scores 0.234) while roughly
-// halving textual noise (243 swarms/2,966 accounts -> 117 swarms/1,484 accounts). This
-// threshold alone is not sufficient: see reply-hijack-swarm.ts's per-account low-effort
-// guardrail, plus MIN_NORMALIZED_LENGTH below for the false positives no similarity
-// threshold can separate.
+// しきい値をより低く設定すると、お悔やみの返信や祝福の連投、
+// ハッシュタグ企画への便乗といった、自然な集団反応まで誤検知してしまうため、
+// この値を採用している。しきい値の調整だけでは判定を完結できないため、
+// 低努力アカウントかどうかの追加判定と組み合わせる。
 const SIMILARITY_THRESHOLD = 0.1
-// The dominant false positive for `reply_hijack_swarm` was not impression farming but
-// community morning-greeting rituals - many real members each replying with a short
-// greeting to the same person's daily morning tweet. Once @mentions are stripped such a
-// greeting is only a handful of characters, so any two of them share nearly all their
-// bigrams and score a Jaccard similarity near 1.0 - far above SIMILARITY_THRESHOLD -
-// purely because there is almost no text to disagree about. Raising SIMILARITY_THRESHOLD
-// cannot separate these, and reply-hijack-swarm.ts's low-effort guard cannot either, since
-// greeting-culture accounts genuinely are reply-heavy.
+// @mention を除去すると朝の挨拶のような定型的な短文リプライがごく少ない文字数になり、
+// しきい値を上げても他の短い挨拶と高い類似度を示してしまうため、
+// しきい値の調整だけでは真のなりすまし文言と挨拶文化アカウントを区別できない。
+// そのためこの最小文字数によるフィルタで短すぎる定型文をあらかじめ除外する。
+// 挨拶文化アカウントは元々リプライが多いため、
+// 低努力アカウントの追加判定でも区別できない。
+// duplicate-reply-index.ts でも同じ理由から同じ値を採用している。
 //
-// `duplicate-reply-index.ts` carries the same guard for the same reason; the value is
-// deliberately kept identical.
-//
-// 20 came from re-simulating this index over a 115,243-reply corpus and sweeping the
-// threshold against 20 hand-judged accounts: it leaves 3 of the 12 greeting accounts
-// flagged (661 swarms/6,830 accounts -> 421/5,335), while 15 clears only 3 of them and 30
-// clears all 12 at the cost of another 18% of overall coverage. Non-greeting accounts are
-// essentially untouched (8 flagged -> 7).
-//
-// A second false-positive shape is deliberately NOT addressed here: genuine mass reactions
-// where dozens of people each write a long, substantive reply under one announcement. By
-// length and similarity alike those look identical to this rule's target pattern, and
-// remain a known gap.
+// なお、多数のアカウントがそれぞれ長文で実質的な返信を書く自然な集団反応は、
+// 長さ・類似度のいずれでもこのルールの対象パターンと区別できないため、
+// 意図的に対象から外している。
 const MIN_NORMALIZED_LENGTH = 20
 
 export interface ReplyHijackCorpusEntry {
@@ -44,29 +29,23 @@ export interface ReplyHijackCorpusEntry {
 
 export interface ReplyHijackIndex {
   /**
-   * @param accountId - the account to look up
-   * @param tweetId - the target tweet id this account replied to
-   * @returns the size of the qualifying "reply-hijack swarm" this account/target pair
-   *   belongs to (5+ distinct authors, each replying once, with similar paraphrased text,
-   *   within a 24-hour window), or 0 if this pair is not part of one
+   * @param accountId - 検索対象のアカウント
+   * @param tweetId - このアカウントがリプライした対象ツイートの ID
+   * @returns このアカウント・対象ツイートの組が属する「reply-hijack swarm」の規模。
+   *   属していない場合は 0
    */
   swarmSizeFor(accountId: string, tweetId: string): number
 }
 
 /**
- * Builds a cross-account "reply-hijack swarm" lookup: discards replies whose text is too
- * short to carry a meaningful similarity signal, groups the rest by the target tweet they
- * reply to, keeps at most one reply per author per target (an author replying
- * more than once to the same target is `reply_flooding`'s pattern, not this one), and
- * flags groups of 5+ distinct authors whose replies fall within a 24-hour window and
- * whose text is similar (paraphrase-level, not necessarily verbatim) as a swarm. Built
- * once per crawl/relabel run from a shared corpus and attached to each account's bundle
- * as `replyHijackSwarmSize` before rules are evaluated - see `AccountFeatureBundle`.
- * `swarmSizeFor` reports raw structural swarm membership only; it is a necessary but not
- * sufficient signal for the `reply_hijack_swarm` rule, which additionally requires the
- * account's own profile to look low-effort.
- * @param corpus - reply tweets gathered from across the crawl/relabel run
- * @returns an index queryable per account/target pair at bundle-build time
+ * リプライツイートの corpus からアカウント横断の「reply-hijack swarm」検索インデックスを構築する。
+ * 同一著者が同一対象へ複数回リプライする挙動は `reply_flooding` の対象でありここでは扱わないため、
+ * 著者・対象ごとに最初の1件のみを扱う。
+ * `swarmSizeFor` が返すのは構造上の swarm 所属情報のみであり、
+ * `reply_hijack_swarm` ルールの判定には、
+ * アカウント自身のプロフィールが低努力に見えるという追加条件も必要になる。
+ * @param corpus - クロール・再ラベリング実行全体から集めたリプライツイート
+ * @returns アカウント・対象ツイートの組ごとに問い合わせるためのインデックス
  */
 export function buildReplyHijackIndex(corpus: ReplyHijackCorpusEntry[]): ReplyHijackIndex {
   const firstReplyByAuthor = new Map<string, Map<string, ReplyHijackCorpusEntry>>()

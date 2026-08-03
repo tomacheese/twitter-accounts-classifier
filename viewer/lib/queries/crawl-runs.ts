@@ -1,26 +1,25 @@
 import type { CrawlAccountRun, CrawlRun, PrismaClient } from '../../generated/prisma'
 
-/** One `CrawlAccountRun` row, as displayed in the crawl run history page. */
+/** クロール実行履歴ページに表示する `CrawlAccountRun` の1行分。 */
 export type CrawlAccountRunSummary = CrawlAccountRun
 
-/** A `CrawlRun` row together with its child `CrawlAccountRun` rows. */
+/** 子である `CrawlAccountRun` を含む `CrawlRun`。 */
 export interface CrawlRunSummary extends CrawlRun {
   accountRuns: CrawlAccountRunSummary[]
 }
 
-/** A `CrawlRun` row with only its account count, for the lightweight history list. */
+/** 軽量な履歴一覧向けに、アカウント件数のみを持つ `CrawlRun`。 */
 export interface CrawlRunListItem extends CrawlRun {
   accountRunCount: number
 }
 
 /**
- * Loads the most recent crawl runs, with only their account count, for the
- * dashboard's summary section. Each run's account-level detail is deliberately
- * left out here (see {@link getCrawlRunDetail}) so this query stays cheap
- * regardless of how many accounts have accumulated on each run.
- * @param prisma - the Prisma client to query
- * @param limit - the maximum number of runs to return
- * @returns up to `limit` runs, most recent first, with only their account count
+ * ダッシュボードの概要向けに、直近のクロール実行をアカウント件数のみで読み込む。
+ * アカウント単位の詳細は意図的に含めない (詳細は {@link getCrawlRunDetail})。
+ * 各実行に蓄積したアカウント数によらず、このクエリを軽量に保つため。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @param limit - 取得する実行数の上限
+ * @returns 新しい順で最大 limit 件の実行 (アカウント件数のみ)
  */
 export async function getRecentCrawlRuns(
   prisma: PrismaClient,
@@ -35,13 +34,11 @@ export async function getRecentCrawlRuns(
 }
 
 /**
- * Loads the full crawl run history for the list page. Each run's account-level
- * detail is deliberately left out here (see {@link getCrawlRunDetail}) so this
- * query stays cheap regardless of how many accounts have accumulated on each run
- * (the runs themselves are not paginated, so this list still grows with the
- * number of crawl cycles that have run).
- * @param prisma - the Prisma client to query
- * @returns every run, most recent first, with only its account count
+ * 履歴一覧ページ向けに、クロール実行の全履歴をアカウント件数のみで読み込む。
+ * アカウント単位の詳細を含めない理由は {@link getRecentCrawlRuns} と同じ。
+ * 実行自体はページネーションしていないため、クロールを重ねるほど件数は増え続ける。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @returns 新しい順の全実行 (アカウント件数のみ)
  */
 export async function getAllCrawlRuns(prisma: PrismaClient): Promise<CrawlRunListItem[]> {
   const runs = await prisma.crawlRun.findMany({
@@ -52,13 +49,12 @@ export async function getAllCrawlRuns(prisma: PrismaClient): Promise<CrawlRunLis
 }
 
 /**
- * Loads a single crawl run together with its full per-account breakdown, for the
- * run's dedicated detail page. Account runs are ordered by start time (with `id`
- * as a tiebreaker) so the per-account table renders in a stable order across
- * reloads, matching this project's convention for list queries.
- * @param prisma - the Prisma client to query
- * @param id - the `CrawlRun` id
- * @returns the run with its account runs, or `null` if no run has that id
+ * 実行ごとの詳細ページ向けに、単一のクロール実行をアカウント単位の内訳付きで読み込む。
+ * アカウント単位の一覧は startedAt 順に並べ、同着時は id をタイブレークに使う。
+ * 再読み込みのたびに表示順が変わらないようにするためで、一覧クエリ全般の方針に合わせている。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @param id - `CrawlRun` の id
+ * @returns アカウント単位の実行を含む実行。該当する id がなければ `null`
  */
 export async function getCrawlRunDetail(
   prisma: PrismaClient,

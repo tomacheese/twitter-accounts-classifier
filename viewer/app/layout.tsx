@@ -3,9 +3,8 @@ import Script from 'next/script'
 import './globals.css'
 import { SiteNav } from './components/site-nav'
 
-// Applied before hydration so the very first paint already matches the
-// user's stored choice — falling back to OS preference — instead of
-// flashing light mode first.
+// hydration 前に適用することで、最初の描画から保存済みの選択 (未保存なら OS の設定) に合わせ、
+// ライトモードが一瞬表示されるのを防ぐ。
 const THEME_INIT_SCRIPT = `
 (function () {
   var stored = localStorage.getItem('theme')
@@ -20,9 +19,8 @@ export const metadata: Metadata = {
 }
 
 /**
- * Root layout for the viewer app. Renders the shared navigation bar around every page.
- * @param props - the page content to render inside the layout
- * @returns the HTML document shell with navigation
+ * @param props - レイアウト内に描画するページ本体
+ * @returns ナビゲーションを含む HTML ドキュメントの骨格
  */
 export default function RootLayout({
   children,

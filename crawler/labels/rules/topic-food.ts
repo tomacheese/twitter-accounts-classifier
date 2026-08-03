@@ -1,8 +1,7 @@
 import type { LabelRule } from '../types'
 
-// English terms are word-boundary-matched to avoid matching inside unrelated words.
-// Japanese terms are left as substring matches since word boundaries don't apply the
-// same way to Japanese script.
+// 英単語は無関係な語の内部に一致しないよう単語境界で判定している。
+// 日本語は単語境界の概念が成り立たないため部分一致のままとしている。
 const FOOD_PATTERN = /\b(cooking|foodie|chef)\b|グルメ|料理|食べ歩き|ラーメン|レシピ/i
 
 export const topicFoodRule: LabelRule = {

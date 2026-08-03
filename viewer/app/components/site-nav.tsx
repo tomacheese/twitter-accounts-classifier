@@ -13,10 +13,9 @@ const NAV_ITEMS = [
 ] as const
 
 /**
- * The site-wide navigation bar. Below the `sm` breakpoint it collapses to a
- * hamburger toggle, since the nav links plus the theme toggle do not fit a
- * narrow viewport in one row without wrapping mid-word.
- * @returns the rendered navigation bar
+ * ナビリンクとテーマ切り替えを1行に収めると狭い画面幅では折り返すため、
+ * `sm` ブレークポイント未満ではハンバーガーメニューに折りたたむ。
+ * @returns 描画されたナビゲーションバー
  */
 export function SiteNav(): React.ReactElement {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -56,8 +55,7 @@ export function SiteNav(): React.ReactElement {
         <div
           className="mt-3 flex flex-col gap-3 border-t pt-3 text-sm font-medium sm:hidden dark:border-gray-700"
           onClick={() => {
-            // Collapse the menu once a link inside it is followed, so it
-            // doesn't stay open over the newly navigated-to page.
+            // リンクをたどった際にメニューを閉じる。遷移後のページ上に開いたまま残さないため。
             setIsMenuOpen(false)
           }}
         >

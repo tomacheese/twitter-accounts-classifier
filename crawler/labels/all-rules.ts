@@ -40,10 +40,9 @@ import { replyFloodingRule } from './rules/reply-flooding'
 import { replyHijackSwarmRule } from './rules/reply-hijack-swarm'
 
 /**
- * The canonical set of all label rules registered by the crawler. Both `runCrawlCycle`
- * (registration at crawl time) and `prisma/seed.ts` (LabelDefinition seeding on a fresh
- * database) must derive from this single list, so a rule added to one path is never
- * silently missing from the other.
+ * クローラーに登録される全ラベルルールの正規リスト。
+ * `runCrawlCycle`（登録）と `prisma/seed.ts`（シード投入）の両方が単一リストを参照し、
+ * 一方にだけルールを追加してもう一方に反映し忘れる事態を防ぐ。
  */
 export const ALL_LABEL_RULES: LabelRule[] = [
   verifiedBlueIndividualRule,

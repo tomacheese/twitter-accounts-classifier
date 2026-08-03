@@ -1,10 +1,11 @@
 import type { LabelRule } from '../types'
 
-// "推し" ("oshi") is deliberately absent: it is now generic Japanese internet slang for "my
-// favorite [anything]" and is applied to anime/game characters, VTubers (covered by
-// topic_vtuber), sports figures, actors, animals and even cities, so on its own it cannot
-// distinguish idol fandom from any other kind of fandom. English terms are
-// word-boundary-matched to avoid matching inside unrelated words.
+// 「推し」は現在ではアニメ/ゲームキャラクター、
+// VTuber (topic_vtuber で対応済み)、スポーツ選手、俳優、動物、
+// 地域など何にでも使われる汎用的な表現になっており、
+// 単体ではアイドルファン特有のシグナルとして使えないため、
+// 意図的に対象語から除外している。
+// 英単語は無関係な語の内部に一致しないよう単語境界で判定している。
 const IDOL_PATTERN = /アイドル|\bidol\b|k-?pop|ジャニーズ|ハロプロ|坂道/i
 
 export const topicIdolRule: LabelRule = {

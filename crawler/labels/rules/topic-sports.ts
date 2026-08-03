@@ -1,13 +1,12 @@
 import type { LabelRule } from '../types'
 
-// English terms are word-boundary-matched to avoid matching inside unrelated words
-// (e.g. "NBA"/"MLB" as substrings). Japanese terms are left as substring matches since
-// word boundaries don't apply the same way to Japanese script.
+// NBA/MLB のような略語が無関係な語の内部に一致しないよう、
+// 英単語は単語境界で判定している。
+// 日本語は単語境界の概念が同様には成り立たないため部分一致のままとしている。
 //
-// スポーツ excludes a preceding "e" (half- or full-width, either case) so that eスポーツ
-// ("esports") is not tagged as sports: esports is a gaming topic already covered by
-// topic_gaming's own eスポーツ term, and esports players/venues were a recurring
-// false-positive source here.
+// スポーツ は直前の e (全角・半角、大小問わず) を除外している。
+// eスポーツ は topic_gaming 側のシグナルとして扱っており、
+// 含めると eスポーツ 関連のプレイヤーや会場アカウントをスポーツ関心ありと誤検知してしまうため。
 const SPORTS_PATTERN =
   /\b(baseball|soccer|basketball|NBA|MLB|NPB)\b|(?<![eEｅＥ])スポーツ|野球|サッカー|バスケ(ットボール)?|Jリーグ/i
 

@@ -44,10 +44,10 @@ function makePrisma(overrides: {
   const tweetFindMany = vi
     .fn()
     .mockImplementation(overrides.tweetFindManyImpl ?? (() => Promise.resolve([])))
-  // recordAccountLabelsBulk の呼び出しは1アカウント分の複数ラベルを1本の $queryRaw に
-  // まとめる。SQL 文が "UNNEST(" を含むかどうかで他の $queryRaw 呼び出しと区別できる。
-  // それ以外の $queryRaw は呼び出し順が固定であることを前提としており、1回目は
-  // loadLatestRuleVersions、2回目以降は fetchTweetsForAccounts になる。
+  // recordAccountLabelsBulk の呼び出しは1アカウント分の複数ラベルを1本の $queryRaw にまとめる。
+  // SQL 文が "UNNEST(" を含むかどうかで他の $queryRaw 呼び出しと区別できる。
+  // それ以外の $queryRaw は呼び出し順が固定であることを前提としており、
+  // 1回目は loadLatestRuleVersions、2回目以降は fetchTweetsForAccounts になる。
   const bulkPersist = vi.fn()
   let queryRawCalls = 0
   const queryRaw = vi.fn().mockImplementation((strings: unknown, ...values: unknown[]) => {
@@ -139,9 +139,9 @@ describe('runRelabelBackfill', () => {
     const account2 = { ...sampleAccount, id: 'acc2', screenName: 'other' }
     const { prisma, bulkPersist } = makePrisma({
       accounts: [[sampleAccount, account2], []],
-      // acc1 の永続化だけを失敗させ、acc2 は成功させる。アカウント単位の try/catch が
-      // バッチの残りを止めないことを、呼び出し順ではなく accountId で判定して検証する
-      // (並列処理下では呼び出し順が保証と見なせないため)。
+      // acc1 の永続化だけを失敗させ、acc2 は成功させる。
+      // アカウント単位の try/catch がバッチの残りを止めないことを、
+      // 呼び出し順ではなく accountId で判定する(並列処理下では呼び出し順が保証されないため)。
       bulkPersistImpl: (accountId) => {
         if (accountId === 'acc1') return Promise.reject(new Error('db error'))
         return Promise.resolve([
@@ -191,11 +191,11 @@ describe('runRelabelBackfill', () => {
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    // $queryRaw is called exactly once, for loadLatestRuleVersions - since the only
-    // account is already fully up to date, fetchTweetsForAccounts's batched raw query is
-    // never issued at all.
+    // $queryRaw が呼ばれるのは loadLatestRuleVersions の1回のみ。
+    // 唯一のアカウントが既に最新のため、
+    // fetchTweetsForAccounts のバッチ取得クエリはそもそも発行されない。
     expect(queryRaw).toHaveBeenCalledTimes(1)
-    // tweet.findMany is only ever used for the shared reply corpus load, never per account.
+    // tweet.findMany は共有の返信コーパス読み込みでのみ使われ、アカウント単位では使われない。
     expect(tweetFindMany).toHaveBeenCalledTimes(1)
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 0 })
   })
@@ -230,11 +230,11 @@ describe('runRelabelBackfill', () => {
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    // The account is left un-persisted (not labeled from an empty, fetch-failure-induced
-    // tweet sample) so it stays stale and a future run retries it with real data, rather
-    // than the whole call rejecting or the account being wrongly marked up to date.
-    // It is still counted in accountsProcessed as attempted, so the progress log's
-    // denominator can still reach totalAccounts.
+    // 取得失敗で空になったツイートサンプルでラベル付けしてしまわないよう永続化せずに残し、
+    // stale なまま次回実行で実データを使って再試行できるようにしている。
+    // 呼び出し全体を reject させたり、誤って最新済み扱いにしたりはしない。
+    // 試行済みとして accountsProcessed にはカウントするため、
+    // 進捗ログの分母は totalAccounts に到達できる。
     expect(bulkPersist).not.toHaveBeenCalled()
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 0 })
   })
@@ -354,8 +354,7 @@ describe('runRelabelBackfill', () => {
   describe('progress logging', () => {
     afterEach(() => {
       // Date.now と Logger.info をこのブロックのテストごとにスパイし直しており、
-      // 復元しないと後続のテスト (この describe 内・および同一ファイル内の
-      // 後続テスト) に漏れ出す。
+      // 復元しないと後続のテスト (この describe 内・および同一ファイル内の後続テスト) に漏れ出す。
       vi.restoreAllMocks()
     })
 

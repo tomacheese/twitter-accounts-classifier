@@ -1,11 +1,11 @@
 import type { LabelRule } from '../types'
 
 /**
- * Detects a Verified Organization (gold checkmark) account - companies, brands, and
- * other businesses that pay for X's organization verification. Determined solely by
- * `verifiedType === 'Business'`; unlike `verified-blue-individual`, this holds regardless
- * of the current `isBlueVerified` value (real accounts observed with
- * `verifiedType: 'Business'` but `isBlueVerified: false` still carry the org badge).
+ * X の組織認証（ゴールドバッジ）を持つアカウントを検出する。企業やブランドなど、
+ * X の組織認証に課金している主体が対象。判定は `verifiedType === 'Business'` のみで行う。
+ * `verified-blue-individual` と異なり、現在の `isBlueVerified` の値によらず成立する。
+ * （`verifiedType: 'Business'` かつ `isBlueVerified: false` でも、
+ * 組織バッジを保持する実アカウントがあるため。）
  */
 export const verifiedBusinessRule: LabelRule = {
   key: 'verified_business',

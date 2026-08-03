@@ -1,20 +1,18 @@
 import type { LabelRule } from '../types'
 import { averagePairwiseSimilarity } from '../text-similarity'
 
-// This "impression zombie" (インプレゾンビ) archetype - paraphrased, sometimes AI-reworded or
-// translated, replies piled onto one tweet - is covered by neither neighbouring rule:
-// self_duplicate_reply requires a standalone-tweet/reply pair (this is reply-vs-reply), and
-// templated_reply_network requires verbatim text shared across *different* accounts (this is
-// paraphrased text repeated by the *same* account). Thresholds are calibrated against
-// crawled samples: confirmed flood groups (8-27 replies to one tweet, spanning under a
-// minute to a few hours) scored average bigram-Jaccard similarity 0.06-0.26, while an
-// extended, topically unrelated chat session with one friend scored 0.011.
+// この「インプレゾンビ」的なアーキタイプ(言い換えや、
+// 時には AI による書き換え・翻訳を伴うリプライを1つのツイートに大量投稿する)は、
+// 隣接する他ルールでは捕捉できない。
+// self_duplicate_reply は単独ツイートとリプライのペアを要求し(これはリプライ同士の比較)、
+// templated_reply_network は別アカウント間の一字一句同一テキストを要求する。
+// こちらは同一アカウントによる言い換えの繰り返しであるため。
 const MIN_REPLIES_TO_SAME_TARGET = 8
 const WINDOW_HOURS = 24
 const SIMILARITY_THRESHOLD = 0.03
 
-// Used only to render a human-readable handle in the reason string. Grouping itself keys
-// off `inReplyToTweetId` - see the comment on `groups` below for why.
+// reason 文字列にハンドルを人が読める形で表示するためだけに使う。
+// グルーピング自体は `inReplyToTweetId` を基準に行う。
 const REPLY_TARGET_PATTERN = /^@(\w+)/
 
 export const replyFloodingRule: LabelRule = {
@@ -23,16 +21,16 @@ export const replyFloodingRule: LabelRule = {
     '同一相手への返信を短時間のうちに大量投稿しており、その文面が言い換えや翻訳違いを含めて内容的に酷似している。1つのバズったツイートに大量の言い換えリプライを浴びせてインプレッションを稼ぐ「インプレゾンビ」の典型パターン',
   version: '1.1.0',
   evaluate(bundle) {
-    // Grouping by the leading @mention (i.e. by the account being talked to) cannot
-    // distinguish flooding from an ordinary two-way conversation: a back-and-forth chat, or
-    // an argument, with one person trivially produces 8+ replies "to the same target" within
-    // 24 hours, and the similarity floor does not separate them either (such conversations
-    // scored 0.035-0.072, above the threshold). The structural difference is what the
-    // replies are aimed at, not who: this archetype piles many replies onto ONE viral tweet,
-    // whereas a conversation answers a different tweet each time. Every reply in the
-    // production corpus carries an `inReplyToTweetId`, so nothing observable is lost by
-    // grouping on it; replies whose parent id is unknown are skipped rather than lumped
-    // together, since a missing id is not evidence that two replies share a target.
+    // 先頭の @メンション(会話相手)でグルーピングすると、
+    // 通常の相互会話との区別ができない。一人との往復チャットや口論でも、
+    // 24時間以内に「同じ相手への」複数のリプライが容易に発生し、
+    // 類似度の下限でも区別できないため。
+    // 構造的な違いは「相手が誰か」ではなく「何に対するリプライか」にあり、
+    // このアーキタイプは1つのバズったツイートに大量のリプライを積み上げるのに対し、
+    // 通常の会話では毎回異なるツイートに返信する。
+    // 本番データのリプライはすべて `inReplyToTweetId` を持つため、
+    // これを基準にグルーピングしても失われる情報はなく、
+    // 親ツイート ID が不明なリプライは同一グループとみなさずスキップする。
     const groups = new Map<string, { fullText: string; createdAt: Date }[]>()
     for (const tweet of bundle.recentTweets) {
       if (!tweet.isReply || tweet.isRetweet) continue

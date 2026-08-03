@@ -54,7 +54,11 @@ function page(
 describe('fetchRecommendedTimeline', () => {
   it('calls getHomeTimeline with the given count and tags results as recommended', async () => {
     const getHomeTimeline = vi.fn().mockResolvedValue(page(['1']))
-    const client: TweetApiLike = { getHomeTimeline, getHomeLatestTimeline: vi.fn(), getSearchTimeline: vi.fn() }
+    const client: TweetApiLike = {
+      getHomeTimeline,
+      getHomeLatestTimeline: vi.fn(),
+      getSearchTimeline: vi.fn(),
+    }
 
     const result = await fetchRecommendedTimeline(client, 20)
 
@@ -65,7 +69,11 @@ describe('fetchRecommendedTimeline', () => {
 
   it('is backward compatible with a single-page response (no cursor)', async () => {
     const getHomeTimeline = vi.fn().mockResolvedValue(page(['1', '2']))
-    const client: TweetApiLike = { getHomeTimeline, getHomeLatestTimeline: vi.fn(), getSearchTimeline: vi.fn() }
+    const client: TweetApiLike = {
+      getHomeTimeline,
+      getHomeLatestTimeline: vi.fn(),
+      getSearchTimeline: vi.fn(),
+    }
 
     const result = await fetchRecommendedTimeline(client, 20)
 
@@ -79,7 +87,11 @@ describe('fetchRecommendedTimeline', () => {
       .mockResolvedValueOnce(page(['1', '2'], 'cursor-a'))
       .mockResolvedValueOnce(page(['3', '4'], 'cursor-b'))
       .mockResolvedValueOnce(page(['5'], 'cursor-c'))
-    const client: TweetApiLike = { getHomeTimeline, getHomeLatestTimeline: vi.fn(), getSearchTimeline: vi.fn() }
+    const client: TweetApiLike = {
+      getHomeTimeline,
+      getHomeLatestTimeline: vi.fn(),
+      getSearchTimeline: vi.fn(),
+    }
 
     const result = await fetchRecommendedTimeline(client, 5)
 
@@ -95,7 +107,11 @@ describe('fetchRecommendedTimeline', () => {
       .fn()
       .mockResolvedValueOnce(page(['1', '2'], 'cursor-a'))
       .mockResolvedValueOnce(page(['3'], undefined))
-    const client: TweetApiLike = { getHomeTimeline, getHomeLatestTimeline: vi.fn(), getSearchTimeline: vi.fn() }
+    const client: TweetApiLike = {
+      getHomeTimeline,
+      getHomeLatestTimeline: vi.fn(),
+      getSearchTimeline: vi.fn(),
+    }
 
     const result = await fetchRecommendedTimeline(client, 20)
 
@@ -108,7 +124,11 @@ describe('fetchRecommendedTimeline', () => {
       .fn()
       .mockResolvedValueOnce(page(['1', '2', '3'], 'cursor-a'))
       .mockResolvedValueOnce(page(['4', '5', '6'], 'cursor-b'))
-    const client: TweetApiLike = { getHomeTimeline, getHomeLatestTimeline: vi.fn(), getSearchTimeline: vi.fn() }
+    const client: TweetApiLike = {
+      getHomeTimeline,
+      getHomeLatestTimeline: vi.fn(),
+      getSearchTimeline: vi.fn(),
+    }
 
     const result = await fetchRecommendedTimeline(client, 5)
 
@@ -117,13 +137,17 @@ describe('fetchRecommendedTimeline', () => {
   })
 
   it('keeps paginating past a page that filters down to zero mappable tweets as long as a cursor remains', async () => {
-    // rawCount > 0 with zero mapped ids simulates a page that was entirely ads/tombstoned
-    // entries (dropped by toRawTweetResult) - this must not be mistaken for end-of-data.
+    // 広告・tombstone のみで構成され toRawTweetResult に全件除外されたページを再現している。
+    // データ終端と誤認してはならないケース。
     const getHomeTimeline = vi
       .fn()
       .mockResolvedValueOnce(page([], 'cursor-a', 20))
       .mockResolvedValueOnce(page(['1', '2'], 'cursor-b'))
-    const client: TweetApiLike = { getHomeTimeline, getHomeLatestTimeline: vi.fn(), getSearchTimeline: vi.fn() }
+    const client: TweetApiLike = {
+      getHomeTimeline,
+      getHomeLatestTimeline: vi.fn(),
+      getSearchTimeline: vi.fn(),
+    }
 
     const result = await fetchRecommendedTimeline(client, 2)
 
@@ -137,7 +161,11 @@ describe('fetchRecommendedTimeline', () => {
       .fn()
       .mockResolvedValueOnce(page(['1'], 'cursor-a'))
       .mockResolvedValueOnce(page([], 'cursor-b', 0))
-    const client: TweetApiLike = { getHomeTimeline, getHomeLatestTimeline: vi.fn(), getSearchTimeline: vi.fn() }
+    const client: TweetApiLike = {
+      getHomeTimeline,
+      getHomeLatestTimeline: vi.fn(),
+      getSearchTimeline: vi.fn(),
+    }
 
     const result = await fetchRecommendedTimeline(client, 20)
 
@@ -147,7 +175,11 @@ describe('fetchRecommendedTimeline', () => {
 
   it('stops paginating if the API returns the same cursor again (stuck-cursor guard)', async () => {
     const getHomeTimeline = vi.fn().mockResolvedValue(page([], 'same-cursor', 20))
-    const client: TweetApiLike = { getHomeTimeline, getHomeLatestTimeline: vi.fn(), getSearchTimeline: vi.fn() }
+    const client: TweetApiLike = {
+      getHomeTimeline,
+      getHomeLatestTimeline: vi.fn(),
+      getSearchTimeline: vi.fn(),
+    }
 
     const result = await fetchRecommendedTimeline(client, 20)
 
@@ -194,13 +226,27 @@ describe('fetchTrendingTimeline', () => {
     const getTrends = vi.fn().mockResolvedValue(['#foo', '#bar'])
     const scraper: TrendsScraperLike = { getTrends }
     const getSearchTimeline = vi.fn().mockResolvedValue(page(['3']))
-    const client: TweetApiLike = { getHomeTimeline: vi.fn(), getHomeLatestTimeline: vi.fn(), getSearchTimeline }
+    const client: TweetApiLike = {
+      getHomeTimeline: vi.fn(),
+      getHomeLatestTimeline: vi.fn(),
+      getSearchTimeline,
+    }
 
     const result = await fetchTrendingTimeline(scraper, client, 5, 10)
 
     expect(getTrends).toHaveBeenCalledTimes(1)
-    expect(getSearchTimeline).toHaveBeenCalledWith({ rawQuery: '#foo', product: 'Top', count: 5, cursor: undefined })
-    expect(getSearchTimeline).toHaveBeenCalledWith({ rawQuery: '#bar', product: 'Top', count: 5, cursor: undefined })
+    expect(getSearchTimeline).toHaveBeenCalledWith({
+      rawQuery: '#foo',
+      product: 'Top',
+      count: 5,
+      cursor: undefined,
+    })
+    expect(getSearchTimeline).toHaveBeenCalledWith({
+      rawQuery: '#bar',
+      product: 'Top',
+      count: 5,
+      cursor: undefined,
+    })
     expect(result.tweets.every((t) => t.source === 'trending')).toBe(true)
   })
 
@@ -208,7 +254,11 @@ describe('fetchTrendingTimeline', () => {
     const getTrends = vi.fn().mockResolvedValue(['#foo', '#bar', '#baz'])
     const scraper: TrendsScraperLike = { getTrends }
     const getSearchTimeline = vi.fn().mockResolvedValue(page([]))
-    const client: TweetApiLike = { getHomeTimeline: vi.fn(), getHomeLatestTimeline: vi.fn(), getSearchTimeline }
+    const client: TweetApiLike = {
+      getHomeTimeline: vi.fn(),
+      getHomeLatestTimeline: vi.fn(),
+      getSearchTimeline,
+    }
 
     await fetchTrendingTimeline(scraper, client, 5, 2)
 
@@ -222,7 +272,11 @@ describe('fetchTrendingTimeline', () => {
       .fn()
       .mockResolvedValueOnce(page(['1', '2'], 'cursor-a'))
       .mockResolvedValueOnce(page(['3'], 'cursor-b'))
-    const client: TweetApiLike = { getHomeTimeline: vi.fn(), getHomeLatestTimeline: vi.fn(), getSearchTimeline }
+    const client: TweetApiLike = {
+      getHomeTimeline: vi.fn(),
+      getHomeLatestTimeline: vi.fn(),
+      getSearchTimeline,
+    }
 
     const result = await fetchTrendingTimeline(scraper, client, 3, 10)
 

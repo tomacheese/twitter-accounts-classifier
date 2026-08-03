@@ -6,7 +6,7 @@ import { getCrawlRunDetail } from '@/lib/queries/crawl-runs'
 import { ErrorFallback } from '../../components/error-fallback'
 import { StatusBadge } from '../../components/status-badge'
 
-/** The warning types the crawler emits, one per failure site. */
+/** crawler が発行する警告種別。障害の発生箇所ごとに1つ。 */
 type CrawlWarningType =
   | 'recommended_timeline_failed'
   | 'following_timeline_failed'
@@ -17,10 +17,8 @@ type CrawlWarningType =
   | 'followers_sync_failed'
 
 /**
- * One structured warning recorded against a `CrawlAccountRun`, as persisted in its
- * `warnings` JSON column. Mirrors `CrawlWarning` in
- * `crawler/db/crawl-run-repository.ts` — duplicated here since the crawler and viewer
- * are separate packages with no shared TypeScript project reference.
+ * crawler と viewer は TypeScript のプロジェクト参照を共有していない別パッケージのため、
+ * crawler/db/crawl-run-repository.ts の CrawlWarning 型をここに複製している。
  */
 interface CrawlWarning {
   type: CrawlWarningType
@@ -28,16 +26,15 @@ interface CrawlWarning {
   username?: string
   authorId?: string
   errorMessage: string
-  /** The raw HTTP response body that caused the failure, when the crawler captured one. */
+  /** 失敗の原因になった生の HTTP レスポンス本文。crawler が取得できた場合のみ。 */
   rawResponseSnippet?: string
-  /** The crawler build (APPLICATION_VERSION) that produced this specific warning. */
+  /** この警告を生成した crawler のビルド (APPLICATION_VERSION)。 */
   appVersion?: string
 }
 
 /**
- * Groups a flat warning list by `type`, preserving each group's first-seen order.
- * @param warnings - the account run's warnings, in the order they were recorded
- * @returns each distinct type paired with every warning of that type, in encounter order
+ * @param warnings - 記録された順のアカウント実行の警告一覧
+ * @returns 出現順に並んだ、種別ごとの警告のペア
  */
 function groupWarningsByType(warnings: CrawlWarning[]): [CrawlWarningType, CrawlWarning[]][] {
   const groups = new Map<CrawlWarningType, CrawlWarning[]>()
@@ -65,11 +62,9 @@ const ACCOUNT_RUN_COLUMNS = [
 ] as const
 
 /**
- * Formats the elapsed time between two timestamps as e.g. "1h 04m 12s", or "4m 12s"
- * when the duration is under an hour (the leading "0h " is omitted, not zero-padded).
- * @param startedAt - the start timestamp
- * @param finishedAt - the end timestamp
- * @returns the elapsed duration, human-readable
+ * @param startedAt - 開始時刻
+ * @param finishedAt - 終了時刻
+ * @returns 人間が読める形式の経過時間
  */
 function formatDuration(startedAt: Date, finishedAt: Date): string {
   const totalSeconds = Math.max(0, Math.round((finishedAt.getTime() - startedAt.getTime()) / 1000))
@@ -82,10 +77,8 @@ function formatDuration(startedAt: Date, finishedAt: Date): string {
 }
 
 /**
- * Crawl run detail page: one run's overall outcome plus its full per-account
- * breakdown.
- * @param props - the route's `id` path parameter
- * @returns the rendered crawl run detail page
+ * @param props - ルートの `id` パスパラメータ
+ * @returns クロール実行詳細ページの描画結果
  */
 export default async function CrawlRunDetailPage({
   params,
@@ -97,8 +90,8 @@ export default async function CrawlRunDetailPage({
   try {
     run = await getCrawlRunDetail(getPrismaClient(), id)
   } catch (error) {
-    // Log the full error server-side but show the client a generic message:
-    // error.message can leak SQL/connection details from the driver.
+    // error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため、
+    // 詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。
     console.error('Failed to load crawl run detail:', error)
     return <ErrorFallback message="Failed to load the crawl run." />
   }
@@ -213,9 +206,9 @@ export default async function CrawlRunDetailPage({
                                     </summary>
                                     <ul className="mt-1 list-disc pl-4">
                                       {group.map((warning, index) => (
-                                        // Warnings have no stable id of their own, and this
-                                        // list never reorders or mutates after the initial
-                                        // render, so an index key is safe here.
+                                        // warning には固有の id がなく、
+                                        // このリストは並び替えも変更もされないため、
+                                        // key に index を使っても問題ない。
                                         <li key={index}>
                                           {warning.message}
                                           {warning.username

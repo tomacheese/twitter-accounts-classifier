@@ -4,10 +4,8 @@ import { useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 /**
- * Renders a row of toggleable label checkboxes that update the `label`
- * query parameter (repeated per selected label) on the current page.
- * @param props - the full set of known label keys to offer as filters
- * @returns the rendered filter control
+ * @param props - フィルタとして提示するラベルキーの全集合
+ * @returns 描画されたフィルタコントロール
  */
 export function LabelFilter({
   availableLabelKeys,
@@ -26,9 +24,7 @@ export function LabelFilter({
     } else {
       next.add(labelKey)
     }
-    // Carry every other active param (sort, direction) forward as-is; only
-    // `label` is rebuilt from `next`, and `page` is deliberately dropped,
-    // since changing the filter should reset pagination back to page 1.
+    // page は意図的に削除している。フィルタを変更したときはページ1に戻す必要があるため。
     const params = new URLSearchParams(searchParams)
     params.delete('label')
     for (const key of next) {

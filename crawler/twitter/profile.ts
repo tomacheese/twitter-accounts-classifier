@@ -1,5 +1,15 @@
-import type { TweetApiUtils, TwitterApiUtilsResponse, UserApiUtils, UserApiUtilsData } from 'twitter-openapi-typescript'
-import { toAccountProfileInput, toTweetInput, type RawTweetResult, type RawUserResult } from './mappers'
+import type {
+  TweetApiUtils,
+  TwitterApiUtilsResponse,
+  UserApiUtils,
+  UserApiUtilsData,
+} from 'twitter-openapi-typescript'
+import {
+  toAccountProfileInput,
+  toTweetInput,
+  type RawTweetResult,
+  type RawUserResult,
+} from './mappers'
 import { convertTimelineResponse, toRawUserResult } from './timeline'
 import type { AccountProfileInput } from '../db/account-repository'
 import type { TweetInput } from '../db/tweet-repository'
@@ -12,14 +22,20 @@ export interface UserApiLike {
   }>
 }
 
-export async function fetchAccountProfile(client: UserApiLike, userId: string): Promise<AccountProfileInput> {
+export async function fetchAccountProfile(
+  client: UserApiLike,
+  userId: string,
+): Promise<AccountProfileInput> {
   const response = await client.getUserByRestId({ userId })
   return toAccountProfileInput(response.data)
 }
 
 export interface RecentTweetsResult {
   tweets: TweetInput[]
-  /** Profiles of every tweet author appearing in the response, e.g. other users pulled in via conversation context (no extra API calls). */
+  /**
+   * レスポンスに含まれる全ツイート投稿者のプロフィール (会話コンテキスト経由の他ユーザーなど)。
+   * 追加の API 呼び出しは発生しない。
+   */
   authors: AccountProfileInput[]
 }
 
@@ -30,20 +46,22 @@ export async function fetchRecentTweets(
 ): Promise<RecentTweetsResult> {
   const response = await client.getUserTweetsAndReplies({ userId, count: limit })
   return {
-    tweets: response.data.data.map((raw) => toTweetInput(raw, { source: 'profile', viewerAccountId: userId })),
+    tweets: response.data.data.map((raw) =>
+      toTweetInput(raw, { source: 'profile', viewerAccountId: userId }),
+    ),
     authors: response.data.data.map((raw) => toAccountProfileInput(raw.user)),
   }
 }
 
 /**
- * Awaits a real `twitter-openapi-typescript` `getUserByRestId` response and converts its
- * `UserApiUtilsData` payload into `{ data: RawUserResult }`, reusing `./timeline`'s
- * `toRawUserResult`. `UserApiUtilsData.user` is `i.User | undefined` (unlike
- * `TweetApiUtilsData.user`, which is never undefined) because the lookup can target a
- * suspended or deleted account, hence the explicit throw.
- * @param response - the pending `getUserByRestId`/`getUserByScreenName` response
- * @returns the converted user payload
- * @throws if the lookup returned no user, e.g. a suspended or deleted account
+ * 実際の `getUserByRestId` レスポンスを `{ data: RawUserResult }` に変換する。
+ * 変換ロジックを重複させないよう `./timeline` の `toRawUserResult` を再利用する。
+ * `UserApiUtilsData.user` は `TweetApiUtilsData.user` と異なり `i.User | undefined` であり、
+ * 停止・削除済みアカウントを検索対象にし得るため、
+ * 明示的に throw している。
+ * @param response - `getUserByRestId`・`getUserByScreenName` の保留中レスポンス
+ * @returns 変換後のユーザーペイロード
+ * @throws 検索結果がユーザーなしだった場合。例: 停止・削除済みアカウント
  */
 async function convertUserResponse(
   response: Promise<TwitterApiUtilsResponse<UserApiUtilsData>>,
@@ -56,21 +74,21 @@ async function convertUserResponse(
 }
 
 /**
- * Wraps the real `twitter-openapi-typescript` user API (`client.getUserApi()`) and tweet
- * API (`client.getTweetApi()`) into a `UserApiLike`. `getUserByRestId` is declared on
- * `UserApiUtils` and returns `TwitterApiUtilsResponse<UserApiUtilsData>` (converted via
- * {@link convertUserResponse}); `getUserTweetsAndReplies` is declared on `TweetApiUtils`
- * and shares the exact same `TwitterApiUtilsResponse<TimelineApiUtilsResponse<TweetApiUtilsData>>`
- * shape as the timeline/tweet-detail endpoints, so it reuses `./timeline`'s
- * `convertTimelineResponse`.
- * @param userApi - the real user API, e.g. from `TwitterOpenApiClient.getUserApi()`
- * @param tweetApi - the real tweet API, e.g. from `TwitterOpenApiClient.getTweetApi()`
- * @returns a `UserApiLike` usable with {@link fetchAccountProfile} and {@link fetchRecentTweets}
+ * ユーザー API (`getUserApi()`) とツイート API (`getTweetApi()`) を `UserApiLike` にラップする。
+ * `getUserByRestId` は `TwitterApiUtilsResponse<UserApiUtilsData>` を返すため、
+ * {@link convertUserResponse} で変換する。
+ * `getUserTweetsAndReplies` は timeline・tweet-detail 系エンドポイントと同じ、
+ * `TwitterApiUtilsResponse<TimelineApiUtilsResponse<TweetApiUtilsData>>` 形状を返すため、
+ * 専用の変換処理を新設せず `./timeline` の `convertTimelineResponse` を再利用する。
+ * @param userApi - 実際のユーザー API (例: `TwitterOpenApiClient.getUserApi()`)
+ * @param tweetApi - 実際のツイート API (例: `TwitterOpenApiClient.getTweetApi()`)
+ * @returns {@link fetchAccountProfile}・{@link fetchRecentTweets} で使う `UserApiLike`
  */
 export function createUserApiLike(userApi: UserApiUtils, tweetApi: TweetApiUtils): UserApiLike {
   return {
     getUserByRestId: (param) => convertUserResponse(userApi.getUserByRestId(param)),
     getUserByScreenName: (param) => convertUserResponse(userApi.getUserByScreenName(param)),
-    getUserTweetsAndReplies: (param) => convertTimelineResponse(tweetApi.getUserTweetsAndReplies(param)),
+    getUserTweetsAndReplies: (param) =>
+      convertTimelineResponse(tweetApi.getUserTweetsAndReplies(param)),
   }
 }

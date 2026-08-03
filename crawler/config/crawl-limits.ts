@@ -1,25 +1,25 @@
 export const CRAWL_LIMITS = {
-  // A narrower snapshot of the algorithmic "recommended" timeline was observed to miss
-  // tweets a human saw live in the same feed, recoverable only via a manual crawl - a
-  // wider per-cycle sample reduces how much of that feed goes unseen.
+  // アルゴリズムによる「おすすめ」タイムラインを狭い範囲でしか取得しないと、
+  // 同じフィードで人が見ているツイートを取りこぼし、
+  // 手動クロールでなければ救えなくなるため、取得件数を広めに設定している。
   tweetsPerTimeline: 100,
-  // ad_reply_hijack candidates need a deep reply sample per tweet, and a wide slice of
-  // each account's own top tweets, to have any chance of accumulating the >=3 replies the
-  // rule requires per account.
+  // 返信は1ツイートあたり深く、各アカウントの上位ツイートも広く取得しないと、
+  // ルールが求める返信件数をアカウントごとに十分集められないため、
+  // 多めに設定している。
   repliesPerTweet: 30,
   recentTweetsPerAccount: 20,
   topTweetsForReplies: 30,
   trendsPerCycle: 5,
-  // Per direction (following/followers), per login account, per cycle. Initial default -
-  // revisit if observed follow/follower counts of the configured login accounts warrant a
-  // different value.
+  // 方向 (フォロー/フォロワー)・ログインアカウント・サイクルごとの件数。
+  // 初期値であり、
+  // 設定済みログインアカウントのフォロー/フォロワー数の実態次第では見直しが必要になる。
   followEdgesPerAccount: 2000,
-  // Milliseconds paused between each author in the per-author profile/tweet-fetch loop
-  // (runAccountCycleBody in crawl.ts). The sample sizes above put many authors and many
-  // per-author fetches through a single login account each cycle, which without pacing
-  // correlated with more transient rate-limit/connection failures. A small fixed pause
-  // smooths the request rate against that account's rate limit window; see
-  // twitter/retry.ts for the complementary per-call retry.
+  // アカウント単位のプロフィール・ツイート取得ループ (crawl.ts の runAccountCycleBody)で、
+  // 著者ごとに一時停止するミリ秒数。
+  // ペーシングなしでは単一ログインアカウントに多数のリクエストが集中し、
+  // レート制限や接続エラーが増えやすくなるため、
+  // 固定の小休止でリクエスト頻度を平準化している。
+  // 呼び出し単位のリトライは twitter/retry.ts 側で別途扱う。
   authorFetchDelayMs: 300,
 } as const
 

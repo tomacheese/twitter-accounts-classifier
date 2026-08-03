@@ -39,7 +39,7 @@ describe('jaccardSimilarity', () => {
 describe('averagePairwiseSimilarity', () => {
   it('averages similarity across every pair', () => {
     const result = averagePairwiseSimilarity(['abc', 'abc', 'xyz'])
-    // pairs: (abc,abc)=1, (abc,xyz)=0, (abc,xyz)=0 -> average = 1/3
+    // ペアは (abc,abc)=1、(abc,xyz)=0、(abc,xyz)=0 の3組で、平均は1/3になる
     expect(result).toBeCloseTo(1 / 3, 5)
   })
 

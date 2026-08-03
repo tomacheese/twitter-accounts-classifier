@@ -20,7 +20,9 @@ function makeBundle(recentTweets: AccountFeatureBundle['recentTweets']): Account
   }
 }
 
-function tweet(overrides: Partial<AccountFeatureBundle['recentTweets'][number]>): AccountFeatureBundle['recentTweets'][number] {
+function tweet(
+  overrides: Partial<AccountFeatureBundle['recentTweets'][number]>,
+): AccountFeatureBundle['recentTweets'][number] {
   return {
     id: 't1',
     fullText: 'hello',
@@ -37,7 +39,9 @@ function tweet(overrides: Partial<AccountFeatureBundle['recentTweets'][number]>)
 
 describe('adPromotedRule', () => {
   it('is true when at least one recent tweet is marked isPromoted', () => {
-    const result = adPromotedRule.evaluate(makeBundle([tweet({}), tweet({ id: 't2', isPromoted: true })]))
+    const result = adPromotedRule.evaluate(
+      makeBundle([tweet({}), tweet({ id: 't2', isPromoted: true })]),
+    )
     expect(result.value).toBe(true)
     expect(result.confidence).toBe(1)
   })

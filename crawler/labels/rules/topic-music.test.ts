@@ -26,8 +26,9 @@ function makeBundle(
 describe('topicMusicRule', () => {
   it('is true for a bio declaring an instrument/band role', () => {
     expect(
-      topicMusicRule.evaluate(makeBundle({ bio: 'サンプルバンドという名前のバンドでベース弾いてます' }))
-        .value,
+      topicMusicRule.evaluate(
+        makeBundle({ bio: 'サンプルバンドという名前のバンドでベース弾いてます' }),
+      ).value,
     ).toBe(true)
   })
 
@@ -39,9 +40,9 @@ describe('topicMusicRule', () => {
   })
 
   it('is true for a Japanese "音楽" bio', () => {
-    expect(
-      topicMusicRule.evaluate(makeBundle({ bio: '趣味は映画と読書と音楽です' })).value,
-    ).toBe(true)
+    expect(topicMusicRule.evaluate(makeBundle({ bio: '趣味は映画と読書と音楽です' })).value).toBe(
+      true,
+    )
   })
 
   it('is false for an unrelated bio', () => {

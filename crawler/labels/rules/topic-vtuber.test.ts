@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { topicVtuberRule } from './topic-vtuber'
 import type { AccountFeatureBundle } from '../types'
 
-function makeBundle(accountOverrides: Partial<AccountFeatureBundle['account']>): AccountFeatureBundle {
+function makeBundle(
+  accountOverrides: Partial<AccountFeatureBundle['account']>,
+): AccountFeatureBundle {
   return {
     account: {
       id: '1',
@@ -23,24 +25,27 @@ function makeBundle(accountOverrides: Partial<AccountFeatureBundle['account']>):
 
 describe('topicVtuberRule', () => {
   it('is true for a bio declaring VTuber activity', () => {
-    expect(topicVtuberRule.evaluate(makeBundle({ bio: '個人勢Vtuberです。よろしくお願いします' })).value).toBe(
+    expect(
+      topicVtuberRule.evaluate(makeBundle({ bio: '個人勢Vtuberです。よろしくお願いします' })).value,
+    ).toBe(true)
+  })
+
+  it('is true for a bio mentioning にじさんじ (a major VTuber agency)', () => {
+    expect(topicVtuberRule.evaluate(makeBundle({ bio: 'にじさんじのライバーです' })).value).toBe(
       true,
     )
   })
 
-  it('is true for a bio mentioning にじさんじ (a major VTuber agency)', () => {
-    expect(topicVtuberRule.evaluate(makeBundle({ bio: 'にじさんじのライバーです' })).value).toBe(true)
-  })
-
   it('is true for a bio mentioning ホロライブ (a major VTuber agency)', () => {
     expect(
-      topicVtuberRule.evaluate(makeBundle({ bio: 'ホロライブのファンです。推し活頑張ってます' })).value,
+      topicVtuberRule.evaluate(makeBundle({ bio: 'ホロライブのファンです。推し活頑張ってます' }))
+        .value,
     ).toBe(true)
   })
 
   it('is false for an unrelated bio', () => {
-    expect(topicVtuberRule.evaluate(makeBundle({ bio: '毎日ラーメンの写真を載せています' })).value).toBe(
-      false,
-    )
+    expect(
+      topicVtuberRule.evaluate(makeBundle({ bio: '毎日ラーメンの写真を載せています' })).value,
+    ).toBe(false)
   })
 })

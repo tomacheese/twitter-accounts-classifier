@@ -1,13 +1,13 @@
 import type { LabelRule } from '../types'
 
 /**
- * Detects an individual Blue-verified account that has also enabled X's opt-in
- * "professional account" feature as a Business (`professional.professionalType ===
- * 'Business'`) - a self-service small-business tool distinct from `verified-business`,
- * which is X's paid organization verification (gold checkmark) instead. Scoped the same
- * way as `verified-blue-individual` (Blue-verified, no organization/government
- * `verifiedType`) since this is a further subdivision of that population, not an
- * independent signal.
+ * 個人の Blue 認証を持ち、
+ * かつプロフェッショナルアカウントを Business 種別で有効化しているアカウントを検出する
+ * (`professional.professionalType === 'Business'`)。
+ * X の有料組織認証（ゴールドバッジ）である `verified-business` とは別概念の、
+ * セルフサービス型の小規模事業者向け機能。
+ * `verified-blue-individual` と同じ範囲（Blue 認証あり、組織/政府認証なし）に限るのは、
+ * これが独立した兆候ではなく、その母集団を細分するものだから。
  */
 export const verifiedBlueProfessionalBusinessRule: LabelRule = {
   key: 'verified_blue_professional_business',

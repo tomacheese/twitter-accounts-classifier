@@ -1,6 +1,3 @@
-/**
- * One HTTP response observed while passing through {@link wrapFetchWithResponseCapture}.
- */
 export interface CapturedResponse {
   url: string
   status: number
@@ -9,38 +6,32 @@ export interface CapturedResponse {
 }
 
 /**
- * Hard cap on how many responses {@link responseBuffer} keeps at once. This is a
- * diagnostic aid for investigating the rare parse failure, not a durable log - an
- * unbounded buffer would grow for the lifetime of a long-running crawl process.
+ * まれに発生するパース失敗の調査用であり永続的なログではないため、
+ * 常駐プロセスの生存期間中に無制限に増え続けないよう上限を設けている。
  */
 const MAX_CAPTURED_RESPONSES = 20
 
 /**
- * Hard cap on how many characters of a single response body are retained. Some
- * timeline responses can be very large; truncating keeps memory bounded even though
- * the full body is not needed to diagnose a shape mismatch (the failure point is
- * almost always visible near the start of the JSON).
+ * タイムラインのレスポンスは非常に大きくなり得るが、
+ * 形状不一致の原因は JSON の先頭付近で判明することがほとんどで本文全体は不要なため、
+ * 切り詰めてメモリ使用量を抑えている。
  */
 const MAX_BODY_LENGTH = 20_000
 
 const TRUNCATION_MARKER = '... [truncated]'
 
 /**
- * Most-recently-observed HTTP responses, oldest first. `twitter-openapi-typescript`
- * performs fetch + parse + convert in one method call, so by the time our code catches
- * a parse failure thrown deep inside the library, the raw response body that caused it
- * is already gone - it was never captured anywhere. This buffer exists purely so that
- * failure can be investigated after the fact, by recovering the response that was being
- * parsed at the time.
+ * `twitter-openapi-typescript` は fetch・パース・変換を 1 つのメソッド呼び出しにまとめているため、
+ * ライブラリ内部のパース失敗を捕捉した時点では、原因となった生レスポンスはどこにも残っていない。
+ * 事後に失敗を調査できるよう、
+ * このバッファでレスポンスを保持している。
  */
 let responseBuffer: CapturedResponse[] = []
 
 /**
- * Appends one response to {@link responseBuffer}, truncating an oversized body and
- * evicting the oldest entry once the buffer exceeds {@link MAX_CAPTURED_RESPONSES}.
- * @param url - the request URL the response was received for
- * @param status - the response's HTTP status
- * @param body - the response body text
+ * @param url - レスポンスを受け取ったリクエストの URL
+ * @param status - レスポンスの HTTP ステータス
+ * @param body - レスポンス本文のテキスト
  */
 function recordResponse(url: string, status: number, body: string): void {
   const truncatedBody =
@@ -52,23 +43,23 @@ function recordResponse(url: string, status: number, body: string): void {
 }
 
 /**
- * Wraps a `fetch` implementation so every response passing through it is also recorded
- * into {@link responseBuffer}, without altering what the real caller receives. Uses
- * `response.clone()` because the original `Response` body must remain consumable by the
- * real caller - reading it directly here would leave nothing for the library to parse.
- * The clone's body is read (and recorded) before this function returns, rather than
- * left as a fire-and-forget promise - the whole point of this buffer is to still hold
- * the response by the time a parse failure further up the call stack is caught, and a
- * detached read could otherwise lose that race.
- * @param fetchImpl - the `fetch` implementation to wrap, e.g. one backed by `cycletls`
- * @returns a `fetch`-compatible function that captures a copy of every response
+ * `response.clone()` を使っているのは、
+ * 元の `Response` の本文を呼び出し元が引き続き消費できる必要があるため。
+ * ここで直接読み取ってしまうと、
+ * ライブラリがパースするための本文が残らなくなる。
+ * また clone の本文はこの関数が返る前に読み切って記録している。
+ * 呼び出し後に投げっぱなしの Promise にすると、
+ * 上位でパース失敗が捕捉される時点までにバッファへの記録が間に合わない可能性がある。
+ * @param fetchImpl - ラップ対象の `fetch` 実装 (例: `cycletls` を裏側に使うもの)
+ * @returns 呼び出しごとにレスポンスの複製をキャプチャする `fetch` 互換の関数
  */
 export function wrapFetchWithResponseCapture(fetchImpl: typeof fetch): typeof fetch {
   return async (input, init) => {
     const response = await fetchImpl(input, init)
     const url = input instanceof Request ? input.url : String(input)
-    // Body capture must never fail the real call it's piggybacking on - a body that
-    // can't be read as text (or any other error here) is simply left unrecorded.
+    // 本来の呼び出しを失敗させてはならないため、
+    // 本文をテキストとして読めない場合なども含め、
+    // ここで発生したエラーは記録を諦めるだけに留める。
     try {
       const body = await response.clone().text()
       recordResponse(url, response.status, body)
@@ -80,13 +71,10 @@ export function wrapFetchWithResponseCapture(fetchImpl: typeof fetch): typeof fe
 }
 
 /**
- * Finds the most recently captured response whose URL contains `urlSubstring`,
- * searching from most-recent backward. Lets a timeline-fetch failure handler recover
- * "what did X actually return" for the specific GraphQL endpoint that just failed,
- * identified by its path segment (e.g. `HomeTimeline`), without needing to correlate
- * requests and responses at the fetch layer itself.
- * @param urlSubstring - a substring identifying the endpoint, e.g. `HomeTimeline`
- * @returns the matching response, or `undefined` if none was captured
+ * fetch 層でリクエストとレスポンスを紐付ける仕組みを別途用意せずに済むよう、
+ * エンドポイントのパス断片による検索だけで該当レスポンスを引けるようにしている。
+ * @param urlSubstring - エンドポイントを識別する部分文字列 (例: `HomeTimeline`)
+ * @returns 一致したレスポンス、キャプチャされていなければ `undefined`
  */
 export function getLastResponseMatching(urlSubstring: string): CapturedResponse | undefined {
   for (let i = responseBuffer.length - 1; i >= 0; i--) {

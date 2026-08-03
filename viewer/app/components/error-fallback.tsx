@@ -1,10 +1,9 @@
 /**
- * Server-renderable error message shown when a page's own data fetch fails.
- * Preferred over the `error.tsx` boundary for caught failures: that boundary is
- * a Client Component and only paints after hydration, leaving the initial HTTP
- * response blank, whereas this renders into the very first response.
- * @param props - the message to display
- * @returns the rendered fallback
+ * ページ自身のデータ取得が失敗した際に使うサーバーレンダリング可能なエラー表示。
+ * `error.tsx` の境界は Client Component でハイドレーション後にしか描画されず、
+ * 最初の HTTP レスポンスが空白になるため、catch した失敗にはこちらを優先する。
+ * @param props - 表示するメッセージ
+ * @returns 描画されたフォールバック
  */
 export function ErrorFallback({ message }: { message: string }): React.ReactElement {
   return (

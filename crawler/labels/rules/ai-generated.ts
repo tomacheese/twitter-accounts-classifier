@@ -1,16 +1,15 @@
 import type { LabelRule } from '../types'
 
-// Both word orders are covered: "生成AI" ("generative AI") is the standard Japanese term
-// order and at least as common as "AI生成" ("AI generation"), so a pattern covering only the
-// AI-first order silently misses half the self-declarations.
+// 「生成AI」と「AI生成」の両方の語順を含めているのは、
+// AI 語順のみでは標準的な語順である「生成AI」の自己申告を見逃してしまうため。
 const BIO_DECLARATION_PATTERN =
   /AI(で)?生成|生成AI|generated (by|using) AI|AI-generated|人工知能(で)?生成|created (by|with|using) AI/i
 
-// The declaration pattern only checks that the term is present, not whether it is being
-// denied, so a bio saying "一切AI生成はしません" ("I do not use AI generation at all") would
-// otherwise be labelled true. Both sides of the match are inspected, and the window is wide
-// enough to reach negations placed a few words away: prohibition markers (🚫/🈲/❌/NG) are
-// frequently written before the term rather than after it.
+// 宣言パターンは用語の有無のみを判定し、否定表現を考慮しないため、
+// 「一切AI生成はしません」のような否定を伴う bio を誤って true と判定してしまう。
+// そのため一致箇所の前後双方を否定語で確認する。
+// 禁止マーカー(🚫/🈲/❌/NG)は用語の後ろではなく前に書かれることが多いため、
+// 確認範囲は前後に十分な幅を持たせている。
 const NEGATION_WINDOW_LENGTH = 25
 const NEGATION_PATTERN =
   /しません|していません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
@@ -26,11 +25,11 @@ function isNegatedDeclaration(bio: string): boolean {
   return NEGATION_PATTERN.test(beforeMatch) || NEGATION_PATTERN.test(afterMatch)
 }
 
-// Bios that discuss generative AI as a professional subject (researcher, professor, media
-// outlet, consultancy, business venture, regulation advocate) are talking about the field,
-// not about the origin of their own posts. The institutional framing therefore vetoes the
-// declaration - unless it is paired with an explicit personal-content phrase (e.g. "画像は" /
-// "投稿しています") showing the account really is describing what it posts.
+// 生成AIを研究者・教授・メディア・コンサル・事業として職業的に語る bio は、
+// 自身の投稿の生成元ではなく、その分野について語っているにすぎないため、
+// この職業的な文脈は宣言を無効化する。
+// ただし「画像は」「投稿しています」のような自身のコンテンツを指す明示的な表現を伴う場合は、
+// 実際に自己申告しているとみなす。
 const INSTITUTIONAL_CONTEXT_PATTERN =
   /教授|研究者|代表取締役|\bCEO\b|公式(アカウント)?|メディア|事業|コンサル(ティング)?|規制派|反対派|賛成派|推進(派)?|アドバイザー|著書|委員|エンジニア|CAMP|ウェビナー|セミナー|活用ノウハウ|解説|考察|紹介します/i
 const PERSONAL_CONTENT_DECLARATION_PATTERN =
@@ -40,11 +39,10 @@ function isInstitutionalMention(bio: string): boolean {
   return INSTITUTIONAL_CONTEXT_PATTERN.test(bio) && !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
 }
 
-// The same "AI is a topic or tool I engage with, not the source of what I post" framing, in
-// its non-professional variants: a hobby among several, a market sector followed as an
-// investor, or - the largest single false-positive group - work-productivity phrasing from
-// engineers and business-automation accounts ("生成AIで効率化", "生成AI・GAS で業務改善").
-// Vetoed under the same personal-content condition as `isInstitutionalMention`.
+// 職業的な文脈と同じ「AIは話題・関心事であり、
+// 投稿の生成元ではない」という構図を、趣味・投資対象としての言及や、
+// 業務効率化のための言及にも適用したもの。`isInstitutionalMention` と同様、
+// 自身のコンテンツを指す明示的な表現を伴う場合のみ宣言として扱う。
 const TOPIC_INTEREST_CONTEXT_PATTERN =
   /情報収集|実?活用|遊び|勉強中|興味|関心|ウォッチ|ウォチ|先端技術|追って|学ぼう|学ぶ|半導体|銘柄|効率化|業務改善|著作権問題/i
 
@@ -52,25 +50,28 @@ function isTopicInterestMention(bio: string): boolean {
   return TOPIC_INTEREST_CONTEXT_PATTERN.test(bio) && !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
 }
 
-// Accounts that OPPOSE generative AI - anti-AI activists, and hand-drawing artists
-// forbidding others from training on their work - are the single largest false-positive
-// group, and `isNegatedDeclaration` cannot catch them: it inspects a fixed window around
-// only the FIRST match (so a closing 【生成AI不使用】 is never examined), and its vocabulary
-// covers grammatical negation ("しません") rather than opposition ("反対", "嫌い", "認めません").
+// 生成AIに反対するアカウント(アンチAI活動家や、
+// 自作イラストへの学習を拒否する手描き作家)は最大の誤検知要因であり、
+// `isNegatedDeclaration` では検出できない。
+// 同関数は最初の一致箇所周辺の固定範囲のみを見るため、
+// 文末の「【生成AI不使用】」のような表記を見逃すうえ、
+// 語彙も文法的否定(「しません」)を対象としており、
+// 「反対」「嫌い」「認めません」のような対立表現をカバーしていないため。
 //
-// This check scans the whole bio instead of a window, and is deliberately narrow so it does
-// not swallow genuine AI creators, who very commonly forbid reposting or training in the
-// same breath as declaring their own AI use. Two limits keep those out:
-//   - a bare "学習禁止"/"転載禁止" is NOT treated as opposition, because both camps write it;
-//   - the refusal word must sit close to the AI term, so a refusal aimed at a different
-//     object further along the bio (e.g. a plain 無断転載 notice) does not veto.
+// 本チェックは bio 全体を走査するが、意図的に狭い語彙にとどめている。
+// 生成AI利用者自身も、
+// 自己申告と同じ文中で無断転載や無断学習を拒否することが非常に多く、
+// それらを誤って対立表現とみなさないためである。
+// 単なる「学習禁止」「転載禁止」は両陣営が書く表現であるため対立とはみなさず、
+// 拒否語がAI用語から離れた場所(無関係な無断転載の注意書きなど)にある場合は無効化しない。
 const AI_OPPOSITION_PATTERN =
   /反生成AI|反AI生成|(?:生成AI|AI生成)(?:に|には)?反対|無断生成AI|(?:生成AI|AI生成).{0,15}(?:嫌い|きらい|認めません|認めない|ブロ(?:ック)?)|(?:生成AI|AI生成)(?:は)?(?:一切)?(?:不使用|使用していません|使っていません|使いません)|(?:生成AI|AI生成).{0,6}(?:お断り|お断わり)/i
 
-// "〜している方" ("people who do ~") is a Japanese third-person construct: it describes a
-// policy toward OTHER accounts (e.g. a follow-back refusal aimed at AI users), not a
-// self-declaration of what this account posts. Vetoed the same way as institutional/topic
-// mentions, unless paired with an explicit personal-content phrase.
+// 「〜している方」は日本語における三人称の言い回しであり、
+// 自身の投稿内容の自己申告ではなく、
+// 他アカウントに対する方針(AI利用者へのフォロー拒否など)を述べているにすぎないため、
+// 職業的・関心事の文脈と同様に無効化する。
+// ただし自身のコンテンツを指す明示的な表現を伴う場合は例外とする。
 const THIRD_PARTY_REFERENCE_PATTERN =
   /(?:生成AI|AI生成).{0,10}(?:して(?:る|いる)|使って(?:る|いる))方/
 

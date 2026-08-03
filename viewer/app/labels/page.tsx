@@ -3,25 +3,21 @@ import { getPrismaClient } from '@/lib/prisma'
 import { getLabelDistribution, type LabelDistributionEntry } from '@/lib/queries/dashboard'
 import { ErrorFallback } from '../components/error-fallback'
 
-// This page always reads live data, so opt it out of static prerendering:
-// without this, `next build` tries to statically generate it at build time,
-// when no database connection is available.
+// このページは常に最新データを読むため、
+// 静的プリレンダリングの対象から外している。指定しないと、
+// DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
 
 /**
- * Label reference page: every registered `LabelDefinition`, with its
- * `description` — the same human-readable text each rule module supplies
- * when it registers, describing exactly what condition sets that label to
- * `true` — plus how many currently-evaluated accounts carry it.
- * @returns the rendered label reference page
+ * @returns ラベル一覧ページの描画結果
  */
 export default async function LabelsPage(): Promise<React.ReactElement> {
   let entries: LabelDistributionEntry[]
   try {
     entries = await getLabelDistribution(getPrismaClient())
   } catch (error) {
-    // Log the full error server-side but show the client a generic message:
-    // error.message can leak SQL/connection details from the driver.
+    // error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため、
+    // 詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。
     console.error('Failed to load label definitions:', error)
     return <ErrorFallback message="Failed to load label definitions." />
   }

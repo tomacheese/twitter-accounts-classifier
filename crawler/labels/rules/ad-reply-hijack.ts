@@ -1,10 +1,10 @@
 import type { LabelRule } from '../types'
 
-// Crypto giveaway/airdrop pitches sit alongside the job-change/ad-案件 terms because bot
-// networks piling fake-giveaway and airdrop replies onto high-engagement tweets are the
-// dominant reply-hijack pattern on X as of 2026, not just job-change solicitation.
-// English terms are word-boundary-matched, as in the finance/tech/crypto topic rules, so
-// they do not match inside unrelated words.
+// 転職勧誘・広告案件系の語だけでなく暗号資産のギブアウェイ/エアドロップ勧誘も含めているのは、
+// 高エンゲージメントツイートに偽ギブアウェイ・エアドロップの返信を量産するボットネットワークが、
+// 転職勧誘単体より支配的な手口であるため。
+// 英単語は他のトピック系ルールと同様に単語境界でマッチさせ、
+// 無関係な単語の内部にはマッチしないようにしている。
 const AD_JOB_PITCH_PATTERN =
   /転職(エージェント|活動|相談|しませんか|しよう)|求人|副業|案件情報|PR案件|広告案件|アフィリ|セミナー情報|無料相談|エアドロ(ップ)?|無料配布|プレゼント企画|\bgiveaway\b|\bairdrop\b|\bclaim\s*now\b|\bconnect\s*wallet\b|\bfree\s*mint\b/i
 

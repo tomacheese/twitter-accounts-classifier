@@ -1,34 +1,35 @@
 import type { LabelRule } from '../types'
 
 const MIN_DISTINCT_AUTHORS = 5
-// Raising `SIMILARITY_THRESHOLD` in reply-hijack-index.ts cannot on its own separate
-// coordinated impression farming from a genuine mass reaction to a viral tweet: ordinary
-// Japanese/English courtesy replies (condolences, wedding congratulations) measured HIGHER
-// bigram-Jaccard similarity (0.36-0.46) than a confirmed spam exemplar (0.23),
-// because a shared boilerplate phrase scores just as "similar" whether it is farmed or
-// heartfelt. Swarm membership is therefore necessary but not sufficient, and this rule also
-// requires the account's OWN recent activity to look low-effort and reply-only - a person
-// posting a heartfelt congratulations reply is not, in general, also an account with no
-// original tweets of its own.
+// reply-hijack-index.ts の `SIMILARITY_THRESHOLD` を引き上げるだけでは、
+// 協調的なインプレッション稼ぎと、
+// バズったツイートへの純粋な大量反応を分離できない。
+// お悔やみや結婚祝いのような定型的な礼儀リプライは、
+// farming の実例よりも高い類似度を示すことがあり、
+// 定型的な決まり文句は farming でも心のこもったものでも、同程度「似ている」と判定されるためである。
+// そのためスウォームへの参加は必要条件にとどめ、
+// アカウント自身の直近の活動が低努力・リプライ主体であることも併せて要求する。
+// 心のこもったお祝いリプライを送る人物は、
+// 通常オリジナル投稿が一切ないアカウントではないため。
 const MIN_SAMPLE = 3
-// The account's own tweets must literally BE replies, not merely "not original":
-// `originalContentRatio` treats retweets as not original, so an ordinary retweet-consuming
-// human (mostly reposting others, rarely writing anything, including a rare reply) passed
-// that guard on their retweets alone - a 91% false-positive rate almost entirely of this
-// shape. The genuine hijack-swarm archetype is specifically reply-heavy.
+// アカウント自身の投稿は文字通り返信でなければならない。
+// 「オリジナルでない」だけでは不十分で、
+// `originalContentRatio` はリツイートもオリジナルでないとみなすため、
+// 通常のリツイート消費型の人間(他者を転載するのが大半で、
+// 稀に返信する程度)もこのガードを素通りしてしまう。
+// 真のリプライハイジャック・スウォームは返信に特化したアーキタイプである。
 const REPLY_RATIO_THRESHOLD = 0.5
 
 /**
- * Flags accounts that took part in a "reply-hijack swarm" - 5 or more distinct
- * accounts each posting a paraphrased-similar, low-effort reply to the same
- * high-engagement target tweet within a short window, farming impressions off
- * someone else's viral post. Swarm membership is driven by
- * `AccountFeatureBundle.replyHijackSwarmSize`, which is computed once per crawl/relabel
- * run from a shared corpus (see `buildReplyHijackIndex`), not per-rule - but membership
- * alone is not sufficient (see `REPLY_RATIO_THRESHOLD` above): this rule also
- * requires the account's own recent tweets to look reply-only/low-effort, since text
- * similarity between distinct authors cannot on its own distinguish coordinated farming
- * from a genuine mass reaction (e.g. condolences, congratulations) to the same tweet.
+ * 「一斉提灯リプライ」スウォームに参加したアカウントを検出する。5アカウント以上が、
+ * 同一の高エンゲージメントツイートに、言い回しの似た低努力リプライをそれぞれ短時間で投稿し、
+ * 他者のバズ投稿からインプレッションを稼ぐ挙動を指す。
+ * スウォームへの参加は `AccountFeatureBundle.replyHijackSwarmSize` によって判定され、
+ * これはクロール・再ラベリングごとにルール単位ではなく共有コーパスから一括計算される。
+ * ただし参加のみでは十分ではなく(上記 `REPLY_RATIO_THRESHOLD` を参照)、
+ * アカウント自身の直近の投稿も返信主体・低努力であることを要求する。
+ * 異なる投稿者間のテキスト類似度だけでは、協調的な farming と、
+ * 同一ツイートへの純粋な大量反応(お悔やみや祝福など)を区別できないため。
  */
 export const replyHijackSwarmRule: LabelRule = {
   key: 'reply_hijack_swarm',
@@ -41,7 +42,8 @@ export const replyHijackSwarmRule: LabelRule = {
 
     const sampled = bundle.recentTweets
     const hasEnoughSample = sampled.length >= MIN_SAMPLE
-    const replyRatio = sampled.length > 0 ? sampled.filter((t) => t.isReply).length / sampled.length : 0
+    const replyRatio =
+      sampled.length > 0 ? sampled.filter((t) => t.isReply).length / sampled.length : 0
     const looksReplyFocused = hasEnoughSample && replyRatio >= REPLY_RATIO_THRESHOLD
 
     const value = isSwarmMember && looksReplyFocused

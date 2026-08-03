@@ -280,9 +280,9 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    // The reply-hijack candidate must go through the same dedicated profile fetch and
-    // label evaluation as any timeline author - not just the lighter embedded-profile
-    // upsert fallback used for authors we never evaluate.
+    // reply-hijack 候補も、
+    // 評価しない投稿者向けの軽量な埋め込みプロフィール upsert だけで済ませず、
+    // タイムライン投稿者と同じ専用プロフィール取得・ラベル評価を通す。
     expect(getUserByRestId).toHaveBeenCalledWith({ userId: 'reply-author' })
     expect(deps.persistLabel).toHaveBeenCalledWith(
       expect.objectContaining({ accountId: 'reply-author', labelDefinitionId: 'ld-hijack' }),
@@ -319,9 +319,8 @@ describe('runCrawlCycle', () => {
           }),
           getUserApi: () => ({
             getUserByRestId,
-            // Deliberately empty: the candidate's own recent-tweets fetch returns
-            // nothing, so the only path by which their label evaluation can see the
-            // hijack replies is via the otherReplies observed above.
+            // 意図的に空にする: 候補者自身の最近の投稿取得からは何も得られない状態にし、
+            // ラベル評価が上記の otherReplies 経由でのみ hijack replies を見られるようにする。
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
         },
@@ -395,10 +394,10 @@ describe('runCrawlCycle', () => {
     const deps = makeDeps({
       loadReplyCorpus: vi.fn().mockResolvedValue([
         {
-          // swarmSizeFor (see labels/reply-hijack-index.ts) only counts an account as a
-          // swarm member if its own reply is present in the loaded corpus - the account
-          // being labeled in this test is no exception, so its reply must be included
-          // here too, not just returned live via getUserTweetsAndReplies below.
+          // swarmSizeFor (labels/reply-hijack-index.ts 参照) は、
+          // コーパスに自身の返信が含まれているアカウントのみ swarm member として数える。
+          // このテストでラベル付け対象のアカウントも例外ではないため、
+          // getUserTweetsAndReplies 経由の返り値だけでなくここにも返信を含める必要がある。
           accountId: 'author1',
           fullText: 'このサンプル動画は視聴する価値が十分にあると思いますね',
           inReplyToTweetId: 'swarm-target',
@@ -509,10 +508,10 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    // author-ok gets the full, dedicated-fetch profile persisted...
     expect(deps.persistAccount).toHaveBeenCalledWith(expect.objectContaining({ id: 'author-ok' }))
-    // ...author-bad's dedicated fetch failed, but its embedded timeline profile is still
-    // persisted as a fallback, since tweet-bad's accountId FK requires an Account row.
+    // author-bad は専用取得に失敗しているが、
+    // tweet-bad の accountId 外部キーが Account 行を要求するため、
+    // 埋め込みのタイムラインプロフィールがフォールバックとして永続化される。
     expect(deps.persistAccount).toHaveBeenCalledWith(expect.objectContaining({ id: 'author-bad' }))
     expect(deps.persistTweets).toHaveBeenCalledWith(
       expect.arrayContaining([
@@ -546,8 +545,7 @@ describe('runCrawlCycle', () => {
           }),
           getUserApi: () => ({
             getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
-            // The author's own tweet list (profile fetch) never carries this tweet -
-            // it is only ever observed via the timeline injection above.
+            // プロフィール取得側にはこのツイートを含めない: タイムライン注入経由でのみ観測させる。
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
         },
@@ -590,8 +588,8 @@ describe('runCrawlCycle', () => {
           }),
           getUserApi: () => ({
             getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
-            // Same tweet id as observed in the timeline above, but the profile fetch
-            // path never carries a true isPromoted/isPaidPromotion flag.
+            // タイムライン側と同じツイート id だが、
+            // プロフィール取得経路では isPromoted/isPaidPromotion が true にならない。
             getUserTweetsAndReplies: vi
               .fn()
               .mockResolvedValue({ data: { data: [notPromotedInProfile] } }),
@@ -617,9 +615,9 @@ describe('runCrawlCycle', () => {
     const stranger = rawUser('stranger1', 'stranger')
     const timelineTweet = rawTweet('timeline1', author)
     const ownReply = rawTweet('own-reply1', author, 'parent1')
-    // Twitter's UserTweetsAndReplies endpoint returns the parent tweet a reply answers
-    // as conversation-thread context alongside the account's own posts, even though it
-    // is authored by someone else entirely.
+    // UserTweetsAndReplies エンドポイントは、
+    // 返信先の親ツイートを会話スレッドの文脈として本人の投稿と一緒に返すため、
+    // 実際の投稿者は本人とは限らない。
     const foreignParentTweet = rawTweet('parent1', stranger)
 
     const applyAllSpy = vi.spyOn(LabelRuleRegistry.prototype, 'applyAll')
@@ -683,8 +681,8 @@ describe('runCrawlCycle', () => {
           }),
           getUserApi: () => ({
             getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
-            // Same tweet id as the timeline copy above, but the profile fetch path
-            // never observes the ad-disclosure metadata, so it carries `false` here.
+            // タイムライン側と同じツイート id だが、
+            // プロフィール取得経路では広告開示のメタデータを観測できず `false` になる。
             getUserTweetsAndReplies: vi
               .fn()
               .mockResolvedValue({ data: { data: [notPromotedInProfile] } }),

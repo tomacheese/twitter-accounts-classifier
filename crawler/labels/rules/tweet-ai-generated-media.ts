@@ -1,20 +1,16 @@
 import type { LabelRule } from '../types'
 
 /**
- * Confidence assigned per `aiGeneratedDetectionSource` value, reflecting how reliable
- * each detection method is:
- * - `C2paClient`: the media carries C2PA cryptographic provenance metadata (e.g. from an
- *   editing tool or camera that signs its output) - the strongest, tamper-evident signal
- *   available, so it gets the highest confidence.
- * - `UserDeclared`: the poster self-disclosed the media is AI-generated - a direct
- *   first-party admission, but self-reporting can be inaccurate or omitted, so it's rated
- *   slightly below the cryptographic signal.
- * - `ContentDisclosureAiGeneratedDisclosure`: X's own automated/platform detection - a
- *   third-party classifier with an unknown false-positive rate, so it's rated lowest
- *   among the three known sources while still meaningfully above a bare flag.
- * - unknown/missing source (`hasAiGeneratedMedia` true but no recognized source string):
- *   the disclosure exists but its provenance can't be judged, so a conservative middle
- *   confidence is used.
+ * `aiGeneratedDetectionSource` の値ごとに割り当てる confidence。各判定方法の信頼度を反映する。
+ * - `C2paClient`: 編集ツールやカメラが署名する C2PA の暗号学的来歴メタデータをメディアが持つ場合。
+ *   改ざん検知可能な最も強い根拠のため最高値にする。
+ * - `UserDeclared`: 投稿者自身が AI 生成であると自己申告した場合。一次情報による直接的な申告だが、
+ *   自己申告は不正確・未申告になり得るため、暗号学的根拠よりわずかに低くする。
+ * - `ContentDisclosureAiGeneratedDisclosure`: X 自身の自動/プラットフォーム側判定。
+ *   誤検知率が不明な第三者分類器のため、既知の3種のなかでは最も低くしつつも、
+ *   単なるフラグよりは明確に高くする。
+ * - 出典不明/欠落（`hasAiGeneratedMedia` が true だが認識できる出典文字列がない場合）:
+ *   開示自体は存在するがその来歴を判断できないため、保守的な中間値を用いる。
  */
 const CONFIDENCE_BY_DETECTION_SOURCE: Record<string, number> = {
   C2paClient: 1,
@@ -24,10 +20,10 @@ const CONFIDENCE_BY_DETECTION_SOURCE: Record<string, number> = {
 const UNKNOWN_SOURCE_CONFIDENCE = 0.6
 
 /**
- * Resolves the confidence for one flagged tweet's detection source, falling back to
- * {@link UNKNOWN_SOURCE_CONFIDENCE} for an absent or unrecognized source string.
- * @param source - the tweet's `aiGeneratedDetectionSource`
- * @returns the confidence to attribute to this tweet's disclosure
+ * フラグが立った1件のツイートについて、その検出出典から confidence を求める。
+ * 出典が欠落または未認識の場合は {@link UNKNOWN_SOURCE_CONFIDENCE} にフォールバックする。
+ * @param source - ツイートの `aiGeneratedDetectionSource`
+ * @returns このツイートの開示情報に割り当てる confidence
  */
 function confidenceForSource(source: string | null | undefined): number {
   if (source === null || source === undefined) return UNKNOWN_SOURCE_CONFIDENCE

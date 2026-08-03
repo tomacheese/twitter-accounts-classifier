@@ -2,20 +2,19 @@ import path from 'node:path'
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  // Traces only the files each route actually needs into .next/standalone,
-  // so the runtime image can skip copying the full node_modules tree.
+  // standalone 出力にすると各ルートが実際に必要とするファイルだけがトレースされ、
+  // ランタイムイメージで node_modules 全体をコピーする必要がなくなるため、この設定にしている。
   output: 'standalone',
-  // Must be the pnpm workspace root, not viewer/ itself: pnpm hoists shared
-  // deps into the workspace root's node_modules/.pnpm and viewer/node_modules/*
-  // are only symlinks into it, so tracing rooted at viewer/ copies dangling
-  // symlinks ("Cannot find module 'next'" at runtime). Pinned explicitly rather
-  // than left unset, since Next.js would then walk up until it found some
-  // ancestor's unrelated pnpm-lock.yaml — e.g. for a nested worktree checkout.
+  // pnpm はワークスペース共有の依存関係をワークスペースルートの node_modules/.pnpm に集約し、
+  // viewer/node_modules 以下はそこへのシンボリックリンクにすぎないため、
+  // viewer/ を起点にトレースするとリンク切れ (実行時に "Cannot find module 'next'") を起こす。
+  // そのためワークスペースルートを明示的に指定している。
+  // 値を未設定のままにすると、
+  // Next.js が祖先を辿って無関係な pnpm-lock.yaml (ネストしたワークツリーなど) を見つけてしまう。
   outputFileTracingRoot: path.join(import.meta.dirname, '..'),
   images: {
-    // Account.profileImageUrl is sourced directly from Twitter's own CDN, so
-    // remote images must be explicitly allow-listed by hostname for
-    // next/image to fetch them.
+    // Account.profileImageUrl は Twitter (X) 自身の CDN から直接取得されるため、
+    // next/image が取得できるようホスト名を明示的に許可リストへ登録する必要がある。
     remotePatterns: [
       {
         protocol: 'https',

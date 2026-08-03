@@ -1,12 +1,12 @@
 import type { LabelRule } from '../types'
 
 /**
- * Detects an account that has self-declared a commentary relationship via X's
- * `parodyCommentaryFanLabel` field. `'None'` means the field was fetched and the account
- * explicitly has no such label, distinct from `null`/`undefined` (never fetched) - both
- * are treated as "not declared" here. This is deliberately not gated on `isBlueVerified` or
- * on the absence of an organization `verifiedType`: the declaration is a direct API
- * self-report, independent of verification status.
+ * X の `parodyCommentaryFanLabel` フィールドで実況/解説関係を自己申告しているアカウントを検出する。
+ * `'None'` はフィールドを取得済みでラベルなしと明示された状態を意味し、
+ * 未取得を表す `null`/`undefined` とは区別されるが、
+ * 本ルールではどちらも「未申告」として扱う。
+ * `isBlueVerified` や組織 `verifiedType` の有無で絞り込まないのは意図的な設計で、
+ * この申告は認証状態と無関係な API 直接の自己申告だから。
  */
 export const commentaryAccountRule: LabelRule = {
   key: 'commentary_account',

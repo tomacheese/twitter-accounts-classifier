@@ -1,15 +1,16 @@
 import type { LabelRule } from '../types'
 
 /**
- * Detects an individual Blue-verified account that has also enabled X's opt-in
- * "professional account" feature as a Creator (`professional.professionalType ===
- * 'Creator'`). Scoped the same way as `verified-blue-individual` (Blue-verified, no
- * organization/government `verifiedType`) since this is a further subdivision of that
- * population, not an independent signal.
+ * 個人の Blue 認証を持ち、
+ * かつプロフェッショナルアカウントを Creator 種別で有効化しているアカウントを検出する
+ * (`professional.professionalType === 'Creator'`)。
+ * `verified-blue-individual` と同じ範囲(Blue 認証あり、組織/政府認証なし)に限るのは、
+ * これが独立した兆候ではなく、その母集団を細分するものだから。
  */
 export const verifiedBlueCreatorRule: LabelRule = {
   key: 'verified_blue_creator',
-  description: '個人の有料 X Blue 認証バッジを持ち、プロフェッショナルアカウント種別が Creator である',
+  description:
+    '個人の有料 X Blue 認証バッジを持ち、プロフェッショナルアカウント種別が Creator である',
   version: '1.0.0',
   evaluate(bundle) {
     const { isBlueVerified, verifiedType, professionalType } = bundle.account

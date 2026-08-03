@@ -32,7 +32,8 @@ export interface RetryOptions {
 
 export function createCookieIssuerClient(options: CookieIssuerClientOptions) {
   const fetchImpl = options.fetchImpl ?? fetch
-  const sleepImpl = options.sleepImpl ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
+  const sleepImpl =
+    options.sleepImpl ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
 
   async function issueCookies(account: CookieIssuerAccount): Promise<IssuedCookies> {
     const response = await fetchImpl(`${options.baseUrl}/login`, {

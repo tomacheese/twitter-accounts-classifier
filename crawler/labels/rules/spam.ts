@@ -1,26 +1,26 @@
 import type { LabelRule } from '../types'
 
-// Ordinary community-courtesy phrases ("フォロバ", "相互フォロー", "無言フォロー", "DMください")
-// are used by a large share of genuine Japanese accounts - fan accounts, giveaway/懸賞 accounts,
-// even official brand accounts - so they are deliberately excluded here. Only wording that
-// indicates genuine solicitation is kept: dating/paid-companionship solicitation,
-// secondary-account sales DMs, declared follow/like automation, and side-hustle bait.
+// 「フォロバ」「相互フォロー」「無言フォロー」「DMください」のような通常の礼儀表現は、
+// ファンアカウントや懸賞アカウント、
+// 公式ブランドアカウントを含む多くの正当な日本語アカウントで使われているため、
+// あえて対象外とする。出会い系・裏垢 DM 販売・自動フォロー宣言・副業勧誘など、
+// 明確に勧誘を示す文言のみを対象とする。
 //
-// The gap inside the 副業 clause excludes separator/prohibition symbols: a bio refusing
-// side-hustle DMs puts a refusal marker right after "副業", and an unrestricted gap would
-// match straight across it and read the refusal as a solicitation.
+// 副業節の間隙は区切り記号・拒否記号を除外している。
+// 副業 DM を拒否する bio は「副業」の直後に拒否マーカーを置くため、
+// 無制限の間隙にするとその拒否をまたいで勧誘と誤認してしまうため。
 const SOLICITATION_GAP = String.raw`[^\s❌🆖✗・、。!！🚫🈲]{0,10}`
 const SOLICITATION_PATTERN = new RegExp(
   String.raw`出会い(系|活)|パパ活|ママ活|裏垢.{0,10}(dm|DM|募集|販売)|自動(フォロー|いいね)|稼げる|副業${SOLICITATION_GAP}(募集|紹介|稼)|儲かる|不労所得|高収入.{0,10}(バイト|副業)|f4f|follow\s*for\s*follow|dm\s*me.{0,10}fun`,
   'iu',
 )
 
-// SOLICITATION_PATTERN only checks that a term is present, not whether the bio is declining
-// it - bios reading e.g. "出会い系はお断り" state the term precisely to refuse it. Scan a short
-// window after the matched term for a refusal marker before treating the match as genuine
-// solicitation. The window is generous and the vocabulary covers polite, casual/plain-form
-// and symbol-only refusals, since real bios place the refusal at varying distance from the
-// term and in widely varying registers.
+// SOLICITATION_PATTERN は用語の有無のみを判定し、
+// bio がそれを拒否しているかは見ないため、
+// 「出会い系はお断り」のような bio は拒否のために用語そのものを明記している。
+// 一致箇所の直後の短い範囲を走査し、拒否マーカーがあれば勧誘とはみなさない。
+// 実際の bio は丁寧・カジュアル・記号のみなど様々な距離・語調で拒否を書くため、
+// 範囲は広めに、語彙も幅広く取っている。
 const REJECTION_WINDOW_LENGTH = 30
 const REJECTION_PATTERN =
   /お断り|お断わり|御断り|NG|ダメ|禁止|お控え|ご遠慮|しないで|通報|ブロック|要らん|要りません|要らない|いりません|いらない|不要|結構です|興味(が)?(あり|有り)?ません|対応(は)?していません|🆖|❌|✗/i
@@ -35,9 +35,10 @@ function isRejectedSolicitation(bio: string): boolean {
   return REJECTION_PATTERN.test(afterMatch)
 }
 
-// Spam bots mass-follow thousands of accounts hoping for reciprocal follows, so followingCount
-// is HIGH relative to followersCount. The inverse shape (low following, high followers) belongs
-// to prominent/official accounts and must not be flagged.
+// スパムボットはフォロー返しを期待して大量のアカウントをフォローするため、
+// followingCount が followersCount に対して高くなる。
+// 逆の形(フォロー少・フォロワー多)は著名・公式アカウントの特徴であり、
+// 誤検知してはならない。
 const MASS_FOLLOWING_MIN_COUNT = 500
 const MASS_FOLLOWING_RATIO = 5
 

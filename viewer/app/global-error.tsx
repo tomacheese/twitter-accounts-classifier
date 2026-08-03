@@ -1,12 +1,11 @@
 'use client'
 
 /**
- * Root error boundary for failures that escape the root layout itself
- * (`error.tsx` only catches errors thrown by its siblings/children, not by
- * `layout.tsx`). Must render its own `<html>`/`<body>` since it replaces
- * the root layout when triggered.
- * @param props - the caught error and a function to retry rendering
- * @returns the rendered error page
+ * `error.tsx` は `layout.tsx` 自身が投げたエラーは捕捉できないため、
+ * ルートレイアウトから漏れた失敗はこちらで受ける。
+ * 発火時にルートレイアウトを丸ごと置き換えるため、`<html>`/`<body>` を自前で描画する必要がある。
+ * @param props - 捕捉したエラーと再描画をリトライする関数
+ * @returns 描画されたエラーページ
  */
 export default function GlobalError({
   reset,
