@@ -1,8 +1,7 @@
 import type { PrismaClient, WeeklyAnalysisRun } from '../../generated/prisma'
 
 /**
- * A summarized `WeeklyAnalysisRun` row for display, with the sampled account
- * count derived from the raw JSON array.
+ * 表示用に要約した `WeeklyAnalysisRun`。sampledAccountCount は生の JSON 配列から算出する。
  */
 export interface WeeklyRunSummary {
   id: string
@@ -25,10 +24,10 @@ function toSummary(run: WeeklyAnalysisRun): WeeklyRunSummary {
 }
 
 /**
- * Loads the most recent weekly analysis runs, for the dashboard's summary section.
- * @param prisma - the Prisma client to query
- * @param limit - the maximum number of runs to return
- * @returns up to `limit` runs, most recent first
+ * ダッシュボードの概要向けに、直近の週次分析実行を読み込む。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @param limit - 取得する実行数の上限
+ * @returns 新しい順で最大 limit 件の実行
  */
 export async function getRecentWeeklyRuns(
   prisma: PrismaClient,
@@ -42,9 +41,9 @@ export async function getRecentWeeklyRuns(
 }
 
 /**
- * Loads the full weekly analysis run history, for the dedicated history page.
- * @param prisma - the Prisma client to query
- * @returns every run, most recent first
+ * 履歴ページ向けに、週次分析実行の全履歴を読み込む。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @returns 新しい順の全実行
  */
 export async function getAllWeeklyRuns(prisma: PrismaClient): Promise<WeeklyRunSummary[]> {
   const runs = await prisma.weeklyAnalysisRun.findMany({

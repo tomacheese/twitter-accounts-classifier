@@ -4,7 +4,7 @@ export type AccountSortField = 'followersCount' | 'tweetCount' | 'lastCrawledAt'
 export type SortDirection = 'asc' | 'desc'
 
 /**
- * The label filter, sort, and pagination parameters for {@link listAccounts}.
+ * {@link listAccounts} に渡すラベルフィルタ・ソート・ページネーションの条件。
  */
 export interface AccountListFilters {
   labelKeys?: string[]
@@ -15,7 +15,7 @@ export interface AccountListFilters {
 }
 
 /**
- * A single account row rendered in the account list page.
+ * アカウント一覧ページに表示する1行分のアカウント情報。
  */
 export interface AccountListItem {
   id: string
@@ -29,7 +29,7 @@ export interface AccountListItem {
 }
 
 /**
- * A page of account list items plus the total number of matches, for pagination.
+ * ページネーション向けに、1ページ分のアカウント一覧と総件数をまとめたもの。
  */
 export interface AccountListResult {
   items: AccountListItem[]
@@ -99,13 +99,12 @@ async function getActiveLabelKeysByAccount(
 }
 
 /**
- * Loads every registered label key, for populating the Accounts page's label
- * filter control. Deliberately lighter than {@link getLabelDistribution}
- * (dashboard.ts): the filter only needs the key list, not the true/total
- * counts, so it queries `LabelDefinition` directly instead of also reading
- * `AccountLabelLatest`.
- * @param prisma - the Prisma client to query
- * @returns every label key, ordered alphabetically
+ * アカウント一覧ページのラベルフィルタ向けに、登録済みの全ラベルキーを読み込む。
+ * {@link getLabelDistribution} (dashboard.ts) より意図的に軽量にしてあり、
+ * フィルタにはキー一覧のみで十分で true/total の集計は不要なため、
+ * `AccountLabelLatest` は読まず `LabelDefinition` のみを問い合わせる。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @returns アルファベット順に並べた全ラベルキー
  */
 export async function getLabelKeys(prisma: PrismaClient): Promise<string[]> {
   const definitions = await prisma.labelDefinition.findMany({
@@ -116,11 +115,11 @@ export async function getLabelKeys(prisma: PrismaClient): Promise<string[]> {
 }
 
 /**
- * Lists accounts for the account list page, optionally filtered to accounts
- * carrying at least one of the given labels, sorted and paginated.
- * @param prisma - the Prisma client to query
- * @param filters - the label filter, sort, and pagination parameters
- * @returns the matching accounts for the requested page, plus the total match count
+ * アカウント一覧ページ向けに、指定したラベルのいずれかを持つアカウントへ
+ * 絞り込んだうえで、ソート・ページネーションして返す。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @param filters - ラベルフィルタ・ソート・ページネーションの条件
+ * @returns 該当ページのアカウント一覧と総件数
  */
 export async function listAccounts(
   prisma: PrismaClient,

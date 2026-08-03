@@ -3,11 +3,11 @@ import * as Sentry from '@sentry/node'
 let initialized = false
 
 /**
- * Initializes error reporting, if a DSN is configured.
- *
- * `GLITCHTIP_DSN` is only set in the production compose file; local development
- * runs deliberately leave it unset. Unlike `COOKIE_ISSUER_URL`, monitoring must
- * never block a run, so a missing DSN is a silent no-op rather than an error.
+ * DSN が設定されている場合のみ、エラー監視を初期化する。
+ * `GLITCHTIP_DSN` は本番用の compose ファイルにのみ設定され、
+ * ローカル開発では意図的に未設定のままにしている。
+ * `COOKIE_ISSUER_URL` と異なり監視は実行を止めてはならないため、
+ * DSN 未設定はエラーではなく無音のノーオペレーションとして扱う。
  */
 export function initMonitoring(): void {
   const dsn = process.env.GLITCHTIP_DSN

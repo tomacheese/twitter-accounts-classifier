@@ -3,8 +3,8 @@ import { PrismaClient } from '../generated/prisma'
 let client: PrismaClient | undefined
 
 /**
- * Returns the shared Prisma Client instance for the viewer app, creating it on first use.
- * @returns the process-wide Prisma Client instance
+ * viewer アプリ全体で共有する Prisma Client を返す。初回呼び出し時に生成する。
+ * @returns プロセス全体で共有する Prisma Client インスタンス
  */
 export function getPrismaClient(): PrismaClient {
   client ??= new PrismaClient()
