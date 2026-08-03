@@ -8,7 +8,10 @@ const logger = Logger.configure('labeling-follow-sample-repository')
 // `./follow-repository` の `upsertFollowAuthors` と同様、
 // 1件の不正なプロフィールで残りのフォロー先の反映まで止めてはならないため、
 // アカウントごとに個別に upsert する。
-async function upsertFolloweeAuthors(prisma: PrismaClient, result: FollowListResult): Promise<void> {
+async function upsertFolloweeAuthors(
+  prisma: PrismaClient,
+  result: FollowListResult,
+): Promise<void> {
   for (const author of result.authors) {
     try {
       await upsertAccount(prisma, author)
