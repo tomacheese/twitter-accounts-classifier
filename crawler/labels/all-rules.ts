@@ -32,6 +32,7 @@ import { topicFoodRule } from './rules/topic-food'
 import { topicMovieRule } from './rules/topic-movie'
 import { topicParentingRule } from './rules/topic-parenting'
 import { topicTravelRule } from './rules/topic-travel'
+import { topicVrchatRule } from './rules/topic-vrchat'
 import { templatedReplyNetworkRule } from './rules/templated-reply-network'
 import { selfDuplicateReplyRule } from './rules/self-duplicate-reply'
 import { replyFarmingRule } from './rules/reply-farming'
@@ -77,6 +78,7 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   topicMovieRule,
   topicParentingRule,
   topicTravelRule,
+  topicVrchatRule,
   templatedReplyNetworkRule,
   selfDuplicateReplyRule,
   replyFarmingRule,
