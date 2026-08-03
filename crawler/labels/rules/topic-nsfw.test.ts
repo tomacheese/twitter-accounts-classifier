@@ -150,4 +150,20 @@ describe('topicNsfwRule', () => {
     const result = topicNsfwRule.evaluate(bundle)
     expect(result.value).toBe(false)
   })
+
+  it('bio でオプトアウトを宣言しているアカウントは、フォローグラフシグナルがしきい値を満たしていても value: false のままになる', () => {
+    const bundle = {
+      ...makeBundle({ bio: 'I AM A MINOR | DNI: nsfw accounts, bigots' }),
+      followGraphLabelSignals: {
+        topic_nsfw: {
+          followeeLabeledCount: 5,
+          followeeTotalCount: 15,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    }
+    const result = topicNsfwRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+  })
 })

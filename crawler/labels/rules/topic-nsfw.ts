@@ -35,14 +35,13 @@ const ANTI_NSFW_PATTERNS = [
 export const topicNsfwRule: LabelRule = {
   key: 'topic_nsfw',
   description: 'プロフィールでアダルト/NSFW コンテンツを投稿していることを自己申告している',
-  version: '1.3.0',
+  version: '1.3.1',
   evaluate(bundle) {
     const { bio } = bundle.account
-    const keywordMatch =
-      bio !== null &&
-      NSFW_PATTERN.test(bio) &&
-      !ANTI_NSFW_PATTERNS.some((pattern) => pattern.test(bio))
-    const followGraphMatch = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_nsfw)
+    const optedOut = bio !== null && ANTI_NSFW_PATTERNS.some((pattern) => pattern.test(bio))
+    const keywordMatch = bio !== null && NSFW_PATTERN.test(bio) && !optedOut
+    const followGraphMatch =
+      !optedOut && hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_nsfw)
     const value = keywordMatch || followGraphMatch
     return {
       value,
