@@ -2,7 +2,7 @@ import type { PrismaClient } from '../generated/prisma'
 import type { ReplyHijackCorpusEntry } from '../labels/reply-hijack-index'
 
 // 日付レンジではなく件数で上限を区切る: 新しい時間窓の概念を導入するより、
-// 既存の`take` ベースの上限に合わせるほうがシンプルなため。
+// 既存の `take` ベースの上限に合わせるほうがシンプルなため。
 const REPLY_CORPUS_LIMIT = 20_000
 
 /**

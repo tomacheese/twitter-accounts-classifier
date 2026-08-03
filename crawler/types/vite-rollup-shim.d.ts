@@ -5,5 +5,5 @@
 // 'vitest' を import するファイルの型チェックで tsc がエラーになってしまう。
 // このアンビエントシムは、
 // 実際には使われない re-export のためだけにモジュール解決を成立させるものであり、
-// このプロジェクトのコードが'rollup/parseAst' を直接 import することはない。
+// このプロジェクトのコードが `rollup/parseAst` を直接 import することはない。
 declare module 'rollup/parseAst'

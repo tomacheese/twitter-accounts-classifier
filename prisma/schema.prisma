@@ -68,9 +68,9 @@ model Tweet {
   // この列が存在する前に収集された行は AI 生成メディアの判定自体が行われていないため、デフォルトを false ではなく null にすることで、未評価の状態と実際に false/true と判定された状態を区別している。
   hasAiGeneratedMedia        Boolean?
   aiGeneratedDetectionSource String?
-  // hasAiGeneratedMedia と同じ理由で、デフォルトは false ではなく null にしている。
   quotedTweetId              String?
   quotedTweetAuthorId        String?
+  // hasAiGeneratedMedia と同じ理由で、未評価行を区別するためデフォルトを設定せず null のままにしている。
   quotedTweetHasVideo        Boolean?
   foreignVideoSourceCount    Int?
   source                     String

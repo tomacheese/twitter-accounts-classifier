@@ -32,7 +32,7 @@ export interface ReplyHijackIndex {
    * @param accountId - 検索対象のアカウント
    * @param tweetId - このアカウントがリプライした対象ツイートのID
    * @returns このアカウント・対象ツイートの組が属する「reply-hijack swarm」の規模。
-   *   属していない場合は0
+   *   属していない場合は 0
    */
   swarmSizeFor(accountId: string, tweetId: string): number
 }
