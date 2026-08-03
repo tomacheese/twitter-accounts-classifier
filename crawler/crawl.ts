@@ -31,15 +31,14 @@ import {
   withTwitterRetry,
   mergeTweetAdFlags,
   toAccountProfileInput,
-  type IssuedCookies,
-  type TrendsScraperLike,
-} from 'twitter-client'
-import {
   createOpenApiClient as createRealOpenApiClient,
   closeOpenApiClient as closeRealOpenApiClient,
   createTrendsScraper as createRealTrendsScraper,
   closeTrendsScraper as closeRealTrendsScraper,
-} from './twitter/client'
+  type IssuedCookies,
+  type TrendsScraperLike,
+  type BlocksListRawApiLike,
+} from 'twitter-client'
 import {
   fetchRecommendedTimeline,
   fetchFollowingTimeline,
@@ -71,7 +70,12 @@ import {
   syncFollowing as syncFollowingEdges,
 } from './db/follow-repository'
 import { replaceLabelingFollowSample as replaceLabelingFollowSampleRecord } from './db/labeling-follow-sample-repository'
-import { fetchBlocks, type BlockListApiLike, type BlockListResult } from './twitter/blocks'
+import {
+  fetchBlocks,
+  createBlockListApiLike,
+  type BlockListApiLike,
+  type BlockListResult,
+} from './twitter/blocks'
 import { syncBlocks as syncBlocksEdges } from './db/block-repository'
 import {
   clearCrawlAccountCheckpoints as clearCrawlAccountCheckpointsRecord,
@@ -1226,12 +1230,12 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
 
 /**
  * @param realClient - 認証済みの実際の `TwitterOpenApiClient`
- * @param blocksClient - `OpenApiClientContext` のラップ済み `BlockListApiLike` blocks クライアント
+ * @param rawBlocksClient - `OpenApiClientContext` が返す raw な blocks クライアント
  * @returns {@link runCrawlCycle} で使用できる `CrawlOpenApiClient`
  */
 function toCrawlOpenApiClient(
   realClient: Awaited<ReturnType<typeof createRealOpenApiClient>>['client'],
-  blocksClient: BlockListApiLike,
+  rawBlocksClient: BlocksListRawApiLike,
 ): CrawlOpenApiClient {
   return {
     getTweetApi: () => ({
@@ -1240,7 +1244,7 @@ function toCrawlOpenApiClient(
     }),
     getUserApi: () => createUserApiLike(realClient.getUserApi(), realClient.getTweetApi()),
     getUserListApi: () => createFollowListApiLike(realClient.getUserListApi()),
-    getBlocksApi: () => blocksClient,
+    getBlocksApi: () => createBlockListApiLike(rawBlocksClient),
   }
 }
 

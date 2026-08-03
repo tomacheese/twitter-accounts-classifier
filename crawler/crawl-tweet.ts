@@ -8,14 +8,12 @@ import { upsertAccount, type AccountProfileInput } from './db/account-repository
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
 import {
   createCookieIssuerClient,
+  createOpenApiClient,
+  closeOpenApiClient,
   toAccountProfileInput,
   toTweetInput,
   mergeTweetAdFlags,
 } from 'twitter-client'
-import {
-  createOpenApiClient as createRealOpenApiClient,
-  closeOpenApiClient as closeRealOpenApiClient,
-} from './twitter/client'
 import { createTweetApiLike, type TweetApiLike } from './twitter/timeline'
 import { createTweetDetailApiLike, type TweetDetailApiLike } from './twitter/engagement'
 import {
@@ -136,7 +134,7 @@ async function main(): Promise<void> {
     password: account.password,
     otp_secret: account.otpSecret,
   })
-  const openApiContext = await createRealOpenApiClient(cookies)
+  const openApiContext = await createOpenApiClient(cookies)
 
   try {
     const client: ManualCrawlOpenApiClient = {
@@ -165,7 +163,7 @@ async function main(): Promise<void> {
       `Manual tweet crawl complete for ${tweetId}: ${result.repliesFound} replies found, ${result.accountsProcessed} accounts processed`,
     )
   } finally {
-    await closeRealOpenApiClient(openApiContext)
+    await closeOpenApiClient(openApiContext)
     await disconnectPrisma()
   }
 }
