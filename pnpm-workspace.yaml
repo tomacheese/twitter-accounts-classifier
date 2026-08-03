@@ -2,3 +2,4 @@ packages:
   - "crawler"
   - "viewer"
   - "twitter-client"
+  - "blocker"

@@ -16,6 +16,49 @@ importers:
         specifier: ^6.0.0
         version: 6.19.3(typescript@5.9.3)
 
+  blocker:
+    dependencies:
+      '@book000/node-utils':
+        specifier: ^1.0.0
+        version: 1.25.10(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(supports-color@7.2.0)
+      '@prisma/client':
+        specifier: ^6.0.0
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
+      '@sentry/node':
+        specifier: ^8.0.0
+        version: 8.55.2(supports-color@7.2.0)
+      twitter-client:
+        specifier: workspace:*
+        version: link:../twitter-client
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+    devDependencies:
+      '@book000/eslint-config':
+        specifier: 1.13.1
+        version: 1.13.1(eslint-config-standard@17.1.0(eslint-plugin-import@2.32.0)(eslint-plugin-n@16.6.2(eslint@9.39.5(jiti@2.7.0)(supports-color@7.2.0)))(eslint-plugin-promise@6.6.0(eslint@9.39.5(jiti@2.7.0)(supports-color@7.2.0)))(eslint@9.39.5(jiti@2.7.0)(supports-color@7.2.0)))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.43
+      eslint:
+        specifier: ^9.0.0
+        version: 9.39.5(jiti@2.7.0)(supports-color@7.2.0)
+      npm-run-all2:
+        specifier: ^7.0.0
+        version: 7.0.2
+      prettier:
+        specifier: ^3.0.0
+        version: 3.9.6
+      prisma:
+        specifier: ^6.0.0
+        version: 6.19.3(typescript@5.9.3)
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.43)(supports-color@7.2.0)
+
   crawler:
     dependencies:
       '@book000/node-utils':
