@@ -4,6 +4,7 @@ import Image from 'next/image'
 import { formatDateTime } from '@/lib/format-date'
 import { getPrismaClient } from '@/lib/prisma'
 import { getAccountDetail } from '@/lib/queries/account-detail'
+import { AccountLabels } from '../../components/account-labels'
 import { ErrorFallback } from '../../components/error-fallback'
 
 const RECENT_TWEET_COUNT = 20
@@ -88,29 +89,7 @@ export default async function AccountDetailPage({
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Labels</h2>
-        {labels.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            No labels recorded for this account.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {labels.map((label, index) => (
-              <li
-                key={index}
-                className="rounded-lg border bg-white p-3 text-sm shadow-sm dark:border-gray-700 dark:bg-gray-800"
-              >
-                <p className="font-medium">
-                  {label.labelKey}: {label.value ? 'true' : 'false'} (confidence{' '}
-                  {label.confidence.toFixed(2)})
-                </p>
-                <p className="mt-1 text-gray-600 dark:text-gray-400">{label.reason}</p>
-                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                  {label.method} · {label.ruleVersion} · {formatDateTime(label.labeledAt)}
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
+        <AccountLabels labels={labels} />
       </section>
 
       <section>

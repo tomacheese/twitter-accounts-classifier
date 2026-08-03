@@ -22,6 +22,16 @@ export interface AccountDetailLabel {
   method: string
   ruleVersion: string
   labeledAt: Date
+  history: AccountDetailLabelHistoryEntry[]
+}
+
+export interface AccountDetailLabelHistoryEntry {
+  value: boolean
+  confidence: number
+  reason: string
+  method: string
+  ruleVersion: string
+  labeledAt: Date
 }
 
 export interface AccountDetailTweet {
@@ -58,9 +68,61 @@ export interface AccountDetail {
 }
 
 const FOLLOW_LIST_LIMIT = 100
+// history の件数を無制限に返すと再ラベリングを繰り返したアカウントほどページの転送量が増え続けるため、上限を設けて打ち切る。
+const LABEL_HISTORY_LIMIT = 20
 
 /**
- * 各ラベルの最新評価のみではなく、AccountLabel の履歴全体を返す。
+ * labeledAt 降順、id 降順で取得した AccountLabel の一覧を labelDefinitionId ごとに集約する。
+ * @param labels - labeledAt 降順、id 降順で取得した AccountLabel の一覧 (labelDefinition を含む)
+ * @returns ラベルごとに集約された一覧。並び順は各ラベルの最新評価が現れた順を保つ。
+ */
+function groupLabelsByDefinition(
+  labels: {
+    labelDefinitionId: string
+    labelDefinition: { key: string }
+    value: boolean
+    confidence: number
+    reason: string
+    method: string
+    ruleVersion: string
+    labeledAt: Date
+  }[],
+): AccountDetailLabel[] {
+  const grouped = new Map<string, AccountDetailLabel>()
+
+  for (const label of labels) {
+    const existing = grouped.get(label.labelDefinitionId)
+    if (!existing) {
+      grouped.set(label.labelDefinitionId, {
+        labelKey: label.labelDefinition.key,
+        value: label.value,
+        confidence: label.confidence,
+        reason: label.reason,
+        method: label.method,
+        ruleVersion: label.ruleVersion,
+        labeledAt: label.labeledAt,
+        history: [],
+      })
+      continue
+    }
+    if (existing.history.length >= LABEL_HISTORY_LIMIT) {
+      continue
+    }
+    existing.history.push({
+      value: label.value,
+      confidence: label.confidence,
+      reason: label.reason,
+      method: label.method,
+      ruleVersion: label.ruleVersion,
+      labeledAt: label.labeledAt,
+    })
+  }
+
+  return [...grouped.values()]
+}
+
+/**
+ * アカウントの詳細情報を取得する。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param accountId - アカウントの ID
  * @param tweetLimit - 含める直近ツイートの最大件数
@@ -88,7 +150,8 @@ export async function getAccountDetail(
   ] = await Promise.all([
     prisma.accountLabel.findMany({
       where: { accountId },
-      orderBy: { labeledAt: 'desc' },
+      // 再ラベリングが短時間に連続すると labeledAt が同一になりうるため、id をタイブレークにして順序を固定する。
+      orderBy: [{ labeledAt: 'desc' }, { id: 'desc' }],
       include: { labelDefinition: true },
     }),
     prisma.tweet.findMany({
@@ -134,15 +197,7 @@ export async function getAccountDetail(
       isBlueVerified: account.isBlueVerified,
       verifiedType: account.verifiedType,
     },
-    labels: labels.map((label) => ({
-      labelKey: label.labelDefinition.key,
-      value: label.value,
-      confidence: label.confidence,
-      reason: label.reason,
-      method: label.method,
-      ruleVersion: label.ruleVersion,
-      labeledAt: label.labeledAt,
-    })),
+    labels: groupLabelsByDefinition(labels),
     recentTweets: tweets.map((tweet) => ({
       id: tweet.id,
       fullText: tweet.fullText,

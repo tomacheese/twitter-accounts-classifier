@@ -30,13 +30,44 @@ describe('getAccountDetail', () => {
     const findUnique = vi.fn().mockResolvedValue(account)
     const labelFindMany = vi.fn().mockResolvedValue([
       {
-        value: true,
+        value: false,
+        confidence: 0.95,
+        reason: 'no longer matches keyword',
+        method: 'heuristic',
+        ruleVersion: '1.2.0',
+        labeledAt: new Date('2026-07-03T00:00:00Z'),
+        labelDefinitionId: 'ld-spam',
+        labelDefinition: { key: 'spam' },
+      },
+      {
+        value: false,
+        confidence: 0.9,
+        reason: 'matches keyword',
+        method: 'heuristic',
+        ruleVersion: '1.1.0',
+        labeledAt: new Date('2026-07-02T00:00:00Z'),
+        labelDefinitionId: 'ld-spam',
+        labelDefinition: { key: 'spam' },
+      },
+      {
+        value: false,
         confidence: 0.9,
         reason: 'matches keyword',
         method: 'heuristic',
         ruleVersion: '1.0.0',
         labeledAt: new Date('2026-07-01T00:00:00Z'),
+        labelDefinitionId: 'ld-spam',
         labelDefinition: { key: 'spam' },
+      },
+      {
+        value: true,
+        confidence: 0.8,
+        reason: 'account behavior matches bot pattern',
+        method: 'ai-generated',
+        ruleVersion: '1.0.0',
+        labeledAt: new Date('2026-07-01T00:00:00Z'),
+        labelDefinitionId: 'ld-bot',
+        labelDefinition: { key: 'bot' },
       },
     ])
     const tweetFindMany = vi.fn().mockResolvedValue([
@@ -121,12 +152,40 @@ describe('getAccountDetail', () => {
       labels: [
         {
           labelKey: 'spam',
-          value: true,
-          confidence: 0.9,
-          reason: 'matches keyword',
+          value: false,
+          confidence: 0.95,
+          reason: 'no longer matches keyword',
           method: 'heuristic',
+          ruleVersion: '1.2.0',
+          labeledAt: new Date('2026-07-03T00:00:00Z'),
+          history: [
+            {
+              value: false,
+              confidence: 0.9,
+              reason: 'matches keyword',
+              method: 'heuristic',
+              ruleVersion: '1.1.0',
+              labeledAt: new Date('2026-07-02T00:00:00Z'),
+            },
+            {
+              value: false,
+              confidence: 0.9,
+              reason: 'matches keyword',
+              method: 'heuristic',
+              ruleVersion: '1.0.0',
+              labeledAt: new Date('2026-07-01T00:00:00Z'),
+            },
+          ],
+        },
+        {
+          labelKey: 'bot',
+          value: true,
+          confidence: 0.8,
+          reason: 'account behavior matches bot pattern',
+          method: 'ai-generated',
           ruleVersion: '1.0.0',
           labeledAt: new Date('2026-07-01T00:00:00Z'),
+          history: [],
         },
       ],
       recentTweets: [
@@ -178,6 +237,12 @@ describe('getAccountDetail', () => {
     })
     expect(tweetFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { accountId: 'a1' }, take: 10 }),
+    )
+    expect(labelFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { accountId: 'a1' },
+        orderBy: [{ labeledAt: 'desc' }, { id: 'desc' }],
+      }),
     )
   })
 
@@ -294,5 +359,49 @@ describe('getAccountDetail', () => {
         orderBy: [{ lastSeenAt: 'desc' }, { blockedId: 'asc' }],
       }),
     )
+  })
+
+  it('caps a single label history at 20 entries even when more evaluations exist', async () => {
+    const account = {
+      id: 'a5',
+      screenName: 'erin',
+      displayName: 'Erin',
+      bio: null,
+      profileImageUrl: null,
+      followersCount: 0,
+      followingCount: 0,
+      tweetCount: 0,
+      accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
+      isBlueVerified: false,
+      verifiedType: null,
+    }
+    const evaluations = Array.from({ length: 25 }, (_, index) => ({
+      value: true,
+      confidence: 0.9,
+      reason: `evaluation ${index}`,
+      method: 'heuristic',
+      ruleVersion: '1.0.0',
+      labeledAt: new Date(2026, 6, 25 - index),
+      labelDefinitionId: 'ld-spam',
+      labelDefinition: { key: 'spam' },
+    }))
+    const prisma = {
+      account: { findUnique: vi.fn().mockResolvedValue(account) },
+      accountLabel: { findMany: vi.fn().mockResolvedValue(evaluations) },
+      tweet: { findMany: vi.fn().mockResolvedValue([]) },
+      follow: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+      block: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+    } as unknown as PrismaClient
+
+    const result = await getAccountDetail(prisma, 'a5', 10)
+
+    expect(result?.labels).toHaveLength(1)
+    expect(result?.labels[0].history).toHaveLength(20)
   })
 })
