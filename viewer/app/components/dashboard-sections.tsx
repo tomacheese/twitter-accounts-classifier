@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { isCurrentAccountStale } from '@/lib/crawl-run-progress'
 import { formatDateTime } from '@/lib/format-date'
 import { formatDuration } from '@/lib/format-duration'
 import { getPrismaClient } from '@/lib/prisma'
@@ -272,7 +273,8 @@ export async function RecentCrawlRuns(): Promise<React.ReactElement> {
                     <StatusBadge status={run.status} />
                     {run.status === 'running' &&
                       run.currentUsername &&
-                      run.currentAccountStartedAt && (
+                      run.currentAccountStartedAt &&
+                      !isCurrentAccountStale(run.currentAccountStartedAt, new Date()) && (
                         <span className="text-xs text-gray-500 dark:text-gray-400">
                           → @{run.currentUsername} (
                           {formatDuration(run.currentAccountStartedAt, new Date())} elapsed)

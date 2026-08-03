@@ -917,7 +917,14 @@ async function runAccountCycle(
   crawlRunId: string,
 ): Promise<'success' | 'partial'> {
   const startedAt = new Date()
-  await deps.setCurrentAccount(crawlRunId, account.username, startedAt)
+  // 進捗表示用の書き込みが失敗してもアカウントのクロール自体は継続する:
+  // 実クロール結果を記録する recordCrawlAccountRun とは異なり、
+  // このフィールドは表示専用で欠落してもクロールの正しさに影響しないため。
+  try {
+    await deps.setCurrentAccount(crawlRunId, account.username, startedAt)
+  } catch (error) {
+    logger.error(`Failed to record current account for crawl run ${crawlRunId}`, error as Error)
+  }
   try {
     const checkpoints = await deps.loadCrawlAccountCheckpoints(crawlRunId, account.username)
     let timelineSnapshot = restoreTimelineSnapshot(checkpoints.get('timelines'))

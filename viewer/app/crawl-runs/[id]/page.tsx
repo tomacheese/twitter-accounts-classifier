@@ -1,11 +1,18 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { formatDateTime } from '@/lib/format-date'
+import { isCurrentAccountStale } from '@/lib/crawl-run-progress'
 import { formatDuration } from '@/lib/format-duration'
 import { getPrismaClient } from '@/lib/prisma'
 import { getCrawlRunDetail } from '@/lib/queries/crawl-runs'
 import { ErrorFallback } from '../../components/error-fallback'
 import { StatusBadge } from '../../components/status-badge'
+
+// このページは処理中アカウントの経過時間などリクエスト時点の値を描画するため、
+// 静的プリレンダリングの対象から外している。指定しないと、
+// Prisma 経由の読み取りは Next.js のキャッシュ無効化の対象にならず、
+// 経過時間などの値が初回レンダー時点のまま固定されてしまう。
+export const dynamic = 'force-dynamic'
 
 /** crawler が発行する警告種別。障害の発生箇所ごとに1つ。 */
 type CrawlWarningType =
@@ -123,15 +130,18 @@ export default async function CrawlRunDetailPage({
             <dt className="text-gray-500 dark:text-gray-400">Accounts processed</dt>
             <dd>{run.accountRuns.length.toLocaleString()}</dd>
           </div>
-          {run.status === 'running' && run.currentUsername && run.currentAccountStartedAt && (
-            <div>
-              <dt className="text-gray-500 dark:text-gray-400">Currently processing</dt>
-              <dd>
-                @{run.currentUsername} ({formatDuration(run.currentAccountStartedAt, new Date())}{' '}
-                elapsed)
-              </dd>
-            </div>
-          )}
+          {run.status === 'running' &&
+            run.currentUsername &&
+            run.currentAccountStartedAt &&
+            !isCurrentAccountStale(run.currentAccountStartedAt, new Date()) && (
+              <div>
+                <dt className="text-gray-500 dark:text-gray-400">Currently processing</dt>
+                <dd>
+                  @{run.currentUsername} ({formatDuration(run.currentAccountStartedAt, new Date())}{' '}
+                  elapsed)
+                </dd>
+              </div>
+            )}
         </dl>
         {run.accountRuns.length > 0 && (
           <div className="mt-4 flex flex-wrap gap-2 text-sm">

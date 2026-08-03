@@ -127,9 +127,8 @@ export async function finishCrawlRun(
 }
 
 /**
- * アカウント処理を開始した直後に呼び出す: 次のアカウントの処理開始や
- * {@link finishCrawlRun} の呼び出しがこのフィールドを上書き・クリアするため、
- * 呼び出し側で明示的なクリア処理は不要。
+ * 次のアカウントの処理開始や {@link finishCrawlRun} がこのフィールドを上書き・クリアする。
+ * そのため呼び出し側で明示的なクリア処理は不要。
  * @param prisma - Prisma クライアント
  * @param crawlRunId - 対象の CrawlRun ID
  * @param username - 処理を開始したアカウントの username

@@ -1188,6 +1188,18 @@ describe('runCrawlCycle', () => {
     await expect(runCrawlCycle(deps)).resolves.toBeUndefined()
   })
 
+  it('still records the account run when setCurrentAccount fails', async () => {
+    const deps = makeDeps({
+      setCurrentAccount: vi.fn().mockRejectedValue(new Error('row missing')),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'success' }),
+    )
+  })
+
   it('resumes a run by retaining completed accounts and retrying all other configured accounts', async () => {
     const issueCookies = vi.fn().mockResolvedValue({ ct0: 'c0', authToken: 'a0' })
     const deps = makeDeps({
