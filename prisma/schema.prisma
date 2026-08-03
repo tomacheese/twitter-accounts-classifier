@@ -41,6 +41,8 @@ model Account {
   latestLabels             AccountLabelLatest[]
   followerEdges            Follow[]       @relation("FollowerEdges")
   followeeEdges            Follow[]       @relation("FolloweeEdges")
+  labelingFollowSampleAsAccount  LabelingFollowSample[] @relation("LabelingFollowSampleAccount")
+  labelingFollowSampleAsFollowee LabelingFollowSample[] @relation("LabelingFollowSampleFollowee")
   blockerEdges             Block[]        @relation("BlockerEdges")
   blockedEdges             Block[]        @relation("BlockedEdges")
 
@@ -160,6 +162,19 @@ model Follow {
 
   @@unique([followerId, followeeId])
   @@index([followerId])
+  @@index([followeeId])
+}
+
+model LabelingFollowSample {
+  id         String   @id @default(cuid())
+  accountId  String
+  account    Account  @relation("LabelingFollowSampleAccount", fields: [accountId], references: [id])
+  followeeId String
+  followee   Account  @relation("LabelingFollowSampleFollowee", fields: [followeeId], references: [id])
+  fetchedAt  DateTime @default(now())
+
+  @@unique([accountId, followeeId])
+  @@index([accountId])
   @@index([followeeId])
 }
 
