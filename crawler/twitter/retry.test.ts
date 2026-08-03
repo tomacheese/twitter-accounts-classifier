@@ -15,7 +15,8 @@ function fetchError(): Error {
 }
 
 describe('isRetryableTwitterError', () => {
-  it('treats 429 and 5xx ResponseErrors as retryable', () => {
+  it('treats 408, 429 and 5xx ResponseErrors as retryable', () => {
+    expect(isRetryableTwitterError(responseError(408))).toBe(true)
     expect(isRetryableTwitterError(responseError(429))).toBe(true)
     expect(isRetryableTwitterError(responseError(500))).toBe(true)
     expect(isRetryableTwitterError(responseError(503))).toBe(true)
