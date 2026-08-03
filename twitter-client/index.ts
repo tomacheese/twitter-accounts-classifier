@@ -10,3 +10,9 @@ export {
   formatResponseErrorDiagnostics,
 } from './response-diagnostics'
 export type { ResponseErrorDiagnostics } from './response-diagnostics'
+export { createCookieIssuerClient, CookieIssuerError } from './cookie-issuer-client'
+export type {
+  CookieIssuerAccount,
+  CookieIssuerClientOptions,
+  IssuedCookies,
+} from './cookie-issuer-client'

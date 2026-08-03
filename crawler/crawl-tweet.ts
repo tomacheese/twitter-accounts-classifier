@@ -6,7 +6,7 @@ import { getCookieIssuerBaseUrl } from './config/env'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
-import { createCookieIssuerClient } from './auth/cookie-issuer-client'
+import { createCookieIssuerClient } from 'twitter-client'
 import {
   createOpenApiClient as createRealOpenApiClient,
   closeOpenApiClient as closeRealOpenApiClient,

@@ -1,9 +1,8 @@
 import { TwitterOpenApi, type TwitterOpenApiClient } from 'twitter-openapi-typescript'
 import initCycleTLS, { type CycleTLSClient } from 'cycletls'
-import type { IssuedCookies } from '../auth/cookie-issuer-client'
 import { createTrendsClient } from './trends-client'
 import type { TrendsScraperLike } from './timeline'
-import { wrapFetchWithResponseCapture } from 'twitter-client'
+import { wrapFetchWithResponseCapture, type IssuedCookies } from 'twitter-client'
 import { createBlocksClient } from './blocks-client'
 import { createBlockListApiLike, type BlockListApiLike } from './blocks'
 

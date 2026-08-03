@@ -1,4 +1,4 @@
-import type { IssuedCookies } from '../auth/cookie-issuer-client'
+import type { IssuedCookies } from 'twitter-client'
 import type { TrendsScraperLike } from './timeline'
 
 // `@the-convocation/twitter-scraper` の getTrends() は同じ bearer token・エンドポイントを叩くが、

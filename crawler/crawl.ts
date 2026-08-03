@@ -21,14 +21,15 @@ import {
   buildFollowGraphLabelIndex,
   type FollowGraphLabelIndex,
 } from './labels/follow-graph-label-index'
-import { createCookieIssuerClient, type IssuedCookies } from './auth/cookie-issuer-client'
 import {
+  createCookieIssuerClient,
   formatResponseErrorDiagnostics,
   getLastResponseMatching,
   getResponseErrorDiagnostics,
   isResponseError,
   toSafeResponseErrorForLog,
   withTwitterRetry,
+  type IssuedCookies,
 } from 'twitter-client'
 import {
   createOpenApiClient as createRealOpenApiClient,

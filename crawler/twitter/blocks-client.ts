@@ -1,5 +1,5 @@
 import { TwitterOpenApi } from 'twitter-openapi-typescript'
-import type { IssuedCookies } from '../auth/cookie-issuer-client'
+import type { IssuedCookies } from 'twitter-client'
 import type { RawUserResult } from './mappers'
 
 /**
