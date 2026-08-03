@@ -1,5 +1,5 @@
--- AccountLabelLatest に評価結果のスナップショット列を追加する。crawler/db/label-repository.ts の
--- 書き込み経路は以降、この列を使って直前の評価と比較し、AccountLabel への履歴 INSERT を変化があった場合のみに限定する。
+-- AccountLabelLatest に評価結果のスナップショット列を追加する。
+-- crawler/db/label-repository.ts はこの列を直前の評価との比較に使い、AccountLabel への履歴 INSERT を変化があった場合のみに限定する。
 
 -- AlterTable
 ALTER TABLE "AccountLabelLatest"

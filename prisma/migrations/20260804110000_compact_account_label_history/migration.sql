@@ -45,3 +45,7 @@ ALTER TABLE "AccountLabel" ADD CONSTRAINT "AccountLabel_pkey" PRIMARY KEY ("id")
 CREATE INDEX "AccountLabel_accountId_idx" ON "AccountLabel"("accountId");
 ALTER TABLE "AccountLabel" ADD CONSTRAINT "AccountLabel_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "Account"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "AccountLabel" ADD CONSTRAINT "AccountLabel_labelDefinitionId_fkey" FOREIGN KEY ("labelDefinitionId") REFERENCES "LabelDefinition"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- CREATE TABLE ... AS SELECT はプランナー統計を引き継がない。
+-- 入れ替え直後の実行計画が古い統計に基づいて劣化するのを避けるため、明示的に ANALYZE する。
+ANALYZE "AccountLabel";

@@ -56,7 +56,6 @@ export interface RecordCrawlAccountLabelParams extends RecordAccountLabelParams 
 }
 
 interface RecordAccountLabelRow {
-  historyInserted: boolean
   latestUpserted: boolean
 }
 
@@ -174,8 +173,9 @@ export async function recordAccountLabelsBulk(
 }
 
 /**
- * crawl 中のラベル評価結果を記録する: `AccountLabel` の履歴に追記すると同時に、
- * dashboard/アカウント一覧の各クエリが読む `AccountLabelLatest` の該当行も upsert する
+ * crawl 中のラベル評価結果を記録する: `AccountLabelLatest` の直前の値・ruleVersion と
+ * 一致しない場合のみ `AccountLabel` に履歴を追記し、
+ * dashboard/アカウント一覧の各クエリが読む `AccountLabelLatest` の該当行は毎回 upsert する
  * (テーブルの設計意図は prisma/schema.prisma の AccountLabelLatest コメントを参照)。
  * 両方の書き込みは SQL 側の `now()` を共有するため、
  * どちらが「現在の値」かで食い違うことはない。
@@ -244,7 +244,6 @@ export async function recordCrawlAccountLabel(
       RETURNING "accountId"
     )
     SELECT
-      EXISTS (SELECT 1 FROM inserted_history) AS "historyInserted",
       EXISTS (SELECT 1 FROM upserted_latest) AS "latestUpserted"
     FROM claimed
   `
