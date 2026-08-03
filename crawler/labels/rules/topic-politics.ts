@@ -1,3 +1,4 @@
+import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 import type { LabelRule } from '../types'
 
 // 「保守」「リベラル」のような曖昧なイデオロギー用語は、
@@ -11,14 +12,18 @@ const POLITICS_PATTERN =
 export const topicPoliticsRule: LabelRule = {
   key: 'topic_politics',
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
-  version: '1.0.0',
+  version: '1.1.0',
   evaluate(bundle) {
     const { bio } = bundle.account
-    const value = bio !== null && POLITICS_PATTERN.test(bio)
+    const keywordMatch = bio !== null && POLITICS_PATTERN.test(bio)
+    const followGraphMatch = hasFollowGraphTopicSignal(
+      bundle.followGraphLabelSignals?.topic_politics,
+    )
+    const value = keywordMatch || followGraphMatch
     return {
       value,
-      confidence: value ? 0.8 : 0,
-      reason: `bio politics-keyword match=${value}`,
+      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
+      reason: `bio politics-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
     }
   },
 }
