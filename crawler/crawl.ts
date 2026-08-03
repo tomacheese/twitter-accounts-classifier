@@ -127,8 +127,8 @@ export interface CrawlDependencies {
   completeCrawlAccountCheckpoint: (params: CrawlAccountCheckpointParams) => Promise<void>
   clearCrawlAccountCheckpoints: (crawlRunId: string) => Promise<void>
   /**
-   * checkpoint で skip したアカウントでは呼ばない: 放置判定の基準となる生存時刻を、実際に処理を
-   * 試みたアカウントの分だけ進めるため。
+   * checkpoint で skip したアカウントでは呼ばない: 放置判定の基準となる生存時刻を、
+   * 実際に処理を試みたアカウントの分だけ進めるため。
    */
   touchCrawlRunHeartbeat: (crawlRunId: string) => Promise<void>
   /** テスト実行時に `withTwitterRetry` のバックオフや author ループのスリープを実際には待たせないための注入。 */
@@ -144,8 +144,8 @@ function retryOptions(deps: CrawlDependencies): {
 }
 
 /**
- * 呼び出し箇所ごとに個別にラップする: per-author 処理全体で TypeError を捕捉すると、この
- * 既知のライブラリ不具合以外の TypeError まで誤って対象にしてしまうため。
+ * 呼び出し箇所ごとに個別にラップする: per-author 処理全体で TypeError を捕捉すると、
+ * この既知のライブラリ不具合以外の TypeError まで誤って対象にしてしまうため。
  */
 class TimelineUnavailableError extends Error {
   constructor(cause: unknown) {
@@ -170,8 +170,8 @@ async function guardTimelineFetch<T>(fetch: () => Promise<T>): Promise<T> {
 }
 
 /**
- * 想定内のアカウント利用不可 (凍結・削除・鍵アカウント化) は warning に含めない: 日常的に
- * 発生するものまで数えると、本当に調査すべき警告が埋もれてしまうため。
+ * 想定内のアカウント利用不可 (凍結・削除・鍵アカウント化) は warning に含めない: 日常的に発生する
+ * ものまで数えると、本当に調査すべき警告が埋もれてしまうため。
  * @param error - 1 アカウントの処理中に捕捉したエラー
  * @returns 想定内のアカウント利用不可であれば true
  */
@@ -190,8 +190,8 @@ function toErrorMessage(error: unknown): string {
 }
 
 /**
- * 個々の警告の詳細は CrawlAccountRun.warnings に既に保存済みのため、GlitchTip へ送るサマリーには
- * 種類ごとの件数のみを含め、ペイロードを膨らませない。
+ * 個々の警告の詳細は CrawlAccountRun.warnings に既に保存済みのため、
+ * GlitchTip へ送るサマリーには種類ごとの件数のみを含め、ペイロードを膨らませない。
  * @param warnings - 1 アカウントサイクル分の警告
  * @returns 警告種類ごとの件数。0 件の種類は含まない
  */

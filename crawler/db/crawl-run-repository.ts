@@ -13,8 +13,8 @@ export type CrawlWarningType =
   | 'followers_sync_failed'
 
 /**
- * `errorMessage` は元のエラーメッセージだけを保持し、`Error` オブジェクト全体はサーバーログ側
- * に任せる: 永続化される行自体を大きくしすぎないため。
+ * `errorMessage` は元のエラーメッセージだけを保持し、
+ * `Error` オブジェクト全体はサーバーログ側に任せる: 永続化される行自体を大きくしすぎないため。
  */
 export interface CrawlWarning {
   type: CrawlWarningType
@@ -23,9 +23,9 @@ export interface CrawlWarning {
   authorId?: string
   errorMessage: string
   /**
-   * `errorMessage` (JS のエラー文言のみ) では、ライブラリのパース失敗の背後にある実際の
-   * レスポンス形状を後から調査できないため、キャプチャできた場合のみ生の HTTP レスポンス
-   * 本文も保持する (`twitter/response-capture.ts` 参照)。
+   * `errorMessage` (JS のエラー文言のみ) では、
+   * ライブラリのパース失敗の背後にある実際のレスポンス形状を後から調査できないため、
+   * キャプチャできた場合のみ生の HTTP レスポンス本文も保持する。
    */
   rawResponseSnippet?: string
   /** author 処理の ResponseError に限り記録する安全な HTTP 診断情報。 */
@@ -35,9 +35,10 @@ export interface CrawlWarning {
   rateLimitRemaining?: number
   rateLimitReset?: number
   /**
-   * この warning を push した時点の APPLICATION_VERSION。phase 単位の再開 (中断・redeploy を
-   * 挟んで別プロセスが後続 phase を完了するケース) では `CrawlAccountRun.appVersion` (行を最終
-   * 確定させたビルド) と一致しないことがあるため、warning ごとに発生源のビルドを保持する。
+   * この warning を push した時点の APPLICATION_VERSION。
+   * phase 単位の再開 (中断・redeploy を挟んで別プロセスが後続 phase を完了するケース) では
+   * `CrawlAccountRun.appVersion` (行を最終確定させたビルド) と一致しないことがあるため、
+   * warning ごとに発生源のビルドを保持する。
    */
   appVersion?: string
 }
@@ -59,8 +60,8 @@ export interface RecordCrawlAccountRunParams {
   warnings: CrawlWarning[]
   errorMessage: string | null
   /**
-   * crawler image に埋め込まれた APPLICATION_VERSION。値が取れない場合は "unknown"。行を最終
-   * 確定させたビルドを表す — 個々の warning を生んだビルドは `CrawlWarning.appVersion` を見る。
+   * crawler image に埋め込まれた APPLICATION_VERSION。値が取れない場合は "unknown"。
+   * 行を最終確定させたビルドを表す — 個々の warning を生んだビルドは `CrawlWarning.appVersion` を見る。
    */
   appVersion: string
 }
@@ -90,8 +91,8 @@ export interface CrawlRunStartResult {
 }
 
 /**
- * アカウント処理が進む限り定期的に呼び出す必要がある: 放置判定 (startOrResumeCrawlRun) が
- * この値を基準にするため。
+ * アカウント処理が進む限り定期的に呼び出す必要がある:
+ * 放置判定 (startOrResumeCrawlRun) がこの値を基準にするため。
  * @param prisma - Prisma クライアント
  * @param id - 対象の CrawlRun ID
  * @param at - 記録する時刻
@@ -136,8 +137,8 @@ export async function recordCrawlAccountRun(
 }
 
 /**
- * phase の結果を永続化してから checkpoint を記録するため、再開時は存在する phase を
- * 安全に skip できる。
+ * phase の結果を永続化してから checkpoint を記録するため、
+ * 再開時は存在する phase を安全に skip できる。
  * @param prisma - Prisma クライアント
  * @param crawlRunId - 取得対象の crawl run
  * @param username - 設定済みのログインアカウント
@@ -163,8 +164,8 @@ export async function loadCrawlAccountCheckpoints(
 }
 
 /**
- * 停止後に完了済み phase を再実行した場合は、曖昧な 2 件目の checkpoint を作らず
- * 既存 payload を置き換える。
+ * 停止後に完了済み phase を再実行した場合は、
+ * 曖昧な 2 件目の checkpoint を作らず既存 payload を置き換える。
  * @param prisma - Prisma クライアント
  * @param params - checkpoint の識別子と JSON payload
  */
@@ -181,8 +182,8 @@ export async function completeCrawlAccountCheckpoint(
 }
 
 /**
- * 通常の cycle 完了後、再開専用の checkpoint payload と label の重複防止 claim を削除する。予期しない
- * 例外で終了した run は、後続プロセスが再開できるようこれらの状態を維持する。
+ * 通常の cycle 完了後、再開専用の checkpoint payload と label の重複防止 claim を削除する。
+ * 予期しない例外で終了した run は、後続プロセスが再開できるようこれらの状態を維持する。
  * @param prisma - Prisma クライアント
  * @param crawlRunId - 最終化済みの crawl run
  */

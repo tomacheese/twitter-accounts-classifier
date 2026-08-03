@@ -36,8 +36,8 @@ interface LatestLabelRow {
 
 /**
  * 各 (account, rule) ペアの直近の ruleVersion を取得する。
- * `AccountLabel` は追記のみで更新されないため、この集計なしには
- * 最新ラベルが現在のルールバージョンを反映済みかどうか判別できない。
+ * `AccountLabel` は追記のみで更新されないため、
+ * この集計なしには最新ラベルが現在のルールバージョンを反映済みかどうか判別できない。
  * @param prisma - 問い合わせに使う Prisma クライアント
  * @returns `${accountId}:${labelDefinitionId}` から最新の ruleVersion へのマップ
  */
@@ -85,9 +85,8 @@ interface TweetRow {
 
 /**
  * `accountIds` それぞれについて、直近 `limitPerAccount` 件のツイートを1回のクエリで取得する。
- * Prisma のクエリビルダーではアカウントごとに1クエリを発行しない限り
- * 「アカウントごとの上位 N 件」を表現できないため、`ROW_NUMBER()` を使った
- * 生 SQL で取得している。
+ * Prisma のクエリビルダーではアカウントごとに1クエリを発行しない限り「アカウントごとの上位 N 件」を
+ * 表現できないため、`ROW_NUMBER()` を使った生 SQL で取得している。
  * @param prisma - 問い合わせに使う Prisma クライアント
  * @param accountIds - ツイートを取得する対象アカウント
  * @param limitPerAccount - アカウントごとに保持する直近ツイート件数
@@ -124,8 +123,8 @@ async function fetchTweetsForAccounts(
 }
 
 /**
- * アカウント行と取得済みツイートから、ラベルルールが評価する `AccountFeatureBundle` を
- * 組み立てる。通常のクロール時 (`runCrawlCycle`) が作る形と同一にすることで、
+ * アカウント行と取得済みツイートから、ラベルルールが評価する `AccountFeatureBundle` を組み立てる。
+ * 通常のクロール時 (`runCrawlCycle`) が作る形と同一にすることで、
  * ルールがクロール実行時とこの再評価バックフィルとで異なる挙動にならないようにしている。
  * @param account - バンドルを組み立てる対象アカウント
  * @param recentTweets - 取得済みの、このアカウントの直近ツイート
@@ -204,11 +203,11 @@ function isFullyUpToDate(
 }
 
 /**
- * 登録済みの全ラベルルールを全アカウントに対して再評価し、保存済み `ruleVersion` が
- * 古いか未評価の (account, rule) ペアについてのみ新しい `AccountLabel` 行を永続化する。
+ * 登録済みの全ラベルルールを全アカウントに対して再評価し、
+ * 保存済み `ruleVersion` が古いか未評価の (account, rule) ペアについてのみ新しい `AccountLabel` 行を永続化する。
  * 通常のクロールでは対象アカウントが次に再クロールされるまでラベルは再評価されない
- * (ルールのロジック変更に対する自動再評価はない) ため、そのギャップをオンデマンドで
- * 埋める明示的なバックフィル処理。
+ * (ルールのロジック変更に対する自動再評価はない) ため、
+ * そのギャップをオンデマンドで埋める明示的なバックフィル処理。
  * @param prisma - 使用する Prisma クライアント
  * @param registry - 全アカウントに対して評価するラベルルールのレジストリ
  * @param options - 任意の上書き設定 (例: 進捗ログの出力間隔)
@@ -234,10 +233,10 @@ export async function runRelabelBackfill(
   let lastLoggedAt = Date.now()
 
   /**
-   * 前回ログ出力からの処理済みアカウント数が `progressLogIntervalAccounts` を超えた
-   * タイミングで、累計進捗・直近区間の処理速度・残り時間の概算を1行ログ出力する。
-   * 経過時間が MIN_ELAPSED_MINUTES_FOR_RATE 未満の場合は、ゼロ除算や桁溢れした
-   * 速度値を出力しないよう速度算出をスキップし、件数のみ出力する。
+   * 前回ログ出力からの処理済みアカウント数が `progressLogIntervalAccounts` を超えたタイミングで、
+   * 累計進捗・直近区間の処理速度・残り時間の概算を1行ログ出力する。
+   * 経過時間が MIN_ELAPSED_MINUTES_FOR_RATE 未満の場合は、
+   * ゼロ除算や桁溢れした速度値を出力しないよう速度算出をスキップし、件数のみ出力する。
    */
   function logProgressIfDue(): void {
     const processedSinceLastLog = accountsProcessed - lastLoggedAccountsProcessed
