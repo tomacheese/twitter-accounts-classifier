@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { topicVrchatRule } from './topic-vrchat'
 import type { AccountFeatureBundle } from '../types'
 
-function buildBundle(bio: string | null, tweetTexts: string[] = []): AccountFeatureBundle {
+function buildBundle(
+  bio: string | null,
+  tweets: { fullText: string; isRetweet?: boolean }[] = [],
+): AccountFeatureBundle {
   return {
     account: {
       id: '1',
@@ -11,19 +14,19 @@ function buildBundle(bio: string | null, tweetTexts: string[] = []): AccountFeat
       bio,
       followersCount: 0,
       followingCount: 0,
-      tweetCount: tweetTexts.length,
+      tweetCount: tweets.length,
       accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
       isBlueVerified: false,
       verifiedType: null,
     },
-    recentTweets: tweetTexts.map((fullText, index) => ({
+    recentTweets: tweets.map(({ fullText, isRetweet = false }, index) => ({
       id: String(index),
       fullText,
       createdAt: new Date('2020-01-01T00:00:00Z'),
       retweetCount: 0,
       likeCount: 0,
       isReply: false,
-      isRetweet: false,
+      isRetweet,
       isPromoted: false,
       isPaidPromotion: false,
     })),
@@ -50,6 +53,12 @@ describe('topicVrchatRule', () => {
     expect(result.value).toBe(true)
   })
 
+  it('bio にアンダースコアが後続するハンドル名メンションを含む場合は value: true になる', () => {
+    const bundle = buildBundle('フレンドはこちら → @VRC_example')
+    const result = topicVrchatRule.evaluate(bundle)
+    expect(result.value).toBe(true)
+  })
+
   it('bio に俗称「ぶいちゃ」を含む場合は value: true になる', () => {
     const bundle = buildBundle('ぶいちゃ勢です。よろしくお願いします。')
     const result = topicVrchatRule.evaluate(bundle)
@@ -63,13 +72,15 @@ describe('topicVrchatRule', () => {
   })
 
   it('bio は無関係だが直近ツイートに VRChat を含む場合は value: true になる', () => {
-    const bundle = buildBundle('猫が好きです。', ['今日は友達と VRChat で遊びました！'])
+    const bundle = buildBundle('猫が好きです。', [
+      { fullText: '今日は友達と VRChat で遊びました！' },
+    ])
     const result = topicVrchatRule.evaluate(bundle)
     expect(result.value).toBe(true)
   })
 
   it('bio・ツイートのいずれにも VRChat 関連キーワードを含まない場合は value: false になる', () => {
-    const bundle = buildBundle('猫が好きです。', ['今日はカフェに行きました。'])
+    const bundle = buildBundle('猫が好きです。', [{ fullText: '今日はカフェに行きました。' }])
     const result = topicVrchatRule.evaluate(bundle)
     expect(result.value).toBe(false)
     expect(result.confidence).toBe(0)
@@ -82,7 +93,21 @@ describe('topicVrchatRule', () => {
   })
 
   it('bio が null かつツイートにも VRChat キーワードがない場合は value: false になる', () => {
-    const bundle = buildBundle(null, ['今日はカフェに行きました。'])
+    const bundle = buildBundle(null, [{ fullText: '今日はカフェに行きました。' }])
+    const result = topicVrchatRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+  })
+
+  it('VRChat キーワードを含むツイートがリツイートである場合は value: false になる (他アカウントの発言のため)', () => {
+    const bundle = buildBundle('猫が好きです。', [
+      { fullText: '今日は友達と VRChat で遊びました！', isRetweet: true },
+    ])
+    const result = topicVrchatRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+  })
+
+  it('「ぶいちゃん」のように直後に「ん」が続く場合は value: false になる (無関係な固有名詞との誤検知防止)', () => {
+    const bundle = buildBundle('ぶいちゃんという名前の猫を飼っています。')
     const result = topicVrchatRule.evaluate(bundle)
     expect(result.value).toBe(false)
   })
