@@ -26,3 +26,5 @@ export type {
   NormalizedTweetSource,
   ToTweetInputContext,
 } from './mappers'
+export { createBlocksClient, createBlock } from './blocks-client'
+export type { BlocksListPage, BlocksListRawApiLike } from './blocks-client'

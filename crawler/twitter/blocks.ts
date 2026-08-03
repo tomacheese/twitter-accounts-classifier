@@ -1,5 +1,8 @@
-import { toAccountProfileInput, type RawUserResult } from 'twitter-client'
-import type { BlocksListRawApiLike } from './blocks-client'
+import {
+  toAccountProfileInput,
+  type RawUserResult,
+  type BlocksListRawApiLike,
+} from 'twitter-client'
 import type { AccountProfileInput } from '../db/account-repository'
 
 /** `getBlocks` に渡すページサイズ。`follows.ts` の `PAGE_SIZE` と揃える。 */

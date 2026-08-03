@@ -3,10 +3,10 @@ import initCycleTLS, { type CycleTLSClient } from 'cycletls'
 import { createTrendsClient } from './trends-client'
 import {
   wrapFetchWithResponseCapture,
+  createBlocksClient,
   type IssuedCookies,
   type TrendsScraperLike,
 } from 'twitter-client'
-import { createBlocksClient } from './blocks-client'
 import { createBlockListApiLike, type BlockListApiLike } from './blocks'
 
 const CHROME_JA3 =
