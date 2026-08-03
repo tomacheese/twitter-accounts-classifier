@@ -83,11 +83,10 @@ describe('replaceLabelingFollowSample', () => {
 
     await replaceLabelingFollowSample(prisma, 'alice', makeResult(['bob', 'carol']))
 
+    // Account の upsert に失敗した bob は外部キー制約に違反するため、
+    // 挿入対象から除外し carol のみを渡す。
     expect(createMany).toHaveBeenCalledWith({
-      data: [
-        { accountId: 'alice', followeeId: 'bob' },
-        { accountId: 'alice', followeeId: 'carol' },
-      ],
+      data: [{ accountId: 'alice', followeeId: 'carol' }],
       skipDuplicates: true,
     })
   })

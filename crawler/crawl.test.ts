@@ -187,14 +187,21 @@ describe('runCrawlCycle', () => {
     expect(result).toEqual({ ids: [], authors: [], reachedEnd: true })
   })
 
-  it('フォロー先サンプルの取得に失敗した投稿者はスキップされ、クロール全体は継続する', async () => {
+  it('フォロー先サンプルの取得に失敗しても、投稿者本体のラベリングは継続する', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+
     const deps = makeDeps({
       createOpenApiClient: vi.fn().mockResolvedValue({
         client: {
           getTweetApi: () => ({
-            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
           getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
             getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
@@ -210,7 +217,21 @@ describe('runCrawlCycle', () => {
     })
 
     await runCrawlCycle(deps)
+
+    // サンプル取得は失敗として記録されるが、
+    // フォロー先サンプルはラベリング精度を補強する追加シグナルに過ぎないため、
+    // 投稿者本体の persistAccount・persistLabel は通常どおり実行される。
     expect(deps.replaceLabelingFollowSample).not.toHaveBeenCalled()
+    expect(deps.persistAccount).toHaveBeenCalled()
+    expect(deps.persistLabel).toHaveBeenCalled()
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'partial',
+        warnings: expect.arrayContaining([
+          expect.objectContaining({ type: 'labeling_follow_sample_failed' }),
+        ]),
+      }),
+    )
   })
 
   it('passes the registry to ensureLabelDefinitions so every registered rule gets a LabelDefinition', async () => {

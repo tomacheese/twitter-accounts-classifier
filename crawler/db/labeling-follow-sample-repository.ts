@@ -8,13 +8,17 @@ const logger = Logger.configure('labeling-follow-sample-repository')
 // `./follow-repository` の `upsertFollowAuthors` と同様、
 // 1件の不正なプロフィールで残りのフォロー先の反映まで止めてはならないため、
 // アカウントごとに個別に upsert する。
+// upsert に失敗したアカウントの id は戻り値から除外し、
+// 呼び出し元が LabelingFollowSample の外部キー違反を避けられるようにする。
 async function upsertFolloweeAuthors(
   prisma: PrismaClient,
   result: FollowListResult,
-): Promise<void> {
+): Promise<Set<string>> {
+  const upsertedIds = new Set<string>()
   for (const author of result.authors) {
     try {
       await upsertAccount(prisma, author)
+      upsertedIds.add(author.id)
     } catch (error) {
       logger.error(
         `Failed to upsert account ${author.id} while sampling labeling follow edges`,
@@ -22,6 +26,7 @@ async function upsertFolloweeAuthors(
       )
     }
   }
+  return upsertedIds
 }
 
 /**
@@ -37,13 +42,16 @@ export async function replaceLabelingFollowSample(
   accountId: string,
   result: FollowListResult,
 ): Promise<void> {
-  await upsertFolloweeAuthors(prisma, result)
+  const upsertedIds = await upsertFolloweeAuthors(prisma, result)
+  // Account の upsert に失敗した followeeId は外部キー制約に違反するため、
+  // createMany 全体を巻き添えでロールバックさせないようにここで除外する。
+  const followeeIds = result.ids.filter((id) => upsertedIds.has(id))
 
   await prisma.$transaction(async (tx) => {
     await tx.labelingFollowSample.deleteMany({ where: { accountId } })
-    if (result.ids.length > 0) {
+    if (followeeIds.length > 0) {
       await tx.labelingFollowSample.createMany({
-        data: result.ids.map((followeeId) => ({ accountId, followeeId })),
+        data: followeeIds.map((followeeId) => ({ accountId, followeeId })),
         skipDuplicates: true,
       })
     }

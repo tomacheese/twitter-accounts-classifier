@@ -95,7 +95,7 @@ export interface AccountFeatureBundle {
    * 実行開始時点で `AccountLabelLatest` に永続化済みだった値のみを反映する。
    * この値を持たない bundle（多くのルール単体テストなど）では空オブジェクトとして扱う。
    */
-  followGraphLabelSignals?: Record<string, FollowGraphLabelSignal>
+  followGraphLabelSignals?: Record<string, FollowGraphLabelSignal | undefined>
 }
 
 export interface LabelRuleResult {

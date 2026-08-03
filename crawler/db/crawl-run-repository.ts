@@ -12,6 +12,7 @@ export type CrawlWarningType =
   | 'following_sync_failed'
   | 'followers_sync_failed'
   | 'blocks_sync_failed'
+  | 'labeling_follow_sample_failed'
 
 /**
  * `errorMessage` は元のエラーメッセージだけを保持し、

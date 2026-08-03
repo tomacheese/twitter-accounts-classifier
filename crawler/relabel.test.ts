@@ -380,9 +380,8 @@ describe('runRelabelBackfill', () => {
 
     await runRelabelBackfill(prisma, registry)
 
-    // ラベルの真偽値そのものを検証することで、
-    // followGraphLabelSignals が実際に bundle に渡っているかどうかを区別できるようにしている
-    // (永続化の有無は ruleVersion の新旧のみで決まり、evaluate の結果値には依存しないため)。
+    // 永続化の有無は ruleVersion の新旧のみで決まり、evaluate の結果値には依存しないため、
+    // ラベルの真偽値そのものを検証することで followGraphLabelSignals が実際に bundle に渡っているかどうかを区別できるようにしている。
     expect(bulkPersist).toHaveBeenCalledWith('acc1', 1, [true])
   })
 

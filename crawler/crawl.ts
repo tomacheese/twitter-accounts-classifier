@@ -391,16 +391,30 @@ async function runAccountCycleBody(
       profileTweets.push(...recentTweets)
       for (const author of authors) extraAuthors.set(author.id, author)
 
-      const followSample = await withTwitterRetry(
-        () =>
-          fetchFollowing(
-            client.getUserListApi(),
-            authorId,
-            deps.limits.followEdgesPerLabeledAccount,
-          ),
-        retryOptions(deps),
-      )
-      await deps.replaceLabelingFollowSample(authorId, followSample)
+      // フォロー先サンプルの取得はラベリング精度を補強する追加シグナルに過ぎないため、
+      // 失敗してもキーワードベースのラベリングまで止めない。
+      try {
+        const followSample = await withTwitterRetry(
+          () =>
+            fetchFollowing(
+              client.getUserListApi(),
+              authorId,
+              deps.limits.followEdgesPerLabeledAccount,
+            ),
+          retryOptions(deps),
+        )
+        await deps.replaceLabelingFollowSample(authorId, followSample)
+      } catch (error) {
+        const message = `Failed to fetch labeling follow sample for author ${authorId}, continuing without it`
+        logger.error(message, error as Error)
+        warnings.push({
+          type: 'labeling_follow_sample_failed',
+          message,
+          authorId,
+          errorMessage: toErrorMessage(error),
+          appVersion: APP_VERSION,
+        })
+      }
 
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
       // profileTweets は他者に帰属する会話スレッドの文脈ツイートもそのまま保持するが、
@@ -757,6 +771,7 @@ function isCrawlWarning(value: unknown): value is CrawlWarning {
       'following_sync_failed',
       'followers_sync_failed',
       'blocks_sync_failed',
+      'labeling_follow_sample_failed',
     ].includes(value.type as string)
   ) {
     return false
