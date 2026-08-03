@@ -68,11 +68,12 @@ export interface AccountDetail {
 }
 
 const FOLLOW_LIST_LIMIT = 100
+// history の件数を無制限に返すと再ラベリングを繰り返したアカウントほどページの転送量が増え続けるため、上限を設けて打ち切る。
+const LABEL_HISTORY_LIMIT = 20
 
 /**
- * labeledAt 降順の AccountLabel 履歴一覧を labelDefinitionId ごとに集約する。
- * 各グループの先頭 (最新の1件) を代表値とし、2件目以降を history に格納する。
- * @param labels - labeledAt 降順で取得した AccountLabel の一覧 (labelDefinition を含む)
+ * labeledAt 降順、id 降順で取得した AccountLabel の一覧を labelDefinitionId ごとに集約する。
+ * @param labels - labeledAt 降順、id 降順で取得した AccountLabel の一覧 (labelDefinition を含む)
  * @returns ラベルごとに集約された一覧。並び順は各ラベルの最新評価が現れた順を保つ。
  */
 function groupLabelsByDefinition(
@@ -104,6 +105,9 @@ function groupLabelsByDefinition(
       })
       continue
     }
+    if (existing.history.length >= LABEL_HISTORY_LIMIT) {
+      continue
+    }
     existing.history.push({
       value: label.value,
       confidence: label.confidence,
@@ -118,7 +122,7 @@ function groupLabelsByDefinition(
 }
 
 /**
- * ラベルごとに最新評価と、それ以前の再評価履歴 (history) を分けて返す。
+ * アカウントの詳細情報を取得する。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param accountId - アカウントの ID
  * @param tweetLimit - 含める直近ツイートの最大件数
@@ -146,7 +150,8 @@ export async function getAccountDetail(
   ] = await Promise.all([
     prisma.accountLabel.findMany({
       where: { accountId },
-      orderBy: { labeledAt: 'desc' },
+      // 再ラベリングが短時間に連続すると labeledAt が同一になりうるため、id をタイブレークにして順序を固定する。
+      orderBy: [{ labeledAt: 'desc' }, { id: 'desc' }],
       include: { labelDefinition: true },
     }),
     prisma.tweet.findMany({

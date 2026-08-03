@@ -238,6 +238,12 @@ describe('getAccountDetail', () => {
     expect(tweetFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { accountId: 'a1' }, take: 10 }),
     )
+    expect(labelFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { accountId: 'a1' },
+        orderBy: [{ labeledAt: 'desc' }, { id: 'desc' }],
+      }),
+    )
   })
 
   it('returns empty following/followers lists when no edges are recorded', async () => {
@@ -353,5 +359,49 @@ describe('getAccountDetail', () => {
         orderBy: [{ lastSeenAt: 'desc' }, { blockedId: 'asc' }],
       }),
     )
+  })
+
+  it('caps a single label history at 20 entries even when more evaluations exist', async () => {
+    const account = {
+      id: 'a5',
+      screenName: 'erin',
+      displayName: 'Erin',
+      bio: null,
+      profileImageUrl: null,
+      followersCount: 0,
+      followingCount: 0,
+      tweetCount: 0,
+      accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
+      isBlueVerified: false,
+      verifiedType: null,
+    }
+    const evaluations = Array.from({ length: 25 }, (_, index) => ({
+      value: true,
+      confidence: 0.9,
+      reason: `evaluation ${index}`,
+      method: 'heuristic',
+      ruleVersion: '1.0.0',
+      labeledAt: new Date(2026, 6, 25 - index),
+      labelDefinitionId: 'ld-spam',
+      labelDefinition: { key: 'spam' },
+    }))
+    const prisma = {
+      account: { findUnique: vi.fn().mockResolvedValue(account) },
+      accountLabel: { findMany: vi.fn().mockResolvedValue(evaluations) },
+      tweet: { findMany: vi.fn().mockResolvedValue([]) },
+      follow: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+      block: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+    } as unknown as PrismaClient
+
+    const result = await getAccountDetail(prisma, 'a5', 10)
+
+    expect(result?.labels).toHaveLength(1)
+    expect(result?.labels[0].history).toHaveLength(20)
   })
 })

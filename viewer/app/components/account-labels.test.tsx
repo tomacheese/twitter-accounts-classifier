@@ -32,6 +32,7 @@ describe('AccountLabels', () => {
 
     expect(html).toContain('spam')
     expect(html).toContain('matches keyword')
+    expect(html).not.toContain('<details>')
   })
 
   it('collapses evaluated-but-inactive (value=false) labels behind a details element', () => {

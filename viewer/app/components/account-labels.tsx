@@ -8,19 +8,12 @@ const BADGE_STYLES = {
 } as const
 
 /**
- * ラベル1件分のカードを描画する。value=true (適用中) と value=false (評価済み・非該当)
- * のどちらでも同じ構造を使い、バッジの配色だけ tone で切り替える。
- * @param props.label - 表示するラベル (最新評価と再評価履歴を含む)
- * @param props.tone - バッジの配色 ('applied' は適用中、'inactive' は評価済み・非該当)
- * @returns ラベル1件分のカード
+ * ラベル 1 件分のカードを描画する。
+ * @param props - 表示するラベル (最新評価と再評価履歴を含む)
+ * @returns ラベル 1 件分のカード
  */
-function LabelCard({
-  label,
-  tone,
-}: {
-  label: AccountDetailLabel
-  tone: keyof typeof BADGE_STYLES
-}): React.ReactElement {
+function LabelCard({ label }: { label: AccountDetailLabel }): React.ReactElement {
+  const tone: keyof typeof BADGE_STYLES = label.value ? 'applied' : 'inactive'
   return (
     <li className="rounded-lg border bg-white p-3 text-sm shadow-sm dark:border-gray-700 dark:bg-gray-800">
       <p className="font-medium">
@@ -60,10 +53,8 @@ function LabelCard({
 }
 
 /**
- * アカウント詳細ページのラベル一覧を表示する。value=true (適用中) は常に展開表示し、
- * value=false (評価済み・非該当) は既定で折りたたんだ details にまとめることで、
- * ラベル定義数が多いアカウントでも見たい情報にすぐ到達できるようにする。
- * @param props.labels - 表示するラベルの一覧 (labelDefinitionId ごとに集約済み)
+ * アカウント詳細ページのラベル一覧を表示する。
+ * @param props - 表示するラベルの一覧 (labelDefinitionId ごとに集約済み)
  * @returns ラベル一覧セクションの中身
  */
 export function AccountLabels({ labels }: { labels: AccountDetailLabel[] }): React.ReactElement {
@@ -83,7 +74,7 @@ export function AccountLabels({ labels }: { labels: AccountDetailLabel[] }): Rea
       {applied.length > 0 && (
         <ul className="flex flex-col gap-2">
           {applied.map((label) => (
-            <LabelCard key={label.labelKey} label={label} tone="applied" />
+            <LabelCard key={label.labelKey} label={label} />
           ))}
         </ul>
       )}
@@ -94,7 +85,7 @@ export function AccountLabels({ labels }: { labels: AccountDetailLabel[] }): Rea
           </summary>
           <ul className="mt-2 flex flex-col gap-2">
             {inactive.map((label) => (
-              <LabelCard key={label.labelKey} label={label} tone="inactive" />
+              <LabelCard key={label.labelKey} label={label} />
             ))}
           </ul>
         </details>
