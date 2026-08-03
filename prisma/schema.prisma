@@ -134,6 +134,10 @@ model AccountLabelLatest {
   labelDefinitionId String
   labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
   value             Boolean
+  confidence        Float
+  reason            String
+  method            String
+  ruleVersion       String
   labeledAt         DateTime
 
   @@id([accountId, labelDefinitionId])
