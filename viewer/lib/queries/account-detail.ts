@@ -71,17 +71,19 @@ const FOLLOW_LIST_LIMIT = 100
 // history の件数を無制限に返すと再ラベリングを繰り返したアカウントほどページの転送量が増え続けるため、上限を設けて打ち切る。
 const LABEL_HISTORY_LIMIT = 20
 // ラベルルールが true/false を繰り返した場合でも 1 アカウントのページ読み込みが際限なく重くならないための防御的な上限。
+// AccountLabel には変化があった評価のみ記録されるため、この上限は history の長さを打ち切るだけであり、
+// 現在値 (labels[].value 等) は AccountLabelLatest から取得するため影響を受けない。
 const ACCOUNT_LABEL_FETCH_LIMIT = 2000
 
 /**
- * labeledAt 降順、id 降順で取得した AccountLabel の一覧を labelDefinitionId ごとに集約する。
- * @param labels - labeledAt 降順、id 降順で取得した AccountLabel の一覧 (labelDefinition を含む)
- * @returns ラベルごとに集約された一覧。並び順は各ラベルの最新評価が現れた順を保つ。
+ * labeledAt 降順、id 降順で取得した AccountLabel の一覧から、labelDefinitionId ごとの history を組み立てる。
+ * 各ラベルの最新行 (AccountLabelLatest の現在値と重複する) は除外し、それより前の変化のみを保持する。
+ * @param labels - labeledAt 降順、id 降順で取得した AccountLabel の一覧
+ * @returns labelDefinitionId から history 配列へのマップ
  */
-function groupLabelsByDefinition(
+function buildLabelHistoryByDefinition(
   labels: {
     labelDefinitionId: string
-    labelDefinition: { key: string }
     value: boolean
     confidence: number
     reason: string
@@ -89,28 +91,24 @@ function groupLabelsByDefinition(
     ruleVersion: string
     labeledAt: Date
   }[],
-): AccountDetailLabel[] {
-  const grouped = new Map<string, AccountDetailLabel>()
+): Map<string, AccountDetailLabelHistoryEntry[]> {
+  const historyByDefinition = new Map<string, AccountDetailLabelHistoryEntry[]>()
+  const seenMostRecent = new Set<string>()
 
   for (const label of labels) {
-    const existing = grouped.get(label.labelDefinitionId)
-    if (!existing) {
-      grouped.set(label.labelDefinitionId, {
-        labelKey: label.labelDefinition.key,
-        value: label.value,
-        confidence: label.confidence,
-        reason: label.reason,
-        method: label.method,
-        ruleVersion: label.ruleVersion,
-        labeledAt: label.labeledAt,
-        history: [],
-      })
+    if (!seenMostRecent.has(label.labelDefinitionId)) {
+      seenMostRecent.add(label.labelDefinitionId)
       continue
     }
-    if (existing.history.length >= LABEL_HISTORY_LIMIT) {
+    let history = historyByDefinition.get(label.labelDefinitionId)
+    if (!history) {
+      history = []
+      historyByDefinition.set(label.labelDefinitionId, history)
+    }
+    if (history.length >= LABEL_HISTORY_LIMIT) {
       continue
     }
-    existing.history.push({
+    history.push({
       value: label.value,
       confidence: label.confidence,
       reason: label.reason,
@@ -120,7 +118,48 @@ function groupLabelsByDefinition(
     })
   }
 
-  return [...grouped.values()]
+  return historyByDefinition
+}
+
+/**
+ * AccountLabelLatest の現在値一覧に、対応する history を組み合わせてラベル一覧を組み立てる。
+ * @param latestLabels - labeledAt 降順で取得した AccountLabelLatest の一覧 (labelDefinition を含む)
+ * @param historyRows - labeledAt 降順、id 降順で取得した AccountLabel の一覧
+ * @returns ラベルごとに集約された一覧。並び順は AccountLabelLatest の並び順を保つ。
+ */
+function groupLabelsByDefinition(
+  latestLabels: {
+    labelDefinitionId: string
+    labelDefinition: { key: string }
+    value: boolean
+    confidence: number
+    reason: string
+    method: string
+    ruleVersion: string
+    labeledAt: Date
+  }[],
+  historyRows: {
+    labelDefinitionId: string
+    value: boolean
+    confidence: number
+    reason: string
+    method: string
+    ruleVersion: string
+    labeledAt: Date
+  }[],
+): AccountDetailLabel[] {
+  const historyByDefinition = buildLabelHistoryByDefinition(historyRows)
+
+  return latestLabels.map((label) => ({
+    labelKey: label.labelDefinition.key,
+    value: label.value,
+    confidence: label.confidence,
+    reason: label.reason,
+    method: label.method,
+    ruleVersion: label.ruleVersion,
+    labeledAt: label.labeledAt,
+    history: historyByDefinition.get(label.labelDefinitionId) ?? [],
+  }))
 }
 
 /**
@@ -141,7 +180,8 @@ export async function getAccountDetail(
   }
 
   const [
-    labels,
+    latestLabels,
+    labelHistoryRows,
     tweets,
     followingEdges,
     followingCount,
@@ -150,12 +190,16 @@ export async function getAccountDetail(
     blockedEdges,
     blockedCount,
   ] = await Promise.all([
+    prisma.accountLabelLatest.findMany({
+      where: { accountId },
+      orderBy: { labeledAt: 'desc' },
+      include: { labelDefinition: true },
+    }),
     prisma.accountLabel.findMany({
       where: { accountId },
       // 再ラベリングが短時間に連続すると labeledAt が同一になりうるため、id をタイブレークにして順序を固定する。
       orderBy: [{ labeledAt: 'desc' }, { id: 'desc' }],
       take: ACCOUNT_LABEL_FETCH_LIMIT,
-      include: { labelDefinition: true },
     }),
     prisma.tweet.findMany({
       where: { accountId },
@@ -200,7 +244,7 @@ export async function getAccountDetail(
       isBlueVerified: account.isBlueVerified,
       verifiedType: account.verifiedType,
     },
-    labels: groupLabelsByDefinition(labels),
+    labels: groupLabelsByDefinition(latestLabels, labelHistoryRows),
     recentTweets: tweets.map((tweet) => ({
       id: tweet.id,
       fullText: tweet.fullText,
