@@ -127,8 +127,8 @@ export default async function CrawlRunDetailPage({
             <div>
               <dt className="text-gray-500 dark:text-gray-400">Currently processing</dt>
               <dd>
-                @{run.currentUsername} (
-                {formatDuration(run.currentAccountStartedAt, new Date())} elapsed)
+                @{run.currentUsername} ({formatDuration(run.currentAccountStartedAt, new Date())}{' '}
+                elapsed)
               </dd>
             </div>
           )}

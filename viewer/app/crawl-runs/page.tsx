@@ -50,12 +50,14 @@ export default async function CrawlRunsPage(): Promise<React.ReactElement> {
                   <td className="p-3">
                     <div className="flex items-center gap-2">
                       <StatusBadge status={run.status} />
-                      {run.status === 'running' && run.currentUsername && run.currentAccountStartedAt && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          → @{run.currentUsername} (
-                          {formatDuration(run.currentAccountStartedAt, new Date())} elapsed)
-                        </span>
-                      )}
+                      {run.status === 'running' &&
+                        run.currentUsername &&
+                        run.currentAccountStartedAt && (
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            → @{run.currentUsername} (
+                            {formatDuration(run.currentAccountStartedAt, new Date())} elapsed)
+                          </span>
+                        )}
                     </div>
                   </td>
                   <td className="p-3">{run.accountRunCount.toLocaleString()}</td>
