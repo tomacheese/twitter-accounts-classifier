@@ -41,6 +41,8 @@ interface LatestLabelsSummary {
  * statement_timeout は、
  * クエリが詰まった場合にプールの枠を占有し続けて枯渇を招くのを防ぐために設定している
  * (`AccountLabelLatest` の設計意図は prisma/schema.prisma の該当コメントを参照)。
+ * 60秒への引き上げは、テーブル増大によりクエリ所要時間が旧設定の15秒を上回るようになったための対応であり、
+ * プール枠の占有時間が延びるトレードオフは、下記のバックグラウンド更新でコールドクエリの発生頻度自体を減らすことで許容している。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ラベル付けずみアカウント数とラベル分布
  */
@@ -93,21 +95,15 @@ const CACHE_TTL_MS = 15 * 60 * 1000
 let cached: { promise: Promise<LatestLabelsSummary>; expiresAt: number } | undefined
 
 /**
- * 解決済みの値だけでなく実行中の promise 自体もキャッシュすることで、
- * getDashboardKpis と getLabelDistribution を Promise.all で同時に呼んでも、
- * 実際のクエリは1回にまとめられる。
- * 失敗したクエリはキャッシュしないため、次回呼び出し時は TTL 内であっても DB へ再試行する。
+ * TTL の有無にかかわらず必ず DB へ問い合わせ、その結果でキャッシュを上書きする。
+ * バックグラウンドでの定期更新は、まだ有効なキャッシュを使い回されると更新にならないため、
+ * getLatestLabelsSummary の TTL チェックを経由しないこの関数を直接呼ぶ必要がある。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ラベル付けずみアカウント数とラベル分布
  */
-function getLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSummary> {
-  const now = Date.now()
-  if (cached && cached.expiresAt > now) {
-    return cached.promise
-  }
-
+function refreshLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSummary> {
   const promise = queryLatestLabelsSummary(prisma)
-  const entry = { promise, expiresAt: now + CACHE_TTL_MS }
+  const entry = { promise, expiresAt: Date.now() + CACHE_TTL_MS }
   cached = entry
   promise.catch(() => {
     if (cached === entry) {
@@ -118,27 +114,54 @@ function getLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSumma
   return promise
 }
 
+/**
+ * 解決済みの値だけでなく実行中の promise 自体もキャッシュすることで、
+ * getDashboardKpis と getLabelDistribution を Promise.all で同時に呼んでも、
+ * 実際のクエリは1回にまとめられる。
+ * 更新中のキャッシュを使い回す(stale-while-revalidate)実装にはしていない。
+ * 更新の頻度自体をバックグラウンドの定期更新で抑えているため、
+ * 更新中の待ち時間は許容できると判断している。
+ * 失敗したクエリはキャッシュしないため、次回呼び出し時は TTL 内であっても DB へ再試行する。
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @returns ラベル付けずみアカウント数とラベル分布
+ */
+function getLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSummary> {
+  const now = Date.now()
+  if (cached && cached.expiresAt > now) {
+    return cached.promise
+  }
+
+  return refreshLatestLabelsSummary(prisma)
+}
+
 /** キャッシュの TTL 切れの何ミリ秒前にバックグラウンド更新を行うか。1分。 */
 const WARM_BEFORE_EXPIRY_MS = 60 * 1000
 
 let warmingStarted = false
 
 /**
- * ダッシュボードのラベル集計キャッシュを、TTL 切れの直前に定期的にバックグラウンド更新し続ける。
- * ユーザーのアクセス有無によらずキャッシュを温かく保つことで、
- * TTL 切れ直後の最初のリクエストがコールドキャッシュの重いクエリを踏むのを防ぐ。
- * 同一プロセス内で複数回呼び出されても、実際にタイマーを登録するのは最初の1回だけにする。
+ * @param prisma - クエリを実行する Prisma クライアント
+ */
+function warmLatestLabelsSummary(prisma: PrismaClient): void {
+  refreshLatestLabelsSummary(prisma).catch((error: unknown) => {
+    console.error('Failed to warm dashboard label summary cache:', error)
+    captureException(error, { source: 'startLatestLabelsSummaryWarming' })
+  })
+}
+
+/**
+ * setInterval だけでは、起動直後の1周期分と、TTL 切れの直前1分間だけキャッシュが有効なままの周期とで、
+ * ユーザーのアクセスがコールドキャッシュの重いクエリを踏む隙間が残る。
+ * このため起動直後に即時実行し、以降は TTL チェックを経由しない強制更新を周期実行する。
  * @param prisma - クエリを実行する Prisma クライアント
  */
 export function startLatestLabelsSummaryWarming(prisma: PrismaClient): void {
   if (warmingStarted) return
   warmingStarted = true
 
+  warmLatestLabelsSummary(prisma)
   const timer = setInterval(() => {
-    getLatestLabelsSummary(prisma).catch((error: unknown) => {
-      console.error('Failed to warm dashboard label summary cache:', error)
-      captureException(error)
-    })
+    warmLatestLabelsSummary(prisma)
   }, CACHE_TTL_MS - WARM_BEFORE_EXPIRY_MS)
   timer.unref()
 }

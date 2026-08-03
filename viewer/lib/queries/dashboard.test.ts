@@ -209,14 +209,36 @@ describe('startLatestLabelsSummaryWarming', () => {
     vi.useRealTimers()
   })
 
-  it('warms the cache by re-querying shortly before the TTL expires', async () => {
+  it('warms the cache immediately on start, without waiting for the first tick', async () => {
+    const { startLatestLabelsSummaryWarming } = await import('./dashboard')
+    const prisma = createMockPrisma([SAMPLE_ROW])
+
+    startLatestLabelsSummaryWarming(prisma)
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('forces a fresh query on every tick, even though the cache is still within its TTL', async () => {
     const { startLatestLabelsSummaryWarming } = await import('./dashboard')
     const prisma = createMockPrisma([SAMPLE_ROW])
 
     startLatestLabelsSummaryWarming(prisma)
     await vi.advanceTimersByTimeAsync(14 * 60 * 1000)
+    await vi.advanceTimersByTimeAsync(14 * 60 * 1000)
+    await vi.advanceTimersByTimeAsync(14 * 60 * 1000)
 
-    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+    expect(prisma.$transaction).toHaveBeenCalledTimes(4)
+  })
+
+  it('keeps the cache warm through the window where the previous tick period alone would have left it expired', async () => {
+    const { startLatestLabelsSummaryWarming, getLabelDistribution } = await import('./dashboard')
+    const prisma = createMockPrisma([SAMPLE_ROW])
+
+    startLatestLabelsSummaryWarming(prisma)
+    await vi.advanceTimersByTimeAsync(35 * 60 * 1000)
+    await getLabelDistribution(prisma)
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(3)
   })
 
   it('logs and reports a failed warming query but keeps retrying on the next tick', async () => {
@@ -227,13 +249,15 @@ describe('startLatestLabelsSummaryWarming', () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
     startLatestLabelsSummaryWarming(prisma)
-    await vi.advanceTimersByTimeAsync(14 * 60 * 1000)
+    await vi.advanceTimersByTimeAsync(0)
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       'Failed to warm dashboard label summary cache:',
       expect.any(Error),
     )
-    expect(captureException).toHaveBeenCalledWith(expect.any(Error))
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error), {
+      source: 'startLatestLabelsSummaryWarming',
+    })
 
     await vi.advanceTimersByTimeAsync(14 * 60 * 1000)
 
@@ -247,7 +271,6 @@ describe('startLatestLabelsSummaryWarming', () => {
 
     startLatestLabelsSummaryWarming(prisma)
     startLatestLabelsSummaryWarming(prisma)
-    await vi.advanceTimersByTimeAsync(14 * 60 * 1000)
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1)
   })
