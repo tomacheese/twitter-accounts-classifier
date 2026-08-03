@@ -6,6 +6,7 @@ import {
   finishCrawlRun,
   loadCrawlAccountCheckpoints,
   recordCrawlAccountRun,
+  setCurrentAccount,
   startOrResumeCrawlRun,
   touchCrawlRunHeartbeat,
 } from './crawl-run-repository'
@@ -101,7 +102,12 @@ describe('startOrResumeCrawlRun', () => {
     expect(result).toEqual({ id: 'new-run', latestAccountStatuses: new Map() })
     expect(update).toHaveBeenCalledWith({
       where: { id: 'abandoned-run' },
-      data: { finishedAt: lastHeartbeatAt, status: 'failed' },
+      data: {
+        finishedAt: lastHeartbeatAt,
+        status: 'failed',
+        currentUsername: null,
+        currentAccountStartedAt: null,
+      },
     })
     expect(deleteCheckpoints).toHaveBeenCalledWith({ where: { crawlRunId: 'abandoned-run' } })
     expect(deleteLabelClaims).toHaveBeenCalledWith({ where: { crawlRunId: 'abandoned-run' } })
@@ -146,7 +152,7 @@ describe('touchCrawlRunHeartbeat', () => {
 })
 
 describe('finishCrawlRun', () => {
-  it('updates finishedAt and status for the given run id', async () => {
+  it('updates finishedAt, status, and clears the current-account fields', async () => {
     const update = vi.fn().mockResolvedValue({})
     const prisma = { crawlRun: { update } } as unknown as PrismaClient
     const finishedAt = new Date('2026-07-28T01:00:00Z')
@@ -155,7 +161,27 @@ describe('finishCrawlRun', () => {
 
     expect(update).toHaveBeenCalledWith({
       where: { id: 'run1' },
-      data: { finishedAt, status: 'partial' },
+      data: {
+        finishedAt,
+        status: 'partial',
+        currentUsername: null,
+        currentAccountStartedAt: null,
+      },
+    })
+  })
+})
+
+describe('setCurrentAccount', () => {
+  it('updates the current-account fields for the given run id', async () => {
+    const update = vi.fn().mockResolvedValue({})
+    const prisma = { crawlRun: { update } } as unknown as PrismaClient
+    const startedAt = new Date('2026-07-28T00:10:00Z')
+
+    await setCurrentAccount(prisma, 'run1', 'alice', startedAt)
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'run1' },
+      data: { currentUsername: 'alice', currentAccountStartedAt: startedAt },
     })
   })
 })
