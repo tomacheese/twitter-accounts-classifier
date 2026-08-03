@@ -58,8 +58,9 @@ function makePrisma(overrides: {
       const ids = values[0] as string[]
       const accountIds = values[1] as string[]
       const labelDefinitionIds = values[2] as string[]
+      const resultValues = values[3] as boolean[]
       const accountId = accountIds[0]
-      bulkPersist(accountId, ids.length)
+      bulkPersist(accountId, ids.length, resultValues)
       return (
         overrides.bulkPersistImpl?.(accountId, ids.length) ??
         Promise.resolve(
@@ -104,7 +105,7 @@ describe('runRelabelBackfill', () => {
     const result = await runRelabelBackfill(prisma, registry)
 
     expect(bulkPersist).toHaveBeenCalledTimes(1)
-    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1)
+    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1, [true])
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 1 })
   })
 
@@ -221,7 +222,7 @@ describe('runRelabelBackfill', () => {
     const result = await runRelabelBackfill(prisma, registry)
 
     expect(bulkPersist).toHaveBeenCalledTimes(1)
-    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1)
+    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1, [true])
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 1 })
   })
 
@@ -378,7 +379,10 @@ describe('runRelabelBackfill', () => {
 
     await runRelabelBackfill(prisma, registry)
 
-    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1)
+    // ラベルの真偽値そのものを検証することで、
+    // followGraphLabelSignals が実際に bundle に渡っているかどうかを区別できるようにしている
+    // (永続化の有無は ruleVersion の新旧のみで決まり、evaluate の結果値には依存しないため)。
+    expect(bulkPersist).toHaveBeenCalledWith('acc1', 1, [true])
   })
 
   describe('progress logging', () => {
