@@ -125,6 +125,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       .fn()
       .mockResolvedValue(new Map([['verified_blue_individual', 'ld1']])),
     loadReplyCorpus: vi.fn().mockResolvedValue([]),
+    loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
     persistLabel: vi.fn().mockResolvedValue(undefined),
     syncFollowing: vi.fn().mockResolvedValue(undefined),
     syncFollowers: vi.fn().mockResolvedValue(undefined),
@@ -455,6 +456,39 @@ describe('runCrawlCycle', () => {
       .map((call) => call[0])
       .find((bundle) => bundle.account.id === 'author1')
     expect(bundleForAuthor?.replyHijackSwarmSize).toBe(5)
+
+    applyAllSpy.mockRestore()
+  })
+
+  it('labelDefinitionIds を loadFollowGraphLabelIndex に渡し、bundle に followGraphLabelSignals を設定する', async () => {
+    const signalsFor = vi.fn().mockReturnValue({
+      topic_food: {
+        followeeLabeledCount: 5,
+        followeeTotalCount: 15,
+        followerLabeledCount: 0,
+        followerTotalCount: 0,
+      },
+    })
+    const applyAllSpy = vi.spyOn(LabelRuleRegistry.prototype, 'applyAll')
+    const deps = makeDeps({
+      loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(signalsFor).toHaveBeenCalled()
+    const bundles = applyAllSpy.mock.calls.map((call) => call[0])
+    expect(bundles.length).toBeGreaterThan(0)
+    for (const bundle of bundles) {
+      expect(bundle.followGraphLabelSignals).toEqual({
+        topic_food: {
+          followeeLabeledCount: 5,
+          followeeTotalCount: 15,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      })
+    }
 
     applyAllSpy.mockRestore()
   })

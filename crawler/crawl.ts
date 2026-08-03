@@ -18,6 +18,10 @@ import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import { buildReplyHijackIndex, type ReplyHijackCorpusEntry } from './labels/reply-hijack-index'
+import {
+  buildFollowGraphLabelIndex,
+  type FollowGraphLabelIndex,
+} from './labels/follow-graph-label-index'
 import { createCookieIssuerClient, type IssuedCookies } from './auth/cookie-issuer-client'
 import { getLastResponseMatching } from './twitter/response-capture'
 import {
@@ -109,6 +113,9 @@ export interface CrawlDependencies {
   persistTweets: (inputs: TweetInput[]) => Promise<void>
   ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
   loadReplyCorpus: () => Promise<ReplyHijackCorpusEntry[]>
+  loadFollowGraphLabelIndex: (
+    labelDefinitionIds: Map<string, string>,
+  ) => Promise<FollowGraphLabelIndex>
   persistLabel: (params: {
     crawlRunId: string
     username: string
@@ -307,6 +314,7 @@ async function runAccountCycleBody(
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
+  followGraphLabelIndex: FollowGraphLabelIndex,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
   timelineSnapshot: TimelineSnapshot,
@@ -447,6 +455,7 @@ async function runAccountCycleBody(
         })),
         templatedReplyNetworkSize,
         replyHijackSwarmSize,
+        followGraphLabelSignals: followGraphLabelIndex.signalsFor(profile.id),
       }
 
       for (const { rule, result } of registry.applyAll(bundle)) {
@@ -911,6 +920,7 @@ async function runAccountCycle(
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
+  followGraphLabelIndex: FollowGraphLabelIndex,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
 ): Promise<'success' | 'partial'> {
@@ -961,6 +971,7 @@ async function runAccountCycle(
               labelDefinitionIds,
               duplicateReplyIndex,
               replyHijackIndex,
+              followGraphLabelIndex,
               account,
               crawlRunId,
               timelineSnapshot,
@@ -1097,6 +1108,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   const registry = new LabelRuleRegistry()
   for (const rule of ALL_LABEL_RULES) registry.register(rule)
   const labelDefinitionIds = await deps.ensureLabelDefinitions(registry)
+  const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(labelDefinitionIds)
   // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
   // アカウントごとではなくサイクルごとに 1 回だけ構築する。
   const replyCorpus = await deps.loadReplyCorpus()
@@ -1125,6 +1137,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
           labelDefinitionIds,
           duplicateReplyIndex,
           replyHijackIndex,
+          followGraphLabelIndex,
           account,
           crawlRunId,
         )
@@ -1220,6 +1233,8 @@ async function main(): Promise<void> {
     },
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: () => loadReplyCorpus(prisma),
+    loadFollowGraphLabelIndex: (labelDefinitionIds) =>
+      buildFollowGraphLabelIndex(prisma, labelDefinitionIds),
     persistLabel: async (params) => {
       await recordCrawlAccountLabel(prisma, params)
     },
