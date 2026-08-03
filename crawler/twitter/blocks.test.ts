@@ -80,9 +80,8 @@ describe('fetchBlocks', () => {
   })
 
   it('marks reachedEnd false when the cursor-exhausting page also overshoots the limit', async () => {
-    // limit (2) は最初のページ (3 件) の内側に収まるが、そのページはカーソルも尽きている
-    // (nextCursor なし) - 切り捨てられた末尾 (id '3') を呼び出し側の prune 処理が
-    // 「もう存在しない」と誤解してはならない。
+    // limit (2) は最初のページ (3 件) の内側に収まるが、そのページはカーソルも尽きている (nextCursor なし)。
+    // 切り捨てられた末尾 (id '3') を呼び出し側の prune 処理が「もう存在しない」と誤解してはならない。
     const getBlocks = vi.fn().mockResolvedValueOnce(page(['1', '2', '3'], undefined))
     const client: BlockListApiLike = { getBlocks }
 

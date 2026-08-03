@@ -3,9 +3,8 @@ import type { IssuedCookies } from '../auth/cookie-issuer-client'
 import type { RawUserResult } from './mappers'
 
 /**
- * "BlockedAccountsAll" 操作の GraphQL persisted query id。`twitter-openapi-typescript` には
- * このエンドポイントに対応するメソッドが存在しないため、id・名前は X の配信済み Web クライアント
- * バンドルを直接読み、実際に一度認証済みリクエストを送って確認した。
+ * "BlockedAccountsAll" 操作の GraphQL persisted query id。
+ * `twitter-openapi-typescript` にはこのエンドポイントに対応するメソッドが存在しないため、X の配信済み Web クライアントバンドルから直接値を採取している。
  */
 const BLOCKS_QUERY_ID = '5oNXfRkE7HVkDX1Fd1gn3g'
 const BLOCKS_OPERATION_NAME = 'BlockedAccountsAll'
@@ -22,10 +21,8 @@ export interface BlocksListRawApiLike {
 
 /**
  * `BlockedAccountsAll` の Timeline レスポンスに含まれる、正規化前のユーザーエントリの形。
- * `twitter-openapi-typescript` を経由しないリクエストなので、JSON はライブラリの camelCase な
- * `TweetApiUtilsData['user']` ではなく X の実際の snake_case ワイヤーフォーマットのまま届く。
- * `rest_id` は任意: 凍結・削除済みのブロック対象アカウントは `rest_id` を持たない
- * `UserUnavailable` 結果として返ってくるが、オブジェクト自体は truthy のまま届く。
+ * `twitter-openapi-typescript` を経由しないため、JSON は X の実際の snake_case ワイヤーフォーマットのまま届く。
+ * `rest_id` が任意なのは、凍結・削除済みのブロック対象アカウントは `rest_id` を持たない `UserUnavailable` として返ってくるため。
  */
 interface RawTimelineUser {
   rest_id?: string
@@ -50,9 +47,8 @@ interface RawTimelineUser {
 }
 
 /**
- * Timeline エントリ 1 件分の形。`content.itemContent` は、このエンドポイントの実レスポンスで
- * 実際に観測した 2 つの形をどちらもカバーする: ユーザー行 (`user_results`)、または末尾カーソルが
- * 独立した top-level エントリではなく `TimelineTimelineItem` の中に入れ子で届く場合。
+ * Timeline エントリ 1 件分の形。
+ * `content.itemContent` は、ユーザー行 (`user_results`) の場合と、末尾カーソルが独立した top-level エントリではなく `TimelineTimelineItem` に入れ子で届く場合の両方をカバーする。
  */
 interface RawTimelineEntry {
   entryId: string
@@ -70,8 +66,8 @@ interface RawTimelineEntry {
 }
 
 /**
- * Timeline instruction 1 件分の形。`entry` (単数) は `TimelineReplaceEntry` をカバーするための
- * フィールドで、一部の instruction 種別は複数形の `entries` 配列の代わりにこちらを使う。
+ * Timeline instruction 1 件分の形。
+ * `entry` (単数) は、一部の instruction 種別が複数形の `entries` 配列の代わりに使う `TimelineReplaceEntry` などをカバーするためのフィールド。
  */
 interface RawTimelineInstruction {
   entries?: RawTimelineEntry[]
@@ -88,12 +84,7 @@ interface BlockedAccountsAllResponse {
 }
 
 /**
- * `BlockedAccountsAll` の生の Timeline ユーザーエントリを `./mappers` が期待する
- * `RawUserResult` の形に変換する。`./timeline.ts` の `toRawUserResult` を踏襲しつつ、
- * snake_case のワイヤーフォーマットを直接読むように調整している ({@link RawTimelineUser}
- * 直前の注記を参照)。screen_name/name/created_at は `core` が `legacy` より優先されるが、
- * `description` に対応する `core` フィールドは存在しないため `profile_bio` -> `legacy` の順で
- * フォールバックする。
+ * `description` に対応する `core` フィールドが存在しないため、`profile_bio` -> `legacy` の順でフォールバックする。
  * @param user - `rest_id` を持つことが確認済みの、レスポンス内の 1 ユーザーエントリ
  * @returns `RawUserResult` の形に変換した同じユーザー
  */
@@ -120,9 +111,7 @@ function toRawUserResult(user: RawTimelineUser & { rest_id: string }): RawUserRe
 }
 
 /**
- * ひとつの Timeline instruction が持つ entry 群を返す。複数件なら配列の `entries`、
- * 単一件なら `entry` (`TimelineReplaceEntry` など) と、instruction によってフィールド名が
- * 異なるため、この違いを吸収する。
+ * instruction によって entry を持つフィールド名が複数件用の `entries` と単数件用の `entry` (`TimelineReplaceEntry` など) とで異なるため、この違いを吸収する。
  * @param instruction - 対象の Timeline instruction
  * @returns instruction が持つ entry の一覧 (0 件のこともある)
  */
@@ -131,14 +120,10 @@ function entriesOf(instruction: RawTimelineInstruction): RawTimelineEntry[] {
 }
 
 /**
- * `BlockedAccountsAll` のレスポンスボディを {@link BlocksListPage} に変換する。
- * `./follows.ts` が `twitter-openapi-typescript` の正規化済みオブジェクト経由で読んでいるのと
- * 同じ Timeline instruction/entries/cursor の形を、ここでは生の JSON から直接読む。
  * @param payload - パース済みのレスポンスボディ
  * @returns 変換済みユーザー一覧と、次ページのカーソル (あれば)
- * @throws payload に GraphQL レベルのエラーが含まれる場合、またはレスポンスの形が想定と
- * まったく一致しない場合 (X 側のスキーマ変更など) - 「このページにブロックが 0 件」という
- * 正当な空配列と、スキーマ崩壊による破損とを呼び出し側が取り違えないよう区別している
+ * @throws payload に GraphQL レベルのエラーが含まれる場合、またはレスポンスの形が想定と一致しない場合。
+ * 「このページにブロックが 0 件」という正当な空配列と、スキーマ崩壊による破損とを呼び出し側が区別できるようにするため。
  */
 function parseBlocksResponse(payload: BlockedAccountsAllResponse): BlocksListPage {
   if (payload.errors && payload.errors.length > 0) {
@@ -182,10 +167,8 @@ function parseBlocksResponse(payload: BlockedAccountsAllResponse): BlocksListPag
 }
 
 /**
- * blocks エンドポイントが非 2xx を返した際に throw するエラー。`twitter-openapi-typescript`
- * 自身の `ResponseError` の形 (`.name` と `.response.status`) を模倣することで、`./retry.ts` の
- * `isRetryableTwitterError` によるダックタイピングが、ライブラリが投げるエラーと同様に
- * このハンドロールしたリクエストのレート制限・サーバーエラーも retryable と認識できるようにする。
+ * blocks エンドポイントが非 2xx を返した際に throw するエラー。
+ * `twitter-openapi-typescript` 自身の `ResponseError` の形 (`.name` と `.response.status`) を模倣し、`./retry.ts` の `isRetryableTwitterError` によるダックタイピングがこのハンドロールしたリクエストのエラーも retryable と認識できるようにしている。
  */
 class BlocksResponseError extends Error {
   response: { status: number }
@@ -197,15 +180,10 @@ class BlocksResponseError extends Error {
 }
 
 /**
- * `twitter-openapi-typescript` にはブロック一覧エンドポイントに対応するメソッドが存在しないため、
- * `trends-client.ts` が `guide.json` をハンドロールしているのと同じ要領で GraphQL リクエストを
- * 自前で組み立てる。注意: ライブラリ自身の GraphQL リクエストと異なり、ここでは
- * `x-client-transaction-id` を付与していない (ライブラリ内部では `x-client-transaction-id-generater`
- * パッケージが、実際の Web クライアントの document を使って鍵を導出して生成している) -
- * 対応するには一行では済まない追加調査が必要なため、不要と決めつけず既知のギャップとして残す。
+ * `twitter-openapi-typescript` にはブロック一覧エンドポイントに対応するメソッドが存在しないため、`trends-client.ts` が `guide.json` をハンドロールしているのと同じ要領で GraphQL リクエストを自前で組み立てている。
+ * ライブラリ自身の GraphQL リクエストと異なり `x-client-transaction-id` を付与していないが、対応には追加調査が必要なため既知のギャップとして残している。
  * @param cookies - アカウントの ct0/auth_token クッキー
- * @param fetchImpl - リクエスト送信に使う fetch 実装 (`trends-client.ts` と同様、
- * cycleTLS による Chrome フィンガープリントを想定)
+ * @param fetchImpl - リクエスト送信に使う fetch 実装 (`trends-client.ts` と同様、cycleTLS による Chrome フィンガープリントを想定)
  * @returns `getBlocksPage` を公開するオブジェクト
  */
 export function createBlocksClient(

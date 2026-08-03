@@ -18,9 +18,9 @@ export interface BlockListResult {
   ids: string[]
   authors: AccountProfileInput[]
   /**
-   * カーソルが尽きたことで停止した場合のみ true。`limit` に達した、またはページ取得が
-   * 失敗したことで停止した場合は false。呼び出し側はこの値を見て、現存しない `blockedId`
-   * の行を削除してよいかどうかを判断する。
+   * カーソルが尽きたことで停止した場合のみ true。
+   * `limit` に達した、またはページ取得が失敗したことで停止した場合は false。
+   * 呼び出し側はこの値を見て、現存しない `blockedId` の行を削除してよいかどうかを判断する。
    */
   reachedEnd: boolean
 }
@@ -47,8 +47,7 @@ async function paginate(
     cursor = page.nextCursor
   }
 
-  // limit に達したページがたまたまカーソル終端でもあった場合、末尾を切り捨てた分を
-  // 呼び出し側の prune 処理に「もう存在しない」と誤解されないよう reachedEnd を false にする。
+  // limit に達したページがたまたまカーソル終端でもあった場合、末尾を切り捨てた分を呼び出し側の prune 処理に「もう存在しない」と誤解されないよう reachedEnd を false にする。
   const truncated = ids.length > limit
   return {
     ids: ids.slice(0, limit),
@@ -58,11 +57,9 @@ async function paginate(
 }
 
 /**
- * ログインアカウント自身がブロック中のユーザー一覧を取得する。
  * @param client - ブロック一覧 API のアダプター
  * @param limit - この呼び出しで収集する最大件数
- * @returns 収集した id・プロフィール、および一覧の末尾まで到達できたか (詳細は
- * {@link BlockListResult.reachedEnd} を参照)
+ * @returns 収集した id・プロフィール、および一覧の末尾まで到達できたか (詳細は {@link BlockListResult.reachedEnd} を参照)
  */
 export async function fetchBlocks(
   client: BlockListApiLike,
@@ -72,8 +69,7 @@ export async function fetchBlocks(
 }
 
 /**
- * `count` 未指定時に `PAGE_SIZE` をデフォルト値として補うことで、`fetchBlocks` 以外の呼び出し元
- * (テストなど) が毎回ページサイズを指定しなくても済むようにする。
+ * `count` 未指定時に `PAGE_SIZE` をデフォルト値として補うことで、`fetchBlocks` 以外の呼び出し元 (テストなど) が毎回ページサイズを指定しなくても済むようにする。
  * @param rawApi - 内部エンドポイントへの生アクセス
  * @returns {@link fetchBlocks} で使える `BlockListApiLike`
  */
