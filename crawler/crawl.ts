@@ -8,7 +8,7 @@ import {
   getCrawlStaleThresholdMultiplier,
   getCrawlWarningThreshold,
 } from './config/env'
-import { withTwitterRetry } from './twitter/retry'
+import { withTwitterRetry } from 'twitter-client'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'

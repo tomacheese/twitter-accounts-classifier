@@ -30,6 +30,9 @@ importers:
       cycletls:
         specifier: ^2.0.5
         version: 2.0.5
+      twitter-client:
+        specifier: workspace:*
+        version: link:../twitter-client
       twitter-openapi-typescript:
         specifier: ^0.0.56
         version: 0.0.56
