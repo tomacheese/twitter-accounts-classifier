@@ -41,6 +41,8 @@ model Account {
   latestLabels             AccountLabelLatest[]
   followerEdges            Follow[]       @relation("FollowerEdges")
   followeeEdges            Follow[]       @relation("FolloweeEdges")
+  blockerEdges             Block[]        @relation("BlockerEdges")
+  blockedEdges             Block[]        @relation("BlockedEdges")
 
   // この3カラムは絞り込みなしで並び替えに使われうるため、
   // インデックスがないと行数増加に伴い全件ソートが発生する。
@@ -161,6 +163,20 @@ model Follow {
   @@index([followeeId])
 }
 
+model Block {
+  id          String   @id @default(cuid())
+  blockerId   String
+  blocker     Account  @relation("BlockerEdges", fields: [blockerId], references: [id])
+  blockedId   String
+  blocked     Account  @relation("BlockedEdges", fields: [blockedId], references: [id])
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
 model CrawlRun {
   id               String                   @id @default(cuid())
   startedAt        DateTime
@@ -191,6 +207,7 @@ model CrawlAccountRun {
   labelsAppliedCount Int       @default(0)
   followingSynced    Boolean   @default(false)
   followersSynced    Boolean   @default(false)
+  blocksSynced       Boolean   @default(false)
   warnings           Json      @default("[]")
   errorMessage       String?
   /// crawler イメージに埋め込まれた APPLICATION_VERSION (Docker のビルド引数)。
