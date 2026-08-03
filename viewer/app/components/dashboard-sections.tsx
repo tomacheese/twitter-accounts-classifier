@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { formatDateTime } from '@/lib/format-date'
+import { formatDuration } from '@/lib/format-duration'
 import { getPrismaClient } from '@/lib/prisma'
 import { getDashboardKpis, getLabelDistribution } from '@/lib/queries/dashboard'
 import { getRecentWeeklyRuns } from '@/lib/queries/weekly-runs'
@@ -269,6 +270,12 @@ export async function RecentCrawlRuns(): Promise<React.ReactElement> {
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium">{formatDateTime(run.startedAt)}</p>
                     <StatusBadge status={run.status} />
+                    {run.status === 'running' && run.currentUsername && run.currentAccountStartedAt && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        → @{run.currentUsername} (
+                        {formatDuration(run.currentAccountStartedAt, new Date())} elapsed)
+                      </span>
+                    )}
                   </div>
                   <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
                     {run.accountRunCount.toLocaleString()} account(s) processed
