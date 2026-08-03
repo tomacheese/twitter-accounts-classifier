@@ -135,6 +135,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
     }),
     finishCrawlRun: vi.fn().mockResolvedValue(undefined),
     recordCrawlAccountRun: vi.fn().mockResolvedValue(undefined),
+    setCurrentAccount: vi.fn().mockResolvedValue(undefined),
     loadCrawlAccountCheckpoints: vi.fn().mockResolvedValue(new Map()),
     completeCrawlAccountCheckpoint: vi.fn().mockResolvedValue(undefined),
     clearCrawlAccountCheckpoints: vi.fn().mockResolvedValue(undefined),
@@ -171,6 +172,7 @@ describe('runCrawlCycle', () => {
     )
     expect(deps.closeTrendsScraper).toHaveBeenCalled()
     expect(deps.closeOpenApiClient).toHaveBeenCalled()
+    expect(deps.setCurrentAccount).toHaveBeenCalledWith('run1', 'v', expect.any(Date))
   })
 
   it('passes the registry to ensureLabelDefinitions so every registered rule gets a LabelDefinition', async () => {

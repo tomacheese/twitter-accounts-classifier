@@ -73,6 +73,7 @@ import {
   touchCrawlRunHeartbeat as touchCrawlRunHeartbeatRecord,
   finishCrawlRun as finishCrawlRunRecord,
   recordCrawlAccountRun as recordCrawlAccountRunRecord,
+  setCurrentAccount as setCurrentAccountRecord,
   type CrawlAccountCheckpointParams,
   type CrawlAccountCheckpointPhase,
   type CrawlRunStartResult,
@@ -123,6 +124,7 @@ export interface CrawlDependencies {
   syncBlocks: (blockerId: string, result: BlockListResult) => Promise<void>
   startOrResumeCrawlRun: (startedAt: Date) => Promise<CrawlRunStartResult>
   finishCrawlRun: (id: string, finishedAt: Date, status: string) => Promise<void>
+  setCurrentAccount: (crawlRunId: string, username: string, startedAt: Date) => Promise<void>
   recordCrawlAccountRun: (params: RecordCrawlAccountRunParams) => Promise<void>
   loadCrawlAccountCheckpoints: (
     crawlRunId: string,
@@ -915,6 +917,7 @@ async function runAccountCycle(
   crawlRunId: string,
 ): Promise<'success' | 'partial'> {
   const startedAt = new Date()
+  await deps.setCurrentAccount(crawlRunId, account.username, startedAt)
   try {
     const checkpoints = await deps.loadCrawlAccountCheckpoints(crawlRunId, account.username)
     let timelineSnapshot = restoreTimelineSnapshot(checkpoints.get('timelines'))
@@ -1230,6 +1233,8 @@ async function main(): Promise<void> {
       startOrResumeCrawlRunRecord(prisma, startedAt, staleThresholdMs),
     finishCrawlRun: (id, finishedAt, status) =>
       finishCrawlRunRecord(prisma, id, finishedAt, status),
+    setCurrentAccount: (crawlRunId, username, startedAt) =>
+      setCurrentAccountRecord(prisma, crawlRunId, username, startedAt),
     recordCrawlAccountRun: (params) => recordCrawlAccountRunRecord(prisma, params),
     loadCrawlAccountCheckpoints: (crawlRunId, username) =>
       loadCrawlAccountCheckpointsRecord(prisma, crawlRunId, username),
