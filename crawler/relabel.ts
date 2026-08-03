@@ -37,17 +37,15 @@ interface LatestLabelRow {
 
 /**
  * 各 (account, rule) ペアの直近の ruleVersion を取得する。
- * `AccountLabel` は追記のみで更新されないため、
- * この集計なしには最新ラベルが現在のルールバージョンを反映済みかどうか判別できない。
+ * AccountLabelLatest は (accountId, labelDefinitionId) ごとに常に最新の1行だけを保持するため、
+ * AccountLabel の履歴全体を DISTINCT ON で走査する必要がない。
  * @param prisma - 問い合わせに使う Prisma クライアント
  * @returns `${accountId}:${labelDefinitionId}` から最新の ruleVersion へのマップ
  */
 async function loadLatestRuleVersions(prisma: PrismaClient): Promise<Map<string, string>> {
   const rows = await prisma.$queryRaw<LatestLabelRow[]>`
-    SELECT DISTINCT ON ("accountId", "labelDefinitionId")
-      "accountId", "labelDefinitionId", "ruleVersion"
-    FROM "AccountLabel"
-    ORDER BY "accountId", "labelDefinitionId", "labeledAt" DESC, "id" DESC
+    SELECT "accountId", "labelDefinitionId", "ruleVersion"
+    FROM "AccountLabelLatest"
   `
   return new Map(rows.map((row) => [`${row.accountId}:${row.labelDefinitionId}`, row.ruleVersion]))
 }

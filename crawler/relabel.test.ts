@@ -71,7 +71,7 @@ function makePrisma(overrides: {
     if (sql.includes('"Follow"')) {
       return Promise.resolve(overrides.followGraphRows ?? [])
     }
-    if (sql.includes('DISTINCT ON')) {
+    if (sql.includes('FROM "AccountLabelLatest"')) {
       return Promise.resolve(overrides.latestRuleVersions ?? [])
     }
     if (overrides.queryRawTweetError) {
