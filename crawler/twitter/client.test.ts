@@ -33,7 +33,7 @@ describe('createCycleTLSFetch', () => {
 })
 
 // `createOpenApiClient`・`createTrendsScraper` はここから先で別途検証する。
-// 実物の`cycletls` クライアントは外部プロセスを起動して遅くなるうえ、
+// 実物の `cycletls` クライアントは外部プロセスを起動して遅くなるうえ、
 // ここで検証したい「渡す fetch がレスポンスをキャプチャすること」とは無関係なため、
 // `cycletls`・`twitter-openapi-typescript`・`./trends-client` はモックにしている。
 const { fakeCycleTLS } = vi.hoisted(() => {

@@ -24,7 +24,7 @@ function makeBundle(overrides: Partial<AccountFeatureBundle['account']>): Accoun
 describe('verifiedBlueCreatorRule', () => {
   it('is true when Blue-verified with no organization type and professionalType is Creator', () => {
     const result = verifiedBlueCreatorRule.evaluate(
-      makeBundle({ isBlueVerified: true, professionalType: 'Creator' })
+      makeBundle({ isBlueVerified: true, professionalType: 'Creator' }),
     )
     expect(result.value).toBe(true)
     expect(result.confidence).toBe(1)
@@ -32,7 +32,7 @@ describe('verifiedBlueCreatorRule', () => {
 
   it('is false when professionalType is Business instead of Creator', () => {
     const result = verifiedBlueCreatorRule.evaluate(
-      makeBundle({ isBlueVerified: true, professionalType: 'Business' })
+      makeBundle({ isBlueVerified: true, professionalType: 'Business' }),
     )
     expect(result.value).toBe(false)
   })
@@ -44,7 +44,7 @@ describe('verifiedBlueCreatorRule', () => {
 
   it('is false when the account has an organization verifiedType, even with professionalType Creator', () => {
     const result = verifiedBlueCreatorRule.evaluate(
-      makeBundle({ isBlueVerified: true, verifiedType: 'Business', professionalType: 'Creator' })
+      makeBundle({ isBlueVerified: true, verifiedType: 'Business', professionalType: 'Creator' }),
     )
     expect(result.value).toBe(false)
   })

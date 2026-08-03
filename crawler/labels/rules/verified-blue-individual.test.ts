@@ -30,14 +30,14 @@ describe('verifiedBlueIndividualRule', () => {
 
   it('is true when isBlueVerified is true and verifiedType is the literal string None', () => {
     const result = verifiedBlueIndividualRule.evaluate(
-      makeBundle({ isBlueVerified: true, verifiedType: 'None' })
+      makeBundle({ isBlueVerified: true, verifiedType: 'None' }),
     )
     expect(result.value).toBe(true)
   })
 
   it('is false when isBlueVerified is true but verifiedType is an organization type', () => {
     const result = verifiedBlueIndividualRule.evaluate(
-      makeBundle({ isBlueVerified: true, verifiedType: 'Business' })
+      makeBundle({ isBlueVerified: true, verifiedType: 'Business' }),
     )
     expect(result.value).toBe(false)
   })

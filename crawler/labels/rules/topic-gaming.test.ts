@@ -38,8 +38,7 @@ describe('topicGamingRule', () => {
 
   it('is false for an unrelated bio', () => {
     expect(
-      topicGamingRule.evaluate(makeBundle({ bio: '毎日ラーメンの写真を載せています' }))
-        .value,
+      topicGamingRule.evaluate(makeBundle({ bio: '毎日ラーメンの写真を載せています' })).value,
     ).toBe(false)
   })
 })

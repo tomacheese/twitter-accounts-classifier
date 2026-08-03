@@ -30,7 +30,7 @@ export interface ReplyHijackCorpusEntry {
 export interface ReplyHijackIndex {
   /**
    * @param accountId - 検索対象のアカウント
-   * @param tweetId - このアカウントがリプライした対象ツイートのID
+   * @param tweetId - このアカウントがリプライした対象ツイートの ID
    * @returns このアカウント・対象ツイートの組が属する「reply-hijack swarm」の規模。
    *   属していない場合は 0
    */

@@ -40,14 +40,15 @@ describe('topicIdolRule', () => {
 
   it('is false for a bio using "推し" for a non-idol fandom (anime character)', () => {
     expect(
-      topicIdolRule.evaluate(makeBundle({ bio: 'サンプル戦記のヒロインに沼って推し続けています' })).value,
+      topicIdolRule.evaluate(makeBundle({ bio: 'サンプル戦記のヒロインに沼って推し続けています' }))
+        .value,
     ).toBe(false)
   })
 
   it('is false for a bio using "推し" for a VTuber (covered by topic_vtuber instead)', () => {
-    expect(
-      topicIdolRule.evaluate(makeBundle({ bio: '架空ゆめかが宇宙一の推しです' })).value,
-    ).toBe(false)
+    expect(topicIdolRule.evaluate(makeBundle({ bio: '架空ゆめかが宇宙一の推しです' })).value).toBe(
+      false,
+    )
   })
 
   it('is false for a bio that only mentions unrelated "担当" (job-title sense, not idol fandom)', () => {

@@ -65,7 +65,8 @@ model Tweet {
   retweetedTweetId           String?
   isPromoted                 Boolean  @default(false)
   isPaidPromotion            Boolean  @default(false)
-  // この列が存在する前に収集された行は AI 生成メディアの判定自体が行われていないため、デフォルトを false ではなく null にすることで、未評価の状態と実際に false/true と判定された状態を区別している。
+  // この列が存在する前に収集された行は判定自体が行われていないため、
+  // デフォルトを false ではなく null にして未評価の状態と実際の判定結果を区別している。
   hasAiGeneratedMedia        Boolean?
   aiGeneratedDetectionSource String?
   quotedTweetId              String?
@@ -101,12 +102,15 @@ model AccountLabel {
   ruleVersion       String
   labeledAt         DateTime        @default(now())
 
-  // アカウント詳細ページが labeledAt 降順で取得する際に使う唯一の単体インデックス。
+  // viewer/lib/queries/account-detail.ts が labeledAt 降順で取得する際に使う唯一の単体インデックス。
   // 下の複合インデックスは2番目のカラムが labelDefinitionId のため代用できない。
   // labelDefinitionId や labeledAt を先頭カラムとする単体インデックスは、
-  // crawler・viewer の主要な処理経路では使われないため用意していない。
+  // crawler・viewer の主要な処理経路では使われず、
+  // 週次レビューのようなレイテンシ要件のないバッチ処理でのみ必要になるため用意していない。
   @@index([accountId])
-  // AccountLabelLatest は ruleVersion を保持していないため、ルールバージョン別の再ラベリング処理は AccountLabel の履歴を直接参照する必要があり、そのための複合インデックス。
+  // crawler/relabel.ts の loadLatestRuleVersions が実行する DISTINCT ON クエリに一致させるための複合インデックス。
+  // AccountLabelLatest は ruleVersion を保持していないため、
+  // ルールバージョン別の再ラベリング処理だけは AccountLabel の履歴を直接参照する必要がある。
   @@index([accountId, labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])
 }
 
@@ -115,6 +119,9 @@ model AccountLabel {
 // ダッシュボードやアカウント一覧のクエリが全件スキャンになり本番の応答時間を守れない。
 // そのため (accountId, labelDefinitionId) ごとの最新値のみを保持する専用テーブルとして用意し、
 // recordCrawlAccountLabel / recordAccountLabelsBulk が AccountLabel への履歴 INSERT と同時に upsert する。
+// crawler/db/label-repository.ts・viewer/lib/queries/dashboard.ts・
+// viewer/lib/queries/accounts.ts・対応するマイグレーションのコメントは、
+// この経緯の説明をここへの参照のみとし、重複させない。
 model AccountLabelLatest {
   accountId         String
   account           Account         @relation(fields: [accountId], references: [id])
@@ -124,6 +131,7 @@ model AccountLabelLatest {
   labeledAt         DateTime
 
   @@id([accountId, labelDefinitionId])
+  // value = true で絞り込む dashboard.ts/accounts.ts の各クエリを支えるインデックス。
   @@index([labelDefinitionId, value])
   @@index([value, accountId])
 }
@@ -183,8 +191,10 @@ model CrawlAccountRun {
   followersSynced    Boolean   @default(false)
   warnings           Json      @default("[]")
   errorMessage       String?
-  /// crawler イメージに埋め込まれた APPLICATION_VERSION (Docker のビルド引数)。値が取得できない場合は "unknown" になる。
-  /// この行を最終的に確定させたビルドを表しており、個々の warning を発生させたビルドは warnings 内の各要素が持つ appVersion (CrawlWarning.appVersion) を参照する。
+  /// crawler イメージに埋め込まれた APPLICATION_VERSION (Docker のビルド引数)。
+  /// 値が取得できない場合は "unknown" になる。
+  /// この行を最終的に確定させたビルドを表しており、
+  /// 個々の warning を発生させたビルドは warnings 内の各要素が持つ appVersion を参照する。
   appVersion         String    @default("unknown")
 
   @@index([crawlRunId])

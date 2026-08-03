@@ -48,7 +48,9 @@ describe('LabelRuleRegistry', () => {
     const registry = new LabelRuleRegistry()
     registry.register(alwaysTrueRule)
 
-    expect(() => { registry.register(alwaysTrueRule) }).toThrow(/already registered/)
+    expect(() => {
+      registry.register(alwaysTrueRule)
+    }).toThrow(/already registered/)
   })
 
   it('captures rule evaluation exceptions and rethrows', () => {

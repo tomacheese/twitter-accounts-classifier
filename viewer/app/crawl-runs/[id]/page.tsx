@@ -205,7 +205,8 @@ export default async function CrawlRunDetailPage({
                                     </summary>
                                     <ul className="mt-1 list-disc pl-4">
                                       {group.map((warning, index) => (
-                                        // warning には固有の id がなく、このリストは初期描画後に並び替えも変更もされないため、key に index を使っても問題ない。
+                                        // warning には固有の id がなく、
+                                        // このリストは初期描画後に並び替えも変更もされないため、key に index を使っても問題ない。
                                         <li key={index}>
                                           {warning.message}
                                           {warning.username

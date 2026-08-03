@@ -27,9 +27,9 @@ export const replyFloodingRule: LabelRule = {
     // 構造的な違いは「相手が誰か」ではなく「何に対するリプライか」にあり、
     // このアーキタイプは1つのバズったツイートに大量のリプライを積み上げるのに対し、
     // 通常の会話では毎回異なるツイートに返信する。
-    // 本番データのリプライはすべて`inReplyToTweetId` を持つため、
+    // 本番データのリプライはすべて `inReplyToTweetId` を持つため、
     // これを基準にグルーピングしても失われる情報はなく、
-    // 親ツイートIDが不明なリプライは同一グループとみなさずスキップする。
+    // 親ツイート ID が不明なリプライは同一グループとみなさずスキップする。
     const groups = new Map<string, { fullText: string; createdAt: Date }[]>()
     for (const tweet of bundle.recentTweets) {
       if (!tweet.isReply || tweet.isRetweet) continue

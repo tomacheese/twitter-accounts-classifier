@@ -33,10 +33,11 @@ export interface TweetInput {
 export async function upsertTweet(prisma: PrismaClient, input: TweetInput): Promise<Tweet> {
   // `isPromoted`/`isPaidPromotion` は既存値との OR で合成する: 単純に入力値で上書きすると、
   // 広告メタデータを含まない経路で再取得した際に、
-  // 既に検出済みの`true` が `false` に戻ってしまうため (`crawler/twitter/mappers.ts` の`mergeTweetAdFlags` も同様の問題を扱う)。
-  // `hasAiGeneratedMedia` /`aiGeneratedDetectionSource` / `quotedTweetId` / `quotedTweetAuthorId` /`quotedTweetHasVideo` も、
+  // 既に検出済みの `true` が `false` に戻ってしまう。
+  // 同様の問題は `crawler/twitter/mappers.ts` の `mergeTweetAdFlags` でも扱っている。
+  // `hasAiGeneratedMedia` 系や引用ツイート関連のフィールドも、
   // `null` を「未評価」ではなく「上書きしてよい値」として扱うと既知の値を消してしまうため、
-  // 同じく既存値を優先する (詳細は該当マイグレーション参照)。
+  // 入力値が `null` のときのみ既存値にフォールバックする (詳細は該当マイグレーション参照)。
   const existing = await prisma.tweet.findUnique({
     where: { id: input.id },
     select: {

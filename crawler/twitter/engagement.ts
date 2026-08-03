@@ -5,7 +5,7 @@ import type { AccountProfileInput } from '../db/account-repository'
 import type { TweetInput } from '../db/tweet-repository'
 
 export function sortByEngagement(tweets: TweetInput[]): TweetInput[] {
-  // eslint-disable-next-line unicorn/no-array-sort -- tsconfig のターゲットが ES2022 のため toSorted() は使えず、入力を変更しないようスプレッドしたコピーに sort() している
+  // eslint-disable-next-line unicorn/no-array-sort -- ES2022 対象のため toSorted() が使えず、コピーへ sort() している
   return [...tweets].sort((a, b) => b.retweetCount + b.likeCount - (a.retweetCount + a.likeCount))
 }
 

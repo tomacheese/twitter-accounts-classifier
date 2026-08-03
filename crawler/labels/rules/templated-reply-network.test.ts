@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { templatedReplyNetworkRule } from './templated-reply-network'
 import type { AccountFeatureBundle } from '../types'
 
-function makeBundle(
-  templatedReplyNetworkSize: number | undefined,
-): AccountFeatureBundle {
+function makeBundle(templatedReplyNetworkSize: number | undefined): AccountFeatureBundle {
   return {
     account: {
       id: '1',

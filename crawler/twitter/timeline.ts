@@ -169,7 +169,7 @@ export async function fetchTrendingTimeline(
  * `legacy` 単独の型では値を取りこぼす。
  * `user.core` を優先し、
  * 古い・異なる形状のレスポンスに備えて `legacy` をフォールバックとして読む。
- * `verifiedType` も同様に `RawUserResult` が想定するトップレベルではなく `user.verification?.verifiedType` に存在するため変換が必要になる。
+ * `verifiedType` も同様に、想定するトップレベルではなく `user.verification?.verifiedType` に存在するため変換が必要になる。
  * `./profile` の `createUserApiLike` からも同じ形状の変換として再利用される。
  * @param user - 実際のタイムライン・ユーザー API レスポンス内に含まれるユーザーオブジェクト
  * @returns 同じユーザーを `RawUserResult` 形状に変換したもの
@@ -257,8 +257,8 @@ function toRawTweetResults(data: TweetApiUtilsData[]): RawTweetResult[] {
 }
 
 /**
- * `./engagement` の `TweetDetailApiLike` が `TweetApiUtils.getTweetDetail` をラップする際にもこの関数を再利用している。
- * `getTweetDetail` のレスポンスも同じ `TwitterApiUtilsResponse<TimelineApiUtilsResponse<TweetApiUtilsData>>` 形状のため。
+ * `getTweetDetail` のレスポンスも下記引数と同じ `TimelineApiUtilsResponse<TweetApiUtilsData>` 形状のため、
+ * `./engagement` の `TweetDetailApiLike` もラップ時にこの関数を再利用している。
  * @param response - 保留中の API レスポンス
  * @returns 変換後のページ
  */
@@ -277,7 +277,7 @@ export async function convertTimelineResponse(
 
 /**
  * @param tweetApi - 実際のツイート API (例: `TwitterOpenApiClient.getTweetApi()`)
- * @returns {@link fetchRecommendedTimeline}・{@link fetchFollowingTimeline}・{@link fetchTrendingTimeline} で使う `TweetApiLike`
+ * @returns 各 timeline 取得関数 (Recommended/Following/Trending) が共通して使う `TweetApiLike`
  */
 export function createTweetApiLike(tweetApi: TweetApiUtils): TweetApiLike {
   return {

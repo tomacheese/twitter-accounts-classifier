@@ -12,7 +12,10 @@ import { createUserApiLike } from './profile'
 type RealUser = TweetApiUtilsData['user']
 type RealTweet = TweetApiUtilsData['tweet']
 
-function makeRealUser(overrides: Partial<RealUser['legacy']> = {}, verifiedType?: string): RealUser {
+function makeRealUser(
+  overrides: Partial<RealUser['legacy']> = {},
+  verifiedType?: string,
+): RealUser {
   return {
     typename: 'User',
     id: 'u1',
@@ -55,7 +58,9 @@ function makeRealTweet(overrides: Partial<TweetApiUtilsData> = {}): TweetApiUtil
 
 function makeTimelineResponse(
   data: TweetApiUtilsData[],
-): Promise<TwitterApiUtilsResponse<{ data: TweetApiUtilsData[]; cursor: { bottom?: { value: string } } }>> {
+): Promise<
+  TwitterApiUtilsResponse<{ data: TweetApiUtilsData[]; cursor: { bottom?: { value: string } } }>
+> {
   return Promise.resolve({ raw: {} as never, header: {} as never, data: { data, cursor: {} } })
 }
 
@@ -72,7 +77,9 @@ describe('toRawUserResult', () => {
 describe('createTweetApiLike (real-shape adapter)', () => {
   it('drops a tombstoned entry (no legacy) instead of crashing', async () => {
     const tombstoned = makeRealTweet({ tweet: { restId: 't-tombstoned' } as RealTweet })
-    const getHomeTimeline = vi.fn().mockReturnValue(makeTimelineResponse([tombstoned, makeRealTweet()]))
+    const getHomeTimeline = vi
+      .fn()
+      .mockReturnValue(makeTimelineResponse([tombstoned, makeRealTweet()]))
     const tweetApi: TweetApiUtils = { getHomeTimeline } as unknown as TweetApiUtils
 
     const adapter = createTweetApiLike(tweetApi)
@@ -84,10 +91,16 @@ describe('createTweetApiLike (real-shape adapter)', () => {
 
   it('derives retweetedStatusIdStr from the retweeted entry, not a flat legacy field', async () => {
     const retweetOriginal = makeRealTweet({
-      tweet: { restId: 'original1', legacy: { ...makeRealTweet().tweet.legacy, fullText: 'original' } } as RealTweet,
+      tweet: {
+        restId: 'original1',
+        legacy: { ...makeRealTweet().tweet.legacy, fullText: 'original' },
+      } as RealTweet,
     })
     const retweetEntry = makeRealTweet({
-      tweet: { restId: 't-retweet', legacy: { ...makeRealTweet().tweet.legacy, fullText: 'RT @x: original' } } as RealTweet,
+      tweet: {
+        restId: 't-retweet',
+        legacy: { ...makeRealTweet().tweet.legacy, fullText: 'RT @x: original' },
+      } as RealTweet,
       retweeted: retweetOriginal,
     })
     const getHomeTimeline = vi.fn().mockReturnValue(makeTimelineResponse([retweetEntry]))

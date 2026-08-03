@@ -96,7 +96,9 @@ function mergeForeignVideoSourceCount(
  * 広告開示メタデータや引用先の `legacy` を保持しているのは一部の経路だけということがあり得るため、
  * id ごとに単純に上書きするのではなく OR 結合・coalesce によってフィールドを統合している。
  * @param tweets - 重複する id を含み得るツイート
- * @returns id ごとに 1 件へ統合したツイート。他のフィールドは最後に観測したコピーの値を保持しつつ、`isPromoted`・`isPaidPromotion` は OR 結合し、引用ツイート関連のフィールドは coalesce する (同一 id の全コピーの中で現在のコピーの非 null 値を優先し、なければそれまでに統合済みのコピーの値にフォールバックする)
+ * @returns id ごとに 1 件へ統合したツイート。他のフィールドは最後に観測したコピーの値を保持しつつ、
+ *   `isPromoted`・`isPaidPromotion` は OR 結合し、引用ツイート関連のフィールドは coalesce する。
+ *   coalesce では同一 id の全コピーの中で非 null 値を優先し、なければ統合済みの値にフォールバックする。
  */
 export function mergeTweetAdFlags(tweets: TweetInput[]): TweetInput[] {
   const byId = new Map<string, TweetInput>()

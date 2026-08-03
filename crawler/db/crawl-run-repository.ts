@@ -36,7 +36,8 @@ export interface CrawlWarning {
   rateLimitReset?: number
   /**
    * この warning を push した時点の APPLICATION_VERSION。
-   * phase 単位の再開 (中断・redeploy を挟んで別プロセスが後続 phase を完了するケース) では `CrawlAccountRun.appVersion` (行を最終確定させたビルド) と一致しないことがあるため、
+   * phase 単位の再開 (中断・redeploy を挟んで別プロセスが後続 phase を完了するケース) では、
+   * 行を最終確定させたビルドを表す `CrawlAccountRun.appVersion` と一致しないことがあるため、
    * warning ごとに発生源のビルドを保持する。
    */
   appVersion?: string

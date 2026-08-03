@@ -31,17 +31,19 @@ describe('topicTravelRule', () => {
   })
 
   it('is true for a bio listing 一人旅', () => {
-    expect(topicTravelRule.evaluate(makeBundle({ bio: '一人旅と温泉巡りが趣味です' })).value).toBe(true)
+    expect(topicTravelRule.evaluate(makeBundle({ bio: '一人旅と温泉巡りが趣味です' })).value).toBe(
+      true,
+    )
   })
 
   it('is true for an English travel bio', () => {
-    expect(
-      topicTravelRule.evaluate(makeBundle({ bio: 'Books. Coffee. Travel.' })).value,
-    ).toBe(true)
+    expect(topicTravelRule.evaluate(makeBundle({ bio: 'Books. Coffee. Travel.' })).value).toBe(true)
   })
 
   it('is true for a bio using the noun "traveler"', () => {
-    expect(topicTravelRule.evaluate(makeBundle({ bio: 'Photographer | Traveler' })).value).toBe(true)
+    expect(topicTravelRule.evaluate(makeBundle({ bio: 'Photographer | Traveler' })).value).toBe(
+      true,
+    )
   })
 
   it('is false for an unrelated bio', () => {

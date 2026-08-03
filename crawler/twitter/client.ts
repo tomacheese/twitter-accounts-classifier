@@ -99,7 +99,7 @@ export interface TrendsScraperContext {
 
 /**
  * 自前の trends クライアント ({@link createTrendsClient} 参照) を、
- * Node の既定のフィンガープリントではなく本物の Chrome TLS/JA3 フィンガープリントを提示する `cycletls` ベースの fetch 経由で動かす {@link TrendsScraperLike} を作る。
+ * Chrome TLS/JA3 フィンガープリントを提示する `cycletls` ベースの fetch で動かす {@link TrendsScraperLike} を作る。
  * {@link createOpenApiClient} と同じ診断上の理由から、
  * {@link wrapFetchWithResponseCapture} でもラップしている。
  * @param cookies - Twitter アカウントに対して発行されたクッキー

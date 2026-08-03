@@ -78,7 +78,13 @@ describe('replyHijackSwarmRule', () => {
   })
 
   it('is false for a 5+ member swarm when the account mostly retweets rather than replies (genuine retweet-consumer, not a reply-hijacker)', () => {
-    const mostlyRetweets = [tweet(false, true), tweet(false, true), tweet(false, true), tweet(false, true), tweet(true)]
+    const mostlyRetweets = [
+      tweet(false, true),
+      tweet(false, true),
+      tweet(false, true),
+      tweet(false, true),
+      tweet(true),
+    ]
     const result = replyHijackSwarmRule.evaluate(makeBundle(10, mostlyRetweets))
 
     expect(result.value).toBe(false)

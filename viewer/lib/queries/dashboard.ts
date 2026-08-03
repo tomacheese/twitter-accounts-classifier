@@ -14,7 +14,8 @@ export interface LabelDistributionEntry {
   totalAccounts: number
 }
 
-// json_agg() が返す distribution の要素はすでに JSON としてパース済みのため、trueCount/totalAccounts はここでは(直接の bigint 列とは異なり)number で届く。
+// json_agg() が返す distribution の要素はすでに JSON としてパース済みのため、
+// trueCount/totalAccounts はここでは(直接の bigint 列とは異なり)number で届く。
 interface LabelDistributionJsonRow {
   labelKey: string
   labelDescription: string
@@ -33,8 +34,12 @@ interface LatestLabelsSummary {
 }
 
 /**
- * `latest_labels` を `NOT MATERIALIZED` にしているのは、`MATERIALIZED` では Seq Scan と一時領域への実体化が強制され、`AccountLabelLatest_value_accountId_idx` を使った index-only scan が選ばれなくなるため。
- * 無関係なディスク I/O 競合でクエリが詰まった場合に備え、statement_timeout も設定している。
+ * `latest_labels` を `NOT MATERIALIZED` にしているのは、
+ * `MATERIALIZED` では Seq Scan と一時領域への実体化が強制され、
+ * `AccountLabelLatest_value_accountId_idx` を使った index-only scan が選ばれなくなるため。
+ * statement_timeout は、
+ * クエリが詰まった場合にコネクションプールの枠を無期限に占有し続けてプール枯渇を招くのを防ぐために設定している
+ * (`AccountLabelLatest` の設計意図は prisma/schema.prisma の該当コメントを参照)。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ラベル付けずみアカウント数とラベル分布
  */
@@ -66,7 +71,9 @@ async function queryLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLab
   ])
   const rows = result[1]
 
-  // トップレベルの SELECT に FROM 句がなく常に1行だけ返るが、Prisma の $queryRaw の戻り値の型は配列であり要素数を型では保証できないため、Array#at() で undefined を許容する型のまま安全に取り出す。
+  // トップレベルの SELECT に FROM 句がなく常に1行だけ返るが、
+  // Prisma の $queryRaw の戻り値の型は配列であり要素数を型では保証できないため、
+  // Array#at() で undefined を許容する型のまま安全に取り出す。
   const row = rows.at(0)
   return {
     labeledAccounts: Number(row?.labeledAccounts ?? 0),
@@ -85,7 +92,8 @@ const CACHE_TTL_MS = 15 * 60 * 1000
 let cached: { promise: Promise<LatestLabelsSummary>; expiresAt: number } | undefined
 
 /**
- * 解決済みの値だけでなく実行中の promise 自体もキャッシュすることで、getDashboardKpis と getLabelDistribution を Promise.all で同時に呼んだ場合でも、実際のクエリは1回にまとめられる。
+ * 解決済みの値だけでなく実行中の promise 自体もキャッシュすることで、
+ * getDashboardKpis と getLabelDistribution を Promise.all で同時に呼んだ場合でも、実際のクエリは1回にまとめられる。
  * 失敗したクエリはキャッシュしないため、次回呼び出し時は TTL 内であっても DB へ再試行する。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ラベル付けずみアカウント数とラベル分布

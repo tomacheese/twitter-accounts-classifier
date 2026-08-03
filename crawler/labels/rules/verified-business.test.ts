@@ -24,7 +24,7 @@ function makeBundle(overrides: Partial<AccountFeatureBundle['account']>): Accoun
 describe('verifiedBusinessRule', () => {
   it('is true when verifiedType is Business, even without an active Blue subscription', () => {
     const result = verifiedBusinessRule.evaluate(
-      makeBundle({ verifiedType: 'Business', isBlueVerified: false })
+      makeBundle({ verifiedType: 'Business', isBlueVerified: false }),
     )
     expect(result.value).toBe(true)
     expect(result.confidence).toBe(1)
@@ -32,7 +32,7 @@ describe('verifiedBusinessRule', () => {
 
   it('is true when verifiedType is Business and isBlueVerified is true', () => {
     const result = verifiedBusinessRule.evaluate(
-      makeBundle({ verifiedType: 'Business', isBlueVerified: true })
+      makeBundle({ verifiedType: 'Business', isBlueVerified: true }),
     )
     expect(result.value).toBe(true)
   })

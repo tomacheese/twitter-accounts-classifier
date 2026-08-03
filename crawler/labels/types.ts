@@ -40,13 +40,14 @@ export interface AccountFeatureBundle {
     inReplyToTweetId?: string | null
     /**
      * X のコンテンツ開示 API が、このツイートに AI 生成メディアが含まれると判定したか。
-     * `null` は「一度も評価されていない」ことを表し（この列より前のツイート、または開示情報を持たない取得経路の場合）、
+     * `null` は「一度も評価されていない」(この列より前のツイート、または開示情報を持たない取得経路) ことを表し、
      * 「取得の結果 AI 生成メディアなしと確定した」ことを表す `false` とは区別する。
      * 任意項目にする理由は `inReplyToTweetId` と同じ。
      */
     hasAiGeneratedMedia?: boolean | null
     /**
-     * 上記の AI 生成メディアフラグをどう判定したか（`'C2paClient' | 'ContentDisclosureAiGeneratedDisclosure' | 'UserDeclared'`）。
+     * 上記の AI 生成メディアフラグをどう判定したか。
+     * 値は `'C2paClient' | 'ContentDisclosureAiGeneratedDisclosure' | 'UserDeclared'`。
      * `hasAiGeneratedMedia` が `true` でない場合は `null`/未設定にする。
      */
     aiGeneratedDetectionSource?: string | null

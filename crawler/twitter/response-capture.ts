@@ -50,8 +50,8 @@ function recordResponse(url: string, status: number, body: string): void {
  * また clone の本文はこの関数が返る前に読み切って記録している。
  * 呼び出し後に投げっぱなしの Promise にすると、
  * 上位でパース失敗が捕捉される時点までにバッファへの記録が間に合わない可能性がある。
- * @param fetchImpl - the `fetch` implementation to wrap, e.g. one backed by `cycletls`
- * @returns a `fetch`-compatible function that captures a copy of every response
+ * @param fetchImpl - ラップ対象の `fetch` 実装 (例: `cycletls` を裏側に使うもの)
+ * @returns 呼び出しごとにレスポンスの複製をキャプチャする `fetch` 互換の関数
  */
 export function wrapFetchWithResponseCapture(fetchImpl: typeof fetch): typeof fetch {
   return async (input, init) => {

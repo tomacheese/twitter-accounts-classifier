@@ -26,21 +26,22 @@ function makeBundle(
 describe('topicFoodRule', () => {
   it('is true for a bio mentioning グルメ', () => {
     expect(
-      topicFoodRule.evaluate(makeBundle({ bio: 'フルタイム勤務のワーママ/街歩きとグルメ🐈🍺' })).value,
+      topicFoodRule.evaluate(makeBundle({ bio: 'フルタイム勤務のワーママ/街歩きとグルメ🐈🍺' }))
+        .value,
     ).toBe(true)
   })
 
   it('is true for a bio mentioning 料理', () => {
     expect(
-      topicFoodRule.evaluate(makeBundle({ bio: '好きなもの アニメ・ゲーム・洋服・料理' }))
-        .value,
+      topicFoodRule.evaluate(makeBundle({ bio: '好きなもの アニメ・ゲーム・洋服・料理' })).value,
     ).toBe(true)
   })
 
   it('is true for an English foodie bio', () => {
     expect(
-      topicFoodRule.evaluate(makeBundle({ bio: 'Home cook and foodie exploring local restaurants' }))
-        .value,
+      topicFoodRule.evaluate(
+        makeBundle({ bio: 'Home cook and foodie exploring local restaurants' }),
+      ).value,
     ).toBe(true)
   })
 

@@ -24,7 +24,7 @@ function makeBundle(overrides: Partial<AccountFeatureBundle['account']>): Accoun
 describe('verifiedGovernmentRule', () => {
   it('is true when verifiedType is Government, even without an active Blue subscription', () => {
     const result = verifiedGovernmentRule.evaluate(
-      makeBundle({ verifiedType: 'Government', isBlueVerified: false })
+      makeBundle({ verifiedType: 'Government', isBlueVerified: false }),
     )
     expect(result.value).toBe(true)
     expect(result.confidence).toBe(1)
@@ -32,7 +32,7 @@ describe('verifiedGovernmentRule', () => {
 
   it('is true when verifiedType is Government and isBlueVerified is true', () => {
     const result = verifiedGovernmentRule.evaluate(
-      makeBundle({ verifiedType: 'Government', isBlueVerified: true })
+      makeBundle({ verifiedType: 'Government', isBlueVerified: true }),
     )
     expect(result.value).toBe(true)
   })

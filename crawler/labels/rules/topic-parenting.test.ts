@@ -31,10 +31,9 @@ describe('topicParentingRule', () => {
   })
 
   it('is true for a bio mentioning 子育て', () => {
-    expect(
-      topicParentingRule.evaluate(makeBundle({ bio: '会社員・子育て世帯です' }))
-        .value,
-    ).toBe(true)
+    expect(topicParentingRule.evaluate(makeBundle({ bio: '会社員・子育て世帯です' })).value).toBe(
+      true,
+    )
   })
 
   it('is true for a bio mentioning ワーママ', () => {
@@ -45,8 +44,7 @@ describe('topicParentingRule', () => {
 
   it('is true for an English parenting bio', () => {
     expect(
-      topicParentingRule.evaluate(makeBundle({ bio: 'Sharing my parenting journey daily' }))
-        .value,
+      topicParentingRule.evaluate(makeBundle({ bio: 'Sharing my parenting journey daily' })).value,
     ).toBe(true)
   })
 

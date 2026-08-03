@@ -155,6 +155,10 @@ class TimelineUnavailableError extends Error {
 }
 
 /**
+ * `twitter-openapi-typescript` は `e.data.user?.result.timeline.timeline` の
+ * オプショナルチェイニングが `data.user` しか保護しておらず、`result.timeline` が
+ * 欠けている場合に型付きエラーではなく素の TypeError を投げるため、
+ * 型で判定できず message 文字列の一致で見分けている。
  * @param fetch - ガード対象の `fetchRecentTweets` 呼び出し
  * @returns 呼び出し結果。既知のライブラリ不具合の場合は `TimelineUnavailableError` を rethrow する
  */
