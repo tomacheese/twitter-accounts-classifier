@@ -4,15 +4,15 @@ import type {
   TweetApiUtilsData,
   TwitterApiUtilsResponse,
 } from 'twitter-openapi-typescript'
+import type { AccountProfileInput } from '../db/account-repository'
+import type { TweetInput } from '../db/tweet-repository'
 import {
   toAccountProfileInput,
   toTweetInput,
   type RawTweetResult,
   type RawUserResult,
-} from './mappers'
-import type { AccountProfileInput } from '../db/account-repository'
-import type { TweetInput } from '../db/tweet-repository'
-import type { TrendsScraperLike } from 'twitter-client'
+  type TrendsScraperLike,
+} from 'twitter-client'
 
 /**
  * `rawCount` を `data.data` とは別に持つのは、

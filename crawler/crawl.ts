@@ -29,6 +29,8 @@ import {
   isResponseError,
   toSafeResponseErrorForLog,
   withTwitterRetry,
+  mergeTweetAdFlags,
+  toAccountProfileInput,
   type IssuedCookies,
   type TrendsScraperLike,
 } from 'twitter-client'
@@ -87,7 +89,6 @@ import {
   type CrawlWarning,
   type CrawlWarningType,
 } from './db/crawl-run-repository'
-import { mergeTweetAdFlags, toAccountProfileInput } from './twitter/mappers'
 
 const logger = Logger.configure('crawl')
 

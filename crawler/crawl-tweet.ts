@@ -6,7 +6,12 @@ import { getCookieIssuerBaseUrl } from './config/env'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
-import { createCookieIssuerClient } from 'twitter-client'
+import {
+  createCookieIssuerClient,
+  toAccountProfileInput,
+  toTweetInput,
+  mergeTweetAdFlags,
+} from 'twitter-client'
 import {
   createOpenApiClient as createRealOpenApiClient,
   closeOpenApiClient as closeRealOpenApiClient,
@@ -19,7 +24,6 @@ import {
   createUserApiLike,
   type UserApiLike,
 } from './twitter/profile'
-import { toAccountProfileInput, toTweetInput, mergeTweetAdFlags } from './twitter/mappers'
 
 const logger = Logger.configure('crawl-tweet')
 

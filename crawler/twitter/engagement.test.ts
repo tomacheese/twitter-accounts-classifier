@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { sortByEngagement, fetchReplies, type TweetDetailApiLike } from './engagement'
 import type { TweetInput } from '../db/tweet-repository'
-import type { RawTweetResult } from './mappers'
+import type { RawTweetResult } from 'twitter-client'
 
 function tweet(id: string, retweetCount: number, likeCount: number): TweetInput {
   return {

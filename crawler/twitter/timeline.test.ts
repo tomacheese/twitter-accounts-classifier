@@ -5,8 +5,7 @@ import {
   fetchTrendingTimeline,
   type TweetApiLike,
 } from './timeline'
-import type { RawTweetResult } from './mappers'
-import type { TrendsScraperLike } from 'twitter-client'
+import type { RawTweetResult, TrendsScraperLike } from 'twitter-client'
 
 function rawTweet(id: string): RawTweetResult {
   return {

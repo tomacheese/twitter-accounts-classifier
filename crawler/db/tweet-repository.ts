@@ -1,40 +1,17 @@
 import { Logger } from '@book000/node-utils'
 import type { PrismaClient, Tweet } from '../generated/prisma'
+import type { NormalizedTweet, NormalizedTweetSource } from 'twitter-client'
 
 const logger = Logger.configure('tweet-repository')
 
-export type TweetSource = 'recommended' | 'following' | 'trending' | 'profile' | 'manual'
-
-export interface TweetInput {
-  id: string
-  accountId: string
-  fullText: string
-  createdAt: Date
-  retweetCount: number
-  likeCount: number
-  replyCount: number
-  quoteCount: number
-  isReply: boolean
-  inReplyToTweetId: string | null
-  isAuthorReply: boolean
-  isRetweet: boolean
-  retweetedTweetId: string | null
-  isPromoted: boolean
-  isPaidPromotion: boolean
-  hasAiGeneratedMedia: boolean | null
-  aiGeneratedDetectionSource: string | null
-  foreignVideoSourceCount?: number | null
-  quotedTweetId: string | null
-  quotedTweetAuthorId: string | null
-  quotedTweetHasVideo: boolean | null
-  source: TweetSource
-}
+export type TweetSource = NormalizedTweetSource
+export type TweetInput = NormalizedTweet
 
 export async function upsertTweet(prisma: PrismaClient, input: TweetInput): Promise<Tweet> {
   // `isPromoted`/`isPaidPromotion` は既存値との OR で合成する: 単純に入力値で上書きすると、
   // 広告メタデータを含まない経路で再取得した際に、
   // 既に検出済みの `true` が `false` に戻ってしまう。
-  // 同様の問題は `crawler/twitter/mappers.ts` の `mergeTweetAdFlags` でも扱っている。
+  // 同様の問題は `twitter-client` の `mergeTweetAdFlags` でも扱っている。
   // `hasAiGeneratedMedia` 系や引用ツイート関連のフィールドも、
   // `null` を「未評価」ではなく「上書きしてよい値」として扱うと既知の値を消してしまうため、
   // 入力値が `null` のときのみ既存値にフォールバックする (詳細は該当マイグレーション参照)。

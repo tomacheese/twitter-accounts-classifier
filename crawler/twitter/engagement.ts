@@ -1,5 +1,5 @@
 import type { TweetApiUtils } from 'twitter-openapi-typescript'
-import { toAccountProfileInput, toTweetInput, type RawTweetResult } from './mappers'
+import { toAccountProfileInput, toTweetInput, type RawTweetResult } from 'twitter-client'
 import { convertTimelineResponse } from './timeline'
 import type { AccountProfileInput } from '../db/account-repository'
 import type { TweetInput } from '../db/tweet-repository'

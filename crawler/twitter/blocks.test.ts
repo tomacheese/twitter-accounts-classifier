@@ -6,7 +6,7 @@ import {
   type BlockListPage,
 } from './blocks'
 import type { BlocksListRawApiLike } from './blocks-client'
-import type { RawUserResult } from './mappers'
+import type { RawUserResult } from 'twitter-client'
 
 function rawUser(restId: string): RawUserResult {
   return {

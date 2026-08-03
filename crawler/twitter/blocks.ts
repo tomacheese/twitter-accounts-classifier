@@ -1,4 +1,4 @@
-import { toAccountProfileInput, type RawUserResult } from './mappers'
+import { toAccountProfileInput, type RawUserResult } from 'twitter-client'
 import type { BlocksListRawApiLike } from './blocks-client'
 import type { AccountProfileInput } from '../db/account-repository'
 

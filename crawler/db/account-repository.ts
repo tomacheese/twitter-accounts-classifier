@@ -1,22 +1,7 @@
 import type { Account, PrismaClient } from '../generated/prisma'
+import type { NormalizedAccountProfile } from 'twitter-client'
 
-export interface AccountProfileInput {
-  id: string
-  screenName: string
-  displayName: string
-  bio: string | null
-  profileImageUrl: string | null
-  followersCount: number
-  followingCount: number
-  tweetCount: number
-  accountCreatedAt: Date
-  location: string | null
-  url: string | null
-  isBlueVerified: boolean
-  verifiedType: string | null
-  professionalType: string | null
-  parodyCommentaryFanLabel: string | null
-}
+export type AccountProfileInput = NormalizedAccountProfile
 
 export async function upsertAccount(
   prisma: PrismaClient,

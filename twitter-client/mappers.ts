@@ -1,6 +1,3 @@
-import type { AccountProfileInput } from '../db/account-repository'
-import type { TweetInput, TweetSource } from '../db/tweet-repository'
-
 export interface RawUserResult {
   restId: string
   legacy: {
@@ -57,7 +54,52 @@ export interface RawTweetResult {
   user: RawUserResult
 }
 
-export function toAccountProfileInput(raw: RawUserResult): AccountProfileInput {
+export interface NormalizedAccountProfile {
+  id: string
+  screenName: string
+  displayName: string
+  bio: string | null
+  profileImageUrl: string | null
+  followersCount: number
+  followingCount: number
+  tweetCount: number
+  accountCreatedAt: Date
+  location: string | null
+  url: string | null
+  isBlueVerified: boolean
+  verifiedType: string | null
+  professionalType: string | null
+  parodyCommentaryFanLabel: string | null
+}
+
+export type NormalizedTweetSource = 'recommended' | 'following' | 'trending' | 'profile' | 'manual'
+
+export interface NormalizedTweet {
+  id: string
+  accountId: string
+  fullText: string
+  createdAt: Date
+  retweetCount: number
+  likeCount: number
+  replyCount: number
+  quoteCount: number
+  isReply: boolean
+  inReplyToTweetId: string | null
+  isAuthorReply: boolean
+  isRetweet: boolean
+  retweetedTweetId: string | null
+  isPromoted: boolean
+  isPaidPromotion: boolean
+  hasAiGeneratedMedia: boolean | null
+  aiGeneratedDetectionSource: string | null
+  foreignVideoSourceCount?: number | null
+  quotedTweetId: string | null
+  quotedTweetAuthorId: string | null
+  quotedTweetHasVideo: boolean | null
+  source: NormalizedTweetSource
+}
+
+export function toAccountProfileInput(raw: RawUserResult): NormalizedAccountProfile {
   return {
     id: raw.restId,
     screenName: raw.legacy.screenName,
@@ -78,7 +120,7 @@ export function toAccountProfileInput(raw: RawUserResult): AccountProfileInput {
 }
 
 export interface ToTweetInputContext {
-  source: TweetSource
+  source: NormalizedTweetSource
   viewerAccountId: string
 }
 
@@ -100,8 +142,8 @@ function mergeForeignVideoSourceCount(
  *   `isPromoted`・`isPaidPromotion` は OR 結合し、引用ツイート関連のフィールドは coalesce する。
  *   coalesce では同一 id の全コピー中で非 null 値を優先し、なければ統合値にフォールバックする。
  */
-export function mergeTweetAdFlags(tweets: TweetInput[]): TweetInput[] {
-  const byId = new Map<string, TweetInput>()
+export function mergeTweetAdFlags(tweets: NormalizedTweet[]): NormalizedTweet[] {
+  const byId = new Map<string, NormalizedTweet>()
   for (const tweet of tweets) {
     const existing = byId.get(tweet.id)
     byId.set(tweet.id, {
@@ -120,7 +162,7 @@ export function mergeTweetAdFlags(tweets: TweetInput[]): TweetInput[] {
   return [...byId.values()]
 }
 
-export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext): TweetInput {
+export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext): NormalizedTweet {
   const isReply = raw.legacy.inReplyToStatusIdStr !== null
   const isRetweet = raw.legacy.retweetedStatusIdStr !== null
 

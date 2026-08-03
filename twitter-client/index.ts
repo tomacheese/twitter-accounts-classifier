@@ -17,3 +17,12 @@ export type {
   IssuedCookies,
 } from './cookie-issuer-client'
 export type { TrendsScraperLike } from './api-types'
+export { toAccountProfileInput, mergeTweetAdFlags, toTweetInput } from './mappers'
+export type {
+  RawUserResult,
+  RawTweetResult,
+  NormalizedAccountProfile,
+  NormalizedTweet,
+  NormalizedTweetSource,
+  ToTweetInputContext,
+} from './mappers'

@@ -1,6 +1,5 @@
 import { TwitterOpenApi } from 'twitter-openapi-typescript'
-import type { IssuedCookies } from 'twitter-client'
-import type { RawUserResult } from './mappers'
+import type { IssuedCookies, RawUserResult } from 'twitter-client'
 
 /**
  * "BlockedAccountsAll" 操作の GraphQL persisted query id。
