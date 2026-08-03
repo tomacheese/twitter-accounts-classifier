@@ -33,8 +33,8 @@ export async function createOpenApiClientWith(
 }
 
 /**
- * X の実際の GraphQL エンドポイントは Node の既定の `fetch` フィンガープリントを
- * Cloudflare のブロックで拒否する (HTTP 403) ため、legacy trends エンドポイントと同様、
+ * X の実際の GraphQL エンドポイントは Node の既定の `fetch` フィンガープリントを Cloudflare のブロックで拒否する (HTTP 403) ため、
+ * legacy trends エンドポイントと同様、
  * `cycletls` で本物の Chrome TLS/JA3 フィンガープリントを提示する `fetch` 実装を用意し、
  * {@link createTrendsScraper} と {@link createOpenApiClient} の双方で共有している。
  * @param cycleTLS - 初期化済みの `cycletls` クライアント

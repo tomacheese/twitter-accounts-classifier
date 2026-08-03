@@ -3,9 +3,8 @@ import type { LabelRule } from '../types'
 /**
  * X の組織認証（ゴールドバッジ）を持つアカウントを検出する。企業やブランドなど、
  * X の組織認証に課金している主体が対象。判定は `verifiedType === 'Business'` のみで行う。
- * `verified-blue-individual` と異なり、現在の `isBlueVerified` の値によらず成立する
- * （`verifiedType: 'Business'` かつ `isBlueVerified: false` の実アカウントでも
- * 組織バッジを保持し続けるケースが観測されているため）。
+ * `verified-blue-individual` と異なり、現在の `isBlueVerified` の値によらず成立する。
+ * （`verifiedType: 'Business'` かつ `isBlueVerified: false` の実アカウントでも組織バッジを保持し続けるケースが観測されているため。）
  */
 export const verifiedBusinessRule: LabelRule = {
   key: 'verified_business',

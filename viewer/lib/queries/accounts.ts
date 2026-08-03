@@ -47,8 +47,7 @@ interface ActiveLabelRow {
 
 /**
  * 指定したラベルキーのいずれかで最新評価が `true` のアカウント ID を返す。
- * `AccountLabelLatest` を読む (テーブルの設計意図は prisma/schema.prisma の
- * AccountLabelLatest コメントを参照)。
+ * `AccountLabelLatest` を読む (テーブルの設計意図は prisma/schema.prisma の AccountLabelLatest コメントを参照)。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param labelKeys - マッチ対象のラベルキー (OR 条件)
  * @returns 一致したアカウント ID
@@ -67,9 +66,10 @@ async function findAccountIdsWithAnyLabel(
 }
 
 /**
- * 指定した各アカウントについて、有効な (最新評価が `true` の) ラベルキーを
- * 読み込む。アカウント一覧のラベルバッジ表示用。`AccountLabelLatest` を読む
- * 点は {@link findAccountIdsWithAnyLabel} と同じ。
+ * 指定した各アカウントについて、
+ * 有効な (最新評価が `true` の) ラベルキーを読み込む。
+ * アカウント一覧のラベルバッジ表示用。
+ * `AccountLabelLatest` を読む点は {@link findAccountIdsWithAnyLabel} と同じ。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param accountIds - 有効ラベルを読み込む対象のアカウント
  * @returns アカウント ID から有効ラベルキー一覧へのマップ
@@ -115,8 +115,9 @@ export async function getLabelKeys(prisma: PrismaClient): Promise<string[]> {
 }
 
 /**
- * アカウント一覧ページ向けに、指定したラベルのいずれかを持つアカウントへ
- * 絞り込んだうえで、ソート・ページネーションして返す。
+ * アカウント一覧ページ向けに、
+ * 指定したラベルのいずれかを持つアカウントへ絞り込んだうえで、
+ * ソート・ページネーションして返す。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param filters - ラベルフィルタ・ソート・ページネーションの条件
  * @returns 該当ページのアカウント一覧と総件数

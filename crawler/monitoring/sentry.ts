@@ -28,8 +28,8 @@ export function captureException(error: unknown, context?: Record<string, unknow
 }
 
 /**
- * 例外以外のイベントを GlitchTip に報告する。captureException と同様、初期化前の
- * 呼び出しや送信失敗で throw すると呼び出し元の処理を止めてしまうため、
+ * 例外以外のイベントを GlitchTip に報告する。captureException と同様、
+ * 初期化前の呼び出しや送信失敗で throw すると呼び出し元の処理を止めてしまうため、
  * その場合は例外を投げずログ出力のみに留める。
  * @param message - 報告する概要テキスト
  * @param context - イベントの `extra` として付与する追加の構造化データ

@@ -85,8 +85,8 @@ interface TweetRow {
 
 /**
  * `accountIds` それぞれについて、直近 `limitPerAccount` 件のツイートを1回のクエリで取得する。
- * Prisma のクエリビルダーではアカウントごとに1クエリを発行しない限り「アカウントごとの上位 N 件」を
- * 表現できないため、`ROW_NUMBER()` を使った生 SQL で取得している。
+ * Prisma のクエリビルダーではアカウントごとに1クエリを発行しない限り、
+ * 「アカウントごとの上位 N 件」を表現できないため、`ROW_NUMBER()` を使った生 SQL で取得している。
  * @param prisma - 問い合わせに使う Prisma クライアント
  * @param accountIds - ツイートを取得する対象アカウント
  * @param limitPerAccount - アカウントごとに保持する直近ツイート件数
@@ -186,8 +186,7 @@ export interface RelabelResult {
  * @param rules - 登録済みの全ルール
  * @param labelDefinitionIds - ルールキーから LabelDefinition の id へのマップ
  * @param latestRuleVersions - アカウント・ルールの組ごとに直近で永続化された ruleVersion
- * @returns 登録済みの全ルールについて、このアカウントのバージョンが既に最新であれば true
- *   (true の場合、ツイートを取得せずスキップできる)
+ * @returns 登録済みの全ルールについて、このアカウントのバージョンが既に最新であれば true (この場合、ツイートを取得せずスキップできる)
  */
 function isFullyUpToDate(
   account: AccountRow,
@@ -205,8 +204,7 @@ function isFullyUpToDate(
 /**
  * 登録済みの全ラベルルールを全アカウントに対して再評価し、
  * 保存済み `ruleVersion` が古いか未評価の (account, rule) ペアについてのみ新しい `AccountLabel` 行を永続化する。
- * 通常のクロールでは対象アカウントが次に再クロールされるまでラベルは再評価されない
- * (ルールのロジック変更に対する自動再評価はない) ため、
+ * 通常のクロールでは対象アカウントが次に再クロールされるまでラベルは再評価されない (ルールのロジック変更に対する自動再評価はない) ため、
  * そのギャップをオンデマンドで埋める明示的なバックフィル処理。
  * @param prisma - 使用する Prisma クライアント
  * @param registry - 全アカウントに対して評価するラベルルールのレジストリ

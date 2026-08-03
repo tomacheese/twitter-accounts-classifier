@@ -34,8 +34,7 @@ export interface DuplicateReplyIndex {
   /**
    * @param text - 検索対象となるリプライの生本文
    * @param excludeAccountId - 対象のリプライを投稿した本人のアカウント。件数から除外する
-   * @returns `excludeAccountId` 以外で、`text` の正規化形と一致するリプライを投稿した
-   *   アカウントの数
+   * @returns `excludeAccountId` 以外で、`text` の正規化形と一致するリプライを投稿したアカウントの数
    */
   countOtherAccounts(text: string, excludeAccountId: string): number
 }

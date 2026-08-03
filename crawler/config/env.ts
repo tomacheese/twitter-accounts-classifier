@@ -13,10 +13,9 @@ export function getCookieIssuerBaseUrl(): string {
 const DEFAULT_CRAWL_WARNING_THRESHOLD = 5
 
 /**
- * アカウントごとの警告件数が、集約された GlitchTip レポートを発火させるしきい値を読み取る
- * （crawl.ts の runAccountCycle 参照）。getCookieIssuerBaseUrl と異なり、これは必須設定では
- * なく任意の運用調整値であるため、未設定・非正・非整数の値はすべて実行を止めずに
- * DEFAULT_CRAWL_WARNING_THRESHOLD へフォールバックする。
+ * アカウントごとの警告件数が、集約された GlitchTip レポートを発火させるしきい値を読み取る（runAccountCycle 参照）。
+ * getCookieIssuerBaseUrl と異なり、これは必須設定ではなく任意の運用調整値であるため、
+ * 未設定・非正・非整数の値はすべて実行を止めずに DEFAULT_CRAWL_WARNING_THRESHOLD へフォールバックする。
  * @returns 設定されたしきい値。未設定または不正な場合は DEFAULT_CRAWL_WARNING_THRESHOLD
  */
 export function getCrawlWarningThreshold(): number {
@@ -33,11 +32,11 @@ export function getCrawlWarningThreshold(): number {
 }
 
 /**
- * 環境変数を正の整数として読み取る。未設定・空文字ならデフォルト値を返す。`Number()` は
- * 16進数・指数表記・符号付き文字列なども受理してしまうため、10進数の数字列のみを許可する
- * 正規表現で事前に絞り込む。エラーメッセージには入力値そのものを含めない。このヘルパーは
- * 汎用であり、将来 secret を扱う環境変数の検証に使われた場合に、生の値が GlitchTip 等の
- * エラートラッキングへそのまま送られることを避けるため。
+ * 環境変数を正の整数として読み取る。未設定・空文字ならデフォルト値を返す。
+ * `Number()` は 16進数・指数表記・符号付き文字列なども受理してしまうため、
+ * 10進数の数字列のみを許可する正規表現で事前に絞り込む。エラーメッセージには入力値そのものを含めない。
+ * このヘルパーは汎用であり、将来 secret を扱う環境変数の検証に使われた場合に、
+ * 生の値が GlitchTip 等のエラートラッキングへそのまま送られることを避けるため。
  * @param name - 環境変数名
  * @param defaultValue - 未設定・空文字時のデフォルト値
  * @returns 読み取った正の整数
@@ -53,10 +52,10 @@ function parsePositiveIntEnv(name: string, defaultValue: number): number {
 
 /**
  * クロール間隔 (秒)。entrypoint.sh のサイクル間 sleep 時間と同じ環境変数を読み、
- * TypeScript 側でも放置判定のしきい値算出に利用する。未設定時は、README が定める
- * entrypoint.sh 側デフォルトと合わせて 21600 (6時間) とする。entrypoint.sh の
- * `sleep` はシェルの流儀で `6h` のような単位付き文字列も受理するが、こちらは
- * README が定める「秒数の整数」形式のみを受理する (単位付き文字列は未対応)。
+ * TypeScript 側でも放置判定のしきい値算出に利用する。
+ * 未設定時は、README が定める entrypoint.sh 側デフォルトと合わせて 21600 (6時間) とする。
+ * entrypoint.sh の `sleep` はシェルの流儀で `6h` のような単位付き文字列も受理するが、
+ * こちらは README が定める「秒数の整数」形式のみを受理する (単位付き文字列は未対応)。
  * @returns クロール間隔 (秒)
  */
 export function getCrawlIntervalSeconds(): number {

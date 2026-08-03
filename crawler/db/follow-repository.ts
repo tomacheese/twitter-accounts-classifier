@@ -22,8 +22,8 @@ async function upsertFollowAuthors(prisma: PrismaClient, result: FollowListResul
 }
 
 /**
- * edge の upsert と削除を 1 つのトランザクションにまとめる: 同期途中の失敗で、新旧の
- * edge が中途半端に混在した状態を残さないため。
+ * edge の upsert と削除を 1 つのトランザクションにまとめる: 同期途中の失敗で、
+ * 新旧の edge が中途半端に混在した状態を残さないため。
  * @param prisma - Prisma クライアント
  * @param followerId - フォロー中リストの対象アカウント
  * @param result - 取得したフォロー中リスト

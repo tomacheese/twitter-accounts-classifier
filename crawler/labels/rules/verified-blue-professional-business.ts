@@ -1,12 +1,12 @@
 import type { LabelRule } from '../types'
 
 /**
- * 個人の Blue 認証を持ち、かつ X のオプトイン機能「プロフェッショナルアカウント」を
- * Business 種別で有効化している（`professional.professionalType === 'Business'`）
- * アカウントを検出する。X の有料組織認証（ゴールドバッジ）である `verified-business`
- * とは別概念の、セルフサービス型の小規模事業者向け機能。`verified-blue-individual`
- * と同じ範囲（Blue 認証あり、組織/政府の `verifiedType` なし）に限定するのは、これが
- * 独立した兆候ではなく、その母集団をさらに細分するものだから。
+ * 個人の Blue 認証を持ち、
+ * かつ X のオプトイン機能「プロフェッショナルアカウント」を Business 種別で有効化している（`professional.professionalType === 'Business'`）アカウントを検出する。
+ * X の有料組織認証（ゴールドバッジ）である `verified-business` とは別概念の、
+ * セルフサービス型の小規模事業者向け機能。
+ * `verified-blue-individual` と同じ範囲（Blue 認証あり、組織/政府の `verifiedType` なし）に限定するのは、
+ * これが独立した兆候ではなく、その母集団をさらに細分するものだから。
  */
 export const verifiedBlueProfessionalBusinessRule: LabelRule = {
   key: 'verified_blue_professional_business',

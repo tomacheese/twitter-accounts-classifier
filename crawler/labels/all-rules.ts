@@ -39,9 +39,9 @@ import { replyFloodingRule } from './rules/reply-flooding'
 import { replyHijackSwarmRule } from './rules/reply-hijack-swarm'
 
 /**
- * クローラーに登録される全ラベルルールの正規リスト。`runCrawlCycle`（クロール時の登録）と
- * `prisma/seed.ts`（新規データベースへの LabelDefinition シード）の両方がこの単一リストを
- * 参照することで、一方にだけルールを追加してもう一方に反映し忘れる事態を防ぐ。
+ * クローラーに登録される全ラベルルールの正規リスト。
+ * `runCrawlCycle`（クロール時の登録）と `prisma/seed.ts`（新規データベースへの LabelDefinition シード）の両方がこの単一リストを参照することで、
+ * 一方にだけルールを追加してもう一方に反映し忘れる事態を防ぐ。
  */
 export const ALL_LABEL_RULES: LabelRule[] = [
   verifiedBlueIndividualRule,

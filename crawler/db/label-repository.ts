@@ -74,14 +74,13 @@ interface RecordAccountLabelsBulkRow extends AccountLabel {
 }
 
 /**
- * 1アカウント分の評価結果をまとめて記録する: ラベルごとに `$queryRaw` を逐次発行する
- * 代わりに、列単位の配列を `UNNEST` で展開し、`AccountLabel` への INSERT と
- * `AccountLabelLatest` への UPSERT を1ラウンドトリップにまとめる。UPSERT ガードの
- * 意味論は `recordCrawlAccountLabel` と同じ。
+ * 1アカウント分の評価結果をまとめて記録する: ラベルごとに `$queryRaw` を逐次発行する代わりに、
+ * 列単位の配列を `UNNEST` で展開し、
+ * `AccountLabel` への INSERT と `AccountLabelLatest` への UPSERT を1ラウンドトリップにまとめる。
+ * UPSERT ガードの意味論は `recordCrawlAccountLabel` と同じ。
  * @param prisma - Prisma クライアント
  * @param params - 記録対象のアカウントと評価結果一覧
- * @returns 作成された `AccountLabel` 履歴行。SELECT に `ORDER BY` がないため `labels`
- *   と同じ順序である保証はなく、対応付けが必要なら `labelDefinitionId` で突き合わせる。
+ * @returns 作成された `AccountLabel` 履歴行。SELECT に `ORDER BY` がないため `labels` と同じ順序である保証はなく、対応付けが必要なら `labelDefinitionId` で突き合わせる。
  */
 export async function recordAccountLabelsBulk(
   prisma: PrismaClient,
@@ -154,24 +153,22 @@ export async function recordAccountLabelsBulk(
 
 /**
  * crawl 中のラベル評価結果を記録する: `AccountLabel` の履歴に追記すると同時に、
- * dashboard/アカウント一覧の各クエリが読む `AccountLabelLatest` の該当行も
- * upsert する (テーブルの設計意図は prisma/schema.prisma の AccountLabelLatest
- * コメントを参照)。両方の書き込みは SQL 側の `now()` を共有するため、どちらが
- * 「現在の値」かで食い違うことはない (Node/app 側のクロックで生成すると、複数の
- * app サーバー間でクロックがずれた場合に upsert 側のガードが本来より新しい評価を
- * 無音に取りこぼしうる)。upsert 側は `labeledAt` の比較でガードしており、この
- * 関数を並行して呼ぶ複数の呼び出し元同士が同一アカウントに対して競合しても、
- * 新しい評価が古い評価で上書きされることはない。history の作成と upsert は CTE
- * で連結した1本の SQL 文にまとめており、ネットワークラウンドトリップは1回で
- * 済む。`id` は raw INSERT が Prisma クライアント側の `@default(cuid())` を
- * 経由しないため `randomUUID()` で生成しており、時系列でソート可能ではない。
- * 同一アカウント・同一ラベルに対して寸分違わず同じ `labeledAt` で複数回呼ばれる
- * (バックフィルと通常のクロールが競合するなど) 極めて稀なケースでのみ関わる id
- * の大小関係は意味を持たないが、そのようなタイの発生自体が稀なため許容する。
+ * dashboard/アカウント一覧の各クエリが読む `AccountLabelLatest` の該当行も upsert する (テーブルの設計意図は prisma/schema.prisma の AccountLabelLatest コメントを参照)。
+ * 両方の書き込みは SQL 側の `now()` を共有するため、
+ * どちらが「現在の値」かで食い違うことはない (Node/app 側のクロックで生成すると、複数の app サーバー間でクロックがずれた場合に upsert 側のガードが本来より新しい評価を無音に取りこぼしうる)。
+ * upsert 側は `labeledAt` の比較でガードしており、
+ * この関数を並行して呼ぶ複数の呼び出し元同士が同一アカウントに対して競合しても、
+ * 新しい評価が古い評価で上書きされることはない。
+ * history の作成と upsert は CTE で連結した1本の SQL 文にまとめており、
+ * ネットワークラウンドトリップは1回で済む。
+ * `id` は raw INSERT が Prisma クライアント側の `@default(cuid())` を経由しないため `randomUUID()` で生成しており、
+ * 時系列でソート可能ではない。
+ * 同一アカウント・同一ラベルに対して寸分違わず同じ `labeledAt` で複数回呼ばれる (バックフィルと通常のクロールが競合するなど) 極めて稀なケースでのみ関わる id の大小関係は意味を持たないが、
+ * そのようなタイの発生自体が稀なため許容する。
  *
- * これに加えて、同じ crawl run・ログインアカウント・対象アカウント・ルールを
- * 1回だけ claim するため、author phase の永続化後に停止しても再開時に
- * `AccountLabel` の履歴を重複させない。
+ * これに加えて、
+ * 同じ crawl run・ログインアカウント・対象アカウント・ルールを 1回だけ claim するため、
+ * author phase の永続化後に停止しても再開時に `AccountLabel` の履歴を重複させない。
  * @param prisma - Prisma クライアント
  * @param params - crawl run を含むラベル評価結果
  */

@@ -6,24 +6,24 @@ export interface CapturedResponse {
 }
 
 /**
- * まれに発生するパース失敗の調査用であり永続的なログではないため、常駐プロセスの
- * 生存期間中に無制限に増え続けないよう上限を設けている。
+ * まれに発生するパース失敗の調査用であり永続的なログではないため、
+ * 常駐プロセスの生存期間中に無制限に増え続けないよう上限を設けている。
  */
 const MAX_CAPTURED_RESPONSES = 20
 
 /**
- * タイムラインのレスポンスは非常に大きくなり得るが、形状不一致の原因は JSON の
- * 先頭付近で判明することがほとんどで本文全体は不要なため、切り詰めてメモリ使用量を
- * 抑えている。
+ * タイムラインのレスポンスは非常に大きくなり得るが、
+ * 形状不一致の原因は JSON の先頭付近で判明することがほとんどで本文全体は不要なため、
+ * 切り詰めてメモリ使用量を抑えている。
  */
 const MAX_BODY_LENGTH = 20_000
 
 const TRUNCATION_MARKER = '... [truncated]'
 
 /**
- * `twitter-openapi-typescript` は fetch・パース・変換を 1 つのメソッド呼び出しに
- * まとめているため、ライブラリ内部で投げられたパース失敗をこちら側で捕捉した時点
- * では原因となった生レスポンスはどこにも残っていない。事後に失敗を調査できるよう、
+ * `twitter-openapi-typescript` は fetch・パース・変換を 1 つのメソッド呼び出しにまとめているため、
+ * ライブラリ内部で投げられたパース失敗をこちら側で捕捉した時点では原因となった生レスポンスはどこにも残っていない。
+ * 事後に失敗を調査できるよう、
  * このバッファでレスポンスを保持している。
  */
 let responseBuffer: CapturedResponse[] = []
@@ -43,11 +43,13 @@ function recordResponse(url: string, status: number, body: string): void {
 }
 
 /**
- * `response.clone()` を使っているのは、元の `Response` の本文を呼び出し元が
- * 引き続き消費できる必要があるため。ここで直接読み取ってしまうと、ライブラリが
- * パースするための本文が残らなくなる。また clone の本文はこの関数が返る前に
- * 読み切って記録している。呼び出し後に投げっぱなしの Promise にすると、上位で
- * パース失敗が捕捉される時点までにバッファへの記録が間に合わない可能性がある。
+ * `response.clone()` を使っているのは、
+ * 元の `Response` の本文を呼び出し元が引き続き消費できる必要があるため。
+ * ここで直接読み取ってしまうと、
+ * ライブラリがパースするための本文が残らなくなる。
+ * また clone の本文はこの関数が返る前に読み切って記録している。
+ * 呼び出し後に投げっぱなしの Promise にすると、
+ * 上位でパース失敗が捕捉される時点までにバッファへの記録が間に合わない可能性がある。
  * @param fetchImpl - the `fetch` implementation to wrap, e.g. one backed by `cycletls`
  * @returns a `fetch`-compatible function that captures a copy of every response
  */

@@ -1,13 +1,11 @@
 import type { LabelRule } from '../types'
 
 /**
- * `aiGeneratedDetectionSource` の値ごとに割り当てる confidence。各判定方法の信頼度を
- * 反映する。
- * - `C2paClient`: 編集ツールやカメラが署名する C2PA の暗号学的来歴メタデータを
- *   メディアが持つ場合。改ざん検知可能な最も強い根拠のため最高値にする。
- * - `UserDeclared`: 投稿者自身が AI 生成であると自己申告した場合。一次情報による
- *   直接的な申告だが、自己申告は不正確・未申告になり得るため、暗号学的根拠よりわずかに
- *   低くする。
+ * `aiGeneratedDetectionSource` の値ごとに割り当てる confidence。各判定方法の信頼度を反映する。
+ * - `C2paClient`: 編集ツールやカメラが署名する C2PA の暗号学的来歴メタデータをメディアが持つ場合。
+ *   改ざん検知可能な最も強い根拠のため最高値にする。
+ * - `UserDeclared`: 投稿者自身が AI 生成であると自己申告した場合。一次情報による直接的な申告だが、
+ *   自己申告は不正確・未申告になり得るため、暗号学的根拠よりわずかに低くする。
  * - `ContentDisclosureAiGeneratedDisclosure`: X 自身の自動/プラットフォーム側判定。
  *   誤検知率が不明な第三者分類器のため、既知の3種のなかでは最も低くしつつも、
  *   単なるフラグよりは明確に高くする。
@@ -22,8 +20,8 @@ const CONFIDENCE_BY_DETECTION_SOURCE: Record<string, number> = {
 const UNKNOWN_SOURCE_CONFIDENCE = 0.6
 
 /**
- * フラグが立った1件のツイートについて、その検出出典から confidence を求める。出典が
- * 欠落または未認識の場合は {@link UNKNOWN_SOURCE_CONFIDENCE} にフォールバックする。
+ * フラグが立った1件のツイートについて、その検出出典から confidence を求める。
+ * 出典が欠落または未認識の場合は {@link UNKNOWN_SOURCE_CONFIDENCE} にフォールバックする。
  * @param source - ツイートの `aiGeneratedDetectionSource`
  * @returns このツイートの開示情報に割り当てる confidence
  */

@@ -36,8 +36,7 @@ export interface CrawlWarning {
   rateLimitReset?: number
   /**
    * この warning を push した時点の APPLICATION_VERSION。
-   * phase 単位の再開 (中断・redeploy を挟んで別プロセスが後続 phase を完了するケース) では
-   * `CrawlAccountRun.appVersion` (行を最終確定させたビルド) と一致しないことがあるため、
+   * phase 単位の再開 (中断・redeploy を挟んで別プロセスが後続 phase を完了するケース) では `CrawlAccountRun.appVersion` (行を最終確定させたビルド) と一致しないことがあるため、
    * warning ごとに発生源のビルドを保持する。
    */
   appVersion?: string
@@ -203,8 +202,7 @@ export async function clearCrawlAccountCheckpoints(
  * 正常終了できなかったものとみなして `failed` に確定する。
  * @param prisma - Prisma クライアント
  * @param startedAt - 新規 run の開始時刻
- * @param staleThresholdMs - 放置判定のしきい値 (ミリ秒)。`startedAt - lastHeartbeatAt` がこれを
- *   超えていれば放置とみなす
+ * @param staleThresholdMs - 放置判定のしきい値 (ミリ秒)。`startedAt - lastHeartbeatAt` がこれを超えていれば放置とみなす
  * @returns run ID とアカウントごとの最新試行の status
  */
 export async function startOrResumeCrawlRun(
