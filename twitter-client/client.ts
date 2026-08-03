@@ -1,13 +1,10 @@
 import { TwitterOpenApi, type TwitterOpenApiClient } from 'twitter-openapi-typescript'
 import initCycleTLS, { type CycleTLSClient } from 'cycletls'
+import type { IssuedCookies } from './cookie-issuer-client'
 import { createTrendsClient } from './trends-client'
-import {
-  wrapFetchWithResponseCapture,
-  createBlocksClient,
-  type IssuedCookies,
-  type TrendsScraperLike,
-} from 'twitter-client'
-import { createBlockListApiLike, type BlockListApiLike } from './blocks'
+import type { TrendsScraperLike } from './api-types'
+import { wrapFetchWithResponseCapture } from './response-capture'
+import { createBlocksClient, createBlock, type BlocksListRawApiLike } from './blocks-client'
 
 const CHROME_JA3 =
   '771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0'
@@ -69,7 +66,8 @@ export function createCycleTLSFetch(cycleTLS: CycleTLSClient): typeof fetch {
 export interface OpenApiClientContext {
   client: TwitterOpenApiClient
   cycleTLS: CycleTLSClient
-  blocksClient: BlockListApiLike
+  blocksClient: BlocksListRawApiLike
+  createBlock: (targetUserId: string) => Promise<void>
 }
 
 /**
@@ -85,8 +83,13 @@ export async function createOpenApiClient(cookies: IssuedCookies): Promise<OpenA
   const fetchImpl = wrapFetchWithResponseCapture(createCycleTLSFetch(cycleTLS))
   TwitterOpenApi.fetchApi = fetchImpl
   const client = await createOpenApiClientWith(new TwitterOpenApi(), cookies)
-  const blocksClient = createBlockListApiLike(createBlocksClient(cookies, fetchImpl))
-  return { client, cycleTLS, blocksClient }
+  const blocksClient = createBlocksClient(cookies, fetchImpl)
+  return {
+    client,
+    cycleTLS,
+    blocksClient,
+    createBlock: (targetUserId: string) => createBlock(cookies, fetchImpl, targetUserId),
+  }
 }
 
 /**

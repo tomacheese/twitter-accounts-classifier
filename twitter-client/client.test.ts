@@ -60,11 +60,16 @@ vi.mock('./trends-client', () => ({
   createTrendsClient: vi.fn().mockReturnValue({ marker: 'scraper' }),
 }))
 
+vi.mock('./blocks-client', () => ({
+  createBlocksClient: vi.fn().mockReturnValue({ getBlocksPage: vi.fn() }),
+  createBlock: vi.fn().mockResolvedValue(undefined),
+}))
+
 describe('createOpenApiClient', () => {
   it('assigns a response-capturing fetch to TwitterOpenApi.fetchApi', async () => {
     const { createOpenApiClient } = await import('./client')
     const { TwitterOpenApi } = await import('twitter-openapi-typescript')
-    const { getLastResponseMatching } = await import('twitter-client')
+    const { getLastResponseMatching } = await import('./response-capture')
 
     await createOpenApiClient({ ct0: 'c0', authToken: 'a0' })
 
@@ -76,11 +81,22 @@ describe('createOpenApiClient', () => {
   })
 })
 
+describe('createOpenApiClient blocksClient/createBlock wiring', () => {
+  it('exposes a raw blocks client and a bound createBlock function', async () => {
+    const { createOpenApiClient } = await import('./client')
+
+    const context = await createOpenApiClient({ ct0: 'c0', authToken: 'a0' })
+
+    expect(typeof context.blocksClient.getBlocksPage).toBe('function')
+    expect(typeof context.createBlock).toBe('function')
+  })
+})
+
 describe('createTrendsScraper', () => {
   it('passes a response-capturing fetch through to createTrendsClient', async () => {
     const { createTrendsScraper } = await import('./client')
     const { createTrendsClient } = await import('./trends-client')
-    const { getLastResponseMatching } = await import('twitter-client')
+    const { getLastResponseMatching } = await import('./response-capture')
 
     await createTrendsScraper({ ct0: 'c0', authToken: 'a0' })
 
