@@ -9,6 +9,7 @@ import { ALL_LABEL_RULES } from './labels/all-rules'
 import { CRAWL_LIMITS } from './config/crawl-limits'
 import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import { buildReplyHijackIndex } from './labels/reply-hijack-index'
+import { buildFollowGraphLabelIndex } from './labels/follow-graph-label-index'
 import { runWithConcurrencyLimit } from './utils/concurrency-limit'
 import type { AccountFeatureBundle, LabelRule, LabelRuleResult } from './labels/types'
 
@@ -130,6 +131,7 @@ async function fetchTweetsForAccounts(
  * @param recentTweets - 取得済みの、このアカウントの直近ツイート
  * @param duplicateReplyIndex - アカウント横断で共有する重複返信インデックス
  * @param replyHijackIndex - アカウント横断で共有するリプライハイジャック群インデックス
+ * @param followGraphLabelIndex - アカウント横断で共有するフォローグラフラベルインデックス
  * @returns アカウントの feature bundle
  */
 function buildFeatureBundle(
@@ -137,6 +139,7 @@ function buildFeatureBundle(
   recentTweets: TweetRow[],
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
+  followGraphLabelIndex: Awaited<ReturnType<typeof buildFollowGraphLabelIndex>>,
 ): AccountFeatureBundle {
   let templatedReplyNetworkSize = 0
   let replyHijackSwarmSize = 0
@@ -173,6 +176,7 @@ function buildFeatureBundle(
     })),
     templatedReplyNetworkSize,
     replyHijackSwarmSize,
+    followGraphLabelSignals: followGraphLabelIndex.signalsFor(account.id),
   }
 }
 
@@ -219,6 +223,7 @@ export async function runRelabelBackfill(
   const progressLogIntervalAccounts = options.progressLogIntervalAccounts ?? PROGRESS_LOG_INTERVAL
   const totalAccounts = await prisma.account.count()
   const labelDefinitionIds = await ensureLabelDefinitionsForRules(prisma, registry.getAll())
+  const followGraphLabelIndex = await buildFollowGraphLabelIndex(prisma, labelDefinitionIds)
   const latestRuleVersions = await loadLatestRuleVersions(prisma)
   const replyCorpus = await loadReplyCorpus(prisma)
   const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
@@ -306,6 +311,7 @@ export async function runRelabelBackfill(
             tweetsByAccount.get(account.id) ?? [],
             duplicateReplyIndex,
             replyHijackIndex,
+            followGraphLabelIndex,
           )
           const labelsToPersist: {
             labelDefinitionId: string
