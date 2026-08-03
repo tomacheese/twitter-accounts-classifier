@@ -1,3 +1,4 @@
+import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 import type { LabelRule } from '../types'
 
 // topic_anime はアニメ・漫画を鑑賞する関心を対象としているのに対し、
@@ -10,14 +11,18 @@ const ILLUSTRATION_PATTERN = /イラスト|絵師|絵描き|\billustrator\b|pixi
 export const topicIllustrationRule: LabelRule = {
   key: 'topic_illustration',
   description: 'プロフィールでイラスト制作/投稿を中心的な関心事として挙げている',
-  version: '1.0.0',
+  version: '1.1.0',
   evaluate(bundle) {
     const { bio } = bundle.account
-    const value = bio !== null && ILLUSTRATION_PATTERN.test(bio)
+    const keywordMatch = bio !== null && ILLUSTRATION_PATTERN.test(bio)
+    const followGraphMatch = hasFollowGraphTopicSignal(
+      bundle.followGraphLabelSignals?.topic_illustration,
+    )
+    const value = keywordMatch || followGraphMatch
     return {
       value,
-      confidence: value ? 0.8 : 0,
-      reason: `bio illustration-keyword match=${value}`,
+      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
+      reason: `bio illustration-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
     }
   },
 }
