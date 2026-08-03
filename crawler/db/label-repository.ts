@@ -55,7 +55,8 @@ export interface RecordCrawlAccountLabelParams extends RecordAccountLabelParams 
   username: string
 }
 
-interface RecordAccountLabelRow extends AccountLabel {
+interface RecordAccountLabelRow {
+  historyInserted: boolean
   latestUpserted: boolean
 }
 
@@ -69,7 +70,17 @@ export interface RecordAccountLabelsBulkParams {
   }[]
 }
 
-interface RecordAccountLabelsBulkRow extends AccountLabel {
+interface RecordAccountLabelsBulkRow {
+  id: string
+  accountId: string
+  labelDefinitionId: string
+  value: boolean
+  confidence: number
+  reason: string
+  method: string
+  ruleVersion: string
+  labeledAt: Date | null
+  historyInserted: boolean
   latestUpserted: boolean
 }
 
@@ -102,51 +113,61 @@ export async function recordAccountLabelsBulk(
     WITH shared_now AS (
       SELECT now() AS "labeledAt"
     ),
+    input_rows AS (
+      SELECT * FROM UNNEST(${ids}::text[], ${accountIds}::text[], ${labelDefinitionIds}::text[], ${values}::boolean[], ${confidences}::double precision[], ${reasons}::text[], ${methods}::text[], ${ruleVersions}::text[])
+        AS u("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion")
+    ),
+    to_insert AS (
+      SELECT ir.*
+      FROM input_rows ir
+      LEFT JOIN "AccountLabelLatest" al
+        ON al."accountId" = ir."accountId" AND al."labelDefinitionId" = ir."labelDefinitionId"
+      WHERE al."accountId" IS NULL
+         OR al."value" IS DISTINCT FROM ir."value"
+         OR al."ruleVersion" IS DISTINCT FROM ir."ruleVersion"
+    ),
     inserted_history AS (
       INSERT INTO "AccountLabel"
         ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt")
-      SELECT u.*, shared_now."labeledAt"
-      FROM UNNEST(${ids}::text[], ${accountIds}::text[], ${labelDefinitionIds}::text[], ${values}::boolean[], ${confidences}::double precision[], ${reasons}::text[], ${methods}::text[], ${ruleVersions}::text[])
-        AS u("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion")
+      SELECT ti.*, shared_now."labeledAt"
+      FROM to_insert ti
       CROSS JOIN shared_now
       RETURNING *
     ),
     upserted_latest AS (
-      INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "labeledAt")
-      SELECT ih."accountId", ih."labelDefinitionId", ih."value", ih."labeledAt"
-      FROM inserted_history ih
+      INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt")
+      SELECT ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion", shared_now."labeledAt"
+      FROM input_rows ir
+      CROSS JOIN shared_now
       ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
-      SET "value" = EXCLUDED."value", "labeledAt" = EXCLUDED."labeledAt"
+      SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
+          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "labeledAt" = EXCLUDED."labeledAt"
       WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
       RETURNING "accountId", "labelDefinitionId"
     )
     SELECT
-      ih.*,
+      ir."id", ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion",
+      ih."labeledAt",
+      (ih."id" IS NOT NULL) AS "historyInserted",
       EXISTS (
         SELECT 1 FROM upserted_latest ul
-        WHERE ul."accountId" = ih."accountId" AND ul."labelDefinitionId" = ih."labelDefinitionId"
+        WHERE ul."accountId" = ir."accountId" AND ul."labelDefinitionId" = ir."labelDefinitionId"
       ) AS "latestUpserted"
-    FROM inserted_history ih
+    FROM input_rows ir
+    LEFT JOIN inserted_history ih ON ih."id" = ir."id"
   `
-
-  if (rows.length !== params.labels.length) {
-    // INSERT ... RETURNING が入力より少ない行数しか返さなかった場合、
-    // 呼び出し元は返り値を見ずに全ラベルを永続化済みとして `latestRuleVersions` を更新してしまう。
-    // 原因調査ができるよう警告として記録する。
-    logger.warn(
-      `recordAccountLabelsBulk: expected ${params.labels.length} rows but got ${rows.length} back, the persisted label set may be incomplete (accountId=${params.accountId})`,
-    )
-  }
 
   const history: AccountLabel[] = []
   for (const row of rows) {
-    const { latestUpserted, ...rest } = row
+    const { historyInserted, latestUpserted, labeledAt, ...rest } = row
     if (!latestUpserted) {
       logger.warn(
         `recordAccountLabelsBulk: AccountLabelLatest upsert guard skipped the write (accountId=${rest.accountId}, labelDefinitionId=${rest.labelDefinitionId})`,
       )
     }
-    history.push(rest)
+    if (historyInserted && labeledAt) {
+      history.push({ ...rest, labeledAt })
+    }
   }
 
   return history
@@ -193,26 +214,39 @@ export async function recordCrawlAccountLabel(
       ON CONFLICT ("crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion") DO NOTHING
       RETURNING "id"
     ),
+    previous_latest AS (
+      SELECT "value", "ruleVersion"
+      FROM "AccountLabelLatest"
+      WHERE "accountId" = ${params.accountId} AND "labelDefinitionId" = ${params.labelDefinitionId}
+    ),
     inserted_history AS (
       INSERT INTO "AccountLabel"
         ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt")
       SELECT ${id}, ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, ${params.result.confidence}, ${params.result.reason}, ${params.method}, ${params.ruleVersion}, "labeledAt"
       FROM shared_now
       WHERE EXISTS (SELECT 1 FROM claimed)
-      RETURNING *
+        AND NOT EXISTS (
+          SELECT 1 FROM previous_latest
+          WHERE "value" = ${params.result.value} AND "ruleVersion" = ${params.ruleVersion}
+        )
+      RETURNING "id"
     ),
     upserted_latest AS (
-      INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "labeledAt")
-      SELECT ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, "labeledAt"
+      INSERT INTO "AccountLabelLatest"
+        ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt")
+      SELECT ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, ${params.result.confidence}, ${params.result.reason}, ${params.method}, ${params.ruleVersion}, "labeledAt"
       FROM shared_now
       WHERE EXISTS (SELECT 1 FROM claimed)
       ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
-      SET "value" = EXCLUDED."value", "labeledAt" = EXCLUDED."labeledAt"
+      SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
+          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "labeledAt" = EXCLUDED."labeledAt"
       WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
       RETURNING "accountId"
     )
-    SELECT ih.*, EXISTS (SELECT 1 FROM upserted_latest) AS "latestUpserted"
-    FROM inserted_history ih
+    SELECT
+      EXISTS (SELECT 1 FROM inserted_history) AS "historyInserted",
+      EXISTS (SELECT 1 FROM upserted_latest) AS "latestUpserted"
+    FROM claimed
   `
   const row = rows.at(0)
   if (!row) return
