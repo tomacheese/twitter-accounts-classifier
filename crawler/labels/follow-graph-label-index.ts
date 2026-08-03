@@ -50,13 +50,17 @@ export async function buildFollowGraphLabelIndex(
   const [followeeRows, followerRows] = await Promise.all([
     prisma.$queryRaw<AggregateRow[]>`
       SELECT
-        f."followerId" AS "accountId",
+        edges."accountId",
         all_latest."labelDefinitionId",
         COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
         COUNT(*)::int AS "totalCount"
-      FROM "Follow" f
-      JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = f."followeeId"
-      GROUP BY f."followerId", all_latest."labelDefinitionId"
+      FROM (
+        SELECT "followerId" AS "accountId", "followeeId" FROM "Follow"
+        UNION
+        SELECT "accountId", "followeeId" FROM "LabelingFollowSample"
+      ) edges
+      JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
+      GROUP BY edges."accountId", all_latest."labelDefinitionId"
     `,
     prisma.$queryRaw<AggregateRow[]>`
       SELECT

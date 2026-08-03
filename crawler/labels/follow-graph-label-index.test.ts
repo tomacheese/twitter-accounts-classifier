@@ -79,4 +79,15 @@ describe('buildFollowGraphLabelIndex', () => {
 
     expect(index.signalsFor('alice')).toEqual({})
   })
+
+  it('フォロー先方向の集計クエリは Follow と LabelingFollowSample の両方を参照する', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+    const labelKeyToDefinitionId = new Map([['topic_food', 'def-topic_food']])
+
+    await buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId)
+
+    const followeeQuerySql = (queryRaw.mock.calls[0][0] as unknown[]).join('')
+    expect(followeeQuerySql).toContain('"LabelingFollowSample"')
+  })
 })
