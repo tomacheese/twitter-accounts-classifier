@@ -88,6 +88,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       topTweetsForReplies: 30,
       trendsPerCycle: 5,
       followEdgesPerAccount: 2000,
+      blockEdgesPerAccount: 2000,
       authorFetchDelayMs: 300,
     },
     issueCookies: vi.fn().mockResolvedValue({ ct0: 'c0', authToken: 'a0' }),
