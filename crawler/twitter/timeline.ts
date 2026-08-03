@@ -238,9 +238,9 @@ function toRawTweetResult(data: TweetApiUtilsData): RawTweetResult | null {
       isPromoted: Boolean(data.promotedMetadata),
       isPaidPromotion:
         data.tweet.contentDisclosure?.advertisingDisclosure?.isPaidPromotion ?? false,
-      // contentDisclosure.aiGeneratedDisclosure が欠落している場合は false に
-      // 丸めず null (未評価) のままにしている。X がこの情報を常に付与するとは
-      // 限らず、欠落が「AI 生成ではない」を意味するとは断定できないため。
+      // contentDisclosure.aiGeneratedDisclosure が欠落している場合は false に丸めず null (未評価) のままにしている。
+      // X がこの情報を常に付与するとは限らず、
+      // 欠落が「AI 生成ではない」を意味するとは断定できないため。
       hasAiGeneratedMedia:
         data.tweet.contentDisclosure?.aiGeneratedDisclosure?.hasAiGeneratedMedia ?? null,
       aiGeneratedDetectionSource:

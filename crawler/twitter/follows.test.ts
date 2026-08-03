@@ -92,8 +92,8 @@ describe('fetchFollowing', () => {
   })
 
   it('marks reachedEnd false when the cursor-exhausting page also overshoots the limit', async () => {
-    // limit 超過分として破棄される末尾の id は、呼び出し側の prune 処理で
-    // 「もう存在しない」と誤判定されてはならない。
+    // limit 超過分として破棄される末尾の id は、
+    // 呼び出し側の prune 処理で「もう存在しない」と誤判定されてはならない。
     const getFollowing = vi.fn().mockResolvedValueOnce(page(['1', '2', '3'], undefined))
     const client: FollowListApiLike = { getFollowing, getFollowers: vi.fn() }
 

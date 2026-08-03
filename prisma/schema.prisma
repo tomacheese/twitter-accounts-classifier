@@ -3,7 +3,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// crawler と viewer は別々の pnpm ワークスペースパッケージであり、それぞれ独立した node_modules を持つため、output を指定しないデフォルトの生成先はどちらのパッケージからも解決できない。
+// crawler と viewer は別々の pnpm ワークスペースパッケージであり、
+// それぞれ独立した node_modules を持つため、
+// output を指定しないデフォルトの生成先はどちらのパッケージからも解決できない。
 // そのため output で生成先を明示的に指定している。
 generator client {
   provider = "prisma-client-js"
@@ -99,15 +101,20 @@ model AccountLabel {
   ruleVersion       String
   labeledAt         DateTime        @default(now())
 
-  // アカウント詳細ページが labeledAt 降順で取得する際に使う唯一の単体インデックス。下の複合インデックスは2番目のカラムが labelDefinitionId のため代用できない。
-  // labelDefinitionId や labeledAt を先頭カラムとする単体インデックスは、crawler・viewer の主要な処理経路では使われないため用意していない。
+  // アカウント詳細ページが labeledAt 降順で取得する際に使う唯一の単体インデックス。
+  // 下の複合インデックスは2番目のカラムが labelDefinitionId のため代用できない。
+  // labelDefinitionId や labeledAt を先頭カラムとする単体インデックスは、
+  // crawler・viewer の主要な処理経路では使われないため用意していない。
   @@index([accountId])
   // AccountLabelLatest は ruleVersion を保持していないため、ルールバージョン別の再ラベリング処理は AccountLabel の履歴を直接参照する必要があり、そのための複合インデックス。
   @@index([accountId, labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])
 }
 
-// AccountLabel は監査証跡としてほぼ無制限に増え続ける履歴テーブルであり、そこから DISTINCT ON で最新値を都度導出すると、ダッシュボードやアカウント一覧のクエリが全件スキャンになり本番の応答時間を守れない。
-// そのため (accountId, labelDefinitionId) ごとの最新値のみを保持する専用テーブルとして用意し、recordCrawlAccountLabel / recordAccountLabelsBulk が AccountLabel への履歴 INSERT と同時に upsert する。
+// AccountLabel は監査証跡としてほぼ無制限に増え続ける履歴テーブルであり、
+// そこから DISTINCT ON で最新値を都度導出すると、
+// ダッシュボードやアカウント一覧のクエリが全件スキャンになり本番の応答時間を守れない。
+// そのため (accountId, labelDefinitionId) ごとの最新値のみを保持する専用テーブルとして用意し、
+// recordCrawlAccountLabel / recordAccountLabelsBulk が AccountLabel への履歴 INSERT と同時に upsert する。
 model AccountLabelLatest {
   accountId         String
   account           Account         @relation(fields: [accountId], references: [id])

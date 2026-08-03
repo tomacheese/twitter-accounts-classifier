@@ -126,8 +126,9 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
   const isRetweet = raw.legacy.retweetedStatusIdStr !== null
 
   const quotedResult = raw.legacy.quotedStatusResult?.result ?? null
-  // 引用先が tombstone・非表示で判定不能な場合と、判定した結果として動画がない
-  // 場合を区別できるよう、単純な boolean ではなく null を未評価として使い分ける。
+  // 引用先が tombstone・非表示で判定不能な場合と、
+  // 判定した結果として動画がない場合を区別できるよう、
+  // 単純な boolean ではなく null を未評価として使い分ける。
   const quotedTweetHasVideo = quotedResult?.legacy
     ? (quotedResult.legacy.extendedEntities?.media ?? []).some(
         (media) => media.type === 'video' || media.type === 'animated_gif',

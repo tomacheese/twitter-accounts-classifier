@@ -137,8 +137,8 @@ describe('fetchRecommendedTimeline', () => {
   })
 
   it('keeps paginating past a page that filters down to zero mappable tweets as long as a cursor remains', async () => {
-    // 広告・tombstone のみで構成され toRawTweetResult に全件除外されたページを
-    // 再現している。データ終端と誤認してはならないケース。
+    // 広告・tombstone のみで構成され toRawTweetResult に全件除外されたページを再現している。
+    // データ終端と誤認してはならないケース。
     const getHomeTimeline = vi
       .fn()
       .mockResolvedValueOnce(page([], 'cursor-a', 20))

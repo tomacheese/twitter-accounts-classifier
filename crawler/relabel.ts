@@ -15,9 +15,9 @@ import type { AccountFeatureBundle, LabelRule, LabelRuleResult } from './labels/
 const logger = Logger.configure('relabel')
 
 const ACCOUNT_BATCH_SIZE = 100
-// crawler/db/client.ts は connection_limit を明示しないため、Prisma のデフォルトプールサイズ
-// (num_physical_cpus * 2 + 1) に従う。過去のプール枯渇を踏まえ、
-// 8 はそれに対して余裕を残せる値として選んでいる。
+// crawler/db/client.ts は connection_limit を明示しないため、
+// Prisma のデフォルトプールサイズ(num_physical_cpus * 2 + 1) に従う。
+// 過去のプール枯渇を踏まえ、8 はそれに対して余裕を残せる値として選んでいる。
 const ACCOUNT_CONCURRENCY = 8
 const PROGRESS_LOG_INTERVAL = 1000
 // これ未満の経過時間では速度算出がゼロ除算に近くなり異常値になるため、算出をスキップする閾値。
@@ -292,10 +292,11 @@ export async function runRelabelBackfill(
       tweetFetchFailed = true
     }
 
-    // ここで空のツイートサンプルからラベルを永続化すると、このページの全 stale アカウントの
-    // latestRuleVersions が現在のルールバージョンに更新され、isFullyUpToDate に最新と
-    // みなされて再評価されなくなる。永続化をスキップして stale なまま残し、次回実行で
-    // 再取得・再評価させる。accountsProcessed には試行済みとしてカウントするため、
+    // ここで空のツイートサンプルからラベルを永続化すると、
+    // このページの全 stale アカウントの latestRuleVersions が現在のルールバージョンに更新され、
+    // isFullyUpToDate に最新とみなされて再評価されなくなる。
+    // 永続化をスキップして stale なまま残し、次回実行で再取得・再評価させる。
+    // accountsProcessed には試行済みとしてカウントするため、
     // フェッチ失敗時も進捗ログの分母が totalAccounts に到達する。
     if (tweetFetchFailed) {
       accountsProcessed += staleAccounts.length
@@ -389,10 +390,9 @@ async function main(): Promise<void> {
   }
 }
 
-// このモジュールを import しただけ (relabel.test.ts からの import など) では
-// 実際のバックフィルが走らないようにするガード。直接実行 (`node dist/relabel.js`)
-// した場合のみ動作する。require/module は、CommonJS を採用する本プロジェクトで
-// これを判定するのに適した手段である。
+// このモジュールを import しただけ (relabel.test.ts からの import など) では実際のバックフィルが走らないようにするガード。
+// 直接実行 (`node dist/relabel.js`)した場合のみ動作する。require/module は、
+// CommonJS を採用する本プロジェクトでこれを判定するのに適した手段である。
 // eslint-disable-next-line unicorn/prefer-module
 if (require.main === module) {
   initMonitoring()

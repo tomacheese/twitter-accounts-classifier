@@ -50,17 +50,18 @@ describe('runWithConcurrencyLimit', () => {
       }),
     ).rejects.toThrow('boom')
     // Promise.all は item 2 が throw したマイクロタスクの時点で reject するため、
-    // item 1/3 の1msタイマーが発火する前に到達する。既に開始済みのタスクが
-    // キャンセルされていないことを確認する前に、その完了を待つ猶予を与える。
+    // item 1/3 の1msタイマーが発火する前に到達する。
+    // 既に開始済みのタスクがキャンセルされていないことを確認する前に、
+    // その完了を待つ猶予を与える。
     await new Promise((resolve) => setTimeout(resolve, 10))
     // eslint-disable-next-line unicorn/no-array-sort -- toSorted() は ES2023 lib が必要だが tsconfig は ES2022 を対象としているため、複製した配列をソートして入力の変更を避けている
     expect([...completed].sort((a, b) => a - b)).toEqual([1, 3])
   })
 
   it('does not start a not-yet-begun item once an earlier task has rejected', async () => {
-    // concurrency: 1 なので item は逐次実行される。item 2 が reject した時点で
-    // item 3 はまだ着手していないため、バックグラウンドで実行が継続していれば
-    // item 3 も started に記録されてしまう。
+    // concurrency: 1 なので item は逐次実行される。
+    // item 2 が reject した時点で item 3 はまだ着手していないため、
+    // バックグラウンドで実行が継続していれば item 3 も started に記録されてしまう。
     const started: number[] = []
     await expect(
       runWithConcurrencyLimit([1, 2, 3], 1, (item) => {

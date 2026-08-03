@@ -64,8 +64,8 @@ describe('botRule', () => {
     const tenYearsAgo = new Date('2016-01-01T00:00:00Z')
     const base = new Date('2026-01-01T00:00:00Z').getTime()
     const dayMs = 24 * 60 * 60 * 1000
-    // 生涯平均の tweetCount は水増しされているが、直近のサンプルはまばらな
-    // 投稿間隔であり、通常の投稿頻度を示す。
+    // 生涯平均の tweetCount は水増しされているが、
+    // 直近のサンプルはまばらな投稿間隔であり、通常の投稿頻度を示す。
     const sparseTweets: AccountFeatureBundle['recentTweets'] = Array.from(
       { length: 14 },
       (_, i) => ({

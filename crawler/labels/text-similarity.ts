@@ -1,6 +1,6 @@
-// reply-flooding.ts (単一アカウントが1つの対象へ言い換えたリプライを連投する検出)と
-// reply-hijack-index.ts (複数アカウントがそれぞれ1つの対象へ言い換えたリプライを送る検出)の
-// 両方から共有され、いずれも言い換えレベルの文章類似度を測る点は同じで、グループ化する軸だけが異なる。
+// reply-flooding.ts (単一アカウントが1つの対象へ言い換えたリプライを連投する検出)と reply-hijack-index.ts (複数アカウントがそれぞれ1つの対象へ言い換えたリプライを送る検出)の両方から共有され、
+// いずれも言い換えレベルの文章類似度を測る点は同じで、
+// グループ化する軸だけが異なる。
 const URL_PATTERN = /https?:\/\/\S+/g
 const MENTION_PATTERN = /@\w+/g
 const WHITESPACE_PATTERN = /\s+/g

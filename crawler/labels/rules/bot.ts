@@ -1,8 +1,8 @@
 import type { LabelRule } from '../types'
 
 const VELOCITY_THRESHOLD_PER_DAY = 150
-// 何年も前から稼働する大規模な認証済みビジネスアカウントは、X 側の `statuses_count` が
-// 実際の投稿頻度に対して大幅に水増しされていることがあるため、
+// 何年も前から稼働する大規模な認証済みビジネスアカウントは、
+// X 側の `statuses_count` が実際の投稿頻度に対して大幅に水増しされていることがあるため、
 // `tweetCount / accountAge` のみでは高頻度アカウントと誤判定してしまう。
 // サンプルした直近ツイートの実測頻度にも基準を課すことで、
 // 生涯平均の水増しに単独で依拠しないようにしている。
@@ -51,18 +51,19 @@ export const botRule: LabelRule = {
     const sampled = bundle.recentTweets
     const tweetsPerDay = averageTweetsPerDay(tweetCount, accountCreatedAt)
     const recentTweetsPerDay = recentObservedTweetsPerDay(sampled)
-    // 直近の投稿頻度が高いだけでは十分条件とせず、生涯平均も同時に満たす必要がある。
-    // `recentObservedTweetsPerDay` はサンプルした件数から「1日あたり」の頻度を
-    // 外挿するため、配信・ゲーム実況・ドラマ視聴などの短時間の実況で密集投稿する人間は、
+    // 直近の投稿頻度が高いだけでは十分条件とせず、
+    // 生涯平均も同時に満たす必要がある。
+    // `recentObservedTweetsPerDay` はサンプルした件数から「1日あたり」の頻度を外挿するため、
+    // 配信・ゲーム実況・ドラマ視聴などの短時間の実況で密集投稿する人間は、
     // 生涯平均が bot 的でなくても閾値を容易に超えてしまう。
     const isHighVelocity =
       tweetsPerDay >= VELOCITY_THRESHOLD_PER_DAY &&
       recentTweetsPerDay >= RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY
     // 比率はオリジナル投稿のみを対象とする。リツイートは返信になり得ないため、
-    // 分母にリツイートを含めると比率が機械的にゼロへ寄ってしまい、この信号が
-    // 「会話しないこと」ではなく「リツイートが多いこと」の代理指標になってしまう。
-    // 日本語 X には多数のリツイートを行う人間アカウント(推し活・懸賞・政治系の
-    // 転載アカウントなど)が多く、これらを誤検知しないためである。
+    // 分母にリツイートを含めると比率が機械的にゼロへ寄ってしまい、
+    // この信号が「会話しないこと」ではなく「リツイートが多いこと」の代理指標になってしまう。
+    // 日本語 X には多数のリツイートを行う人間アカウント(推し活・懸賞・政治系の転載アカウントなど)が多く、
+    // これらを誤検知しないためである。
     const originalPosts = sampled.filter((t) => !t.isRetweet)
     const replyRatio =
       originalPosts.length > 0

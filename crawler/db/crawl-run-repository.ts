@@ -127,8 +127,9 @@ export async function recordCrawlAccountRun(
   prisma: PrismaClient,
   params: RecordCrawlAccountRunParams,
 ): Promise<void> {
-  // `warnings` は構造化された配列だが、Prisma が生成する `InputJsonValue` union に
-  // そのまま渡せないため、明示的なキャストが必要になる。
+  // `warnings` は構造化された配列だが、
+  // Prisma が生成する `InputJsonValue` union にそのまま渡せないため、
+  // 明示的なキャストが必要になる。
   await prisma.crawlAccountRun.create({
     data: { ...params, warnings: params.warnings as unknown as Prisma.InputJsonValue },
   })
@@ -236,14 +237,15 @@ export async function startOrResumeCrawlRun(
         `${existingRun.lastHeartbeatAt.toISOString()}, exceeding staleThresholdMs=${staleThresholdMs}`,
     )
     try {
-      // lastHeartbeatAt (この行が最後に生存を示した時刻) を finishedAt とする。startedAt (新しい
-      // cycle の開始時刻) を使うと、実際にはとうに停止していた run の duration が放置時間の分だけ
-      // 水増しされてしまう。
+      // lastHeartbeatAt (この行が最後に生存を示した時刻) を finishedAt とする。
+      // startedAt (新しい cycle の開始時刻) を使うと、
+      // 実際にはとうに停止していた run の duration が放置時間の分だけ水増しされてしまう。
       await finishCrawlRun(prisma, existingRun.id, existingRun.lastHeartbeatAt, 'failed')
       await clearCrawlAccountCheckpoints(prisma, existingRun.id)
     } catch (error) {
-      // 片付けに失敗しても新しい run の作成は続行する。放置された行の checkpoint / label claim
-      // が残り続けるだけで、後続の cycle には影響しない。
+      // 片付けに失敗しても新しい run の作成は続行する。
+      // 放置された行の checkpoint / label claim が残り続けるだけで、
+      // 後続の cycle には影響しない。
       logger.error(`Failed to finalize abandoned crawl run ${existingRun.id}`, error as Error)
     }
   }

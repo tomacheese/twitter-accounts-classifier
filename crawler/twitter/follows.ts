@@ -52,9 +52,9 @@ async function paginate(
     cursor = page.nextCursor
   }
 
-  // limit を超過した末尾は破棄するため、そのページでカーソルが尽きていても
-  // reachedEnd を true のままにはしない。破棄した id を呼び出し側が
-  // 「もう存在しない」と誤判定してエッジを削除しないようにするため。
+  // limit を超過した末尾は破棄するため、
+  // そのページでカーソルが尽きていても reachedEnd を true のままにはしない。
+  // 破棄した id を呼び出し側が「もう存在しない」と誤判定してエッジを削除しないようにするため。
   const truncated = ids.length > limit
   return {
     ids: ids.slice(0, limit),

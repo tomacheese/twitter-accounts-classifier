@@ -313,18 +313,21 @@ async function runAccountCycleBody(
   const allTweets = [...recommended.tweets, ...following.tweets, ...trending.tweets]
   const topTweets = sortByEngagement(allTweets).slice(0, deps.limits.topTweetsForReplies)
 
-  // Tweet.accountId は Account への必須外部キーであるため、専用のプロフィール取得が行われないか
-  // 失敗した投稿者についても、埋め込みプロフィールをフォールバックとして必ず upsert する。
+  // Tweet.accountId は Account への必須外部キーであるため、
+  // 専用のプロフィール取得が行われないか失敗した投稿者についても、
+  // 埋め込みプロフィールをフォールバックとして必ず upsert する。
   const extraAuthors = new Map<string, AccountProfileInput>()
   for (const author of [...recommended.authors, ...following.authors, ...trending.authors]) {
     extraAuthors.set(author.id, author)
   }
   const replyTweets: TweetInput[] = []
-  // ラベル評価ループをタイムライン投稿者だけに絞ると、自分ではバズる投稿をしない
-  // reply-hijack 系アカウントを一切評価できなくなるため、候補として別途集める。
+  // ラベル評価ループをタイムライン投稿者だけに絞ると、
+  // 自分ではバズる投稿をしない reply-hijack 系アカウントを一切評価できなくなるため、
+  // 候補として別途集める。
   const replyHijackCandidateIds = new Set<string>()
-  // 候補を検出した実際の返信そのものを保持しないと、ラベル評価は候補者について別途取得した
-  // 投稿履歴だけに頼ることになり、判定の根拠となった返信自体が失われてしまう。
+  // 候補を検出した実際の返信そのものを保持しないと、
+  // ラベル評価は候補者について別途取得した投稿履歴だけに頼ることになり、
+  // 判定の根拠となった返信自体が失われてしまう。
   const otherRepliesByAuthor = new Map<string, TweetInput[]>()
   for (const topTweet of topTweets) {
     const { authorReplies, otherReplies, authors } = await withTwitterRetry(
@@ -372,8 +375,8 @@ async function runAccountCycleBody(
 
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
       // profileTweets は他者に帰属する会話スレッドの文脈ツイートもそのまま保持するが、
-      // ラベル評価用のバンドルには含めない。混入すると authorId 向けの全ルールが誤った
-      // recentTweets を読むことになるため。
+      // ラベル評価用のバンドルには含めない。
+      // 混入すると authorId 向けの全ルールが誤った recentTweets を読むことになるため。
       const authorOwnRecentTweets = recentTweets.filter((t) => t.accountId === authorId)
       const authorOtherReplies = otherRepliesByAuthor.get(authorId) ?? []
       const bundleTweets = mergeTweetAdFlags([
@@ -382,8 +385,8 @@ async function runAccountCycleBody(
         ...authorOtherReplies,
       ])
 
-      // 複数の異なるテンプレ返信ネットワークに属することがあるため、合計や平均ではなく
-      // 最大値を最も強いシグナルとして採用する。
+      // 複数の異なるテンプレ返信ネットワークに属することがあるため、
+      // 合計や平均ではなく最大値を最も強いシグナルとして採用する。
       let templatedReplyNetworkSize = 0
       for (const t of bundleTweets) {
         if (!t.isReply) continue
@@ -525,9 +528,9 @@ async function syncFollowingPhase(
       retryOptions(deps),
     )
     userId = response.data.restId
-    // Follow テーブルの followerId/followeeId は Account への必須外部キーであり、この
-    // ログインアカウントは今回のサイクル中にツイート・返信の投稿者として現れるとは限らない
-    // ため、ここで自身の Account 行を upsert しないと以降の edge upsert が失敗する。
+    // Follow テーブルの followerId/followeeId は Account への必須外部キーであり、
+    // このログインアカウントは今回のサイクル中にツイート・返信の投稿者として現れるとは限らないため、
+    // ここで自身の Account 行を upsert しないと以降の edge upsert が失敗する。
     await deps.persistAccount(toAccountProfileInput(response.data))
   } catch (error) {
     const message = `Failed to resolve or persist own account for ${account.username}, skipping follow/follower sync`
@@ -971,10 +974,10 @@ async function runAccountCycle(
       appVersion: APP_VERSION,
     })
 
-    // recordCrawlAccountRun の後に実行する: GlitchTip への到達性に関わらず、永続化された
-    // CrawlAccountRun には常に実際の結果を反映させるため。メッセージ文言には件数を埋め込まない:
-    // 埋め込むと件数ごとに別イシューへ分裂してしまい、同一アカウントの繰り返し超過を
-    // 1 つのイシューにまとめられなくなるため。
+    // recordCrawlAccountRun の後に実行する: GlitchTip への到達性に関わらず、
+    // 永続化された CrawlAccountRun には常に実際の結果を反映させるため。
+    // メッセージ文言には件数を埋め込まない:埋め込むと件数ごとに別イシューへ分裂してしまい、
+    // 同一アカウントの繰り返し超過を 1 つのイシューにまとめられなくなるため。
     const warningThreshold = getCrawlWarningThreshold()
     if (warnings.length >= warningThreshold) {
       captureMessage(`Crawl warnings threshold exceeded for ${account.username}`, {
@@ -1016,17 +1019,17 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   const registry = new LabelRuleRegistry()
   for (const rule of ALL_LABEL_RULES) registry.register(rule)
   const labelDefinitionIds = await deps.ensureLabelDefinitions(registry)
-  // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、アカウントごとではなく
-  // サイクルごとに 1 回だけ構築する。
+  // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
+  // アカウントごとではなくサイクルごとに 1 回だけ構築する。
   const replyCorpus = await deps.loadReplyCorpus()
   const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
   const replyHijackIndex = buildReplyHijackIndex(replyCorpus)
 
   const { id: crawlRunId, latestAccountStatuses } = await deps.startOrResumeCrawlRun(new Date())
 
-  // ここから下を try で囲む: 想定外の例外を捕捉しないと CrawlRun が 'running' のまま残ってしまう
-  // ため、必ず 'failed' として確定させる。ただしプロセスの強制終了と、この確定処理自体の失敗の
-  // 2 つは検知できない。
+  // ここから下を try で囲む: 想定外の例外を捕捉しないと CrawlRun が 'running' のまま残ってしまうため、
+  // 必ず 'failed' として確定させる。ただしプロセスの強制終了と、
+  // この確定処理自体の失敗の 2 つは検知できない。
   try {
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
@@ -1081,8 +1084,9 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
     try {
       await deps.finishCrawlRun(crawlRunId, new Date(), 'failed')
     } catch (finalizeError) {
-      // この二次的な失敗を優先して投げず、元の error をそのまま rethrow する: 原因の手がかりを
-      // 失うほうが影響が大きく、いずれにせよ行は 'running' のまま残るため。
+      // この二次的な失敗を優先して投げず、
+      // 元の error をそのまま rethrow する: 原因の手がかりを失うほうが影響が大きく、
+      // いずれにせよ行は 'running' のまま残るため。
       logger.error('Failed to finalize the CrawlRun as failed', finalizeError as Error)
     }
     throw error

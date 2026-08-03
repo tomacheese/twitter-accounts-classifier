@@ -55,8 +55,9 @@ export function wrapFetchWithResponseCapture(fetchImpl: typeof fetch): typeof fe
   return async (input, init) => {
     const response = await fetchImpl(input, init)
     const url = input instanceof Request ? input.url : String(input)
-    // 本来の呼び出しを失敗させてはならないため、本文をテキストとして読めない場合
-    // なども含め、ここで発生したエラーは記録を諦めるだけに留める。
+    // 本来の呼び出しを失敗させてはならないため、
+    // 本文をテキストとして読めない場合なども含め、
+    // ここで発生したエラーは記録を諦めるだけに留める。
     try {
       const body = await response.clone().text()
       recordResponse(url, response.status, body)

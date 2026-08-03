@@ -1,8 +1,8 @@
 import type { LabelRule } from '../types'
 
 // 英語の vtuber は無関係な複合語の内部に一致しないよう単語境界で判定している。
-// にじさんじ/ホロライブのような主要事務所名は、特定の VTuber 事務所への所属自体が
-// VTuber ファン層・活動者としての強いシグナルになるため対象語に含めている。
+// にじさんじ/ホロライブのような主要事務所名は、
+// 特定の VTuber 事務所への所属自体が VTuber ファン層・活動者としての強いシグナルになるため対象語に含めている。
 const VTUBER_PATTERN = /\bvtuber\b|にじさんじ|ホロライブ|hololive/i
 
 export const topicVtuberRule: LabelRule = {

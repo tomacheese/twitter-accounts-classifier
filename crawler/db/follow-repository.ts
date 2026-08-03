@@ -5,8 +5,9 @@ import type { FollowListResult } from '../twitter/follows'
 
 const logger = Logger.configure('follow-repository')
 
-// `./tweet-repository` の `upsertTweets` と同様、アカウントごとに個別に upsert する:
-// 1 件の不正なプロフィールで、残りのバッチや後続の edge 同期まで止めてはならないため。
+// `./tweet-repository` の `upsertTweets` と同様、
+// アカウントごとに個別に upsert する:1 件の不正なプロフィールで、
+// 残りのバッチや後続の edge 同期まで止めてはならないため。
 async function upsertFollowAuthors(prisma: PrismaClient, result: FollowListResult): Promise<void> {
   for (const author of result.authors) {
     try {
@@ -52,9 +53,9 @@ export async function syncFollowing(
       })
     }
 
-    // `reachedEnd` だけでは削除の可否を判断しない: `result.ids` が空だと `notIn: []` は
-    // 全件一致の条件になってしまい、一時的な空応答 (レート制限や認証エラー) だけで
-    // 記録済みの edge を全消去しかねないため、確認済みの id が 1 件以上ある場合のみ削除する。
+    // `reachedEnd` だけでは削除の可否を判断しない: `result.ids` が空だと `notIn: []` は全件一致の条件になってしまい、
+    // 一時的な空応答 (レート制限や認証エラー) だけで記録済みの edge を全消去しかねないため、
+    // 確認済みの id が 1 件以上ある場合のみ削除する。
     if (result.reachedEnd && result.ids.length > 0) {
       await tx.follow.deleteMany({
         where: { followerId, followeeId: { notIn: result.ids } },

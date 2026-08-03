@@ -3,8 +3,9 @@ import { getPrismaClient } from '@/lib/prisma'
 import { getLabelDistribution, type LabelDistributionEntry } from '@/lib/queries/dashboard'
 import { ErrorFallback } from '../components/error-fallback'
 
-// このページは常に最新データを読むため、静的プリレンダリングの対象から外している。
-// 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
+// このページは常に最新データを読むため、
+// 静的プリレンダリングの対象から外している。指定しないと、
+// DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
 
 /**

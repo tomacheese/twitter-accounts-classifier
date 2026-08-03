@@ -1,5 +1,7 @@
-// URL と @mention を正規化に含めると、短縮URLやリプライ先が投稿ごとに異なるため、
-// 同一テンプレート文言の一致を検出できなくなる。そのため両方とも比較前に除去する。
+// URL と @mention を正規化に含めると、
+// 短縮URLやリプライ先が投稿ごとに異なるため、
+// 同一テンプレート文言の一致を検出できなくなる。
+// そのため両方とも比較前に除去する。
 const URL_PATTERN = /https?:\/\/\S+/g
 const MENTION_PATTERN = /@\w+/g
 const WHITESPACE_PATTERN = /\s+/g

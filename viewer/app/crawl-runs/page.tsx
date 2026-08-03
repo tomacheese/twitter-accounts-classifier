@@ -5,8 +5,9 @@ import { getAllCrawlRuns } from '@/lib/queries/crawl-runs'
 import { ErrorFallback } from '../components/error-fallback'
 import { StatusBadge } from '../components/status-badge'
 
-// このページは常に最新データを読むため、静的プリレンダリングの対象から外している。
-// 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
+// このページは常に最新データを読むため、
+// 静的プリレンダリングの対象から外している。指定しないと、
+// DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
 
 /**

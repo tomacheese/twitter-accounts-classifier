@@ -13,10 +13,11 @@ function japaneseScriptRatio(texts: string[]): number {
   return texts.filter((text) => JAPANESE_SCRIPT_PATTERN.test(text)).length / texts.length
 }
 
-// リンクのみのリプライは、言語に関わらずスクリプト比率が0になり、言語の「不一致」の
-// 根拠ではなく、単に言語的内容を持たない空サンプルにすぎない。URL・メンション・
-// 自己リツイートの接頭辞を除去し、実質的なテキストが残っている場合のみ、
-// どちらか一方の比率に算入する。
+// リンクのみのリプライは、言語に関わらずスクリプト比率が0になり、
+// 言語の「不一致」の根拠ではなく、
+// 単に言語的内容を持たない空サンプルにすぎない。
+// URL・メンション・自己リツイートの接頭辞を除去し、
+// 実質的なテキストが残っている場合のみ、どちらか一方の比率に算入する。
 function hasLinguisticContent(text: string): boolean {
   const stripped = text
     .replace(/^RT @\w+:\s*/i, '')
@@ -37,12 +38,13 @@ export const replyLanguageMismatchRule: LabelRule = {
       (t) => !t.isReply && !t.isRetweet && hasLinguisticContent(t.fullText),
     )
 
-    // 自身のスクリーンネームが引用元として表示される「リツイート」は、実質的には
-    // 他者のコンテンツではなく、自身のリプライを自己拡散しているものである。
+    // 自身のスクリーンネームが引用元として表示される「リツイート」は、
+    // 実質的には他者のコンテンツではなく、
+    // 自身のリプライを自己拡散しているものである。
     //
-    // 接頭辞の後に続く内容自体がリプライらしい形(`@メンション` で始まる)を
-    // していることも要求する。そうしないと、リプライ本文を持たないリンクのみの
-    // 自己リツイート(例: `RT @screenName: https://t.co/xxx`)にもマッチしてしまい、
+    // 接頭辞の後に続く内容自体がリプライらしい形(`@メンション` で始まる)をしていることも要求する。
+    // そうしないと、
+    // リプライ本文を持たないリンクのみの自己リツイート(例: `RT @screenName: https://t.co/xxx`)にもマッチしてしまい、
     // アカウント本来のリプライ言語に関わらずスクリプト比率が0と判定されてしまうため。
     const selfRetweetPrefix = `RT @${screenName}:`
     const isSelfRetweetedReply = (text: string): boolean =>

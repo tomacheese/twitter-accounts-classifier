@@ -1,11 +1,12 @@
 import type { IssuedCookies } from '../auth/cookie-issuer-client'
 import type { TrendsScraperLike } from './timeline'
 
-// `@the-convocation/twitter-scraper` の getTrends() は同じ bearer token・
-// エンドポイントを叩くが、その実装では bearer token を override として渡すと
-// guest token を付与しないため、guide.json が認証エラーで拒否してしまう。
-// アップストリームのライブラリ側に修正がない状態のため、このリクエストを自前で
-// 実装し直し、guest token を確実に付与するようにしている。
+// `@the-convocation/twitter-scraper` の getTrends() は同じ bearer token・エンドポイントを叩くが、
+// その実装では bearer token を override として渡すと guest token を付与しないため、
+// guide.json が認証エラーで拒否してしまう。
+// アップストリームのライブラリ側に修正がない状態のため、
+// このリクエストを自前で実装し直し、
+// guest token を確実に付与するようにしている。
 const TRENDS_BEARER_TOKEN =
   'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
 

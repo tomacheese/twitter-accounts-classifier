@@ -130,9 +130,9 @@ export async function recordAccountLabelsBulk(
   `
 
   if (rows.length !== params.labels.length) {
-    // INSERT ... RETURNING が入力より少ない行数しか返さなかった場合、呼び出し元
-    // (`crawler/relabel.ts`) は返り値を見ずに全ラベルを永続化済みとして
-    // `latestRuleVersions` を更新してしまう。原因調査ができるよう警告として記録する。
+    // INSERT ... RETURNING が入力より少ない行数しか返さなかった場合、
+    // 呼び出し元(`crawler/relabel.ts`) は返り値を見ずに全ラベルを永続化済みとして`latestRuleVersions` を更新してしまう。
+    // 原因調査ができるよう警告として記録する。
     logger.warn(
       `recordAccountLabelsBulk: expected ${params.labels.length} rows but got ${rows.length} back, the persisted label set may be incomplete (accountId=${params.accountId})`,
     )

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { getLastResponseMatching, wrapFetchWithResponseCapture } from './response-capture'
 
-// キャプチャ用バッファはこのファイル内の全テストで共有されるモジュールレベルの
-// 状態のため、各テストは前のテストのエントリを読んでしまわないよう、
+// キャプチャ用バッファはこのファイル内の全テストで共有されるモジュールレベルの状態のため、
+// 各テストは前のテストのエントリを読んでしまわないよう、
 // それぞれ固有の URL 部分文字列を使っている。
 
 describe('wrapFetchWithResponseCapture', () => {
@@ -47,8 +47,9 @@ describe('wrapFetchWithResponseCapture', () => {
       .mockImplementation((input: string) => Promise.resolve(new Response(input, { status: 200 })))
     const wrapped = wrapFetchWithResponseCapture(fetchImpl as unknown as typeof fetch)
 
-    // バッファの上限は 20 件のため、URL が異なる 25 件を積むと先頭 5 件が
-    // 追い出され、EvictionTest-5..24 だけが残るはず。
+    // バッファの上限は 20 件のため、
+    // URL が異なる 25 件を積むと先頭 5 件が追い出され、
+    // EvictionTest-5..24 だけが残るはず。
     for (let i = 0; i < 25; i++) {
       await wrapped(`https://x.com/graphql/abc/EvictionTest-${String(i)}`)
     }
