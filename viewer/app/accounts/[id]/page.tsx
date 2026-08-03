@@ -31,7 +31,7 @@ export default async function AccountDetailPage({
     notFound()
   }
 
-  const { account, labels, recentTweets, following, followers } = detail
+  const { account, labels, recentTweets, following, followers, blocked } = detail
 
   return (
     <div className="flex flex-col gap-8">
@@ -186,6 +186,42 @@ export default async function AccountDetailPage({
         ) : (
           <ul className="flex flex-col gap-2">
             {followers.entries.map((entry) => (
+              <li key={entry.id}>
+                <Link
+                  href={`/accounts/${entry.id}`}
+                  className="flex items-center gap-3 rounded-lg border bg-white p-3 text-sm shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
+                >
+                  {entry.profileImageUrl && (
+                    <Image
+                      src={entry.profileImageUrl}
+                      alt={`${entry.displayName}'s avatar`}
+                      width={32}
+                      height={32}
+                      className="h-8 w-8 rounded-full object-cover"
+                    />
+                  )}
+                  <span>
+                    {entry.displayName}{' '}
+                    <span className="text-gray-500 dark:text-gray-400">@{entry.screenName}</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-lg font-semibold">
+          Blocked ({blocked.totalCount.toLocaleString()})
+        </h2>
+        {blocked.entries.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            No blocked-user data recorded for this account.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {blocked.entries.map((entry) => (
               <li key={entry.id}>
                 <Link
                   href={`/accounts/${entry.id}`}

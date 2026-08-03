@@ -15,6 +15,7 @@ type CrawlWarningType =
   | 'own_account_sync_failed'
   | 'following_sync_failed'
   | 'followers_sync_failed'
+  | 'blocks_sync_failed'
 
 /**
  * crawler と viewer は TypeScript のプロジェクト参照を共有していない別パッケージのため、
@@ -57,6 +58,7 @@ const ACCOUNT_RUN_COLUMNS = [
   'Labels applied',
   'Following graph synced',
   'Followers graph synced',
+  'Blocks synced',
   'Warnings',
   'Error',
 ] as const
@@ -189,6 +191,7 @@ export default async function CrawlRunDetailPage({
                       <td className="p-2">{accountRun.labelsAppliedCount}</td>
                       <td className="p-2">{accountRun.followingSynced ? 'yes' : 'no'}</td>
                       <td className="p-2">{accountRun.followersSynced ? 'yes' : 'no'}</td>
+                      <td className="p-2">{accountRun.blocksSynced ? 'yes' : 'no'}</td>
                       <td className="p-2">
                         {warnings.length === 0 ? (
                           '—'

@@ -54,6 +54,7 @@ export interface AccountDetail {
   recentTweets: AccountDetailTweet[]
   following: AccountDetailFollowList
   followers: AccountDetailFollowList
+  blocked: AccountDetailFollowList
 }
 
 const FOLLOW_LIST_LIMIT = 100
@@ -75,35 +76,49 @@ export async function getAccountDetail(
     return null
   }
 
-  const [labels, tweets, followingEdges, followingCount, followerEdges, followerCount] =
-    await Promise.all([
-      prisma.accountLabel.findMany({
-        where: { accountId },
-        orderBy: { labeledAt: 'desc' },
-        include: { labelDefinition: true },
-      }),
-      prisma.tweet.findMany({
-        where: { accountId },
-        orderBy: { createdAt: 'desc' },
-        take: tweetLimit,
-      }),
-      prisma.follow.findMany({
-        where: { followerId: accountId },
-        // 1回のクロールで同じ方向の全エッジに同一の lastSeenAt が付くため、
-        // タイブレークを固定しないとページ読み込みごとに一覧の中身が変動しうる。
-        orderBy: [{ lastSeenAt: 'desc' }, { followeeId: 'asc' }],
-        take: FOLLOW_LIST_LIMIT,
-        include: { followee: true },
-      }),
-      prisma.follow.count({ where: { followerId: accountId } }),
-      prisma.follow.findMany({
-        where: { followeeId: accountId },
-        orderBy: [{ lastSeenAt: 'desc' }, { followerId: 'asc' }],
-        take: FOLLOW_LIST_LIMIT,
-        include: { follower: true },
-      }),
-      prisma.follow.count({ where: { followeeId: accountId } }),
-    ])
+  const [
+    labels,
+    tweets,
+    followingEdges,
+    followingCount,
+    followerEdges,
+    followerCount,
+    blockedEdges,
+    blockedCount,
+  ] = await Promise.all([
+    prisma.accountLabel.findMany({
+      where: { accountId },
+      orderBy: { labeledAt: 'desc' },
+      include: { labelDefinition: true },
+    }),
+    prisma.tweet.findMany({
+      where: { accountId },
+      orderBy: { createdAt: 'desc' },
+      take: tweetLimit,
+    }),
+    prisma.follow.findMany({
+      where: { followerId: accountId },
+      // 1回のクロールで同じ方向の全エッジに同一の lastSeenAt が付くため、タイブレークを固定しないとページ読み込みごとに一覧の中身が変動しうる。
+      orderBy: [{ lastSeenAt: 'desc' }, { followeeId: 'asc' }],
+      take: FOLLOW_LIST_LIMIT,
+      include: { followee: true },
+    }),
+    prisma.follow.count({ where: { followerId: accountId } }),
+    prisma.follow.findMany({
+      where: { followeeId: accountId },
+      orderBy: [{ lastSeenAt: 'desc' }, { followerId: 'asc' }],
+      take: FOLLOW_LIST_LIMIT,
+      include: { follower: true },
+    }),
+    prisma.follow.count({ where: { followeeId: accountId } }),
+    prisma.block.findMany({
+      where: { blockerId: accountId },
+      orderBy: [{ lastSeenAt: 'desc' }, { blockedId: 'asc' }],
+      take: FOLLOW_LIST_LIMIT,
+      include: { blocked: true },
+    }),
+    prisma.block.count({ where: { blockerId: accountId } }),
+  ])
 
   return {
     account: {
@@ -156,6 +171,15 @@ export async function getAccountDetail(
         profileImageUrl: edge.follower.profileImageUrl,
       })),
       totalCount: followerCount,
+    },
+    blocked: {
+      entries: blockedEdges.map((edge) => ({
+        id: edge.blocked.id,
+        screenName: edge.blocked.screenName,
+        displayName: edge.blocked.displayName,
+        profileImageUrl: edge.blocked.profileImageUrl,
+      })),
+      totalCount: blockedCount,
     },
   }
 }

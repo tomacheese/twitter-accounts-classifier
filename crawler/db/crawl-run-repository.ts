@@ -11,6 +11,7 @@ export type CrawlWarningType =
   | 'own_account_sync_failed'
   | 'following_sync_failed'
   | 'followers_sync_failed'
+  | 'blocks_sync_failed'
 
 /**
  * `errorMessage` は元のエラーメッセージだけを保持し、
@@ -57,6 +58,7 @@ export interface RecordCrawlAccountRunParams {
   labelsAppliedCount: number
   followingSynced: boolean
   followersSynced: boolean
+  blocksSynced: boolean
   warnings: CrawlWarning[]
   errorMessage: string | null
   /**
@@ -71,6 +73,7 @@ export const CRAWL_ACCOUNT_CHECKPOINT_PHASES = [
   'authors',
   'following',
   'followers',
+  'blocks',
 ] as const
 
 export type CrawlAccountCheckpointPhase = (typeof CRAWL_ACCOUNT_CHECKPOINT_PHASES)[number]

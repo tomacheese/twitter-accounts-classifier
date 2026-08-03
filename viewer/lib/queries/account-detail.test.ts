@@ -83,11 +83,23 @@ describe('getAccountDetail', () => {
       .mockImplementation(({ where }: { where: Record<string, unknown> }) =>
         Promise.resolve('followerId' in where ? 1 : 1),
       )
+    const blockFindMany = vi.fn().mockResolvedValue([
+      {
+        blocked: {
+          id: 'b1',
+          screenName: 'blocked_one',
+          displayName: 'Blocked One',
+          profileImageUrl: null,
+        },
+      },
+    ])
+    const blockCount = vi.fn().mockResolvedValue(1)
     const prisma = {
       account: { findUnique },
       accountLabel: { findMany: labelFindMany },
       tweet: { findMany: tweetFindMany },
       follow: { findMany: followFindMany, count: followCount },
+      block: { findMany: blockFindMany, count: blockCount },
     } as unknown as PrismaClient
 
     const result = await getAccountDetail(prisma, 'a1', 10)
@@ -152,6 +164,17 @@ describe('getAccountDetail', () => {
         ],
         totalCount: 1,
       },
+      blocked: {
+        entries: [
+          {
+            id: 'b1',
+            screenName: 'blocked_one',
+            displayName: 'Blocked One',
+            profileImageUrl: null,
+          },
+        ],
+        totalCount: 1,
+      },
     })
     expect(tweetFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { accountId: 'a1' }, take: 10 }),
@@ -180,6 +203,10 @@ describe('getAccountDetail', () => {
         findMany: vi.fn().mockResolvedValue([]),
         count: vi.fn().mockResolvedValue(0),
       },
+      block: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
     } as unknown as PrismaClient
 
     const result = await getAccountDetail(prisma, 'a2', 10)
@@ -204,18 +231,23 @@ describe('getAccountDetail', () => {
     }
     const followFindMany = vi.fn().mockResolvedValue([])
     const followCount = vi.fn().mockResolvedValue(250)
+    const blockFindMany = vi.fn().mockResolvedValue([])
+    const blockCount = vi.fn().mockResolvedValue(250)
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
       accountLabel: { findMany: vi.fn().mockResolvedValue([]) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: { findMany: followFindMany, count: followCount },
+      block: { findMany: blockFindMany, count: blockCount },
     } as unknown as PrismaClient
 
     const result = await getAccountDetail(prisma, 'a3', 10)
 
     expect(result?.following.totalCount).toBe(250)
     expect(result?.followers.totalCount).toBe(250)
+    expect(result?.blocked.totalCount).toBe(250)
     expect(followFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }))
+    expect(blockFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }))
   })
 
   it('orders following/followers by lastSeenAt with a stable id tiebreaker', async () => {
@@ -233,11 +265,13 @@ describe('getAccountDetail', () => {
       verifiedType: null,
     }
     const followFindMany = vi.fn().mockResolvedValue([])
+    const blockFindMany = vi.fn().mockResolvedValue([])
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
       accountLabel: { findMany: vi.fn().mockResolvedValue([]) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: { findMany: followFindMany, count: vi.fn().mockResolvedValue(0) },
+      block: { findMany: blockFindMany, count: vi.fn().mockResolvedValue(0) },
     } as unknown as PrismaClient
 
     await getAccountDetail(prisma, 'a4', 10)
@@ -252,6 +286,12 @@ describe('getAccountDetail', () => {
       expect.objectContaining({
         where: { followeeId: 'a4' },
         orderBy: [{ lastSeenAt: 'desc' }, { followerId: 'asc' }],
+      }),
+    )
+    expect(blockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { blockerId: 'a4' },
+        orderBy: [{ lastSeenAt: 'desc' }, { blockedId: 'asc' }],
       }),
     )
   })
