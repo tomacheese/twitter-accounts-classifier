@@ -16,6 +16,10 @@ export const CRAWL_LIMITS = {
   followEdgesPerAccount: 2000,
   // ブロック一覧は本人のものしか取得できず、followEdgesPerAccount とは傾向が異なりうるため独立した定数にする。
   blockEdgesPerAccount: 2000,
+  // ラベリング対象アカウント自身のフォロー先サンプリング用。
+  // fetchFollowing のページサイズ (200) と同値にし、
+  // 必ず1ページ・1リクエストで完結させる。
+  followEdgesPerLabeledAccount: 200,
   // ペーシングなしでは単一ログインアカウントに多数のリクエストが集中し、レート制限や接続エラーが増えやすくなるため、固定の小休止でリクエスト頻度を平準化している。
   authorFetchDelayMs: 300,
 } as const
