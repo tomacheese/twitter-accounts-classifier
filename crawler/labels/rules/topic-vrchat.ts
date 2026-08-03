@@ -1,3 +1,4 @@
+import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 import type { LabelRule } from '../types'
 
 // 単語境界 (\b) はアンダースコアを単語構成文字として扱うため使わない。
@@ -9,18 +10,20 @@ const VRCHAT_PATTERN = /VRChat|ぶいちゃ(?!ん)|(?<![A-Za-z0-9])VRC(?:(?![A-Z
 export const topicVrchatRule: LabelRule = {
   key: 'topic_vrchat',
   description: 'プロフィールまたは直近のツイートで VRChat を中心的な関心事として挙げている',
-  version: '1.0.0',
+  version: '1.1.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const bioMatch = bio !== null && VRCHAT_PATTERN.test(bio)
     const tweetMatch = bundle.recentTweets
       .filter((tweet) => !tweet.isRetweet)
       .some((tweet) => VRCHAT_PATTERN.test(tweet.fullText))
-    const value = bioMatch || tweetMatch
+    const keywordMatch = bioMatch || tweetMatch
+    const followGraphMatch = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_vrchat)
+    const value = keywordMatch || followGraphMatch
     return {
       value,
-      confidence: value ? 0.8 : 0,
-      reason: `bio/tweet vrchat-keyword match=${value}`,
+      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
+      reason: `bio/tweet vrchat-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
     }
   },
 }
