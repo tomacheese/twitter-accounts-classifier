@@ -45,7 +45,7 @@ interface LatestLabelsSummary {
  */
 async function queryLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSummary> {
   const result = await prisma.$transaction([
-    prisma.$executeRaw`SET LOCAL statement_timeout = '15000'`,
+    prisma.$executeRaw`SET LOCAL statement_timeout = '60000'`,
     prisma.$queryRaw<LatestLabelsSummaryRow[]>`
       WITH latest_labels AS NOT MATERIALIZED (
         SELECT "accountId", "labelDefinitionId", "value"

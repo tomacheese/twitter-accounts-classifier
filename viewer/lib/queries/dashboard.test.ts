@@ -130,7 +130,7 @@ describe('statement_timeout', () => {
     const calls = prisma.$executeRaw.mock.calls.map((call) =>
       (call[0] as TemplateStringsArray).join(''),
     )
-    expect(calls).toContain("SET LOCAL statement_timeout = '15000'")
+    expect(calls).toContain("SET LOCAL statement_timeout = '60000'")
   })
 })
 
