@@ -22,6 +22,16 @@ export interface AccountDetailLabel {
   method: string
   ruleVersion: string
   labeledAt: Date
+  history: AccountDetailLabelHistoryEntry[]
+}
+
+export interface AccountDetailLabelHistoryEntry {
+  value: boolean
+  confidence: number
+  reason: string
+  method: string
+  ruleVersion: string
+  labeledAt: Date
 }
 
 export interface AccountDetailTweet {
@@ -60,7 +70,55 @@ export interface AccountDetail {
 const FOLLOW_LIST_LIMIT = 100
 
 /**
- * 各ラベルの最新評価のみではなく、AccountLabel の履歴全体を返す。
+ * labeledAt 降順の AccountLabel 履歴一覧を labelDefinitionId ごとに集約する。
+ * 各グループの先頭 (最新の1件) を代表値とし、2件目以降を history に格納する。
+ * @param labels - labeledAt 降順で取得した AccountLabel の一覧 (labelDefinition を含む)
+ * @returns ラベルごとに集約された一覧。並び順は各ラベルの最新評価が現れた順を保つ。
+ */
+function groupLabelsByDefinition(
+  labels: {
+    labelDefinitionId: string
+    labelDefinition: { key: string }
+    value: boolean
+    confidence: number
+    reason: string
+    method: string
+    ruleVersion: string
+    labeledAt: Date
+  }[],
+): AccountDetailLabel[] {
+  const grouped = new Map<string, AccountDetailLabel>()
+
+  for (const label of labels) {
+    const existing = grouped.get(label.labelDefinitionId)
+    if (!existing) {
+      grouped.set(label.labelDefinitionId, {
+        labelKey: label.labelDefinition.key,
+        value: label.value,
+        confidence: label.confidence,
+        reason: label.reason,
+        method: label.method,
+        ruleVersion: label.ruleVersion,
+        labeledAt: label.labeledAt,
+        history: [],
+      })
+      continue
+    }
+    existing.history.push({
+      value: label.value,
+      confidence: label.confidence,
+      reason: label.reason,
+      method: label.method,
+      ruleVersion: label.ruleVersion,
+      labeledAt: label.labeledAt,
+    })
+  }
+
+  return [...grouped.values()]
+}
+
+/**
+ * ラベルごとに最新評価と、それ以前の再評価履歴 (history) を分けて返す。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param accountId - アカウントの ID
  * @param tweetLimit - 含める直近ツイートの最大件数
@@ -134,15 +192,7 @@ export async function getAccountDetail(
       isBlueVerified: account.isBlueVerified,
       verifiedType: account.verifiedType,
     },
-    labels: labels.map((label) => ({
-      labelKey: label.labelDefinition.key,
-      value: label.value,
-      confidence: label.confidence,
-      reason: label.reason,
-      method: label.method,
-      ruleVersion: label.ruleVersion,
-      labeledAt: label.labeledAt,
-    })),
+    labels: groupLabelsByDefinition(labels),
     recentTweets: tweets.map((tweet) => ({
       id: tweet.id,
       fullText: tweet.fullText,
