@@ -28,3 +28,4 @@ export type {
 } from './mappers'
 export { createBlocksClient, createBlock } from './blocks-client'
 export type { BlocksListPage, BlocksListRawApiLike } from './blocks-client'
+export { createTrendsClient } from './trends-client'
