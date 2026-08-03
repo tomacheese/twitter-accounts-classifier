@@ -109,6 +109,9 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
           getFollowing: vi.fn().mockResolvedValue(emptyFollowPage),
           getFollowers: vi.fn().mockResolvedValue(emptyFollowPage),
         }),
+        getBlocksApi: () => ({
+          getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+        }),
       },
     }),
     closeOpenApiClient: vi.fn().mockResolvedValue(undefined),
@@ -125,6 +128,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
     persistLabel: vi.fn().mockResolvedValue(undefined),
     syncFollowing: vi.fn().mockResolvedValue(undefined),
     syncFollowers: vi.fn().mockResolvedValue(undefined),
+    syncBlocks: vi.fn().mockResolvedValue(undefined),
     startOrResumeCrawlRun: vi.fn().mockResolvedValue({
       id: 'run1',
       latestAccountStatuses: new Map(),
@@ -503,6 +507,9 @@ describe('runCrawlCycle', () => {
             getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -730,6 +737,9 @@ describe('runCrawlCycle', () => {
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
           getUserListApi: () => ({ getFollowing, getFollowers }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -769,6 +779,9 @@ describe('runCrawlCycle', () => {
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
           getUserListApi: () => ({ getFollowing: vi.fn(), getFollowers: vi.fn() }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -813,6 +826,9 @@ describe('runCrawlCycle', () => {
               getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
             }),
             getUserListApi: () => ({ getFollowing: vi.fn(), getFollowers: vi.fn() }),
+            getBlocksApi: () => ({
+              getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
           },
         }),
       })
@@ -851,6 +867,9 @@ describe('runCrawlCycle', () => {
               getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
             }),
             getUserListApi: () => ({ getFollowing: vi.fn(), getFollowers: vi.fn() }),
+            getBlocksApi: () => ({
+              getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
           },
         }),
       })
@@ -907,6 +926,9 @@ describe('runCrawlCycle', () => {
               getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
             }),
             getUserListApi: () => ({ getFollowing: vi.fn(), getFollowers: vi.fn() }),
+            getBlocksApi: () => ({
+              getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
           },
         }),
       })
@@ -955,6 +977,9 @@ describe('runCrawlCycle', () => {
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
           getUserListApi: () => ({ getFollowing, getFollowers }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -1003,6 +1028,9 @@ describe('runCrawlCycle', () => {
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
           getUserListApi: () => ({ getFollowing, getFollowers }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -1018,6 +1046,83 @@ describe('runCrawlCycle', () => {
             errorMessage: 'followers db down',
           }),
         ]),
+      }),
+    )
+  })
+
+  it('syncs blocked users using the userId resolved during the following phase', async () => {
+    const getBlocks = vi.fn().mockResolvedValue({ data: [], nextCursor: undefined })
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({ getBlocks }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(getBlocks).toHaveBeenCalledWith({ cursor: undefined, count: 200 })
+    expect(deps.syncBlocks).toHaveBeenCalledWith('viewer1', {
+      ids: [],
+      authors: [],
+      reachedEnd: true,
+    })
+    expect(deps.completeCrawlAccountCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'blocks' }),
+    )
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({ blocksSynced: true }),
+    )
+  })
+
+  it('records a blocks_sync_failed warning and continues when the blocks fetch fails', async () => {
+    const getBlocks = vi.fn().mockRejectedValue(new Error('rate limited'))
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({ getBlocks }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'partial',
+        blocksSynced: false,
+        warnings: expect.arrayContaining([expect.objectContaining({ type: 'blocks_sync_failed' })]),
       }),
     )
   })
@@ -1153,6 +1258,9 @@ describe('runCrawlCycle', () => {
             getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -1213,6 +1321,9 @@ describe('runCrawlCycle', () => {
             getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -1260,6 +1371,9 @@ describe('runCrawlCycle', () => {
             getUserTweetsAndReplies: vi.fn(),
           }),
           getUserListApi: () => ({ getFollowing, getFollowers }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -1320,6 +1434,9 @@ describe('runCrawlCycle', () => {
             getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -1369,6 +1486,9 @@ describe('runCrawlCycle', () => {
           getUserListApi: () => ({
             getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),
@@ -1428,6 +1548,9 @@ describe('runCrawlCycle', () => {
             getUserListApi: () => ({
               getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
               getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
+            getBlocksApi: () => ({
+              getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             }),
           },
         }),
@@ -1490,6 +1613,9 @@ describe('runCrawlCycle', () => {
             getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -1527,6 +1653,9 @@ describe('runCrawlCycle', () => {
             getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -1563,6 +1692,9 @@ describe('runCrawlCycle', () => {
           getUserListApi: () => ({
             getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),
@@ -1602,6 +1734,9 @@ describe('runCrawlCycle', () => {
           getUserListApi: () => ({
             getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),
@@ -1644,6 +1779,9 @@ describe('runCrawlCycle', () => {
           getUserListApi: () => ({
             getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),

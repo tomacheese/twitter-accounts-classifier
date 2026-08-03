@@ -63,6 +63,8 @@ import {
   syncFollowers as syncFollowersEdges,
   syncFollowing as syncFollowingEdges,
 } from './db/follow-repository'
+import { fetchBlocks, type BlockListApiLike, type BlockListResult } from './twitter/blocks'
+import { syncBlocks as syncBlocksEdges } from './db/block-repository'
 import {
   clearCrawlAccountCheckpoints as clearCrawlAccountCheckpointsRecord,
   completeCrawlAccountCheckpoint as completeCrawlAccountCheckpointRecord,
@@ -88,6 +90,7 @@ export interface CrawlOpenApiClient {
   getTweetApi(): TweetApiLike & TweetDetailApiLike
   getUserApi(): UserApiLike
   getUserListApi(): FollowListApiLike
+  getBlocksApi(): BlockListApiLike
 }
 
 export interface CrawlDependencies {
@@ -117,6 +120,7 @@ export interface CrawlDependencies {
   }) => Promise<void>
   syncFollowing: (followerId: string, result: FollowListResult) => Promise<void>
   syncFollowers: (followeeId: string, result: FollowListResult) => Promise<void>
+  syncBlocks: (blockerId: string, result: BlockListResult) => Promise<void>
   startOrResumeCrawlRun: (startedAt: Date) => Promise<CrawlRunStartResult>
   finishCrawlRun: (id: string, finishedAt: Date, status: string) => Promise<void>
   recordCrawlAccountRun: (params: RecordCrawlAccountRunParams) => Promise<void>
@@ -612,6 +616,38 @@ async function syncFollowersPhase(
   }
 }
 
+async function syncBlocksPhase(
+  deps: CrawlDependencies,
+  account: AppConfig['accounts'][number],
+  client: CrawlOpenApiClient,
+  blockerId: string | null,
+): Promise<BlocksCheckpointData> {
+  if (!blockerId) return { synced: false, warnings: [] }
+  try {
+    const blocks = await withTwitterRetry(
+      () => fetchBlocks(client.getBlocksApi(), deps.limits.blockEdgesPerAccount),
+      retryOptions(deps),
+    )
+    await deps.syncBlocks(blockerId, blocks)
+    return { synced: true, warnings: [] }
+  } catch (error) {
+    const message = `Failed to sync blocked users for ${account.username}`
+    logger.error(message, error as Error)
+    return {
+      synced: false,
+      warnings: [
+        {
+          type: 'blocks_sync_failed',
+          message,
+          username: account.username,
+          errorMessage: toErrorMessage(error),
+          appVersion: APP_VERSION,
+        },
+      ],
+    }
+  }
+}
+
 type StoredTweetInput = Omit<TweetInput, 'createdAt'> & { createdAt: string }
 type StoredAccountProfileInput = Omit<AccountProfileInput, 'accountCreatedAt'> & {
   accountCreatedAt: string
@@ -697,6 +733,7 @@ function isCrawlWarning(value: unknown): value is CrawlWarning {
       'own_account_sync_failed',
       'following_sync_failed',
       'followers_sync_failed',
+      'blocks_sync_failed',
     ].includes(value.type as string)
   ) {
     return false
@@ -853,6 +890,20 @@ function restoreFollowersCheckpoint(value: unknown): FollowersCheckpointData | u
   return { synced: value.synced, warnings }
 }
 
+interface BlocksCheckpointData {
+  synced: boolean
+  warnings: CrawlWarning[]
+}
+
+function restoreBlocksCheckpoint(value: unknown): BlocksCheckpointData | undefined {
+  if (!isRecord(value) || typeof value.synced !== 'boolean') {
+    return undefined
+  }
+  const warnings = restoreWarnings(value.warnings)
+  if (!warnings) return undefined
+  return { synced: value.synced, warnings }
+}
+
 async function runAccountCycle(
   deps: CrawlDependencies,
   registry: LabelRuleRegistry,
@@ -869,12 +920,14 @@ async function runAccountCycle(
     let metrics = restoreAccountCycleMetrics(checkpoints.get('authors'))
     let following = restoreFollowingCheckpoint(checkpoints.get('following'))
     let followers = restoreFollowersCheckpoint(checkpoints.get('followers'))
+    let blocks = restoreBlocksCheckpoint(checkpoints.get('blocks'))
     const needsTimeline = !metrics && !timelineSnapshot
     const needsAuthors = !metrics
     const needsFollowing = !following
     const needsFollowers = !followers
+    const needsBlocks = !blocks
 
-    if (needsTimeline || needsAuthors || needsFollowing || needsFollowers) {
+    if (needsTimeline || needsAuthors || needsFollowing || needsFollowers || needsBlocks) {
       const cookies = await deps.issueCookies({
         username: account.username,
         password: account.password,
@@ -942,6 +995,20 @@ async function runAccountCycle(
               data: toCheckpointData(followers),
             })
           }
+          if (needsBlocks) {
+            blocks = await syncBlocksPhase(
+              deps,
+              account,
+              openApiContext.client,
+              following?.userId ?? null,
+            )
+            await deps.completeCrawlAccountCheckpoint({
+              crawlRunId,
+              username: account.username,
+              phase: 'blocks',
+              data: toCheckpointData(blocks),
+            })
+          }
         } finally {
           await deps.closeOpenApiClient(openApiContext)
         }
@@ -950,13 +1017,17 @@ async function runAccountCycle(
       }
     }
 
-    if (!metrics || !following || !followers) {
+    if (!metrics || !following || !followers || !blocks) {
       throw new Error(`Incomplete crawl checkpoints for ${account.username}`)
     }
 
-    // 残った warning はリトライと想定内エラーの除外を経ても解消しなかったものであるため、
-    // 1 件でも 'partial' として扱う。
-    const warnings = [...metrics.warnings, ...following.warnings, ...followers.warnings]
+    // 残った warning はリトライと想定内エラーの除外を経ても解消しなかったものであるため、1 件でも 'partial' として扱う。
+    const warnings = [
+      ...metrics.warnings,
+      ...following.warnings,
+      ...followers.warnings,
+      ...blocks.warnings,
+    ]
     const status = warnings.length > 0 ? 'partial' : 'success'
 
     await deps.recordCrawlAccountRun({
@@ -973,6 +1044,7 @@ async function runAccountCycle(
       labelsAppliedCount: metrics.labelsAppliedCount,
       followingSynced: following.synced,
       followersSynced: followers.synced,
+      blocksSynced: blocks.synced,
       warnings,
       errorMessage: null,
       appVersion: APP_VERSION,
@@ -1011,6 +1083,7 @@ async function runAccountCycle(
       labelsAppliedCount: 0,
       followingSynced: false,
       followersSynced: false,
+      blocksSynced: false,
       warnings: [],
       errorMessage: String(error),
       appVersion: APP_VERSION,
@@ -1099,10 +1172,12 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
 
 /**
  * @param realClient - 認証済みの実際の `TwitterOpenApiClient`
+ * @param blocksClient - `OpenApiClientContext` の生リクエスト blocks クライアント
  * @returns {@link runCrawlCycle} で使用できる `CrawlOpenApiClient`
  */
 function toCrawlOpenApiClient(
   realClient: Awaited<ReturnType<typeof createRealOpenApiClient>>['client'],
+  blocksClient: BlockListApiLike,
 ): CrawlOpenApiClient {
   return {
     getTweetApi: () => ({
@@ -1111,6 +1186,7 @@ function toCrawlOpenApiClient(
     }),
     getUserApi: () => createUserApiLike(realClient.getUserApi(), realClient.getTweetApi()),
     getUserListApi: () => createFollowListApiLike(realClient.getUserListApi()),
+    getBlocksApi: () => blocksClient,
   }
 }
 
@@ -1128,7 +1204,7 @@ async function main(): Promise<void> {
     issueCookies: (account) => cookieIssuer.issueCookiesWithRetry(account),
     createOpenApiClient: async (cookies) => {
       const context = await createRealOpenApiClient(cookies)
-      return { ...context, client: toCrawlOpenApiClient(context.client) }
+      return { ...context, client: toCrawlOpenApiClient(context.client, context.blocksClient) }
     },
     closeOpenApiClient: (context) =>
       closeRealOpenApiClient(context as unknown as Parameters<typeof closeRealOpenApiClient>[0]),
@@ -1148,6 +1224,7 @@ async function main(): Promise<void> {
     },
     syncFollowing: (followerId, result) => syncFollowingEdges(prisma, followerId, result),
     syncFollowers: (followeeId, result) => syncFollowersEdges(prisma, followeeId, result),
+    syncBlocks: (blockerId, result) => syncBlocksEdges(prisma, blockerId, result),
     startOrResumeCrawlRun: (startedAt) =>
       startOrResumeCrawlRunRecord(prisma, startedAt, staleThresholdMs),
     finishCrawlRun: (id, finishedAt, status) =>
