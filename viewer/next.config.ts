@@ -10,7 +10,7 @@ const nextConfig: NextConfig = {
   // viewer/ を起点にトレースするとリンク切れ (実行時に "Cannot find module 'next'") を起こす。
   // そのためワークスペースルートを明示的に指定している。
   // 値を未設定のままにすると、
-  // Next.js が祖先ディレクトリを辿って無関係な pnpm-lock.yaml (ネストしたワークツリーなど) を見つけてしまう。
+  // Next.js が祖先を辿って無関係な pnpm-lock.yaml (ネストしたワークツリーなど) を見つけてしまう。
   outputFileTracingRoot: path.join(import.meta.dirname, '..'),
   images: {
     // Account.profileImageUrl は Twitter (X) 自身の CDN から直接取得されるため、

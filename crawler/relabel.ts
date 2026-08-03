@@ -186,7 +186,7 @@ export interface RelabelResult {
  * @param rules - 登録済みの全ルール
  * @param labelDefinitionIds - ルールキーから LabelDefinition の id へのマップ
  * @param latestRuleVersions - アカウント・ルールの組ごとに直近で永続化された ruleVersion
- * @returns 登録済みの全ルールについて、このアカウントのバージョンが既に最新であれば true (この場合、ツイートを取得せずスキップできる)
+ * @returns 全ルールの `ruleVersion` が最新なら true (ツイート取得をスキップできる)
  */
 function isFullyUpToDate(
   account: AccountRow,
@@ -203,8 +203,8 @@ function isFullyUpToDate(
 
 /**
  * 登録済みの全ラベルルールを全アカウントに対して再評価し、
- * 保存済み `ruleVersion` が古いか未評価の (account, rule) ペアについてのみ新しい `AccountLabel` 行を永続化する。
- * 通常のクロールでは対象アカウントが次に再クロールされるまでラベルは再評価されない (ルールのロジック変更に対する自動再評価はない) ため、
+ * 保存済み `ruleVersion` が古いか未評価の (account, rule) にのみ `AccountLabel` 行を永続化する。
+ * 通常のクロールでは再クロールまでラベルは再評価されない (ロジック変更への自動再評価はない) ため、
  * そのギャップをオンデマンドで埋める明示的なバックフィル処理。
  * @param prisma - 使用する Prisma クライアント
  * @param registry - 全アカウントに対して評価するラベルルールのレジストリ
@@ -387,7 +387,7 @@ async function main(): Promise<void> {
   }
 }
 
-// このモジュールを import しただけ (relabel.test.ts からの import など) では実際のバックフィルが走らないようにするガード。
+// このモジュールを import しただけでは実際のバックフィルが走らないようにするガード。
 // 直接実行 (`node dist/relabel.js`)した場合のみ動作する。require/module は、
 // CommonJS を採用する本プロジェクトでこれを判定するのに適した手段である。
 // eslint-disable-next-line unicorn/prefer-module

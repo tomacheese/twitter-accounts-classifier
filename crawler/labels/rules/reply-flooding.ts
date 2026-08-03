@@ -5,7 +5,8 @@ import { averagePairwiseSimilarity } from '../text-similarity'
 // 時には AI による書き換え・翻訳を伴うリプライを1つのツイートに大量投稿する)は、
 // 隣接する他ルールでは捕捉できない。
 // self_duplicate_reply は単独ツイートとリプライのペアを要求し(これはリプライ同士の比較)、
-// templated_reply_network は異なるアカウント間での一字一句同一のテキストを要求する(これは同一アカウントによる言い換えテキストの繰り返し)ため。
+// templated_reply_network は別アカウント間の一字一句同一テキストを要求する。
+// こちらは同一アカウントによる言い換えの繰り返しであるため。
 const MIN_REPLIES_TO_SAME_TARGET = 8
 const WINDOW_HOURS = 24
 const SIMILARITY_THRESHOLD = 0.03

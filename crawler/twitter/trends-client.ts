@@ -62,9 +62,9 @@ async function fetchGuestToken(fetchImpl: typeof fetch): Promise<string> {
 
 /**
  * @param payload - パースした `guide.json` レスポンス本文
- * @returns 見つかったトレンド名の配列。空配列はレスポンス形状が一致した上でトレンド項目が 0 件だったことを意味する
+ * @returns 見つかったトレンド名の配列。空配列は形状は一致しトレンド項目が 0 件だったことを意味する
  * @throws レスポンス形状自体が想定と異なる場合。
- * スキーマ変更による破壊的な失敗と「今トレンドが 0 件」という正常なケースを呼び出し側が混同しないよう、
+ * スキーマ変更による破壊的失敗と「トレンド 0 件」という正常ケースを呼び出し側が混同しないよう、
  * 空配列を返す場合とは区別してエラーを投げる。
  */
 function parseTrendNames(payload: GuideJsonResponse): string[] {
@@ -90,7 +90,7 @@ function parseTrendNames(payload: GuideJsonResponse): string[] {
 
 /**
  * @param cookies - アカウントの ct0・auth_token クッキーペア
- * @param fetchImpl - リクエストを発行する fetch 実装 (例: 本物の Chrome TLS フィンガープリントを提示する cycletls ベースの fetch)
+ * @param fetchImpl - fetch 実装 (例: Chrome TLS フィンガープリントの cycletls fetch)
  * @returns `getTrends()` を公開するオブジェクト
  */
 export function createTrendsClient(

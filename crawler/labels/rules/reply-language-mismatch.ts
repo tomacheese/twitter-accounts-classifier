@@ -44,7 +44,7 @@ export const replyLanguageMismatchRule: LabelRule = {
     //
     // 接頭辞の後に続く内容自体がリプライらしい形(`@メンション` で始まる)をしていることも要求する。
     // そうしないと、
-    // リプライ本文を持たないリンクのみの自己リツイート(例: `RT @screenName: https://t.co/xxx`)にもマッチしてしまい、
+    // 本文のないリンクのみの自己リツイート(例: `RT @foo: https://t.co/xxx`)にも一致してしまうため。
     // アカウント本来のリプライ言語に関わらずスクリプト比率が0と判定されてしまうため。
     const selfRetweetPrefix = `RT @${screenName}:`
     const isSelfRetweetedReply = (text: string): boolean =>

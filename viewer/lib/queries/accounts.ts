@@ -47,7 +47,7 @@ interface ActiveLabelRow {
 
 /**
  * 指定したラベルキーのいずれかで最新評価が `true` のアカウント ID を返す。
- * `AccountLabelLatest` を読む (テーブルの設計意図は prisma/schema.prisma の AccountLabelLatest コメントを参照)。
+ * `AccountLabelLatest` を読む (設計意図は prisma/schema.prisma のコメントを参照)。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param labelKeys - マッチ対象のラベルキー (OR 条件)
  * @returns 一致したアカウント ID

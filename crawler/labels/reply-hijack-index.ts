@@ -38,8 +38,8 @@ export interface ReplyHijackIndex {
 }
 
 /**
- * リプライツイートの corpus からアカウント横断の「reply-hijack swarm」検索用インデックスを構築する。
- * 同一著者が同一対象へ複数回リプライする挙動は `reply_flooding` の対象パターンでありここでは扱わないため、
+ * リプライツイートの corpus からアカウント横断の「reply-hijack swarm」検索インデックスを構築する。
+ * 同一著者が同一対象へ複数回リプライする挙動は `reply_flooding` の対象でありここでは扱わないため、
  * 著者・対象ごとに最初の1件のみを扱う。
  * `swarmSizeFor` が返すのは構造上の swarm 所属情報のみであり、
  * `reply_hijack_swarm` ルールの判定には、

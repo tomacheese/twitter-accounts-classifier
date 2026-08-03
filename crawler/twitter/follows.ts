@@ -9,7 +9,7 @@ import { toAccountProfileInput, type RawUserResult } from './mappers'
 import { toRawUserResult } from './timeline'
 import type { AccountProfileInput } from '../db/account-repository'
 
-/** `twitter-openapi-typescript` のフォローリスト系エンドポイントが 1 リクエストで受け付ける上限が 200 件のため、この値を採用する。 */
+/** `twitter-openapi-typescript` のフォロー API の 1 リクエスト上限が 200 件のため採用。 */
 const PAGE_SIZE = 200
 
 export interface FollowListPage {
@@ -24,9 +24,12 @@ export interface FollowListApiLike {
 
 export interface FollowListResult {
   ids: string[]
-  /** アカウントごとに追加 API 呼び出しをして取得する代わりに、同一の一覧レスポンスから導出したプロフィール。 */
+  /** アカウントごとに追加 API 呼び出しをする代わりに、一覧レスポンスから導出したプロフィール。 */
   authors: AccountProfileInput[]
-  /** カーソルが尽きて終了した場合のみ true。`limit` 到達やページ取得失敗による終了では true にしない。呼び出し側はこの値でエッジ削除の可否を判断する。 */
+  /**
+   * カーソルが尽きて終了した場合のみ true。`limit` 到達やページ取得失敗では true にしない。
+   * 呼び出し側はこの値でエッジ削除の可否を判断する。
+   */
   reachedEnd: boolean
 }
 

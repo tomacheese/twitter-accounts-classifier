@@ -131,7 +131,7 @@ export interface CrawlDependencies {
    * 実際に処理を試みたアカウントの分だけ進めるため。
    */
   touchCrawlRunHeartbeat: (crawlRunId: string) => Promise<void>
-  /** テスト実行時に `withTwitterRetry` のバックオフや author ループのスリープを実際には待たせないための注入。 */
+  /** テスト時に `withTwitterRetry` のバックオフや author ループの待機を無効化する注入。 */
   sleep: (ms: number) => Promise<void>
 }
 
@@ -533,7 +533,7 @@ async function syncFollowingPhase(
     )
     userId = response.data.restId
     // Follow テーブルの followerId/followeeId は Account への必須外部キーであり、
-    // このログインアカウントは今回のサイクル中にツイート・返信の投稿者として現れるとは限らないため、
+    // このログインアカウントは今回のサイクル中に投稿者として現れるとは限らないため、
     // ここで自身の Account 行を upsert しないと以降の edge upsert が失敗する。
     await deps.persistAccount(toAccountProfileInput(response.data))
   } catch (error) {
@@ -1031,7 +1031,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
 
   const { id: crawlRunId, latestAccountStatuses } = await deps.startOrResumeCrawlRun(new Date())
 
-  // ここから下を try で囲む: 想定外の例外を捕捉しないと CrawlRun が 'running' のまま残ってしまうため、
+  // ここから下を try で囲む: 捕捉しないと CrawlRun が 'running' のまま残ってしまうため、
   // 必ず 'failed' として確定させる。ただしプロセスの強制終了と、
   // この確定処理自体の失敗の 2 つは検知できない。
   try {

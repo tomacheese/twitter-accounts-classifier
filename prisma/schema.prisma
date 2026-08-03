@@ -42,7 +42,8 @@ model Account {
   followerEdges            Follow[]       @relation("FollowerEdges")
   followeeEdges            Follow[]       @relation("FolloweeEdges")
 
-  // この3カラムはいずれもフィルタなしで並び替えに使われうるため、インデックスがないと Account の行数が増えるほどページ表示のたびに全件ソートが発生する。
+  // この3カラムは絞り込みなしで並び替えに使われうるため、
+  // インデックスがないと行数増加に伴い全件ソートが発生する。
   @@index([followersCount])
   @@index([tweetCount])
   @@index([lastCrawledAt])
@@ -71,7 +72,8 @@ model Tweet {
   aiGeneratedDetectionSource String?
   quotedTweetId              String?
   quotedTweetAuthorId        String?
-  // hasAiGeneratedMedia と同じ理由で、未評価行を区別するためデフォルトを設定せず null のままにしている。
+  // hasAiGeneratedMedia と同じ理由で、
+  // 未評価行を区別するためデフォルトを設定せず null のままにしている。
   quotedTweetHasVideo        Boolean?
   foreignVideoSourceCount    Int?
   source                     String
@@ -102,13 +104,13 @@ model AccountLabel {
   ruleVersion       String
   labeledAt         DateTime        @default(now())
 
-  // viewer/lib/queries/account-detail.ts が labeledAt 降順で取得する際に使う唯一の単体インデックス。
+  // account-detail.ts が labeledAt 降順で取得する際に使う唯一の単体インデックス。
   // 下の複合インデックスは2番目のカラムが labelDefinitionId のため代用できない。
   // labelDefinitionId や labeledAt を先頭カラムとする単体インデックスは、
   // crawler・viewer の主要な処理経路では使われず、
   // 週次レビューのようなレイテンシ要件のないバッチ処理でのみ必要になるため用意していない。
   @@index([accountId])
-  // crawler/relabel.ts の loadLatestRuleVersions が実行する DISTINCT ON クエリに一致させるための複合インデックス。
+  // relabel.ts の loadLatestRuleVersions の DISTINCT ON クエリに一致させるための複合インデックス。
   // AccountLabelLatest は ruleVersion を保持していないため、
   // ルールバージョン別の再ラベリング処理だけは AccountLabel の履歴を直接参照する必要がある。
   @@index([accountId, labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])
@@ -118,7 +120,7 @@ model AccountLabel {
 // そこから DISTINCT ON で最新値を都度導出すると、
 // ダッシュボードやアカウント一覧のクエリが全件スキャンになり本番の応答時間を守れない。
 // そのため (accountId, labelDefinitionId) ごとの最新値のみを保持する専用テーブルとして用意し、
-// recordCrawlAccountLabel / recordAccountLabelsBulk が AccountLabel への履歴 INSERT と同時に upsert する。
+// recordCrawlAccountLabel 等が AccountLabel への履歴 INSERT と同時に upsert する。
 // crawler/db/label-repository.ts・viewer/lib/queries/dashboard.ts・
 // viewer/lib/queries/accounts.ts・対応するマイグレーションのコメントは、
 // この経緯の説明をここへの参照のみとし、重複させない。

@@ -3,7 +3,8 @@ import Script from 'next/script'
 import './globals.css'
 import { SiteNav } from './components/site-nav'
 
-// hydration 前に適用することで、最初の描画から保存済みの選択 (未保存なら OS の設定) に合わせ、ライトモードが一瞬表示されるのを防ぐ。
+// hydration 前に適用することで、最初の描画から保存済みの選択 (未保存なら OS の設定) に合わせ、
+// ライトモードが一瞬表示されるのを防ぐ。
 const THEME_INIT_SCRIPT = `
 (function () {
   var stored = localStorage.getItem('theme')

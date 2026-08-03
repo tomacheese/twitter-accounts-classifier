@@ -141,7 +141,7 @@ describe('runRelabelBackfill', () => {
       accounts: [[sampleAccount, account2], []],
       // acc1 の永続化だけを失敗させ、acc2 は成功させる。
       // アカウント単位の try/catch がバッチの残りを止めないことを、
-      // 呼び出し順ではなく accountId で判定して検証する(並列処理下では呼び出し順が保証と見なせないため)。
+      // 呼び出し順ではなく accountId で判定する(並列処理下では呼び出し順が保証されないため)。
       bulkPersistImpl: (accountId) => {
         if (accountId === 'acc1') return Promise.reject(new Error('db error'))
         return Promise.resolve([

@@ -14,7 +14,7 @@ const RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY = 50
 const MIN_SAMPLE = 5
 const ORIGINAL_CONTENT_RATIO_THRESHOLD = 0.05
 // `originalContentRatio` はリツイートも「オリジナルでない」とみなすため、
-// 一日中他者を転載するだけで返信は一切しない純粋なリツイート主体アカウントもこのガードを素通りしてしまう。
+// 一日中転載するだけで返信しない純粋なリツイート主体アカウントもこのガードを素通りしてしまう。
 // アカウント自身の投稿が実際に返信であることを要求することで、
 // 両者を明確に区別する。
 const REPLY_RATIO_THRESHOLD = 0.5
@@ -48,7 +48,7 @@ export const replyFarmingRule: LabelRule = {
     // `bot` ルールと同様、直近の投稿頻度が高いだけでは十分条件とせず、
     // 生涯平均も同時に満たす必要がある。
     // 短時間のサンプルから「1日あたり」の頻度を外挿すると、
-    // イベントの実況などで密集投稿する人間の生涯平均は bot 的でなくても閾値を容易に超えてしまうため。
+    // 実況などで密集投稿する人間の生涯平均は bot 的でなくても閾値を容易に超えてしまうため。
     const isHighVelocity =
       tweetsPerDay >= VELOCITY_THRESHOLD_PER_DAY &&
       recentTweetsPerDay >= RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY

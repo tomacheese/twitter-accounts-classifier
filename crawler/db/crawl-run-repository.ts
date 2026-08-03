@@ -61,7 +61,7 @@ export interface RecordCrawlAccountRunParams {
   errorMessage: string | null
   /**
    * crawler image に埋め込まれた APPLICATION_VERSION。値が取れない場合は "unknown"。
-   * 行を最終確定させたビルドを表す — 個々の warning を生んだビルドは `CrawlWarning.appVersion` を見る。
+   * 行を最終確定させたビルドを表す。個々の warning は `CrawlWarning.appVersion` を見る。
    */
   appVersion: string
 }
@@ -203,7 +203,7 @@ export async function clearCrawlAccountCheckpoints(
  * 正常終了できなかったものとみなして `failed` に確定する。
  * @param prisma - Prisma クライアント
  * @param startedAt - 新規 run の開始時刻
- * @param staleThresholdMs - 放置判定のしきい値 (ミリ秒)。`startedAt - lastHeartbeatAt` がこれを超えていれば放置とみなす
+ * @param staleThresholdMs - 放置判定のしきい値 (ミリ秒)。経過時間がこれを超えれば放置とみなす
  * @returns run ID とアカウントごとの最新試行の status
  */
 export async function startOrResumeCrawlRun(

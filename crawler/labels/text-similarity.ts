@@ -1,4 +1,4 @@
-// reply-flooding.ts (単一アカウントによる言い換え連投の検出)と reply-hijack-index.ts (複数アカウントによる同種の検出)の両方から共有され、
+// reply-flooding.ts (単一アカウント内)と reply-hijack-index.ts (複数アカウント間)から共有され、
 // いずれも言い換えレベルの文章類似度を測る点は同じで、
 // グループ化する軸だけが異なる。
 const URL_PATTERN = /https?:\/\/\S+/g

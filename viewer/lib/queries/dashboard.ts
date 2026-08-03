@@ -38,7 +38,7 @@ interface LatestLabelsSummary {
  * `MATERIALIZED` では Seq Scan と一時領域への実体化が強制され、
  * `AccountLabelLatest_value_accountId_idx` を使った index-only scan が選ばれなくなるため。
  * statement_timeout は、
- * クエリが詰まった場合にコネクションプールの枠を無期限に占有し続けてプール枯渇を招くのを防ぐために設定している
+ * クエリが詰まった場合にプールの枠を占有し続けて枯渇を招くのを防ぐために設定している
  * (`AccountLabelLatest` の設計意図は prisma/schema.prisma の該当コメントを参照)。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ラベル付けずみアカウント数とラベル分布
@@ -93,7 +93,8 @@ let cached: { promise: Promise<LatestLabelsSummary>; expiresAt: number } | undef
 
 /**
  * 解決済みの値だけでなく実行中の promise 自体もキャッシュすることで、
- * getDashboardKpis と getLabelDistribution を Promise.all で同時に呼んだ場合でも、実際のクエリは1回にまとめられる。
+ * getDashboardKpis と getLabelDistribution を Promise.all で同時に呼んでも、
+ * 実際のクエリは1回にまとめられる。
  * 失敗したクエリはキャッシュしないため、次回呼び出し時は TTL 内であっても DB へ再試行する。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ラベル付けずみアカウント数とラベル分布

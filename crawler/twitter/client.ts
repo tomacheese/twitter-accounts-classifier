@@ -18,7 +18,7 @@ interface OpenApiFactory {
  * ネットワークに実際に到達する `TwitterOpenApi` クラスをテストで直接使わずに済むよう、
  * {@link createOpenApiClient} からこの部分だけを切り出し、
  * テストではフェイクな factory を注入できるようにしている。
- * @param factory - `getClientFromCookies` を持つオブジェクト。通常は `TwitterOpenApi` のインスタンス
+ * @param factory - `getClientFromCookies` の実装。通常 `TwitterOpenApi` のインスタンス
  * @param cookies - Twitter アカウントに対して発行されたクッキー
  * @returns 認証済みの `TwitterOpenApiClient`
  */
@@ -33,7 +33,7 @@ export async function createOpenApiClientWith(
 }
 
 /**
- * X の実際の GraphQL エンドポイントは Node の既定の `fetch` フィンガープリントを Cloudflare のブロックで拒否する (HTTP 403) ため、
+ * X の GraphQL エンドポイントは Node 標準 `fetch` を Cloudflare に拒否される (HTTP 403) ため、
  * legacy trends エンドポイントと同様、
  * `cycletls` で本物の Chrome TLS/JA3 フィンガープリントを提示する `fetch` 実装を用意し、
  * {@link createTrendsScraper} と {@link createOpenApiClient} の双方で共有している。
@@ -69,11 +69,11 @@ export interface OpenApiClientContext {
 
 /**
  * Node の既定の `fetch` フィンガープリントは Cloudflare のボット検知でブロックされるため、
- * `cycletls` ベースの Chrome フィンガープリント fetch ({@link createCycleTLSFetch} 参照) を経由させている。
+ * `cycletls` の Chrome フィンガープリント fetch ({@link createCycleTLSFetch}) を経由させている。
  * また、ライブラリ内部でパースに失敗すると生レスポンスが失われてしまうため、
  * {@link wrapFetchWithResponseCapture} でラップして事後に復元できるようにしている。
  * @param cookies - Twitter アカウントに対して発行されたクッキー
- * @returns クライアントと、それが依存する `cycletls` クライアント。呼び出し側でクローズできるようにするため
+ * @returns クライアントと、依存する `cycletls` クライアント。呼び出し側でクローズできるように返す
  */
 export async function createOpenApiClient(cookies: IssuedCookies): Promise<OpenApiClientContext> {
   const cycleTLS = await initCycleTLS()
@@ -99,11 +99,11 @@ export interface TrendsScraperContext {
 
 /**
  * 自前の trends クライアント ({@link createTrendsClient} 参照) を、
- * Chrome TLS/JA3 フィンガープリントを提示する `cycletls` ベースの fetch で動かす {@link TrendsScraperLike} を作る。
+ * Chrome TLS/JA3 を提示する `cycletls` fetch で動く {@link TrendsScraperLike} を作る。
  * {@link createOpenApiClient} と同じ診断上の理由から、
  * {@link wrapFetchWithResponseCapture} でもラップしている。
  * @param cookies - Twitter アカウントに対して発行されたクッキー
- * @returns スクレイパーと、それが依存する `cycletls` クライアント。呼び出し側でクローズできるようにするため
+ * @returns スクレイパーと、依存する `cycletls` クライアント。呼び出し側でクローズできるように返す
  */
 export async function createTrendsScraper(cookies: IssuedCookies): Promise<TrendsScraperContext> {
   const cycleTLS = await initCycleTLS()

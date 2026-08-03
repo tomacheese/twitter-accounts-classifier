@@ -40,7 +40,7 @@ import { replyHijackSwarmRule } from './rules/reply-hijack-swarm'
 
 /**
  * クローラーに登録される全ラベルルールの正規リスト。
- * `runCrawlCycle`（クロール時の登録）と `prisma/seed.ts`（新規データベースへの LabelDefinition シード）の両方がこの単一リストを参照することで、
+ * `runCrawlCycle`（登録）と `prisma/seed.ts`（シード投入）の両方が単一リストを参照し、
  * 一方にだけルールを追加してもう一方に反映し忘れる事態を防ぐ。
  */
 export const ALL_LABEL_RULES: LabelRule[] = [

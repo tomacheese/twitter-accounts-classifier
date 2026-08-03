@@ -22,7 +22,8 @@ export default async function AccountDetailPage({
   try {
     detail = await getAccountDetail(getPrismaClient(), id, RECENT_TWEET_COUNT)
   } catch (error) {
-    // エラーの詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため。
+    // error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため、
+    // 詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。
     console.error('Failed to load account detail:', error)
     return <ErrorFallback message="Failed to load the account." />
   }

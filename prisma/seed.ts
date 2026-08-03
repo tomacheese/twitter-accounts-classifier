@@ -1,4 +1,5 @@
-// output を指定しないデフォルトの生成先はこのファイルのパッケージ構成からは解決できないため、crawler が生成したクライアントを直接 import している。
+// デフォルトの生成先はこのファイルのパッケージ構成からは解決できないため、
+// crawler が生成したクライアントを直接 import している。
 import { PrismaClient } from '../crawler/generated/prisma'
 import { ensureLabelDefinitionsForRules } from '../crawler/db/label-repository'
 import { ALL_LABEL_RULES } from '../crawler/labels/all-rules'

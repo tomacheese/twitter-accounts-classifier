@@ -80,7 +80,7 @@ interface RecordAccountLabelsBulkRow extends AccountLabel {
  * UPSERT ガードの意味論は `recordCrawlAccountLabel` と同じ。
  * @param prisma - Prisma クライアント
  * @param params - 記録対象のアカウントと評価結果一覧
- * @returns 作成された `AccountLabel` 履歴行。SELECT に `ORDER BY` がないため `labels` と同じ順序である保証はなく、
+ * @returns 作成された `AccountLabel` 履歴行。`labels` と同じ順序とは限らないため、
  *   対応付けが必要なら `labelDefinitionId` で突き合わせる。
  */
 export async function recordAccountLabelsBulk(
@@ -167,7 +167,7 @@ export async function recordAccountLabelsBulk(
  * ネットワークラウンドトリップは1回で済む。
  * `id` は raw INSERT が Prisma クライアント側の `@default(cuid())` を経由しないため、
  * `randomUUID()` で生成しており時系列でソート可能ではない。
- * 同一アカウント・同一ラベルに寸分違わず同じ `labeledAt` で複数回呼ばれる稀なケースのみ id の大小関係が絡むが、
+ * 同一アカウント・ラベルで `labeledAt` が完全一致する稀なケースのみ id の大小関係が絡むが、
  * そのようなタイの発生自体が稀なため許容する。
  *
  * これに加えて、

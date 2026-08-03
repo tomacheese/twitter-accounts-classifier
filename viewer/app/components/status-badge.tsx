@@ -10,7 +10,8 @@ const STATUS_STYLES: Partial<Record<CrawlRunStatus, string>> = {
 const FALLBACK_STYLE = 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
 
 /**
- * 対象カラムは enum ではなく素の文字列のため、未知の値でも例外にせずグレーのピルにフォールバックする。
+ * 対象カラムは enum ではなく素の文字列のため、
+ * 未知の値でも例外にせずグレーのピルにフォールバックする。
  * @param props - 表示するステータス文字列
  * @returns 描画されたステータスバッジ
  */

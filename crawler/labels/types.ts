@@ -17,7 +17,7 @@ export interface AccountFeatureBundle {
      */
     professionalType?: string | null
     /**
-     * X API の `user.parodyCommentaryFanLabel`（'None' | 'Parody' | 'Commentary' | 'Fan'）に対応する値。
+     * X API の `user.parodyCommentaryFanLabel`（'None' | 'Parody' | 'Commentary' | 'Fan'）の値。
      * 任意項目にする理由は `professionalType` と同じ。
      */
     parodyCommentaryFanLabel?: string | null
@@ -40,7 +40,7 @@ export interface AccountFeatureBundle {
     inReplyToTweetId?: string | null
     /**
      * X のコンテンツ開示 API が、このツイートに AI 生成メディアが含まれると判定したか。
-     * `null` は「一度も評価されていない」(この列より前のツイート、または開示情報を持たない取得経路) ことを表し、
+     * `null` は「一度も評価されていない」(旧ツイートや開示情報のない取得経路) ことを表し、
      * 「取得の結果 AI 生成メディアなしと確定した」ことを表す `false` とは区別する。
      * 任意項目にする理由は `inReplyToTweetId` と同じ。
      */
@@ -71,18 +71,18 @@ export interface AccountFeatureBundle {
     quotedTweetHasVideo?: boolean | null
   }[]
   /**
-   * URL・メンションを除去したうえで、この投稿者自身のいずれかのリプライ本文と完全一致するリプライを投稿した、
+   * URL・メンション除去後、この投稿者自身のいずれかのリプライ本文と完全一致するリプライを投稿した、
    * 他アカウントの最大観測数。定型文を使い回す量産型リプライボット網の特徴を示す。
-   * ルールごとではなく、クロール/再ラベリング実行ごとに共有コーパスから一度だけ算出する（`buildDuplicateReplyIndex` 参照）。
+   * ルールごとではなく実行ごとに共有コーパスから一度算出する（`buildDuplicateReplyIndex` 参照）。
    * 1つのルールは1アカウント分の bundle しか見ないため。
    * この値を持たない bundle（多くのルール単体テストなど）では 0 として扱う。
    */
   templatedReplyNetworkSize?: number
   /**
    * このアカウントが参加した「リプライハイジャック集団」の最大規模。
-   * 5アカウント以上（このアカウントを含む）が、24時間以内に同じ対象ツイートへそれぞれ言い換えつつ類似したリプライを1件だけ投稿し、
+   * 5アカウント以上（本人含む）が24時間以内に同一対象へ言い換えつつ類似リプライを1件だけ投稿し、
    * 他人のバズったツイートの露出を横取りする集団を指す。該当なしの場合は 0（または未設定）。
-   * ルールごとではなく、クロール/再ラベリング実行ごとに共有コーパスから一度だけ算出する（`buildReplyHijackIndex` 参照）。
+   * ルールごとではなく実行ごとに共有コーパスから一度算出する（`buildReplyHijackIndex` 参照）。
    * この点は `templatedReplyNetworkSize` と同じ。
    */
   replyHijackSwarmSize?: number
@@ -93,7 +93,7 @@ export interface LabelRuleResult {
   /**
    * 陽性判定（`value: true`）をどれだけの証拠が裏付けているかを表す、
    * おおよそ `[0, 1]` の範囲の値。`confidence` は `value` と組み合わせて初めて意味を持つ。
-   * `value` が `false` の場合でも `confidence` が非ゼロになることがある（各ルールが陰性側でも部分的な兆候の強さを反映させるために使う場合がある）。
+   * `value` が `false` でも `confidence` は非ゼロになり得る（陰性側の兆候の強さを表す場合がある）。
    * `value` を確認せずに `confidence` 単体で意味があるものとみなさないこと。
    */
   confidence: number

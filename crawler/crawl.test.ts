@@ -545,7 +545,7 @@ describe('runCrawlCycle', () => {
           }),
           getUserApi: () => ({
             getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
-            // 投稿者自身の投稿一覧 (プロフィール取得) 側にはこのツイートを含めない: 上記のタイムライン注入経由でのみ観測させる。
+            // プロフィール取得側にはこのツイートを含めない: タイムライン注入経由でのみ観測させる。
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
         },

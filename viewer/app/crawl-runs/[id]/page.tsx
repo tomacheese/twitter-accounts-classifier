@@ -90,7 +90,8 @@ export default async function CrawlRunDetailPage({
   try {
     run = await getCrawlRunDetail(getPrismaClient(), id)
   } catch (error) {
-    // エラーの詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため。
+    // error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため、
+    // 詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。
     console.error('Failed to load crawl run detail:', error)
     return <ErrorFallback message="Failed to load the crawl run." />
   }
@@ -206,7 +207,8 @@ export default async function CrawlRunDetailPage({
                                     <ul className="mt-1 list-disc pl-4">
                                       {group.map((warning, index) => (
                                         // warning には固有の id がなく、
-                                        // このリストは初期描画後に並び替えも変更もされないため、key に index を使っても問題ない。
+                                        // このリストは並び替えも変更もされないため、
+                                        // key に index を使っても問題ない。
                                         <li key={index}>
                                           {warning.message}
                                           {warning.username

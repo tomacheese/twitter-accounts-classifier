@@ -12,7 +12,8 @@ const JST_FORMATTER = new Intl.DateTimeFormat('en-US', {
 })
 
 /**
- * サーバー・クライアントのローカルタイムゾーンに関わらず、日付を JST (Asia/Tokyo) の `yyyy/MM/dd HH:mm:ss` 形式でフォーマットする。
+ * サーバー・クライアントのローカルタイムゾーンに関わらず、
+ * 日付を JST (Asia/Tokyo) の `yyyy/MM/dd HH:mm:ss` 形式でフォーマットする。
  */
 export function formatDateTime(date: Date): string {
   const parts = Object.fromEntries(

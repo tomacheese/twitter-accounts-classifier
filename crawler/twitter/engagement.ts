@@ -5,7 +5,7 @@ import type { AccountProfileInput } from '../db/account-repository'
 import type { TweetInput } from '../db/tweet-repository'
 
 export function sortByEngagement(tweets: TweetInput[]): TweetInput[] {
-  // eslint-disable-next-line unicorn/no-array-sort -- ES2022 対象のため toSorted() が使えず、コピーへ sort() している
+  // eslint-disable-next-line unicorn/no-array-sort -- ES2022 では toSorted() 不可、コピーに sort()
   return [...tweets].sort((a, b) => b.retweetCount + b.likeCount - (a.retweetCount + a.likeCount))
 }
 
@@ -47,7 +47,7 @@ export async function fetchReplies(
 }
 
 /**
- * `getTweetDetail` のレスポンス形状は `./timeline` の `createTweetApiLike` が変換する timeline 系エンドポイントと同一のため、
+ * `getTweetDetail` の形状は `./timeline` が変換する timeline 系エンドポイントと同一のため、
  * 専用の変換処理を新設せず {@link convertTimelineResponse} を流用する。
  * @param tweetApi - 実際のツイート API (例: `TwitterOpenApiClient.getTweetApi()`)
  * @returns {@link fetchReplies} で使う `TweetDetailApiLike`

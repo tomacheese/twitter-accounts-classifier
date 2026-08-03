@@ -53,7 +53,7 @@ export async function syncFollowing(
       })
     }
 
-    // `reachedEnd` だけでは削除の可否を判断しない: `result.ids` が空だと `notIn: []` は全件一致の条件になってしまい、
+    // `reachedEnd` だけでは削除しない: `result.ids` が空だと `notIn: []` が全件一致になり、
     // 一時的な空応答 (レート制限や認証エラー) だけで記録済みの edge を全消去しかねないため、
     // 確認済みの id が 1 件以上ある場合のみ削除する。
     if (result.reachedEnd && result.ids.length > 0) {

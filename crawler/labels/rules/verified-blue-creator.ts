@@ -2,9 +2,10 @@ import type { LabelRule } from '../types'
 
 /**
  * 個人の Blue 認証を持ち、
- * かつプロフェッショナルアカウントを Creator 種別で有効化しているアカウントを検出する (`professional.professionalType === 'Creator'`)。
- * `verified-blue-individual` と同じ範囲 (Blue 認証あり、組織/政府の `verifiedType` なし) に限定するのは、
- * これが独立した兆候ではなく、その母集団をさらに細分するものだから。
+ * かつプロフェッショナルアカウントを Creator 種別で有効化しているアカウントを検出する
+ * (`professional.professionalType === 'Creator'`)。
+ * `verified-blue-individual` と同じ範囲(Blue 認証あり、組織/政府認証なし)に限るのは、
+ * これが独立した兆候ではなく、その母集団を細分するものだから。
  */
 export const verifiedBlueCreatorRule: LabelRule = {
   key: 'verified_blue_creator',

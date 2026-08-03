@@ -98,7 +98,7 @@ function mergeForeignVideoSourceCount(
  * @param tweets - 重複する id を含み得るツイート
  * @returns id ごとに 1 件へ統合したツイート。他のフィールドは最後に観測したコピーの値を保持しつつ、
  *   `isPromoted`・`isPaidPromotion` は OR 結合し、引用ツイート関連のフィールドは coalesce する。
- *   coalesce では同一 id の全コピーの中で非 null 値を優先し、なければ統合済みの値にフォールバックする。
+ *   coalesce では同一 id の全コピー中で非 null 値を優先し、なければ統合値にフォールバックする。
  */
 export function mergeTweetAdFlags(tweets: TweetInput[]): TweetInput[] {
   const byId = new Map<string, TweetInput>()

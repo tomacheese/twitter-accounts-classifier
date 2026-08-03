@@ -78,7 +78,7 @@ describe('startOrResumeCrawlRun', () => {
 
   it('abandons a running row whose heartbeat exceeds the stale threshold and starts a new run', async () => {
     const startedAt = new Date('2026-07-28T00:00:00Z')
-    // lastHeartbeatAt は startedAt の 20 時間前とし、staleThresholdMs (3 * 21600s = 18 時間) を超えさせる
+    // lastHeartbeatAt は startedAt の 20 時間前とし、staleThresholdMs (18 時間) を超えさせる
     const lastHeartbeatAt = new Date(startedAt.getTime() - 20 * 60 * 60 * 1000)
     const findFirst = vi.fn().mockResolvedValue({
       id: 'abandoned-run',

@@ -39,7 +39,10 @@ export interface TrendsScraperLike {
 
 export interface TimelineResult {
   tweets: TweetInput[]
-  /** アカウントごとに追加 API 呼び出しをして取得する代わりに、同一レスポンスから導出したプロフィール。アカウント情報を別途取得できなかった場合の代替として利用できる。 */
+  /**
+   * アカウントごとに追加 API 呼び出しをする代わりに、同一レスポンスから導出したプロフィール。
+   * アカウント情報を別途取得できなかった場合の代替として使える。
+   */
   authors: AccountProfileInput[]
 }
 
@@ -62,14 +65,14 @@ function mapEach(
 const MAX_PAGES_PER_TIMELINE = 50
 
 /**
- * ホームタイムライン・検索エンドポイントは広告混在やアルゴリズムの都合で 1 回の呼び出しでは `count` まで埋まらないことがあるため、
+ * ホームタイムライン・検索は広告混在等で 1 回の呼び出しでは `count` まで埋まらないことがあるため、
  * `limit` に達するかカーソルが尽きるまで呼び出しを繰り返す。
  *
- * マッピング後の件数が 0 件のページでも、`rawCount` が正でカーソルが残っていればデータ終端とは限らないため、
+ * マッピング後の件数が 0 件でも、`rawCount` が正でカーソルが残ればデータ終端とは限らないため、
  * そのまま次のページを取得し続ける。
  * カーソルが同じ値のまま進まない場合や {@link MAX_PAGES_PER_TIMELINE} に達した場合は、
  * `rawCount` やカーソル判定が効かないケースへの保険として、強制的にループを止める。
- * @param fetchPage - 指定したカーソルに対応する 1 ページを取得する関数 (先頭ページの場合は `undefined`)
+ * @param fetchPage - 指定カーソルに対応する 1 ページを取得する関数 (先頭ページは `undefined`)
  * @param limit - 収集するツイートの最大件数
  * @returns 収集したツイート (`limit` 件に切り詰め済み)
  */
@@ -169,7 +172,7 @@ export async function fetchTrendingTimeline(
  * `legacy` 単独の型では値を取りこぼす。
  * `user.core` を優先し、
  * 古い・異なる形状のレスポンスに備えて `legacy` をフォールバックとして読む。
- * `verifiedType` も同様に、想定するトップレベルではなく `user.verification?.verifiedType` に存在するため変換が必要になる。
+ * `verifiedType` も同様、`user.verification?.verifiedType` に存在するため変換が必要になる。
  * `./profile` の `createUserApiLike` からも同じ形状の変換として再利用される。
  * @param user - 実際のタイムライン・ユーザー API レスポンス内に含まれるユーザーオブジェクト
  * @returns 同じユーザーを `RawUserResult` 形状に変換したもの
@@ -197,11 +200,11 @@ export function toRawUserResult(user: TweetApiUtilsData['user']): RawUserResult 
 }
 
 /**
- * `legacy` を持たないエントリ (tombstone・非表示のツイートなど) はテキストやエンゲージメント件数を持たないため `null` を返し、
+ * `legacy` のないエントリ (tombstone 等) はテキストや件数を持たないため `null` を返し、
  * マッピング対象から除外する。
  *
  * `retweetedStatusIdStr` は実際の `TweetLegacy` 型には存在せず、
- * リツイートは `TweetApiUtilsData.retweeted` がリツイート元エントリ全体を保持する形で表現されるため、
+ * リツイートは `TweetApiUtilsData.retweeted` がリツイート元全体を保持する形で表現されるため、
  * そこから id を読み出す。
  * 引用ツイートも同じ形状で `TweetApiUtilsData.quoted` に保持され、
  * その `legacy` も欠落し得るため、
@@ -238,7 +241,7 @@ function toRawTweetResult(data: TweetApiUtilsData): RawTweetResult | null {
       isPromoted: Boolean(data.promotedMetadata),
       isPaidPromotion:
         data.tweet.contentDisclosure?.advertisingDisclosure?.isPaidPromotion ?? false,
-      // contentDisclosure.aiGeneratedDisclosure が欠落している場合は false に丸めず null (未評価) のままにしている。
+      // contentDisclosure.aiGeneratedDisclosure 欠落時は false でなく null (未評価) にする。
       // X がこの情報を常に付与するとは限らず、
       // 欠落が「AI 生成ではない」を意味するとは断定できないため。
       hasAiGeneratedMedia:
@@ -257,7 +260,7 @@ function toRawTweetResults(data: TweetApiUtilsData[]): RawTweetResult[] {
 }
 
 /**
- * `getTweetDetail` のレスポンスも下記引数と同じ `TimelineApiUtilsResponse<TweetApiUtilsData>` 形状のため、
+ * `getTweetDetail` の応答も下記と同じ `TimelineApiUtilsResponse<TweetApiUtilsData>` 形状のため、
  * `./engagement` の `TweetDetailApiLike` もラップ時にこの関数を再利用している。
  * @param response - 保留中の API レスポンス
  * @returns 変換後のページ

@@ -78,7 +78,7 @@ export async function upsertTweet(prisma: PrismaClient, input: TweetInput): Prom
   })
 }
 
-// ツイートごとに個別に upsert する: 1 件の失敗 (未永続化の account FK や一時的な DB エラーなど) で、
+// ツイートごとに個別に upsert する: 1 件の失敗 (account FK 未永続化や一時的な DB エラー) で、
 // バッチ内の後続ツイートまで巻き込んで永続化を止めてはならないため。
 export async function upsertTweets(prisma: PrismaClient, inputs: TweetInput[]): Promise<Tweet[]> {
   const results: Tweet[] = []

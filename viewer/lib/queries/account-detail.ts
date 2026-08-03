@@ -89,7 +89,8 @@ export async function getAccountDetail(
       }),
       prisma.follow.findMany({
         where: { followerId: accountId },
-        // 1回のクロールで同じ方向の全エッジに同一の lastSeenAt が付くため、タイブレークを固定しないと、データが変わっていなくてもページ読み込みごとに一覧の中身が変動しうる。
+        // 1回のクロールで同じ方向の全エッジに同一の lastSeenAt が付くため、
+        // タイブレークを固定しないとページ読み込みごとに一覧の中身が変動しうる。
         orderBy: [{ lastSeenAt: 'desc' }, { followeeId: 'asc' }],
         take: FOLLOW_LIST_LIMIT,
         include: { followee: true },

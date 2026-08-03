@@ -1,7 +1,7 @@
 import type { LabelRule } from '../types'
 
 /**
- * 政府/国家関係アカウント（グレーバッジ）を検出する。政府機関、当局者、国際/国家関係組織などが対象。
+ * 政府/国家関係アカウント（グレーバッジ）を検出する。政府機関、当局者、国際/国家組織などが対象。
  * 判定は `verifiedType === 'Government'` のみで行う。
  * `verified-business` と同様、現在の `isBlueVerified` の値によらず成立する。
  */

@@ -18,7 +18,8 @@ export default async function CrawlRunsPage(): Promise<React.ReactElement> {
   try {
     runs = await getAllCrawlRuns(getPrismaClient())
   } catch (error) {
-    // エラーの詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため。
+    // error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため、
+    // 詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。
     console.error('Failed to load crawl runs:', error)
     return <ErrorFallback message="Failed to load crawl runs." />
   }

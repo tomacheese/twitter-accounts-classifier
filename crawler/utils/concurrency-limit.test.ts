@@ -8,7 +8,7 @@ describe('runWithConcurrencyLimit', () => {
       seen.push(item)
       return Promise.resolve()
     })
-    // eslint-disable-next-line unicorn/no-array-sort -- ES2023 の toSorted() は使えず、複製へ sort() している
+    // eslint-disable-next-line unicorn/no-array-sort -- toSorted() が使えないため複製へ sort()
     expect([...seen].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5])
   })
 
@@ -54,7 +54,7 @@ describe('runWithConcurrencyLimit', () => {
     // 既に開始済みのタスクがキャンセルされていないことを確認する前に、
     // その完了を待つ猶予を与える。
     await new Promise((resolve) => setTimeout(resolve, 10))
-    // eslint-disable-next-line unicorn/no-array-sort -- ES2023 の toSorted() は使えず、複製へ sort() している
+    // eslint-disable-next-line unicorn/no-array-sort -- toSorted() が使えないため複製へ sort()
     expect([...completed].sort((a, b) => a - b)).toEqual([1, 3])
   })
 

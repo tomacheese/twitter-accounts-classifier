@@ -6,7 +6,7 @@ import type { LabelRule } from '../types'
 //
 // スポーツ は直前の e (全角・半角、大小問わず) を除外している。
 // eスポーツ は topic_gaming 側のシグナルとして扱っており、
-// ここに含めると eスポーツ 関連のプレイヤーや会場アカウントを誤ってスポーツ関心ありとして検知してしまうため。
+// 含めると eスポーツ 関連のプレイヤーや会場アカウントをスポーツ関心ありと誤検知してしまうため。
 const SPORTS_PATTERN =
   /\b(baseball|soccer|basketball|NBA|MLB|NPB)\b|(?<![eEｅＥ])スポーツ|野球|サッカー|バスケ(ットボール)?|Jリーグ/i
 

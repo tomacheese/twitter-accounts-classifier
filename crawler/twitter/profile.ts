@@ -32,7 +32,10 @@ export async function fetchAccountProfile(
 
 export interface RecentTweetsResult {
   tweets: TweetInput[]
-  /** レスポンスに含まれる全ツイート投稿者のプロフィール (会話コンテキスト経由で紛れ込む他ユーザーなど)。追加の API 呼び出しは発生しない。 */
+  /**
+   * レスポンスに含まれる全ツイート投稿者のプロフィール (会話コンテキスト経由の他ユーザーなど)。
+   * 追加の API 呼び出しは発生しない。
+   */
   authors: AccountProfileInput[]
 }
 
@@ -53,7 +56,7 @@ export async function fetchRecentTweets(
 /**
  * 実際の `getUserByRestId` レスポンスを `{ data: RawUserResult }` に変換する。
  * 変換ロジックを重複させないよう `./timeline` の `toRawUserResult` を再利用する。
- * `UserApiUtilsData.user` は (常に存在する `TweetApiUtilsData.user` と異なり) `i.User | undefined` であり、
+ * `UserApiUtilsData.user` は `TweetApiUtilsData.user` と異なり `i.User | undefined` であり、
  * 停止・削除済みアカウントを検索対象にし得るため、
  * 明示的に throw している。
  * @param response - `getUserByRestId`・`getUserByScreenName` の保留中レスポンス
@@ -71,7 +74,7 @@ async function convertUserResponse(
 }
 
 /**
- * ユーザー API (`client.getUserApi()`) とツイート API (`client.getTweetApi()`) を `UserApiLike` にラップする。
+ * ユーザー API (`getUserApi()`) とツイート API (`getTweetApi()`) を `UserApiLike` にラップする。
  * `getUserByRestId` は `TwitterApiUtilsResponse<UserApiUtilsData>` を返すため、
  * {@link convertUserResponse} で変換する。
  * `getUserTweetsAndReplies` は timeline・tweet-detail 系エンドポイントと同じ、
