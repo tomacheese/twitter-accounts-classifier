@@ -108,16 +108,10 @@ model AccountLabel {
   ruleVersion       String
   labeledAt         DateTime        @default(now())
 
-  // account-detail.ts が labeledAt 降順で取得する際に使う唯一の単体インデックス。
-  // 下の複合インデックスは2番目のカラムが labelDefinitionId のため代用できない。
-  // labelDefinitionId や labeledAt を先頭カラムとする単体インデックスは、
-  // crawler・viewer の主要な処理経路では使われず、
-  // 週次レビューのようなレイテンシ要件のないバッチ処理でのみ必要になるため用意していない。
+  // account-detail.ts の accountId 絞り込みにはこの単一インデックスで足りる。
+  // labeledAt 降順の並び替え性能まで複合インデックスで確保する必要はないと判断している。
+  // ルールバージョン検索は AccountLabelLatest で足りるため、AccountLabel 側には置かない。
   @@index([accountId])
-  // relabel.ts の loadLatestRuleVersions の DISTINCT ON クエリに一致させるための複合インデックス。
-  // AccountLabelLatest は ruleVersion を保持していないため、
-  // ルールバージョン別の再ラベリング処理だけは AccountLabel の履歴を直接参照する必要がある。
-  @@index([accountId, labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])
 }
 
 // AccountLabel は監査証跡としてほぼ無制限に増え続ける履歴テーブルであり、
@@ -134,6 +128,10 @@ model AccountLabelLatest {
   labelDefinitionId String
   labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
   value             Boolean
+  confidence        Float
+  reason            String
+  method            String
+  ruleVersion       String
   labeledAt         DateTime
 
   @@id([accountId, labelDefinitionId])

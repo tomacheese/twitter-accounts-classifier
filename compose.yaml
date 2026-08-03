@@ -8,6 +8,23 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    # 本番機のホスト RAM 15GB は Postgres・crawler・viewer で共有しており、
+    # postgres:17-alpine の既定値 (shared_buffers=128MB、work_mem=4MB) は小さすぎるため調整する。
+    # ストレージは HDD のため、random_page_cost は既定値の 4 から変更しない。
+    # SSD/NVMe 向けの低い値に下げると、ランダムアクセスの実コストを過小評価し、
+    # 非効率な実行計画を選ばせる恐れがある。
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pg_stat_statements"
+      - "-c"
+      - "shared_buffers=4GB"
+      - "-c"
+      - "effective_cache_size=10GB"
+      - "-c"
+      - "work_mem=32MB"
+      - "-c"
+      - "maintenance_work_mem=512MB"
     environment:
       POSTGRES_USER: crawler
       POSTGRES_PASSWORD: crawler
