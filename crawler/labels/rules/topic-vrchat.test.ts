@@ -2,10 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { topicVrchatRule } from './topic-vrchat'
 import type { AccountFeatureBundle } from '../types'
 
-function buildBundle(
-  bio: string | null,
-  tweetTexts: string[] = []
-): AccountFeatureBundle {
+function buildBundle(bio: string | null, tweetTexts: string[] = []): AccountFeatureBundle {
   return {
     account: {
       id: '1',
@@ -66,9 +63,7 @@ describe('topicVrchatRule', () => {
   })
 
   it('bio は無関係だが直近ツイートに VRChat を含む場合は value: true になる', () => {
-    const bundle = buildBundle('猫が好きです。', [
-      '今日は友達と VRChat で遊びました！',
-    ])
+    const bundle = buildBundle('猫が好きです。', ['今日は友達と VRChat で遊びました！'])
     const result = topicVrchatRule.evaluate(bundle)
     expect(result.value).toBe(true)
   })
