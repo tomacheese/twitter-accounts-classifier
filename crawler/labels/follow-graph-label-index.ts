@@ -2,9 +2,8 @@ import type { PrismaClient } from '../generated/prisma'
 
 /**
  * あるアカウントのフォロー先・フォロワーにおける、特定ラベルの既存付与状況。
- * `followeeLabeledCount`/`followeeTotalCount` は、
- * このアカウントがフォローしている先のうち、
- * 値が true のラベル済みアカウント数／当該ラベルの AccountLabelLatest 行を持つアカウント総数。
+ * `followeeLabeledCount`/`followeeTotalCount` はこのアカウントのフォロー先における、
+ * 該当ラベルが true のアカウント数／AccountLabelLatest 行を持つアカウント総数。
  * `followerLabeledCount`/`followerTotalCount` はフォロワー側で同じ集計を行ったもの。
  * 比率ではなく生の件数を返し、閾値判断は呼び出し側に委ねる。
  */
@@ -31,7 +30,8 @@ interface AggregateRow {
 }
 
 /**
- * `Follow` と `AccountLabelLatest` を突き合わせる集約クエリをフォロー先方向・フォロワー方向の2本だけ実行し、
+ * フォロー先方向は `Follow` と `LabelingFollowSample` の両方を、
+ * フォロワー方向は `Follow` を、それぞれ `AccountLabelLatest` と突き合わせる集約クエリで、
  * アカウント単位のグラフ探索を行わずにラベルごとの既存付与状況を組み立てる。
  * 参照するのは今回の実行が始まる前に永続化済みの `AccountLabelLatest` の値のみであり、
  * 今回の実行中に確定した新しいラベルは反映しない (呼び出し元がこの関数を各実行の先頭で1回だけ呼ぶ前提のため)。

@@ -68,12 +68,12 @@ describe('replaceLabelingFollowSample', () => {
     })
   })
 
-  it('フォロー先が0件の場合は削除のみ行い、挿入は呼ばない', async () => {
+  it('フォロー先が0件の場合は削除も挿入も行わず、既存サンプルを残す', async () => {
     const { prisma, deleteMany, createMany } = makePrisma()
 
     await replaceLabelingFollowSample(prisma, 'alice', makeResult([]))
 
-    expect(deleteMany).toHaveBeenCalledWith({ where: { accountId: 'alice' } })
+    expect(deleteMany).not.toHaveBeenCalled()
     expect(createMany).not.toHaveBeenCalled()
   })
 
@@ -89,5 +89,15 @@ describe('replaceLabelingFollowSample', () => {
       data: [{ accountId: 'alice', followeeId: 'carol' }],
       skipDuplicates: true,
     })
+  })
+
+  it('取得した全フォロー先の upsert が失敗した場合も削除を行わず、既存サンプルを残す', async () => {
+    const { prisma, accountUpsert, deleteMany, createMany } = makePrisma()
+    accountUpsert.mockRejectedValue(new Error('upsert failed'))
+
+    await replaceLabelingFollowSample(prisma, 'alice', makeResult(['bob', 'carol']))
+
+    expect(deleteMany).not.toHaveBeenCalled()
+    expect(createMany).not.toHaveBeenCalled()
   })
 })

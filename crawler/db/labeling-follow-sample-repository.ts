@@ -47,13 +47,16 @@ export async function replaceLabelingFollowSample(
   // createMany 全体を巻き添えでロールバックさせないようにここで除外する。
   const followeeIds = result.ids.filter((id) => upsertedIds.has(id))
 
+  // `./follow-repository` の syncFollowing と同様、
+  // result.ids が空だと削除だけが実行されて既存サンプルを全消去してしまうため、
+  // 1件以上取得できた場合のみ削除・挿入をまとめて行う。
+  if (followeeIds.length === 0) return
+
   await prisma.$transaction(async (tx) => {
     await tx.labelingFollowSample.deleteMany({ where: { accountId } })
-    if (followeeIds.length > 0) {
-      await tx.labelingFollowSample.createMany({
-        data: followeeIds.map((followeeId) => ({ accountId, followeeId })),
-        skipDuplicates: true,
-      })
-    }
+    await tx.labelingFollowSample.createMany({
+      data: followeeIds.map((followeeId) => ({ accountId, followeeId })),
+      skipDuplicates: true,
+    })
   })
 }

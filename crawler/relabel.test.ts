@@ -45,12 +45,6 @@ function makePrisma(overrides: {
   const tweetFindMany = vi
     .fn()
     .mockImplementation(overrides.tweetFindManyImpl ?? (() => Promise.resolve([])))
-  // recordAccountLabelsBulk の呼び出しは1アカウント分の複数ラベルを1本の $queryRaw にまとめる。
-  // SQL 文が "UNNEST(" を含むかどうかで他の $queryRaw 呼び出しと区別する。
-  // フォローグラフ集約クエリは "Follow" テーブルを FROM 句に含むため、それで区別する
-  // (フォロー先方向はサブクエリ内でエイリアスなしの参照になるため "Follow" のみで判定する)。
-  // それ以外 (loadLatestRuleVersions) は "DISTINCT ON" を含むかどうかで区別し、
-  // 残りはすべて fetchTweetsForAccounts の呼び出しとして扱う。
   // 呼び出し順序ではなく SQL 文の内容で判定するため、新しい集約クエリが追加されても影響を受けない。
   const bulkPersist = vi.fn()
   const queryRaw = vi.fn().mockImplementation((strings: unknown, ...values: unknown[]) => {

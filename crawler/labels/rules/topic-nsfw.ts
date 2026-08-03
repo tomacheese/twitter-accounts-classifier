@@ -1,4 +1,3 @@
-import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 import type { LabelRule } from '../types'
 
 // 曖昧な仄めかし表現まで対象にすると誤検知が増えるため、
@@ -35,18 +34,17 @@ const ANTI_NSFW_PATTERNS = [
 export const topicNsfwRule: LabelRule = {
   key: 'topic_nsfw',
   description: 'プロフィールでアダルト/NSFW コンテンツを投稿していることを自己申告している',
-  version: '1.3.1',
+  // 性的指向に関わる機微カテゴリであり、
+  // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
+  version: '1.3.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const optedOut = bio !== null && ANTI_NSFW_PATTERNS.some((pattern) => pattern.test(bio))
     const keywordMatch = bio !== null && NSFW_PATTERN.test(bio) && !optedOut
-    const followGraphMatch =
-      !optedOut && hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_nsfw)
-    const value = keywordMatch || followGraphMatch
     return {
-      value,
-      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
-      reason: `bio nsfw-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
+      value: keywordMatch,
+      confidence: keywordMatch ? 0.8 : 0,
+      reason: `bio nsfw-keyword match=${keywordMatch}`,
     }
   },
 }
