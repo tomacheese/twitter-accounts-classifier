@@ -4,9 +4,9 @@ import {
   fetchFollowingTimeline,
   fetchTrendingTimeline,
   type TweetApiLike,
-  type TrendsScraperLike,
 } from './timeline'
 import type { RawTweetResult } from './mappers'
+import type { TrendsScraperLike } from 'twitter-client'
 
 function rawTweet(id: string): RawTweetResult {
   return {

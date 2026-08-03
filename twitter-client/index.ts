@@ -16,3 +16,4 @@ export type {
   CookieIssuerClientOptions,
   IssuedCookies,
 } from './cookie-issuer-client'
+export type { TrendsScraperLike } from './api-types'

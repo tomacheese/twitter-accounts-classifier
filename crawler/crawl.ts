@@ -30,6 +30,7 @@ import {
   toSafeResponseErrorForLog,
   withTwitterRetry,
   type IssuedCookies,
+  type TrendsScraperLike,
 } from 'twitter-client'
 import {
   createOpenApiClient as createRealOpenApiClient,
@@ -43,7 +44,6 @@ import {
   fetchTrendingTimeline,
   createTweetApiLike,
   type TweetApiLike,
-  type TrendsScraperLike,
 } from './twitter/timeline'
 import {
   sortByEngagement,
