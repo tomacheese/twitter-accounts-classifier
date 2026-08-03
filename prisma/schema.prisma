@@ -109,7 +109,7 @@ model AccountLabel {
   labeledAt         DateTime        @default(now())
 
   // account-detail.ts の accountId 絞り込みにはこの単一インデックスで足りる。
-  // labeledAt 降順の並び替えまではカバーせず、ソート自体は実行時に行われる。
+  // labeledAt 降順の並び替え性能まで複合インデックスで確保する必要はないと判断している。
   // ルールバージョン検索は AccountLabelLatest で足りるため、AccountLabel 側には置かない。
   @@index([accountId])
 }

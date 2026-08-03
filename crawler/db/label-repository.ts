@@ -173,8 +173,8 @@ export async function recordAccountLabelsBulk(
 }
 
 /**
- * crawl 中のラベル評価結果を記録する: `AccountLabelLatest` の直前の値・ruleVersion と
- * 一致しない場合のみ `AccountLabel` に履歴を追記し、
+ * crawl 中のラベル評価結果を記録する。
+ * `AccountLabelLatest` の直前の値・ruleVersion と一致しない場合のみ `AccountLabel` に履歴を追記し、
  * dashboard/アカウント一覧の各クエリが読む `AccountLabelLatest` の該当行は毎回 upsert する
  * (テーブルの設計意図は prisma/schema.prisma の AccountLabelLatest コメントを参照)。
  * 両方の書き込みは SQL 側の `now()` を共有するため、
