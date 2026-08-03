@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
 
+vi.mock('../monitoring/sentry', () => ({ captureException: vi.fn() }))
+
 interface MockRow {
   labeledAccounts: bigint
   distribution: {
@@ -193,5 +195,60 @@ describe('getLatestLabelsSummary caching', () => {
         totalAccounts: 120,
       },
     ])
+  })
+})
+
+describe('startLatestLabelsSummaryWarming', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T00:00:00Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('warms the cache by re-querying shortly before the TTL expires', async () => {
+    const { startLatestLabelsSummaryWarming } = await import('./dashboard')
+    const prisma = createMockPrisma([SAMPLE_ROW])
+
+    startLatestLabelsSummaryWarming(prisma)
+    await vi.advanceTimersByTimeAsync(14 * 60 * 1000)
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('logs and reports a failed warming query but keeps retrying on the next tick', async () => {
+    const { captureException } = await import('../monitoring/sentry')
+    const { startLatestLabelsSummaryWarming } = await import('./dashboard')
+    const prisma = createMockPrisma([SAMPLE_ROW])
+    prisma.$transaction.mockRejectedValueOnce(new Error('query_canceled'))
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    startLatestLabelsSummaryWarming(prisma)
+    await vi.advanceTimersByTimeAsync(14 * 60 * 1000)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Failed to warm dashboard label summary cache:',
+      expect.any(Error),
+    )
+    expect(captureException).toHaveBeenCalledWith(expect.any(Error))
+
+    await vi.advanceTimersByTimeAsync(14 * 60 * 1000)
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2)
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('does not register the timer twice when called more than once', async () => {
+    const { startLatestLabelsSummaryWarming } = await import('./dashboard')
+    const prisma = createMockPrisma([SAMPLE_ROW])
+
+    startLatestLabelsSummaryWarming(prisma)
+    startLatestLabelsSummaryWarming(prisma)
+    await vi.advanceTimersByTimeAsync(14 * 60 * 1000)
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1)
   })
 })

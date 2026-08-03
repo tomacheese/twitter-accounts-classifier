@@ -1,4 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma'
+import { captureException } from '../monitoring/sentry'
 
 export interface DashboardKpis {
   totalAccounts: number
@@ -115,6 +116,31 @@ function getLatestLabelsSummary(prisma: PrismaClient): Promise<LatestLabelsSumma
   })
 
   return promise
+}
+
+/** キャッシュの TTL 切れの何ミリ秒前にバックグラウンド更新を行うか。1分。 */
+const WARM_BEFORE_EXPIRY_MS = 60 * 1000
+
+let warmingStarted = false
+
+/**
+ * ダッシュボードのラベル集計キャッシュを、TTL 切れの直前に定期的にバックグラウンド更新し続ける。
+ * ユーザーのアクセス有無によらずキャッシュを温かく保つことで、
+ * TTL 切れ直後の最初のリクエストがコールドキャッシュの重いクエリを踏むのを防ぐ。
+ * 同一プロセス内で複数回呼び出されても、実際にタイマーを登録するのは最初の1回だけにする。
+ * @param prisma - クエリを実行する Prisma クライアント
+ */
+export function startLatestLabelsSummaryWarming(prisma: PrismaClient): void {
+  if (warmingStarted) return
+  warmingStarted = true
+
+  const timer = setInterval(() => {
+    getLatestLabelsSummary(prisma).catch((error: unknown) => {
+      console.error('Failed to warm dashboard label summary cache:', error)
+      captureException(error)
+    })
+  }, CACHE_TTL_MS - WARM_BEFORE_EXPIRY_MS)
+  timer.unref()
 }
 
 /**
