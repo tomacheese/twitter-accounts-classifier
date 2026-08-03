@@ -67,6 +67,7 @@ import {
   syncFollowers as syncFollowersEdges,
   syncFollowing as syncFollowingEdges,
 } from './db/follow-repository'
+import { replaceLabelingFollowSample as replaceLabelingFollowSampleRecord } from './db/labeling-follow-sample-repository'
 import { fetchBlocks, type BlockListApiLike, type BlockListResult } from './twitter/blocks'
 import { syncBlocks as syncBlocksEdges } from './db/block-repository'
 import {
@@ -125,6 +126,7 @@ export interface CrawlDependencies {
     ruleVersion: string
     result: { value: boolean; confidence: number; reason: string }
   }) => Promise<void>
+  replaceLabelingFollowSample: (accountId: string, result: FollowListResult) => Promise<void>
   syncFollowing: (followerId: string, result: FollowListResult) => Promise<void>
   syncFollowers: (followeeId: string, result: FollowListResult) => Promise<void>
   syncBlocks: (blockerId: string, result: BlockListResult) => Promise<void>
@@ -388,6 +390,17 @@ async function runAccountCycleBody(
       )
       profileTweets.push(...recentTweets)
       for (const author of authors) extraAuthors.set(author.id, author)
+
+      const followSample = await withTwitterRetry(
+        () =>
+          fetchFollowing(
+            client.getUserListApi(),
+            authorId,
+            deps.limits.followEdgesPerLabeledAccount,
+          ),
+        retryOptions(deps),
+      )
+      await deps.replaceLabelingFollowSample(authorId, followSample)
 
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
       // profileTweets は他者に帰属する会話スレッドの文脈ツイートもそのまま保持するが、
@@ -1238,6 +1251,8 @@ async function main(): Promise<void> {
     persistLabel: async (params) => {
       await recordCrawlAccountLabel(prisma, params)
     },
+    replaceLabelingFollowSample: (accountId, result) =>
+      replaceLabelingFollowSampleRecord(prisma, accountId, result),
     syncFollowing: (followerId, result) => syncFollowingEdges(prisma, followerId, result),
     syncFollowers: (followeeId, result) => syncFollowersEdges(prisma, followeeId, result),
     syncBlocks: (blockerId, result) => syncBlocksEdges(prisma, blockerId, result),

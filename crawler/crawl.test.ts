@@ -89,6 +89,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       trendsPerCycle: 5,
       followEdgesPerAccount: 2000,
       blockEdgesPerAccount: 2000,
+      followEdgesPerLabeledAccount: 200,
       authorFetchDelayMs: 300,
     },
     issueCookies: vi.fn().mockResolvedValue({ ct0: 'c0', authToken: 'a0' }),
@@ -127,6 +128,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
     loadReplyCorpus: vi.fn().mockResolvedValue([]),
     loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
     persistLabel: vi.fn().mockResolvedValue(undefined),
+    replaceLabelingFollowSample: vi.fn().mockResolvedValue(undefined),
     syncFollowing: vi.fn().mockResolvedValue(undefined),
     syncFollowers: vi.fn().mockResolvedValue(undefined),
     syncBlocks: vi.fn().mockResolvedValue(undefined),
@@ -172,6 +174,43 @@ describe('runCrawlCycle', () => {
     )
     expect(deps.closeTrendsScraper).toHaveBeenCalled()
     expect(deps.closeOpenApiClient).toHaveBeenCalled()
+  })
+
+  it('投稿者ごとにフォロー先サンプルを取得し、replaceLabelingFollowSample へ渡す', async () => {
+    const deps = makeDeps()
+    await runCrawlCycle(deps)
+
+    expect(deps.replaceLabelingFollowSample).toHaveBeenCalled()
+    const [accountId, result] = (deps.replaceLabelingFollowSample as ReturnType<typeof vi.fn>).mock
+      .calls[0]
+    expect(typeof accountId).toBe('string')
+    expect(result).toEqual({ ids: [], authors: [], reachedEnd: true })
+  })
+
+  it('フォロー先サンプルの取得に失敗した投稿者はスキップされ、クロール全体は継続する', async () => {
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockRejectedValue(new Error('follow list unavailable')),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+    expect(deps.replaceLabelingFollowSample).not.toHaveBeenCalled()
   })
 
   it('passes the registry to ensureLabelDefinitions so every registered rule gets a LabelDefinition', async () => {
@@ -228,6 +267,10 @@ describe('runCrawlCycle', () => {
             getUserByRestId,
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -280,6 +323,10 @@ describe('runCrawlCycle', () => {
             getUserByRestId,
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -329,6 +376,10 @@ describe('runCrawlCycle', () => {
             // ラベル評価が上記の otherReplies 経由でのみ hijack replies を見られるようにする。
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -371,6 +422,10 @@ describe('runCrawlCycle', () => {
             getUserTweetsAndReplies: vi
               .fn()
               .mockResolvedValue({ data: { data: [templatedReply] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),
@@ -445,6 +500,10 @@ describe('runCrawlCycle', () => {
           getUserApi: () => ({
             getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [ownReply] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),
@@ -590,6 +649,10 @@ describe('runCrawlCycle', () => {
             // プロフィール取得側にはこのツイートを含めない: タイムライン注入経由でのみ観測させる。
             getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
           }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -636,6 +699,10 @@ describe('runCrawlCycle', () => {
               .fn()
               .mockResolvedValue({ data: { data: [notPromotedInProfile] } }),
           }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
         },
       }),
     })
@@ -678,6 +745,10 @@ describe('runCrawlCycle', () => {
             getUserTweetsAndReplies: vi
               .fn()
               .mockResolvedValue({ data: { data: [ownReply, foreignParentTweet] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),
@@ -728,6 +799,10 @@ describe('runCrawlCycle', () => {
             getUserTweetsAndReplies: vi
               .fn()
               .mockResolvedValue({ data: { data: [notPromotedInProfile] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
           }),
         },
       }),
@@ -900,7 +975,10 @@ describe('runCrawlCycle', () => {
               getUserByScreenName,
               getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
             }),
-            getUserListApi: () => ({ getFollowing: vi.fn(), getFollowers: vi.fn() }),
+            getUserListApi: () => ({
+              getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+              getFollowers: vi.fn(),
+            }),
             getBlocksApi: () => ({
               getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
             }),
