@@ -8,7 +8,6 @@ import {
   getCrawlStaleThresholdMultiplier,
   getCrawlWarningThreshold,
 } from './config/env'
-import { withTwitterRetry } from 'twitter-client'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
@@ -23,13 +22,14 @@ import {
   type FollowGraphLabelIndex,
 } from './labels/follow-graph-label-index'
 import { createCookieIssuerClient, type IssuedCookies } from './auth/cookie-issuer-client'
-import { getLastResponseMatching } from './twitter/response-capture'
 import {
   formatResponseErrorDiagnostics,
+  getLastResponseMatching,
   getResponseErrorDiagnostics,
   isResponseError,
   toSafeResponseErrorForLog,
-} from './twitter/response-diagnostics'
+  withTwitterRetry,
+} from 'twitter-client'
 import {
   createOpenApiClient as createRealOpenApiClient,
   closeOpenApiClient as closeRealOpenApiClient,

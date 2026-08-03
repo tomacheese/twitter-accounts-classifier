@@ -64,7 +64,7 @@ describe('createOpenApiClient', () => {
   it('assigns a response-capturing fetch to TwitterOpenApi.fetchApi', async () => {
     const { createOpenApiClient } = await import('./client')
     const { TwitterOpenApi } = await import('twitter-openapi-typescript')
-    const { getLastResponseMatching } = await import('./response-capture')
+    const { getLastResponseMatching } = await import('twitter-client')
 
     await createOpenApiClient({ ct0: 'c0', authToken: 'a0' })
 
@@ -80,7 +80,7 @@ describe('createTrendsScraper', () => {
   it('passes a response-capturing fetch through to createTrendsClient', async () => {
     const { createTrendsScraper } = await import('./client')
     const { createTrendsClient } = await import('./trends-client')
-    const { getLastResponseMatching } = await import('./response-capture')
+    const { getLastResponseMatching } = await import('twitter-client')
 
     await createTrendsScraper({ ct0: 'c0', authToken: 'a0' })
 
