@@ -178,14 +178,16 @@ model Block {
 }
 
 model CrawlRun {
-  id               String                   @id @default(cuid())
-  startedAt        DateTime
-  lastHeartbeatAt  DateTime
-  finishedAt       DateTime?
-  status           String
-  accountRuns      CrawlAccountRun[]
-  checkpoints      CrawlAccountCheckpoint[]
-  accountLabelRuns CrawlAccountLabelRun[]
+  id                      String                   @id @default(cuid())
+  startedAt               DateTime
+  lastHeartbeatAt         DateTime
+  finishedAt              DateTime?
+  status                  String
+  currentUsername         String?
+  currentAccountStartedAt DateTime?
+  accountRuns             CrawlAccountRun[]
+  checkpoints             CrawlAccountCheckpoint[]
+  accountLabelRuns        CrawlAccountLabelRun[]
 
   @@index([startedAt])
   @@index([status, startedAt(sort: Desc), id(sort: Desc)])
