@@ -21,7 +21,12 @@ describe('selectBlockCandidates', () => {
     const result = await selectBlockCandidates(
       prisma as never,
       'blocker-1',
-      { targetLabels: ['spam', 'bot'], confidenceThreshold: 0.8 },
+      {
+        targetLabels: [
+          { label: 'spam', confidenceThreshold: 0.8 },
+          { label: 'bot', confidenceThreshold: 0.8 },
+        ],
+      },
       50,
     )
 
@@ -31,19 +36,24 @@ describe('selectBlockCandidates', () => {
     ])
   })
 
-  it('passes confidenceThreshold, targetLabels, blockerId and the cap as query parameters', async () => {
+  it('passes each label with its own confidenceThreshold, blockerId and the cap as query parameters', async () => {
     const prisma = fakePrismaReturning([])
 
     await selectBlockCandidates(
       prisma as never,
       'blocker-1',
-      { targetLabels: ['spam'], confidenceThreshold: 0.9 },
+      {
+        targetLabels: [
+          { label: 'spam', confidenceThreshold: 0.9 },
+          { label: 'bot', confidenceThreshold: 0.5 },
+        ],
+      },
       10,
     )
 
     const [, ...values] = prisma.$queryRaw.mock.calls[0]
     expect(values).toContain('blocker-1')
-    expect(values).toEqual(expect.arrayContaining([['spam'], 0.9, 10]))
+    expect(values).toEqual(expect.arrayContaining([['spam', 'bot'], [0.9, 0.5], 10]))
   })
 
   it('returns an empty array when no row satisfies the rule', async () => {
@@ -52,7 +62,7 @@ describe('selectBlockCandidates', () => {
     const result = await selectBlockCandidates(
       prisma as never,
       'blocker-1',
-      { targetLabels: ['spam'], confidenceThreshold: 0.9 },
+      { targetLabels: [{ label: 'spam', confidenceThreshold: 0.9 }] },
       50,
     )
 
@@ -67,7 +77,7 @@ describe('selectBlockCandidates SQL shape', () => {
     await selectBlockCandidates(
       prisma as never,
       'blocker-1',
-      { targetLabels: ['spam'], confidenceThreshold: 0.8 },
+      { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
       50,
     )
 

@@ -44,11 +44,16 @@ describe('loadBlockerConfig', () => {
           password: 'p',
           otp_secret: null,
           block_enabled: true,
-          block_rule: { target_labels: ['spam', 'bot'], confidence_threshold: 0.9 },
+          block_rule: {
+            target_labels: [
+              { label: 'spam', confidence_threshold: 0.9 },
+              { label: 'bot', confidence_threshold: 0.5 },
+            ],
+          },
         },
         { email: 'b@example.com', username: 'bob', password: 'p', otp_secret: null },
       ],
-      block: { target_labels: ['spam'], confidence_threshold: 0.8 },
+      block: { target_labels: [{ label: 'spam', confidence_threshold: 0.8 }] },
       discord_webhook_url: 'https://discord.example.com/webhooks/exampleXXXX',
     })
 
@@ -56,7 +61,12 @@ describe('loadBlockerConfig', () => {
 
     expect(config.accounts[0]).toMatchObject({
       blockEnabled: true,
-      blockRule: { targetLabels: ['spam', 'bot'], confidenceThreshold: 0.9 },
+      blockRule: {
+        targetLabels: [
+          { label: 'spam', confidenceThreshold: 0.9 },
+          { label: 'bot', confidenceThreshold: 0.5 },
+        ],
+      },
     })
     expect(config.discordWebhookUrl).toBe('https://discord.example.com/webhooks/exampleXXXX')
   })
@@ -72,14 +82,14 @@ describe('loadBlockerConfig', () => {
           block_enabled: true,
         },
       ],
-      block: { target_labels: ['spam'], confidence_threshold: 0.8 },
+      block: { target_labels: [{ label: 'spam', confidence_threshold: 0.8 }] },
     })
 
     const config = loadBlockerConfig(path)
 
     expect(config.accounts[0]).toMatchObject({
       blockEnabled: true,
-      blockRule: { targetLabels: ['spam'], confidenceThreshold: 0.8 },
+      blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
     })
   })
 

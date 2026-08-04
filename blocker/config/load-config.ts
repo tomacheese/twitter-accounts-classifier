@@ -1,9 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 
-const rawBlockRuleSchema = z.object({
-  target_labels: z.array(z.string()).min(1),
+const rawTargetLabelSchema = z.object({
+  label: z.string(),
   confidence_threshold: z.number().min(0).max(1),
+})
+
+const rawBlockRuleSchema = z.object({
+  target_labels: z.array(rawTargetLabelSchema).min(1),
 })
 
 const rawAccountSchema = z.object({
@@ -22,11 +26,18 @@ const rawConfigSchema = z.object({
 })
 
 /**
+ * 対象ラベル1件分の確信度閾値。
+ */
+export interface BlockTargetLabel {
+  label: string
+  confidenceThreshold: number
+}
+
+/**
  * ブロック対象を判定するためのラベル閾値ルール。
  */
 export interface BlockRuleConfig {
-  targetLabels: string[]
-  confidenceThreshold: number
+  targetLabels: BlockTargetLabel[]
 }
 
 interface BlockerAccountCredentials {
@@ -56,7 +67,12 @@ export interface BlockerAppConfig {
 }
 
 function toBlockRuleConfig(raw: z.infer<typeof rawBlockRuleSchema>): BlockRuleConfig {
-  return { targetLabels: raw.target_labels, confidenceThreshold: raw.confidence_threshold }
+  return {
+    targetLabels: raw.target_labels.map((target) => ({
+      label: target.label,
+      confidenceThreshold: target.confidence_threshold,
+    })),
+  }
 }
 
 /**

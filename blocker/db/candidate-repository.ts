@@ -19,7 +19,7 @@ export interface BlockCandidate {
  * 求め、それで `AccountLabel` 側を絞り込むことでスキャン範囲を対象ラベル関連の行のみに限定する。
  * @param prisma - Prisma クライアント
  * @param blockerId - このブロック実行を行うログインアカウントの `Account.id`
- * @param rule - 適用するブロックルール (対象ラベル・確信度閾値)
+ * @param rule - 適用するブロックルール (ラベルごとの確信度閾値)
  * @param maxCount - 返す候補の最大件数。確信度が高い候補を優先して残すため降順ソート後にカットする
  * @returns 確信度降順に並んだブロック候補
  */
@@ -29,9 +29,16 @@ export async function selectBlockCandidates(
   rule: BlockRuleConfig,
   maxCount: number,
 ): Promise<BlockCandidate[]> {
+  const labels = rule.targetLabels.map((target) => target.label)
+  const thresholds = rule.targetLabels.map((target) => target.confidenceThreshold)
   const rows = await prisma.$queryRaw<BlockCandidate[]>`
-    WITH relevant_labels AS (
-      SELECT id FROM "LabelDefinition" WHERE key = ANY(${rule.targetLabels})
+    WITH rule_thresholds AS (
+      SELECT * FROM unnest(${labels}::text[], ${thresholds}::float8[]) AS t(label_key, threshold)
+    ),
+    relevant_labels AS (
+      SELECT ld.id, rt.threshold
+      FROM "LabelDefinition" ld
+      JOIN rule_thresholds rt ON rt.label_key = ld.key
     ),
     latest_confidence AS (
       SELECT DISTINCT ON ("accountId", "labelDefinitionId")
@@ -44,11 +51,12 @@ export async function selectBlockCandidates(
       SELECT DISTINCT ON (lc."accountId")
         lc."accountId", lc."labelDefinitionId", lc."confidence"
       FROM latest_confidence lc
+      JOIN relevant_labels rl ON rl.id = lc."labelDefinitionId"
       JOIN "AccountLabelLatest" all_latest
         ON all_latest."accountId" = lc."accountId"
         AND all_latest."labelDefinitionId" = lc."labelDefinitionId"
       WHERE all_latest.value = true
-        AND lc."confidence" >= ${rule.confidenceThreshold}
+        AND lc."confidence" >= rl.threshold
         AND lc."accountId" != ${blockerId}
       ORDER BY lc."accountId", lc."confidence" DESC
     )

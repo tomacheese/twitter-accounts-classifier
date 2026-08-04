@@ -51,7 +51,7 @@ Viewer には認証機構がなく、フォロー・フォロワー・ブロッ�
 
 - `data/config.json`: Twitter アカウントの認証情報 (git 管理外)
   - `block_enabled` (アカウントごと、省略時 `false`): このアカウントでブロック処理を実行するかどうか
-  - `block_rule` (アカウントごと、任意): このアカウントに適用するブロックルール (`target_labels`・`confidence_threshold`)。省略時はトップレベルの `block` を使う
+  - `block_rule` (アカウントごと、任意): このアカウントに適用するブロックルール。`target_labels` はラベルごとの確信度閾値 (`label`・`confidence_threshold`) のリストで、対象ラベルは複数指定できる。省略時はトップレベルの `block` を使う
   - `block` (トップレベル、任意): 全アカウント共通のデフォルトブロックルール
   - `discord_webhook_url` (トップレベル、任意): ブロック結果を通知する Discord Webhook URL
 - `data/postgres/`: Postgres の実データ (bind mount、git 管理外)

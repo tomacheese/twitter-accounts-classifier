@@ -12,7 +12,7 @@ describe('runBlockCycle', () => {
           password: 'p',
           otpSecret: null,
           blockEnabled: true,
-          blockRule: { targetLabels: ['spam'], confidenceThreshold: 0.8 },
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
         },
         {
           email: 'b@example.com',
@@ -67,7 +67,7 @@ describe('runBlockCycle', () => {
           password: 'p',
           otpSecret: null,
           blockEnabled: true,
-          blockRule: { targetLabels: ['spam'], confidenceThreshold: 0.8 },
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
         },
       ],
       discordWebhookUrl: null,

@@ -9,7 +9,7 @@ function baseAccount(): Extract<BlockerAccountConfig, { blockEnabled: true }> {
     password: 'p',
     otpSecret: null,
     blockEnabled: true,
-    blockRule: { targetLabels: ['spam'], confidenceThreshold: 0.8 },
+    blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
   }
 }
 
@@ -47,7 +47,7 @@ describe('runBlockAccountCycle', () => {
     expect(deps.selectBlockCandidates).toHaveBeenCalledWith(
       deps.prisma,
       'blocker-1',
-      { targetLabels: ['spam'], confidenceThreshold: 0.8 },
+      { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
       50,
     )
   })
