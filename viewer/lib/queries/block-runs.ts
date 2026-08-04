@@ -27,7 +27,6 @@ export interface BlockRunDetail extends BlockRun {
 
 /**
  * 一覧ページ向けに、blocker 実行の全履歴をアカウント件数のみで読み込む。
- * アカウント単位の詳細は意図的に含めない (詳細は {@link getBlockRunDetail})。
  * 実行を重ねるほど件数は増え続けるが、`CrawlRun` の履歴一覧と同様の増加ペースであるため、
  * ページネーションはしていない。
  * @param prisma - クエリを実行する Prisma クライアント
@@ -43,10 +42,9 @@ export async function getAllBlockRuns(prisma: PrismaClient): Promise<BlockRunLis
 
 /**
  * 詳細ページ向けに、単一の blocker 実行をアカウント単位の内訳付きで読み込む。
- * アカウント単位の一覧は startedAt 順に並べ、同着時は id をタイブレークに使う。
- * 各アカウント実行に含める `BlockAction` は失敗 (`result: 'failure'`) のみに絞る。
  * 成功した `BlockAction` は `blockedCount` の集計値で十分表現できており、
- * 個別に一覧すると詳細ページの表示件数が実行のたびに増え続けてしまうため。
+ * 個別に一覧すると詳細ページの表示件数が実行のたびに増え続けてしまうため、
+ * 失敗した `BlockAction` のみを含める。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param id - `BlockRun` の id
  * @returns アカウント単位の実行を含む実行。該当する id がなければ `null`

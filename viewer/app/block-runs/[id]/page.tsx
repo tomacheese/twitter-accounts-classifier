@@ -7,8 +7,8 @@ import { getBlockRunDetail } from '@/lib/queries/block-runs'
 import { ErrorFallback } from '../../components/error-fallback'
 import { StatusBadge } from '../../components/status-badge'
 
-// このページは処理中アカウントの経過時間などリクエスト時点の値を描画するため、
-// 静的プリレンダリングの対象から外している。理由は crawl-runs/[id]/page.tsx と同じ。
+// このページは常に最新データを読むため、
+// 静的プリレンダリングの対象から外している。
 export const dynamic = 'force-dynamic'
 
 const ACCOUNT_RUN_COLUMNS = [

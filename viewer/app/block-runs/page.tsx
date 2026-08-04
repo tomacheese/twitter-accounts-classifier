@@ -56,7 +56,7 @@ export default async function BlockRunsPage({
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">Current blocks</h2>
-        {blocks.items.length === 0 ? (
+        {blocks.totalCount === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">No blocks recorded yet.</p>
         ) : (
           <>
