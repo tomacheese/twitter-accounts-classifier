@@ -1,15 +1,13 @@
--- The Accounts page (viewer/lib/queries/accounts.ts's listAccounts) sorts by
--- whichever of "followersCount", "tweetCount", or "lastCrawledAt" the user
--- picked, with no other filter in the common case. Without an index on these
--- columns, Postgres has to sort the whole "Account" table on every page load
--- as it grows. Built CONCURRENTLY (and without a wrapping transaction, which
--- Postgres migrations from Prisma already run without) to avoid locking
--- writes against the live "Account" table while each index is built.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS "Account_followersCount_idx"
+-- Accounts ページの一覧はソートキー列 (followersCount / tweetCount / lastCrawledAt) にインデックスがないと、
+-- テーブルが育つほど毎回のソートが重くなるため、この3列にインデックスを張る。
+-- CONCURRENTLY は Postgres 側の制約でトランザクション内では実行できず、
+-- prisma migrate deploy は各マイグレーションファイルを常にトランザクションで囲むため、
+-- ここでは CONCURRENTLY を使わず通常の CREATE INDEX で作成する。
+CREATE INDEX IF NOT EXISTS "Account_followersCount_idx"
 ON "Account" ("followersCount");
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS "Account_tweetCount_idx"
+CREATE INDEX IF NOT EXISTS "Account_tweetCount_idx"
 ON "Account" ("tweetCount");
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS "Account_lastCrawledAt_idx"
+CREATE INDEX IF NOT EXISTS "Account_lastCrawledAt_idx"
 ON "Account" ("lastCrawledAt");
