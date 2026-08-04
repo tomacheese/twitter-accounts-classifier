@@ -11,7 +11,6 @@ export function getCookieIssuerBaseUrl(): string {
 }
 
 /**
- * 環境変数を正の整数として読み取る。未設定・空文字ならデフォルト値を返す。
  * `Number()` は16進数・指数表記・符号付き文字列なども受理してしまうため、
  * 10進数の数字列のみを許可する正規表現で事前に絞り込む。
  * @param name - 環境変数名
@@ -28,8 +27,7 @@ function parsePositiveIntEnv(name: string, defaultValue: number): number {
 }
 
 /**
- * ブロック実行サイクルの間隔 (秒)。crawler の CRAWL_INTERVAL_SECONDS とは独立した値であり、
- * 揃える必要はないため別の環境変数として読む。
+ * crawler の CRAWL_INTERVAL_SECONDS とは独立した値であり、揃える必要はないため別の環境変数として読む。
  * @returns ブロック実行間隔 (秒)
  */
 export function getBlockIntervalSeconds(): number {
@@ -37,8 +35,7 @@ export function getBlockIntervalSeconds(): number {
 }
 
 /**
- * 1件ブロックするごとの待機時間 (ミリ秒)。crawler の authorFetchDelayMs (300ms) より長くし、
- * 自動操作としての検知リスクを抑えるためデフォルトを大きく設定している。
+ * crawler の author 処理間隔より長いデフォルトを設定し、自動操作としての検知リスクを抑える。
  * @returns ブロック実行の待機時間 (ミリ秒)
  */
 export function getBlockActionDelayMs(): number {
@@ -46,10 +43,18 @@ export function getBlockActionDelayMs(): number {
 }
 
 /**
- * 1アカウント・1サイクルあたりのブロック上限件数。ルール設定の誤りで大量ブロックが
- * 暴走するのを防ぐ安全弁として、超過分は次回以降のサイクルに回す前提の値。
+ * ルール設定の誤りで大量ブロックが暴走するのを防ぐ安全弁として、超過分は次回以降のサイクルに回す前提の値。
  * @returns アカウントごとのブロック上限件数
  */
 export function getBlockMaxPerAccountPerRun(): number {
   return parsePositiveIntEnv('BLOCK_MAX_PER_ACCOUNT_PER_RUN', 50)
+}
+
+/**
+ * `crawler` の `CRAWL_STALE_THRESHOLD_MULTIPLIER` と同じ考え方で、放置判定のしきい値を
+ * 「ブロック実行間隔の何倍か」で表す倍率。
+ * @returns 放置判定のしきい値倍率
+ */
+export function getBlockStaleThresholdMultiplier(): number {
+  return parsePositiveIntEnv('BLOCK_STALE_THRESHOLD_MULTIPLIER', 3)
 }

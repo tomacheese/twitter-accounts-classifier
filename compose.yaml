@@ -119,12 +119,14 @@ services:
       DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
       COOKIE_ISSUER_URL: ${COOKIE_ISSUER_URL:?COOKIE_ISSUER_URL must be set in .env}
       BLOCK_INTERVAL_SECONDS: ${BLOCK_INTERVAL_SECONDS:-21600}
+      BLOCK_STALE_THRESHOLD_MULTIPLIER: ${BLOCK_STALE_THRESHOLD_MULTIPLIER:-3}
       BLOCK_ACTION_DELAY_MS: ${BLOCK_ACTION_DELAY_MS:-2000}
       BLOCK_MAX_PER_ACCOUNT_PER_RUN: ${BLOCK_MAX_PER_ACCOUNT_PER_RUN:-50}
       GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
     volumes:
-      # blocker/entrypoint.sh cds into /app/blocker before running anything, and
-      # loadBlockerConfig()'s default path ('data/config.json') is relative to that
-      # cwd, so the bind mount target must be /app/blocker/data (not /app/data).
+      # blocker/entrypoint.sh は何よりも先に /app/blocker へ cd してから起動するため、
+      # loadBlockerConfig() のデフォルトパス ('data/config.json') もそのカレントディレクトリ
+      # からの相対パスになる。そのためバインドマウント先は /app/blocker/data とする必要がある
+      # (/app/data ではない)。
       - ./data:/app/blocker/data
     logging: *default-logging

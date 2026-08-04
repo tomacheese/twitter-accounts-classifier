@@ -6,6 +6,11 @@ export interface AccountRunSummary {
   username: string
   blockedCount: number
   failedCount: number
+  /**
+   * サイクル自体が完走できなかった (認証・own account 解決などで異常終了した) ことを示す。
+   * `blockedCount`/`failedCount` が両方 0 でも「対象が単に無かった」場合と区別する必要がある。
+   */
+  failed: boolean
 }
 
 function buildMessageContent(summaries: AccountRunSummary[]): string {
@@ -14,16 +19,15 @@ function buildMessageContent(summaries: AccountRunSummary[]): string {
 
   const lines = [
     `合計: ${totalBlocked} 件ブロック, ${totalFailed} 件失敗`,
-    ...summaries.map(
-      (summary) =>
-        `- ${summary.username}: ${summary.blockedCount} 件ブロック, ${summary.failedCount} 件失敗`,
-    ),
+    ...summaries.map((summary) => {
+      const suffix = summary.failed ? ' (サイクル異常終了)' : ''
+      return `- ${summary.username}: ${summary.blockedCount} 件ブロック, ${summary.failedCount} 件失敗${suffix}`
+    }),
   ]
   return lines.join('\n')
 }
 
 /**
- * 1 回の実行サイクルが完了するごとに、参加した全アカウント分をまとめた 1 通のメッセージを送信する。
  * 通知の送信失敗はブロック処理の成否に影響させたくないため、この関数自身は throw しない。
  * @param webhookUrl - Discord Webhook URL。null なら送信をスキップする
  * @param summaries - アカウントごとのブロック件数・失敗件数

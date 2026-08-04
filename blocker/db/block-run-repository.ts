@@ -1,4 +1,7 @@
+import { Logger } from '@book000/node-utils'
 import type { PrismaClient } from '../generated/prisma'
+
+const logger = Logger.configure('block-run-repository')
 
 /**
  * `startBlockAccountRun` に渡すパラメータ。
@@ -36,21 +39,6 @@ export interface RecordBlockActionParams {
 
 /**
  * @param prisma - Prisma クライアント
- * @param startedAt - 新規 run の開始時刻
- * @returns 作成した `BlockRun` の ID
- */
-export async function startBlockRun(
-  prisma: PrismaClient,
-  startedAt: Date,
-): Promise<{ id: string }> {
-  const run = await prisma.blockRun.create({
-    data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
-  })
-  return { id: run.id }
-}
-
-/**
- * @param prisma - Prisma クライアント
  * @param id - 対象の `BlockRun` ID
  * @param finishedAt - サイクルが完了 (または失敗) した時刻
  * @param status - run の最終 status ("completed" | "failed")
@@ -65,8 +53,7 @@ export async function finishBlockRun(
 }
 
 /**
- * アカウント処理が進む限り定期的に呼び出す必要がある: `crawler` の `touchCrawlRunHeartbeat` と
- * 同じ考え方で、放置された run を後から検出できるようにするため。
+ * アカウント処理が進む限り定期的に呼び出す必要がある: `crawler` の `touchCrawlRunHeartbeat` と同じ考え方で、放置された run を後から検出できるようにするため。
  * @param prisma - Prisma クライアント
  * @param id - 対象の `BlockRun` ID
  * @param at - 記録する時刻
@@ -77,6 +64,46 @@ export async function touchBlockRunHeartbeat(
   at: Date,
 ): Promise<void> {
   await prisma.blockRun.update({ where: { id }, data: { lastHeartbeatAt: at } })
+}
+
+/**
+ * 単一の blocker プロセスだけが動作する前提で運用する: 複数プロセスの同時実行は想定しない。
+ * `lastHeartbeatAt` が `staleThresholdMs` を超えて更新されていない `running` 行は、
+ * 正常終了できなかったものとみなして `failed` に確定し、新しい run を作り直す
+ * (`crawler` の `startOrResumeCrawlRun` と同じ考え方)。
+ * @param prisma - Prisma クライアント
+ * @param startedAt - 新規 run の開始時刻
+ * @param staleThresholdMs - 放置判定のしきい値 (ミリ秒)。経過時間がこれを超えれば放置とみなす
+ * @returns 使用する `BlockRun` の ID
+ */
+export async function startOrResumeBlockRun(
+  prisma: PrismaClient,
+  startedAt: Date,
+  staleThresholdMs: number,
+): Promise<{ id: string }> {
+  const existingRun = await prisma.blockRun.findFirst({
+    where: { status: 'running' },
+    orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+    select: { id: true, lastHeartbeatAt: true },
+  })
+
+  if (existingRun) {
+    const isStale = startedAt.getTime() - existingRun.lastHeartbeatAt.getTime() > staleThresholdMs
+    if (!isStale) {
+      return { id: existingRun.id }
+    }
+
+    logger.warn(
+      `Abandoning stale block run ${existingRun.id}: last heartbeat at ` +
+        `${existingRun.lastHeartbeatAt.toISOString()}, exceeding staleThresholdMs=${staleThresholdMs}`,
+    )
+    await finishBlockRun(prisma, existingRun.id, existingRun.lastHeartbeatAt, 'failed')
+  }
+
+  const run = await prisma.blockRun.create({
+    data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
+  })
+  return { id: run.id }
 }
 
 /**

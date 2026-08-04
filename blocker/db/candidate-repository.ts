@@ -11,13 +11,12 @@ export interface BlockCandidate {
 }
 
 /**
- * `block_enabled` なアカウント 1 件分のブロック候補を選定する。
- *
- * `AccountLabelLatest` は確信度を保持していないため、`relabel.ts` の
- * `loadLatestRuleVersions` と同じ `DISTINCT ON` パターンで `AccountLabel` から
- * 各 (account, label) の最新確信度を導出し、そこから `confidenceThreshold` 以上のものへ絞り込む。
- * 1 アカウントが複数の対象ラベルに合致する場合は、確信度が最も高いラベルのみを根拠として残す
- * (`DISTINCT ON ("accountId")` で確信度降順の先頭行を残すことで実現する)。
+ * `AccountLabelLatest` は確信度を保持していないため、`AccountLabel` の履歴から確信度を
+ * 導出する必要がある。ただし `prisma/schema.prisma` が `AccountLabel` について警告している
+ * とおり、この履歴テーブルは際限なく増え続けるため、`relabel.ts` の
+ * `loadLatestRuleVersions` のように無条件で全件を `DISTINCT ON` すると本番の応答時間を
+ * 守れない。ここでは対象ラベル (`rule.targetLabels`) に絞った `relevant_labels` を先に
+ * 求め、それで `AccountLabel` 側を絞り込むことでスキャン範囲を対象ラベル関連の行のみに限定する。
  * @param prisma - Prisma クライアント
  * @param blockerId - このブロック実行を行うログインアカウントの `Account.id`
  * @param rule - 適用するブロックルール (対象ラベル・確信度閾値)
@@ -31,10 +30,14 @@ export async function selectBlockCandidates(
   maxCount: number,
 ): Promise<BlockCandidate[]> {
   const rows = await prisma.$queryRaw<BlockCandidate[]>`
-    WITH latest_confidence AS (
+    WITH relevant_labels AS (
+      SELECT id FROM "LabelDefinition" WHERE key = ANY(${rule.targetLabels})
+    ),
+    latest_confidence AS (
       SELECT DISTINCT ON ("accountId", "labelDefinitionId")
         "accountId", "labelDefinitionId", "confidence"
       FROM "AccountLabel"
+      WHERE "labelDefinitionId" IN (SELECT id FROM relevant_labels)
       ORDER BY "accountId", "labelDefinitionId", "labeledAt" DESC, "id" DESC
     ),
     best_label_per_account AS (
@@ -44,9 +47,7 @@ export async function selectBlockCandidates(
       JOIN "AccountLabelLatest" all_latest
         ON all_latest."accountId" = lc."accountId"
         AND all_latest."labelDefinitionId" = lc."labelDefinitionId"
-      JOIN "LabelDefinition" ld ON ld.id = lc."labelDefinitionId"
       WHERE all_latest.value = true
-        AND ld.key = ANY(${rule.targetLabels})
         AND lc."confidence" >= ${rule.confidenceThreshold}
         AND lc."accountId" != ${blockerId}
       ORDER BY lc."accountId", lc."confidence" DESC

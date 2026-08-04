@@ -8,9 +8,13 @@ import {
   type BlockerAccountConfig,
 } from './config/load-config'
 import { loadBlockLimits } from './config/block-limits'
-import { getCookieIssuerBaseUrl } from './config/env'
 import {
-  startBlockRun,
+  getCookieIssuerBaseUrl,
+  getBlockIntervalSeconds,
+  getBlockStaleThresholdMultiplier,
+} from './config/env'
+import {
+  startOrResumeBlockRun,
   finishBlockRun,
   touchBlockRunHeartbeat,
   recordBlockAction,
@@ -28,7 +32,7 @@ const logger = Logger.configure('blocker')
 export interface RunBlockCycleDependencies {
   config: BlockerAppConfig
   prisma: PrismaClient
-  startBlockRun: typeof startBlockRun
+  startOrResumeBlockRun: typeof startOrResumeBlockRun
   finishBlockRun: typeof finishBlockRun
   touchBlockRunHeartbeat: typeof touchBlockRunHeartbeat
   runBlockAccountCycle: typeof runBlockAccountCycle
@@ -36,18 +40,20 @@ export interface RunBlockCycleDependencies {
 }
 
 /**
- * `block_enabled` な全アカウントについて順番にブロックサイクルを実行し、
- * 完了後に 1 通の Discord 通知を送る。
  * 1 アカウントの処理が例外を投げても、他アカウントの処理は継続する
  * (`crawl.ts` の各アカウントループと同じ考え方)。
+ * いずれかのアカウントが失敗した場合は `BlockRun` 自体の status も `'failed'` にする:
+ * 個々の `BlockAccountRun` にしか失敗が残らないと、放置しても誰も気付けない。
  * @param deps - このサイクルに必要な依存関数一式
  */
 export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<void> {
   const startedAt = new Date()
-  const run = await deps.startBlockRun(deps.prisma, startedAt)
+  const staleThresholdMs = getBlockIntervalSeconds() * getBlockStaleThresholdMultiplier() * 1000
+  const run = await deps.startOrResumeBlockRun(deps.prisma, startedAt, staleThresholdMs)
   const summaries: AccountRunSummary[] = []
   const targetAccounts = deps.config.accounts.filter(
-    (account): account is BlockerAccountConfig => account.blockEnabled,
+    (account): account is Extract<BlockerAccountConfig, { blockEnabled: true }> =>
+      account.blockEnabled,
   )
 
   for (const account of targetAccounts) {
@@ -70,7 +76,6 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
           limits: loadBlockLimits(),
         },
         account,
-        deps.config,
         run.id,
       )
       summaries.push(summary)
@@ -80,12 +85,13 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
         error as Error,
       )
       captureException(error, { username: account.username })
-      summaries.push({ username: account.username, blockedCount: 0, failedCount: 0 })
+      summaries.push({ username: account.username, blockedCount: 0, failedCount: 0, failed: true })
     }
   }
 
   await deps.notifyDiscord(deps.config.discordWebhookUrl, summaries)
-  await deps.finishBlockRun(deps.prisma, run.id, new Date(), 'completed')
+  const runStatus = summaries.some((summary) => summary.failed) ? 'failed' : 'completed'
+  await deps.finishBlockRun(deps.prisma, run.id, new Date(), runStatus)
 }
 
 async function main(): Promise<void> {
@@ -95,7 +101,7 @@ async function main(): Promise<void> {
     await runBlockCycle({
       config,
       prisma,
-      startBlockRun,
+      startOrResumeBlockRun,
       finishBlockRun,
       touchBlockRunHeartbeat,
       runBlockAccountCycle,

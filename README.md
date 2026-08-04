@@ -43,6 +43,7 @@ Viewer には認証機構がなく、フォロー・フォロワー・ブロッ�
 | `GLITCHTIP_DSN` | - | GlitchTip (エラートラッキング) の DSN。未設定なら送信しない |
 | `CRAWL_WARNING_THRESHOLD` | - | 1 アカウントの crawl 1 回あたり、GlitchTip へ集約通知する warning 件数の閾値。デフォルト 5 |
 | `BLOCK_INTERVAL_SECONDS` | - | ブロック実行の間隔 (秒)。デフォルト 21600 |
+| `BLOCK_STALE_THRESHOLD_MULTIPLIER` | - | `running` のまま放置された BlockRun を検出するしきい値の倍率 (ブロック実行間隔の何倍か)。デフォルト 3 |
 | `BLOCK_ACTION_DELAY_MS` | - | 1 件ブロックするごとの待機時間 (ミリ秒)。デフォルト 2000 |
 | `BLOCK_MAX_PER_ACCOUNT_PER_RUN` | - | 1 アカウント・1 サイクルあたりのブロック上限件数。デフォルト 50 |
 

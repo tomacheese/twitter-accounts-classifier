@@ -5,7 +5,11 @@ describe('notifyDiscord', () => {
   it('skips sending when webhookUrl is null', async () => {
     const fetchImpl = vi.fn()
 
-    await notifyDiscord(null, [{ username: 'alice', blockedCount: 1, failedCount: 0 }], fetchImpl)
+    await notifyDiscord(
+      null,
+      [{ username: 'alice', blockedCount: 1, failedCount: 0, failed: false }],
+      fetchImpl,
+    )
 
     expect(fetchImpl).not.toHaveBeenCalled()
   })
@@ -16,8 +20,8 @@ describe('notifyDiscord', () => {
     await notifyDiscord(
       'https://discord.example.com/webhooks/exampleXXXX',
       [
-        { username: 'alice', blockedCount: 3, failedCount: 1 },
-        { username: 'bob', blockedCount: 0, failedCount: 0 },
+        { username: 'alice', blockedCount: 3, failedCount: 1, failed: false },
+        { username: 'bob', blockedCount: 0, failedCount: 0, failed: false },
       ],
       fetchImpl,
     )
@@ -32,13 +36,27 @@ describe('notifyDiscord', () => {
     expect(body.content).toContain('合計')
   })
 
+  it('marks a failed account cycle with a distinct suffix in the message', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+
+    await notifyDiscord(
+      'https://discord.example.com/webhooks/exampleXXXX',
+      [{ username: 'alice', blockedCount: 0, failedCount: 0, failed: true }],
+      fetchImpl,
+    )
+
+    const [, init] = fetchImpl.mock.calls[0]
+    const body = JSON.parse((init as RequestInit).body as string) as { content: string }
+    expect(body.content).toContain('サイクル異常終了')
+  })
+
   it('does not throw when the webhook request fails', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error('network error'))
 
     await expect(
       notifyDiscord(
         'https://discord.example.com/webhooks/exampleXXXX',
-        [{ username: 'alice', blockedCount: 1, failedCount: 0 }],
+        [{ username: 'alice', blockedCount: 1, failedCount: 0, failed: false }],
         fetchImpl,
       ),
     ).resolves.toBeUndefined()
@@ -50,7 +68,7 @@ describe('notifyDiscord', () => {
     await expect(
       notifyDiscord(
         'https://discord.example.com/webhooks/exampleXXXX',
-        [{ username: 'alice', blockedCount: 1, failedCount: 0 }],
+        [{ username: 'alice', blockedCount: 1, failedCount: 0, failed: false }],
         fetchImpl,
       ),
     ).resolves.toBeUndefined()

@@ -1,8 +1,7 @@
 import { Logger } from '@book000/node-utils'
 import { withTwitterRetry, type IssuedCookies, type OpenApiClientContext } from 'twitter-client'
 import type { PrismaClient } from './generated/prisma'
-import type { BlockerAccountConfig, BlockerAppConfig } from './config/load-config'
-import { resolveBlockRule } from './config/load-config'
+import type { BlockerAccountConfig } from './config/load-config'
 import type { BlockLimits } from './config/block-limits'
 import { selectBlockCandidates, type BlockCandidate } from './db/candidate-repository'
 import { recordSuccessfulBlock } from './db/block-repository'
@@ -38,8 +37,7 @@ const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
- * `crawl.ts` の `syncFollowingPhase` と同じ方法 (`getUserByScreenName`) で
- * このアカウント自身の `Account.id` を解決する。
+ * `crawl.ts` の `syncFollowingPhase` と同じ方法 (`getUserByScreenName`) を使う。
  * @param client - ログイン済みの OpenAPI クライアント
  * @param username - 解決対象のログインアカウントのユーザー名
  * @returns 解決した `Account.id`
@@ -57,8 +55,10 @@ async function resolveOwnAccountId(
 }
 
 /**
- * 候補 1 件分のブロックを試行し、成功・失敗いずれの場合も `BlockAction` へ記録する。
  * 1 件の失敗が残りの候補の処理を止めないよう、この関数自身は例外を投げない。
+ * Twitter 側への `createBlock` とその後の `BlockAction` 記録を別々の try で囲む: 記録側の
+ * DB エラーを `createBlock` の失敗と同じ `catch` にまとめると、実際にはブロックが成立した
+ * 候補まで `result: 'failure'` として記録されてしまい、履行済みの操作が誤って再試行対象になる。
  * @param client - ログイン済みの OpenAPI クライアント
  * @param deps - ブロック実行に必要な依存関数一式
  * @param blockAccountRunId - 記録先の `BlockAccountRun` ID
@@ -75,17 +75,6 @@ async function attemptBlock(
 ): Promise<boolean> {
   try {
     await withTwitterRetry(() => client.createBlock(candidate.accountId))
-    await deps.recordSuccessfulBlock(deps.prisma, blockerId, candidate.accountId)
-    await deps.recordBlockAction(deps.prisma, {
-      blockAccountRunId,
-      blockerId,
-      blockedId: candidate.accountId,
-      labelDefinitionId: candidate.labelDefinitionId,
-      confidence: candidate.confidence,
-      result: 'success',
-      errorMessage: null,
-    })
-    return true
   } catch (error) {
     logger.error(
       `Failed to block account ${candidate.accountId} on behalf of ${blockerId}`,
@@ -103,38 +92,82 @@ async function attemptBlock(
     })
     return false
   }
+
+  try {
+    await deps.recordSuccessfulBlock(deps.prisma, blockerId, candidate.accountId)
+    await deps.recordBlockAction(deps.prisma, {
+      blockAccountRunId,
+      blockerId,
+      blockedId: candidate.accountId,
+      labelDefinitionId: candidate.labelDefinitionId,
+      confidence: candidate.confidence,
+      result: 'success',
+      errorMessage: null,
+    })
+  } catch (error) {
+    logger.error(
+      `Blocked account ${candidate.accountId} but failed to record it for ${blockerId}`,
+      error as Error,
+    )
+    captureException(error, { blockerId, blockedId: candidate.accountId })
+  }
+  return true
 }
 
 /**
- * `block_enabled` な 1 アカウント分の、own account 解決からブロック履行記録までの全処理を行う。
- * own account 解決に失敗した場合は候補選定以降を行わず、件数 0 の summary を返す
- * (`crawl.ts` の `syncFollowingPhase` が own account 解決失敗時に以降の phase をすべて
- * スキップするのと同じ考え方)。
+ * own account 解決に失敗した場合は候補選定以降を行わない
+ * (`crawl.ts` の `syncFollowingPhase` が own account 解決失敗時に以降の phase をすべてスキップするのと同じ考え方)。
+ * 認証 (`issueCookies`/`createOpenApiClient`) の失敗も同様に `failed: true` の summary を返す:
+ * ここで投げたまま呼び出し元に伝播させると、その `BlockAccountRun` 行自体が作成されず
+ * Discord 通知からもエラートラッキングからも見えなくなる。
  * @param deps - ブロック実行に必要な依存関数一式
- * @param account - 処理対象のアカウント設定
- * @param config - アプリ全体の設定 (グローバルルール解決に使う)
+ * @param account - 処理対象のアカウント設定 (`blockEnabled: true` のもののみ)
  * @param blockRunId - 今回の `BlockRun` ID
  * @returns Discord 通知に使うアカウント単位の集計
  */
 export async function runBlockAccountCycle(
   deps: BlockAccountCycleDependencies,
-  account: BlockerAccountConfig,
-  config: BlockerAppConfig,
+  account: Extract<BlockerAccountConfig, { blockEnabled: true }>,
   blockRunId: string,
 ): Promise<AccountRunSummary> {
   const startedAt = new Date()
-  const zeroSummary: AccountRunSummary = {
+  const failedSummary: AccountRunSummary = {
     username: account.username,
     blockedCount: 0,
     failedCount: 0,
+    failed: true,
   }
 
-  const cookies = await deps.issueCookies({
-    username: account.username,
-    password: account.password,
-    otp_secret: account.otpSecret,
-  })
-  const context = await deps.createOpenApiClient(cookies)
+  async function recordFailedAccountRun(error: unknown): Promise<void> {
+    const accountRun = await deps.startBlockAccountRun(deps.prisma, {
+      blockRunId,
+      username: account.username,
+      startedAt,
+    })
+    await deps.finishBlockAccountRun(deps.prisma, accountRun.id, {
+      finishedAt: new Date(),
+      status: 'failed',
+      candidatesCount: 0,
+      blockedCount: 0,
+      failedCount: 0,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  let context: OpenApiClientContext
+  try {
+    const cookies = await deps.issueCookies({
+      username: account.username,
+      password: account.password,
+      otp_secret: account.otpSecret,
+    })
+    context = await deps.createOpenApiClient(cookies)
+  } catch (error) {
+    logger.error(`Failed to authenticate ${account.username}, skipping block cycle`, error as Error)
+    captureException(error, { username: account.username })
+    await recordFailedAccountRun(error)
+    return failedSummary
+  }
 
   try {
     let blockerId: string
@@ -146,23 +179,10 @@ export async function runBlockAccountCycle(
         error as Error,
       )
       captureException(error, { username: account.username })
-      const accountRun = await deps.startBlockAccountRun(deps.prisma, {
-        blockRunId,
-        username: account.username,
-        startedAt,
-      })
-      await deps.finishBlockAccountRun(deps.prisma, accountRun.id, {
-        finishedAt: new Date(),
-        status: 'failed',
-        candidatesCount: 0,
-        blockedCount: 0,
-        failedCount: 0,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      })
-      return zeroSummary
+      await recordFailedAccountRun(error)
+      return failedSummary
     }
 
-    const rule = resolveBlockRule(account, config)
     const accountRun = await deps.startBlockAccountRun(deps.prisma, {
       blockRunId,
       username: account.username,
@@ -172,7 +192,7 @@ export async function runBlockAccountCycle(
     const candidates = await deps.selectBlockCandidates(
       deps.prisma,
       blockerId,
-      rule,
+      account.blockRule,
       deps.limits.maxPerAccountPerRun,
     )
 
@@ -196,7 +216,7 @@ export async function runBlockAccountCycle(
       errorMessage: null,
     })
 
-    return { username: account.username, blockedCount, failedCount }
+    return { username: account.username, blockedCount, failedCount, failed: false }
   } finally {
     await deps.closeOpenApiClient(context)
   }

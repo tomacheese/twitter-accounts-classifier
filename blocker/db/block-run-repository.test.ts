@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  startBlockRun,
+  startOrResumeBlockRun,
   finishBlockRun,
   touchBlockRunHeartbeat,
   startBlockAccountRun,
@@ -14,6 +14,7 @@ function fakePrisma() {
     blockRun: {
       create: vi.fn().mockResolvedValue({ id: 'run-1' }),
       update: vi.fn().mockResolvedValue({}),
+      findFirst: vi.fn().mockResolvedValue(null),
     },
     blockAccountRun: {
       create: vi.fn().mockResolvedValue({ id: 'account-run-1' }),
@@ -26,17 +27,52 @@ function fakePrisma() {
   }
 }
 
-describe('startBlockRun', () => {
-  it('creates a running BlockRun row with the given startedAt as the heartbeat', async () => {
+describe('startOrResumeBlockRun', () => {
+  it('creates a running BlockRun row when none is currently running', async () => {
     const prisma = fakePrisma()
     const startedAt = new Date('2026-08-04T00:00:00Z')
 
-    const result = await startBlockRun(prisma as never, startedAt)
+    const result = await startOrResumeBlockRun(prisma as never, startedAt, 3_600_000)
 
     expect(result.id).toBe('run-1')
     expect(prisma.blockRun.create).toHaveBeenCalledWith({
       data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
     })
+  })
+
+  it('resumes the existing running BlockRun when its heartbeat is not stale', async () => {
+    const prisma = fakePrisma()
+    const startedAt = new Date('2026-08-04T00:00:00Z')
+    prisma.blockRun.findFirst.mockResolvedValue({
+      id: 'existing-run',
+      lastHeartbeatAt: new Date('2026-08-03T23:59:00Z'),
+    })
+
+    const result = await startOrResumeBlockRun(prisma as never, startedAt, 3_600_000)
+
+    expect(result.id).toBe('existing-run')
+    expect(prisma.blockRun.create).not.toHaveBeenCalled()
+  })
+
+  it('finalizes a stale running BlockRun as failed and creates a new one', async () => {
+    const prisma = fakePrisma()
+    const startedAt = new Date('2026-08-04T00:00:00Z')
+    const staleHeartbeat = new Date('2026-08-03T00:00:00Z')
+    prisma.blockRun.findFirst.mockResolvedValue({
+      id: 'stale-run',
+      lastHeartbeatAt: staleHeartbeat,
+    })
+
+    const result = await startOrResumeBlockRun(prisma as never, startedAt, 3_600_000)
+
+    expect(prisma.blockRun.update).toHaveBeenCalledWith({
+      where: { id: 'stale-run' },
+      data: { finishedAt: staleHeartbeat, status: 'failed' },
+    })
+    expect(prisma.blockRun.create).toHaveBeenCalledWith({
+      data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
+    })
+    expect(result.id).toBe('run-1')
   })
 })
 
