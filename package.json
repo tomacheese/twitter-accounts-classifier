@@ -8,5 +8,10 @@
   },
   "dependencies": {
     "@prisma/client": "^6.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "jiti": "2.7.0"
+    }
   }
 }
