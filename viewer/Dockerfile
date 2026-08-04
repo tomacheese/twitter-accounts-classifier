@@ -1,11 +1,14 @@
 FROM node:24-bookworm-slim AS build
+
 RUN apt-get update && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY crawler/package.json crawler/package.json
 COPY viewer/package.json viewer/package.json
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile
+
 COPY prisma ./prisma
 COPY viewer ./viewer
 RUN pnpm --filter viewer run db:generate
@@ -20,11 +23,14 @@ RUN pnpm --filter viewer run build
 # .next/standalone/node_modules, and the app itself lands nested at
 # .next/standalone/viewer/ rather than at the standalone root.
 FROM node:24-bookworm-slim
+
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+
 COPY --from=build /app/viewer/.next/standalone ./
 COPY --from=build /app/viewer/.next/static ./viewer/.next/static
 COPY --from=build /app/viewer/public ./viewer/public
+
 EXPOSE 3000
 CMD ["node", "viewer/server.js"]
