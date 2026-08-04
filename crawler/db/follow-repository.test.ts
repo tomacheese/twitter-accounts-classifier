@@ -47,7 +47,14 @@ function makePrisma() {
     account: { upsert: accountUpsert },
     $transaction,
   } as unknown as PrismaClient
-  return { prisma, accountUpsert, followCreateMany, followUpdateMany, followDeleteMany }
+  return {
+    prisma,
+    accountUpsert,
+    followCreateMany,
+    followUpdateMany,
+    followDeleteMany,
+    $transaction,
+  }
 }
 
 describe('syncFollowing', () => {
@@ -113,6 +120,17 @@ describe('syncFollowing', () => {
     expect(followDeleteMany).not.toHaveBeenCalled()
     expect(followCreateMany).not.toHaveBeenCalled()
   })
+
+  it('extends the transaction timeout beyond the Prisma default', async () => {
+    const { prisma, $transaction } = makePrisma()
+
+    await syncFollowing(prisma, 'me', makeResult(['a'], true))
+
+    expect($transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 15_000,
+      timeout: 15_000,
+    })
+  })
 })
 
 describe('syncFollowers', () => {
@@ -157,5 +175,16 @@ describe('syncFollowers', () => {
     await syncFollowers(prisma, 'me', makeResult([], true))
 
     expect(followDeleteMany).not.toHaveBeenCalled()
+  })
+
+  it('extends the transaction timeout beyond the Prisma default', async () => {
+    const { prisma, $transaction } = makePrisma()
+
+    await syncFollowers(prisma, 'me', makeResult(['a'], true))
+
+    expect($transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 15_000,
+      timeout: 15_000,
+    })
   })
 })

@@ -33,28 +33,33 @@ export async function syncBlocks(
   await upsertBlockAuthors(prisma, result)
   const now = new Date()
 
-  await prisma.$transaction(async (tx) => {
-    if (result.ids.length > 0) {
-      await tx.block.createMany({
-        data: result.ids.map((blockedId) => ({
-          blockerId,
-          blockedId,
-          firstSeenAt: now,
-          lastSeenAt: now,
-        })),
-        skipDuplicates: true,
-      })
-      await tx.block.updateMany({
-        where: { blockerId, blockedId: { in: result.ids } },
-        data: { lastSeenAt: now },
-      })
-    }
+  await prisma.$transaction(
+    async (tx) => {
+      if (result.ids.length > 0) {
+        await tx.block.createMany({
+          data: result.ids.map((blockedId) => ({
+            blockerId,
+            blockedId,
+            firstSeenAt: now,
+            lastSeenAt: now,
+          })),
+          skipDuplicates: true,
+        })
+        await tx.block.updateMany({
+          where: { blockerId, blockedId: { in: result.ids } },
+          data: { lastSeenAt: now },
+        })
+      }
 
-    // `follow-repository.ts` の `syncFollowing` と同じガードで、空レスポンスによる全件削除事故を防ぐ。
-    if (result.reachedEnd && result.ids.length > 0) {
-      await tx.block.deleteMany({
-        where: { blockerId, blockedId: { notIn: result.ids } },
-      })
-    }
-  })
+      // `follow-repository.ts` の `syncFollowing` と同じガードで、空レスポンスによる全件削除事故を防ぐ。
+      if (result.reachedEnd && result.ids.length > 0) {
+        await tx.block.deleteMany({
+          where: { blockerId, blockedId: { notIn: result.ids } },
+        })
+      }
+    },
+    // `./labeling-follow-sample-repository` の同じコメントを参照。
+    // ロック保持時間も同様に伸びるが、blocker 側の書き込み間隔で吸収できる範囲に収まる。
+    { maxWait: 15_000, timeout: 15_000 },
+  )
 }
