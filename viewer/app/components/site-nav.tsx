@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: '/labels', label: 'Labels' },
   { href: '/weekly-runs', label: 'Weekly Runs' },
   { href: '/crawl-runs', label: 'Crawl Runs' },
+  { href: '/block-runs', label: 'Block Runs' },
 ] as const
 
 /**
