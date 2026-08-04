@@ -17,5 +17,6 @@
     "sourceMap": true,
     "newLine": "lf"
   },
-  "include": ["."]
+  "include": ["."],
+  "exclude": ["vitest.config.mts"]
 }
