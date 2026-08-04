@@ -42,9 +42,17 @@ Viewer には認証機構がなく、フォロー・フォロワー・ブロッ�
 | `CRAWL_STALE_THRESHOLD_MULTIPLIER` | - | `running` のまま放置された CrawlRun を検出するしきい値の倍率 (クロール間隔の何倍か)。デフォルト 3 |
 | `GLITCHTIP_DSN` | - | GlitchTip (エラートラッキング) の DSN。未設定なら送信しない |
 | `CRAWL_WARNING_THRESHOLD` | - | 1 アカウントの crawl 1 回あたり、GlitchTip へ集約通知する warning 件数の閾値。デフォルト 5 |
+| `BLOCK_INTERVAL_SECONDS` | - | ブロック実行の間隔 (秒)。デフォルト 21600 |
+| `BLOCK_STALE_THRESHOLD_MULTIPLIER` | - | `running` のまま放置された BlockRun を検出するしきい値の倍率 (ブロック実行間隔の何倍か)。デフォルト 3 |
+| `BLOCK_ACTION_DELAY_MS` | - | 1 件ブロックするごとの待機時間 (ミリ秒)。デフォルト 2000 |
+| `BLOCK_MAX_PER_ACCOUNT_PER_RUN` | - | 1 アカウント・1 サイクルあたりのブロック上限件数。デフォルト 50 |
 
 ## データ
 
 - `data/config.json`: Twitter アカウントの認証情報 (git 管理外)
+  - `block_enabled` (アカウントごと、省略時 `false`): このアカウントでブロック処理を実行するかどうか
+  - `block_rule` (アカウントごと、任意): このアカウントに適用するブロックルール。`target_labels` はラベルごとの確信度閾値 (`label`・`confidence_threshold`) のリストで、対象ラベルは複数指定できる。省略時はトップレベルの `block` を使う
+  - `block` (トップレベル、任意): 全アカウント共通のデフォルトブロックルール
+  - `discord_webhook_url` (トップレベル、任意): ブロック結果を通知する Discord Webhook URL
 - `data/postgres/`: Postgres の実データ (bind mount、git 管理外)
 - `logs/`: クロールログ (実アカウント名を含むため git 管理外)

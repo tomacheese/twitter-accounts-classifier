@@ -4,15 +4,15 @@ import type {
   UserApiUtils,
   UserApiUtilsData,
 } from 'twitter-openapi-typescript'
+import { convertTimelineResponse, toRawUserResult } from './timeline'
+import type { AccountProfileInput } from '../db/account-repository'
+import type { TweetInput } from '../db/tweet-repository'
 import {
   toAccountProfileInput,
   toTweetInput,
   type RawTweetResult,
   type RawUserResult,
-} from './mappers'
-import { convertTimelineResponse, toRawUserResult } from './timeline'
-import type { AccountProfileInput } from '../db/account-repository'
-import type { TweetInput } from '../db/tweet-repository'
+} from 'twitter-client'
 
 export interface UserApiLike {
   getUserByRestId(param: { userId: string }): Promise<{ data: RawUserResult }>

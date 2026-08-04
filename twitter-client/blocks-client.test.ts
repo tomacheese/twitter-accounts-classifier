@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createBlocksClient } from './blocks-client'
+import { createBlock, createBlocksClient } from './blocks-client'
 
 const cookies = { ct0: 'csrf-token', authToken: 'auth-token-value' }
 
@@ -111,5 +111,29 @@ describe('createBlocksClient', () => {
     const client = createBlocksClient(cookies, fetchImpl as unknown as typeof fetch)
 
     await expect(client.getBlocksPage(undefined, 200)).rejects.toThrow(/403.*error body/)
+  })
+})
+
+describe('createBlock', () => {
+  it('sends user_id as form-encoded body and resolves on success', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+
+    await createBlock(cookies, fetchImpl as unknown as typeof fetch, '999')
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://x.com/i/api/1.1/blocks/create.json',
+      expect.objectContaining({
+        method: 'POST',
+        body: 'user_id=999',
+      }),
+    )
+  })
+
+  it('throws a BlocksResponseError carrying the status on non-2xx response', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('forbidden', { status: 403 }))
+
+    await expect(
+      createBlock(cookies, fetchImpl as unknown as typeof fetch, '999'),
+    ).rejects.toMatchObject({ name: 'ResponseError', response: { status: 403 } })
   })
 })

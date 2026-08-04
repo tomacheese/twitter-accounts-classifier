@@ -7,7 +7,7 @@ import {
   type FollowListApiLike,
   type FollowListPage,
 } from './follows'
-import type { RawUserResult } from './mappers'
+import type { RawUserResult } from 'twitter-client'
 
 function rawUser(restId: string): RawUserResult {
   return {

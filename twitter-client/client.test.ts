@@ -60,6 +60,11 @@ vi.mock('./trends-client', () => ({
   createTrendsClient: vi.fn().mockReturnValue({ marker: 'scraper' }),
 }))
 
+vi.mock('./blocks-client', () => ({
+  createBlocksClient: vi.fn().mockReturnValue({ getBlocksPage: vi.fn() }),
+  createBlock: vi.fn().mockResolvedValue(undefined),
+}))
+
 describe('createOpenApiClient', () => {
   it('assigns a response-capturing fetch to TwitterOpenApi.fetchApi', async () => {
     const { createOpenApiClient } = await import('./client')
@@ -73,6 +78,17 @@ describe('createOpenApiClient', () => {
     expect(getLastResponseMatching('OpenApiWiringTest')).toMatchObject({
       body: '{"fake":true}',
     })
+  })
+})
+
+describe('createOpenApiClient blocksClient/createBlock wiring', () => {
+  it('exposes a raw blocks client and a bound createBlock function', async () => {
+    const { createOpenApiClient } = await import('./client')
+
+    const context = await createOpenApiClient({ ct0: 'c0', authToken: 'a0' })
+
+    expect(typeof context.blocksClient.getBlocksPage).toBe('function')
+    expect(typeof context.createBlock).toBe('function')
   })
 })
 

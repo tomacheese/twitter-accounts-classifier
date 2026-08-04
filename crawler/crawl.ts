@@ -8,7 +8,6 @@ import {
   getCrawlStaleThresholdMultiplier,
   getCrawlWarningThreshold,
 } from './config/env'
-import { withTwitterRetry } from './twitter/retry'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
@@ -22,27 +21,30 @@ import {
   buildFollowGraphLabelIndex,
   type FollowGraphLabelIndex,
 } from './labels/follow-graph-label-index'
-import { createCookieIssuerClient, type IssuedCookies } from './auth/cookie-issuer-client'
-import { getLastResponseMatching } from './twitter/response-capture'
 import {
+  createCookieIssuerClient,
   formatResponseErrorDiagnostics,
+  getLastResponseMatching,
   getResponseErrorDiagnostics,
   isResponseError,
   toSafeResponseErrorForLog,
-} from './twitter/response-diagnostics'
-import {
+  withTwitterRetry,
+  mergeTweetAdFlags,
+  toAccountProfileInput,
   createOpenApiClient as createRealOpenApiClient,
   closeOpenApiClient as closeRealOpenApiClient,
   createTrendsScraper as createRealTrendsScraper,
   closeTrendsScraper as closeRealTrendsScraper,
-} from './twitter/client'
+  type IssuedCookies,
+  type TrendsScraperLike,
+  type BlocksListRawApiLike,
+} from 'twitter-client'
 import {
   fetchRecommendedTimeline,
   fetchFollowingTimeline,
   fetchTrendingTimeline,
   createTweetApiLike,
   type TweetApiLike,
-  type TrendsScraperLike,
 } from './twitter/timeline'
 import {
   sortByEngagement,
@@ -68,7 +70,12 @@ import {
   syncFollowing as syncFollowingEdges,
 } from './db/follow-repository'
 import { replaceLabelingFollowSample as replaceLabelingFollowSampleRecord } from './db/labeling-follow-sample-repository'
-import { fetchBlocks, type BlockListApiLike, type BlockListResult } from './twitter/blocks'
+import {
+  fetchBlocks,
+  createBlockListApiLike,
+  type BlockListApiLike,
+  type BlockListResult,
+} from './twitter/blocks'
 import { syncBlocks as syncBlocksEdges } from './db/block-repository'
 import {
   clearCrawlAccountCheckpoints as clearCrawlAccountCheckpointsRecord,
@@ -86,7 +93,6 @@ import {
   type CrawlWarning,
   type CrawlWarningType,
 } from './db/crawl-run-repository'
-import { mergeTweetAdFlags, toAccountProfileInput } from './twitter/mappers'
 
 const logger = Logger.configure('crawl')
 
@@ -1224,12 +1230,12 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
 
 /**
  * @param realClient - 認証済みの実際の `TwitterOpenApiClient`
- * @param blocksClient - `OpenApiClientContext` のラップ済み `BlockListApiLike` blocks クライアント
+ * @param rawBlocksClient - `OpenApiClientContext` が返す raw な blocks クライアント
  * @returns {@link runCrawlCycle} で使用できる `CrawlOpenApiClient`
  */
 function toCrawlOpenApiClient(
   realClient: Awaited<ReturnType<typeof createRealOpenApiClient>>['client'],
-  blocksClient: BlockListApiLike,
+  rawBlocksClient: BlocksListRawApiLike,
 ): CrawlOpenApiClient {
   return {
     getTweetApi: () => ({
@@ -1238,7 +1244,7 @@ function toCrawlOpenApiClient(
     }),
     getUserApi: () => createUserApiLike(realClient.getUserApi(), realClient.getTweetApi()),
     getUserListApi: () => createFollowListApiLike(realClient.getUserListApi()),
-    getBlocksApi: () => blocksClient,
+    getBlocksApi: () => createBlockListApiLike(rawBlocksClient),
   }
 }
 

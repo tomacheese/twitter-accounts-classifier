@@ -1,5 +1,5 @@
 import { TwitterOpenApi } from 'twitter-openapi-typescript'
-import type { IssuedCookies } from '../auth/cookie-issuer-client'
+import type { IssuedCookies } from './cookie-issuer-client'
 import type { RawUserResult } from './mappers'
 
 /**
@@ -221,5 +221,43 @@ export function createBlocksClient(
       const payload = (await response.json()) as BlockedAccountsAllResponse
       return parseBlocksResponse(payload)
     },
+  }
+}
+
+const BLOCK_CREATE_ENDPOINT_URL = 'https://x.com/i/api/1.1/blocks/create.json'
+
+/**
+ * `twitter-openapi-typescript` にはブロック作成に対応するメソッドが存在しないため、
+ * `createBlocksClient` と同じ要領でレガシー REST エンドポイントを自前で呼び出す。
+ * @param cookies - アカウントの ct0/auth_token クッキー
+ * @param fetchImpl - リクエスト送信に使う fetch 実装
+ * @param targetUserId - ブロック対象アカウントの rest_id
+ * @throws レスポンスが非 2xx の場合、`isRetryableTwitterError` によるダックタイピングでリトライ可否を判定できるよう {@link BlocksResponseError} を投げる
+ */
+export async function createBlock(
+  cookies: IssuedCookies,
+  fetchImpl: typeof fetch,
+  targetUserId: string,
+): Promise<void> {
+  const response = await fetchImpl(BLOCK_CREATE_ENDPOINT_URL, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${TwitterOpenApi.bearer}`,
+      'x-csrf-token': cookies.ct0,
+      cookie: `ct0=${cookies.ct0}; auth_token=${cookies.authToken}`,
+      'x-twitter-auth-type': 'OAuth2Session',
+      'x-twitter-active-user': 'yes',
+      'x-twitter-client-language': 'en',
+      referer: 'https://x.com/',
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ user_id: targetUserId }).toString(),
+  })
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new BlocksResponseError(
+      `Failed to create block for user ${targetUserId}: HTTP ${response.status}${body ? ` - ${body}` : ''}`,
+      response.status,
+    )
   }
 }

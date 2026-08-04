@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fetchAccountProfile, fetchRecentTweets, type UserApiLike } from './profile'
-import type { RawTweetResult, RawUserResult } from './mappers'
+import type { RawTweetResult, RawUserResult } from 'twitter-client'
 
 const rawUser: RawUserResult = {
   restId: 'u1',

@@ -17,6 +17,11 @@ generator viewerClient {
   output   = "../viewer/generated/prisma"
 }
 
+generator blockerClient {
+  provider = "prisma-client-js"
+  output   = "../blocker/generated/prisma"
+}
+
 model Account {
   id                       String         @id
   screenName               String
@@ -45,6 +50,8 @@ model Account {
   labelingFollowSampleAsFollowee LabelingFollowSample[] @relation("LabelingFollowSampleFollowee")
   blockerEdges             Block[]        @relation("BlockerEdges")
   blockedEdges             Block[]        @relation("BlockedEdges")
+  blockActionsAsBlocker    BlockAction[]  @relation("BlockActionBlocker")
+  blockActionsAsBlocked    BlockAction[]  @relation("BlockActionBlocked")
 
   // この3カラムは絞り込みなしで並び替えに使われうるため、
   // インデックスがないと行数増加に伴い全件ソートが発生する。
@@ -93,6 +100,7 @@ model LabelDefinition {
   createdAt           DateTime             @default(now())
   accountLabels       AccountLabel[]
   accountLabelsLatest AccountLabelLatest[]
+  blockActions        BlockAction[]
 }
 
 model AccountLabel {
@@ -261,4 +269,55 @@ model CrawlAccountLabelRun {
   createdAt         DateTime @default(now())
 
   @@unique([crawlRunId, username, accountId, labelDefinitionId, method, ruleVersion])
+}
+
+model BlockRun {
+  id              String            @id @default(cuid())
+  startedAt       DateTime
+  lastHeartbeatAt DateTime
+  finishedAt      DateTime?
+  status          String
+  accountRuns     BlockAccountRun[]
+
+  @@index([startedAt])
+  @@index([status, startedAt(sort: Desc), id(sort: Desc)])
+}
+
+model BlockAccountRun {
+  id              String        @id @default(cuid())
+  blockRunId      String
+  blockRun        BlockRun      @relation(fields: [blockRunId], references: [id])
+  username        String
+  startedAt       DateTime
+  finishedAt      DateTime?
+  status          String
+  candidatesCount Int           @default(0)
+  blockedCount    Int           @default(0)
+  failedCount     Int           @default(0)
+  errorMessage    String?
+  actions         BlockAction[]
+
+  @@index([blockRunId])
+  @@index([blockRunId, username, startedAt(sort: Desc), id(sort: Desc)])
+}
+
+model BlockAction {
+  id                String          @id @default(cuid())
+  blockAccountRunId String
+  blockAccountRun   BlockAccountRun @relation(fields: [blockAccountRunId], references: [id])
+  blockerId         String
+  blocker           Account         @relation("BlockActionBlocker", fields: [blockerId], references: [id])
+  blockedId         String
+  blocked           Account         @relation("BlockActionBlocked", fields: [blockedId], references: [id])
+  labelDefinitionId String
+  labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
+  confidence        Float
+  result            String
+  errorMessage      String?
+  createdAt         DateTime        @default(now())
+
+  // selectBlockCandidates が「過去に result = 'success' の BlockAction が存在するか」を
+  // (blockerId, blockedId) 単位で調べるためのインデックス。
+  @@index([blockerId, blockedId, result])
+  @@index([blockAccountRunId])
 }

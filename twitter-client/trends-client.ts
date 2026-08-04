@@ -1,5 +1,5 @@
-import type { IssuedCookies } from '../auth/cookie-issuer-client'
-import type { TrendsScraperLike } from './timeline'
+import type { IssuedCookies } from './cookie-issuer-client'
+import type { TrendsScraperLike } from './api-types'
 
 // `@the-convocation/twitter-scraper` の getTrends() は同じ bearer token・エンドポイントを叩くが、
 // その実装では bearer token を override として渡すと guest token を付与しないため、

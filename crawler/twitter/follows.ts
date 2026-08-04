@@ -5,7 +5,7 @@ import type {
   UserApiUtilsData,
   UserListApiUtils,
 } from 'twitter-openapi-typescript'
-import { toAccountProfileInput, type RawUserResult } from './mappers'
+import { toAccountProfileInput, type RawUserResult } from 'twitter-client'
 import { toRawUserResult } from './timeline'
 import type { AccountProfileInput } from '../db/account-repository'
 

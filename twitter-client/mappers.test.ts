@@ -5,8 +5,8 @@ import {
   mergeTweetAdFlags,
   type RawTweetResult,
   type RawUserResult,
+  type NormalizedTweet,
 } from './mappers'
-import type { TweetInput } from '../db/tweet-repository'
 
 const rawUser: RawUserResult = {
   restId: 'u1',
@@ -254,7 +254,7 @@ describe('toTweetInput quoted tweet handling', () => {
   })
 })
 
-function tweetInput(overrides: Partial<TweetInput> & { id: string }): TweetInput {
+function tweetInput(overrides: Partial<NormalizedTweet> & { id: string }): NormalizedTweet {
   return {
     accountId: 'u1',
     fullText: 'hello',

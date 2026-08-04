@@ -6,6 +6,7 @@ coverage/
 viewer/next-env.d.ts
 viewer/generated/
 crawler/generated/
+blocker/generated/
 .env
 .env.*
 !.env.example

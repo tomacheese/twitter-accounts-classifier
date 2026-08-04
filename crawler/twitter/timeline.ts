@@ -4,14 +4,15 @@ import type {
   TweetApiUtilsData,
   TwitterApiUtilsResponse,
 } from 'twitter-openapi-typescript'
+import type { AccountProfileInput } from '../db/account-repository'
+import type { TweetInput } from '../db/tweet-repository'
 import {
   toAccountProfileInput,
   toTweetInput,
   type RawTweetResult,
   type RawUserResult,
-} from './mappers'
-import type { AccountProfileInput } from '../db/account-repository'
-import type { TweetInput } from '../db/tweet-repository'
+  type TrendsScraperLike,
+} from 'twitter-client'
 
 /**
  * `rawCount` を `data.data` とは別に持つのは、
@@ -31,10 +32,6 @@ export interface TweetApiLike {
     count?: number
     cursor?: string
   }): Promise<TimelinePage>
-}
-
-export interface TrendsScraperLike {
-  getTrends(): Promise<string[]>
 }
 
 export interface TimelineResult {
