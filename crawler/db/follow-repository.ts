@@ -36,32 +36,36 @@ export async function syncFollowing(
   await upsertFollowAuthors(prisma, result)
   const now = new Date()
 
-  await prisma.$transaction(async (tx) => {
-    if (result.ids.length > 0) {
-      await tx.follow.createMany({
-        data: result.ids.map((followeeId) => ({
-          followerId,
-          followeeId,
-          firstSeenAt: now,
-          lastSeenAt: now,
-        })),
-        skipDuplicates: true,
-      })
-      await tx.follow.updateMany({
-        where: { followerId, followeeId: { in: result.ids } },
-        data: { lastSeenAt: now },
-      })
-    }
+  await prisma.$transaction(
+    async (tx) => {
+      if (result.ids.length > 0) {
+        await tx.follow.createMany({
+          data: result.ids.map((followeeId) => ({
+            followerId,
+            followeeId,
+            firstSeenAt: now,
+            lastSeenAt: now,
+          })),
+          skipDuplicates: true,
+        })
+        await tx.follow.updateMany({
+          where: { followerId, followeeId: { in: result.ids } },
+          data: { lastSeenAt: now },
+        })
+      }
 
-    // `reachedEnd` だけでは削除しない: `result.ids` が空だと `notIn: []` が全件一致になり、
-    // 一時的な空応答 (レート制限や認証エラー) だけで記録済みの edge を全消去しかねないため、
-    // 確認済みの id が 1 件以上ある場合のみ削除する。
-    if (result.reachedEnd && result.ids.length > 0) {
-      await tx.follow.deleteMany({
-        where: { followerId, followeeId: { notIn: result.ids } },
-      })
-    }
-  })
+      // `reachedEnd` だけでは削除しない: `result.ids` が空だと `notIn: []` が全件一致になり、
+      // 一時的な空応答 (レート制限や認証エラー) だけで記録済みの edge を全消去しかねないため、
+      // 確認済みの id が 1 件以上ある場合のみ削除する。
+      if (result.reachedEnd && result.ids.length > 0) {
+        await tx.follow.deleteMany({
+          where: { followerId, followeeId: { notIn: result.ids } },
+        })
+      }
+    },
+    // `./labeling-follow-sample-repository` の同じコメントを参照。
+    { maxWait: 15_000, timeout: 15_000 },
+  )
 }
 
 /**
@@ -78,28 +82,32 @@ export async function syncFollowers(
   await upsertFollowAuthors(prisma, result)
   const now = new Date()
 
-  await prisma.$transaction(async (tx) => {
-    if (result.ids.length > 0) {
-      await tx.follow.createMany({
-        data: result.ids.map((followerId) => ({
-          followerId,
-          followeeId,
-          firstSeenAt: now,
-          lastSeenAt: now,
-        })),
-        skipDuplicates: true,
-      })
-      await tx.follow.updateMany({
-        where: { followeeId, followerId: { in: result.ids } },
-        data: { lastSeenAt: now },
-      })
-    }
+  await prisma.$transaction(
+    async (tx) => {
+      if (result.ids.length > 0) {
+        await tx.follow.createMany({
+          data: result.ids.map((followerId) => ({
+            followerId,
+            followeeId,
+            firstSeenAt: now,
+            lastSeenAt: now,
+          })),
+          skipDuplicates: true,
+        })
+        await tx.follow.updateMany({
+          where: { followeeId, followerId: { in: result.ids } },
+          data: { lastSeenAt: now },
+        })
+      }
 
-    // `syncFollowing` 側の同じコメントを参照。
-    if (result.reachedEnd && result.ids.length > 0) {
-      await tx.follow.deleteMany({
-        where: { followeeId, followerId: { notIn: result.ids } },
-      })
-    }
-  })
+      // `syncFollowing` 側の同じコメントを参照。
+      if (result.reachedEnd && result.ids.length > 0) {
+        await tx.follow.deleteMany({
+          where: { followeeId, followerId: { notIn: result.ids } },
+        })
+      }
+    },
+    // `./labeling-follow-sample-repository` の同じコメントを参照。
+    { maxWait: 15_000, timeout: 15_000 },
+  )
 }

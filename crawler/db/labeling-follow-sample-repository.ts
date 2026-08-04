@@ -52,11 +52,16 @@ export async function replaceLabelingFollowSample(
   // 1件以上取得できた場合のみ削除・挿入をまとめて行う。
   if (followeeIds.length === 0) return
 
-  await prisma.$transaction(async (tx) => {
-    await tx.labelingFollowSample.deleteMany({ where: { accountId } })
-    await tx.labelingFollowSample.createMany({
-      data: followeeIds.map((followeeId) => ({ accountId, followeeId })),
-      skipDuplicates: true,
-    })
-  })
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.labelingFollowSample.deleteMany({ where: { accountId } })
+      await tx.labelingFollowSample.createMany({
+        data: followeeIds.map((followeeId) => ({ accountId, followeeId })),
+        skipDuplicates: true,
+      })
+    },
+    // Postgres データ用ボリュームは HDD 上にあり (compose.yaml 参照)、チェックポイントの書き込みが数秒滞留することがある。
+    // 既定の 5 秒タイムアウトでは短すぎるため、吸収できる値に伸ばす。
+    { maxWait: 15_000, timeout: 15_000 },
+  )
 }

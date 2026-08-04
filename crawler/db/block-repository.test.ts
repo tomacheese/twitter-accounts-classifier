@@ -47,7 +47,7 @@ function makePrisma() {
     account: { upsert: accountUpsert },
     $transaction,
   } as unknown as PrismaClient
-  return { prisma, accountUpsert, blockCreateMany, blockUpdateMany, blockDeleteMany }
+  return { prisma, accountUpsert, blockCreateMany, blockUpdateMany, blockDeleteMany, $transaction }
 }
 
 describe('syncBlocks', () => {
@@ -112,5 +112,16 @@ describe('syncBlocks', () => {
 
     expect(blockDeleteMany).not.toHaveBeenCalled()
     expect(blockCreateMany).not.toHaveBeenCalled()
+  })
+
+  it('extends the transaction timeout beyond the Prisma default', async () => {
+    const { prisma, $transaction } = makePrisma()
+
+    await syncBlocks(prisma, 'me', makeResult(['a'], true))
+
+    expect($transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 15_000,
+      timeout: 15_000,
+    })
   })
 })

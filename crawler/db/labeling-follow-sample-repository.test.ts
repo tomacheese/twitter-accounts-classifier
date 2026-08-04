@@ -41,7 +41,7 @@ function makePrisma() {
     account: { upsert: accountUpsert },
     $transaction,
   } as unknown as PrismaClient
-  return { prisma, accountUpsert, deleteMany, createMany }
+  return { prisma, accountUpsert, deleteMany, createMany, $transaction }
 }
 
 describe('replaceLabelingFollowSample', () => {
@@ -65,6 +65,17 @@ describe('replaceLabelingFollowSample', () => {
         { accountId: 'alice', followeeId: 'carol' },
       ],
       skipDuplicates: true,
+    })
+  })
+
+  it('チェックポイント滞留を吸収できるよう、既定より長いトランザクションタイムアウトを指定する', async () => {
+    const { prisma, $transaction } = makePrisma()
+
+    await replaceLabelingFollowSample(prisma, 'alice', makeResult(['bob']))
+
+    expect($transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 15_000,
+      timeout: 15_000,
     })
   })
 
