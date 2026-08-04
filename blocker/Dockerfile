@@ -25,6 +25,7 @@ COPY --from=build /app/blocker/node_modules ./blocker/node_modules
 COPY --from=build /app/blocker/dist ./blocker/dist
 COPY --from=build /app/twitter-client/dist ./twitter-client/dist
 COPY --from=build /app/twitter-client/package.json ./twitter-client/package.json
+COPY --from=build /app/twitter-client/node_modules ./twitter-client/node_modules
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/blocker ./blocker
 COPY --from=build /app/package.json ./package.json
