@@ -38,6 +38,7 @@ export interface RecordBlockActionParams {
 }
 
 /**
+ * `BlockRun` を完了 (または失敗) 状態に確定する。
  * @param prisma - Prisma クライアント
  * @param id - 対象の `BlockRun` ID
  * @param finishedAt - サイクルが完了 (または失敗) した時刻
@@ -107,6 +108,7 @@ export async function startOrResumeBlockRun(
 }
 
 /**
+ * 1 アカウント分のブロックサイクルの開始を示す `BlockAccountRun` を作成する。
  * @param prisma - Prisma クライアント
  * @param params - 対象の `BlockRun` ID・アカウント名・開始時刻
  * @returns 作成した `BlockAccountRun` の ID
@@ -127,6 +129,7 @@ export async function startBlockAccountRun(
 }
 
 /**
+ * `BlockAccountRun` を完了状態にし、集計値を確定する。
  * @param prisma - Prisma クライアント
  * @param id - 対象の `BlockAccountRun` ID
  * @param params - 完了時に確定する集計値と status
@@ -140,6 +143,7 @@ export async function finishBlockAccountRun(
 }
 
 /**
+ * 1 回のブロック試行の結果を `BlockAction` として記録する。
  * @param prisma - Prisma クライアント
  * @param params - 1 回のブロック試行の記録
  */
