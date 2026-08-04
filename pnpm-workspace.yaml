@@ -3,3 +3,6 @@ packages:
   - "viewer"
   - "twitter-client"
   - "blocker"
+
+overrides:
+  jiti: 2.7.0
