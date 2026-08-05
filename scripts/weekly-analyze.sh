@@ -250,7 +250,14 @@ printf '%s\n' "$FINAL_RUN_JSON" > "$DIAGNOSTICS_DIR/run-metadata.json"
 
 if [ "$FINAL_STATUS" = "success" ]; then
   echo "[weekly-analyze] run succeeded; removing worktree at $WORKTREE_DIR"
-  git worktree remove --force "$WORKTREE_DIR" 2>/dev/null || rm -rf "$WORKTREE_DIR"
+  # `git worktree remove` が失敗して rm -rf にフォールバックした場合、Git 側の
+  # worktree 管理情報がまだ残り、対応するブランチは「別 worktree で checkout 中」
+  # とみなされて `git branch -D` が失敗する。`prune --expire now` で管理情報を
+  # 即座に消してからブランチを削除する必要がある。
+  if ! git worktree remove --force "$WORKTREE_DIR" 2>/dev/null; then
+    rm -rf "$WORKTREE_DIR"
+    git worktree prune --expire now
+  fi
   git branch -D "$WORKTREE_BRANCH" 2>/dev/null || true
 else
   echo "[weekly-analyze] run ended with status $FINAL_STATUS; keeping worktree at $WORKTREE_DIR for inspection"
@@ -269,7 +276,14 @@ for OLD_WORKTREE in "$(pwd)"/.worktrees/weekly-crawl-review-*/; do
   # 明示的に削除しないと実行のたびにブランチだけが蓄積するため。
   OLD_BRANCH="$(basename "$OLD_WORKTREE")"
   echo "[weekly-analyze] removing older failed worktree at $OLD_WORKTREE"
-  git worktree remove --force "$OLD_WORKTREE" 2>/dev/null || rm -rf "$OLD_WORKTREE"
+  # `git worktree remove` が失敗して rm -rf にフォールバックした場合、Git 側の
+  # worktree 管理情報がまだ残り、対応するブランチは「別 worktree で checkout 中」
+  # とみなされて `git branch -D` が失敗する。`prune --expire now` で管理情報を
+  # 即座に消してからブランチを削除する必要がある。
+  if ! git worktree remove --force "$OLD_WORKTREE" 2>/dev/null; then
+    rm -rf "$OLD_WORKTREE"
+    git worktree prune --expire now
+  fi
   case "$OLD_BRANCH" in
     weekly-crawl-review-*)
       git branch -D "$OLD_BRANCH" 2>/dev/null || true
