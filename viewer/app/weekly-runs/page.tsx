@@ -2,6 +2,7 @@ import { formatDateTime } from '@/lib/format-date'
 import { getPrismaClient } from '@/lib/prisma'
 import { getAllWeeklyRuns } from '@/lib/queries/weekly-runs'
 import { ErrorFallback } from '../components/error-fallback'
+import { StatusBadge } from '../components/status-badge'
 
 // このページは常に最新データを読むため、
 // 静的プリレンダリングの対象から外している。指定しないと、
@@ -39,6 +40,10 @@ export default async function WeeklyRunsPage(): Promise<React.ReactElement> {
                 <th className="p-3">Commit SHA</th>
                 <th className="p-3">Sampled accounts</th>
                 <th className="p-3">Findings</th>
+                <th className="p-3">Status</th>
+                <th className="p-3">Phase</th>
+                <th className="p-3">Error</th>
+                <th className="p-3">Pull Request</th>
               </tr>
             </thead>
             <tbody>
@@ -59,6 +64,25 @@ export default async function WeeklyRunsPage(): Promise<React.ReactElement> {
                         {run.findings ?? 'No findings recorded.'}
                       </p>
                     </details>
+                  </td>
+                  <td className="p-3">
+                    <StatusBadge status={run.status} />
+                  </td>
+                  <td className="p-3">{run.currentPhase ?? '—'}</td>
+                  <td className="p-3 text-red-600 dark:text-red-400">{run.errorMessage ?? '—'}</td>
+                  <td className="p-3">
+                    {run.pullRequestUrl && run.pullRequestNumber ? (
+                      <a
+                        href={run.pullRequestUrl}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        #{run.pullRequestNumber}
+                      </a>
+                    ) : (
+                      '—'
+                    )}
                   </td>
                 </tr>
               ))}

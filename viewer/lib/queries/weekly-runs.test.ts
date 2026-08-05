@@ -24,4 +24,33 @@ describe('getAllWeeklyRuns', () => {
     expect(result).toHaveLength(1)
     expect(findMany).toHaveBeenCalledWith({ orderBy: { startedAt: 'desc' } })
   })
+
+  it('includes status, currentPhase, errorMessage and pull request fields in the summary', async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: 'run1',
+        startedAt: new Date('2026-08-04T00:00:00Z'),
+        finishedAt: null,
+        commitSha: null,
+        sampledAccountIds: [],
+        findings: null,
+        status: 'running',
+        currentPhase: 'sampling',
+        errorMessage: null,
+        pullRequestNumber: null,
+        pullRequestUrl: null,
+      },
+    ])
+    const prisma = { weeklyAnalysisRun: { findMany } } as unknown as PrismaClient
+
+    const runs = await getAllWeeklyRuns(prisma)
+
+    expect(runs[0]).toMatchObject({
+      status: 'running',
+      currentPhase: 'sampling',
+      errorMessage: null,
+      pullRequestNumber: null,
+      pullRequestUrl: null,
+    })
+  })
 })

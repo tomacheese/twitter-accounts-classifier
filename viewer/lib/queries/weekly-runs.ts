@@ -10,6 +10,11 @@ export interface WeeklyRunSummary {
   commitSha: string | null
   sampledAccountCount: number
   findings: string | null
+  status: string
+  currentPhase: string | null
+  errorMessage: string | null
+  pullRequestNumber: number | null
+  pullRequestUrl: string | null
 }
 
 function toSummary(run: WeeklyAnalysisRun): WeeklyRunSummary {
@@ -20,6 +25,11 @@ function toSummary(run: WeeklyAnalysisRun): WeeklyRunSummary {
     commitSha: run.commitSha,
     sampledAccountCount: Array.isArray(run.sampledAccountIds) ? run.sampledAccountIds.length : 0,
     findings: run.findings,
+    status: run.status,
+    currentPhase: run.currentPhase,
+    errorMessage: run.errorMessage,
+    pullRequestNumber: run.pullRequestNumber,
+    pullRequestUrl: run.pullRequestUrl,
   }
 }
 
