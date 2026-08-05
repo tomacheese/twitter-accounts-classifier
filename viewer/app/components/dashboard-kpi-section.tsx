@@ -2,24 +2,8 @@ import { formatDateTime } from '@/lib/format-date'
 import { getPrismaClient } from '@/lib/prisma'
 import { getDashboardKpis } from '@/lib/queries/dashboard'
 import { DashboardSectionError } from './dashboard-section-error'
+import { LoadingStatus, Skeleton } from './skeleton'
 import { StatTile } from './stat-tile'
-
-function LoadingStatus({ label }: { label: string }): React.ReactElement {
-  return (
-    <div aria-busy="true" aria-live="polite" role="status">
-      <span className="sr-only">Loading {label}</span>
-    </div>
-  )
-}
-
-function Skeleton({ className }: { className: string }): React.ReactElement {
-  return (
-    <div
-      aria-hidden="true"
-      className={`animate-pulse rounded bg-gray-200 motion-reduce:animate-none dark:bg-gray-700 ${className}`}
-    />
-  )
-}
 
 export function DashboardSummarySkeleton(): React.ReactElement {
   return (

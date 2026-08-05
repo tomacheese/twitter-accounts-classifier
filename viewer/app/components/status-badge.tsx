@@ -24,6 +24,21 @@ const STATUS_STYLES = {
 const FALLBACK_STYLE = 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
 
 /**
+ * DB・内部処理向けの生の状態値をそのまま画面に出すと `not_run` のような
+ * スネークケースが読みにくいため、表示用の文言を別途持つ。
+ */
+const STATUS_LABELS = {
+  running: 'Running',
+  success: 'Success',
+  healthy: 'Healthy',
+  partial: 'Partial',
+  degraded: 'Degraded',
+  stale: 'Stale',
+  failed: 'Failed',
+  not_run: 'Not run',
+} satisfies Record<KnownStatus, string>
+
+/**
  * 対象カラムは enum ではなく素の文字列のため、
  * 未知の値でも例外にせずグレーのピルにフォールバックする。
  * @param props - 表示するステータス文字列
@@ -31,9 +46,10 @@ const FALLBACK_STYLE = 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gra
  */
 export function StatusBadge({ status }: { status: string }): React.ReactElement {
   const style = (STATUS_STYLES as Record<string, string>)[status] ?? FALLBACK_STYLE
+  const label = (STATUS_LABELS as Record<string, string>)[status] ?? status
   return (
     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${style}`}>
-      {status}
+      {label}
     </span>
   )
 }

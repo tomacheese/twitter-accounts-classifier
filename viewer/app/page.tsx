@@ -5,12 +5,21 @@ import { getAttentionRequiredItems } from '../lib/queries/attention-required'
 import { getLatestCrawlSummary } from '../lib/queries/latest-crawl-summary'
 import { getLatestBlockSummary } from '../lib/queries/latest-block-summary'
 import { getTopLabelOverview } from '../lib/queries/dashboard'
-import { SystemStatusSection } from './components/system-status-section'
-import { AttentionRequiredSection } from './components/attention-required-section'
-import { LatestCrawlSummarySection } from './components/latest-crawl-summary-section'
-import { LatestBlockSummarySection } from './components/latest-block-summary-section'
+import { SystemStatusSection, SystemStatusSkeleton } from './components/system-status-section'
+import {
+  AttentionRequiredSection,
+  AttentionRequiredSkeleton,
+} from './components/attention-required-section'
+import {
+  LatestCrawlSummarySection,
+  LatestCrawlSummarySkeleton,
+} from './components/latest-crawl-summary-section'
+import {
+  LatestBlockSummarySection,
+  LatestBlockSummarySkeleton,
+} from './components/latest-block-summary-section'
 import { DashboardSummary, DashboardSummarySkeleton } from './components/dashboard-kpi-section'
-import { LabelOverviewSection } from './components/label-overview-section'
+import { LabelOverviewSection, LabelOverviewSkeleton } from './components/label-overview-section'
 import { DashboardSectionError } from './components/dashboard-section-error'
 
 export const dynamic = 'force-dynamic'
@@ -104,26 +113,26 @@ async function LabelOverviewSectionData(): Promise<React.JSX.Element> {
 
 export default function DashboardPage(): React.JSX.Element {
   return (
-    <main className="flex flex-col gap-8 p-8">
+    <div className="flex flex-col gap-8">
       <h1 className="sr-only">Dashboard</h1>
-      <Suspense fallback={<p>Loading system status…</p>}>
+      <Suspense fallback={<SystemStatusSkeleton />}>
         <SystemStatusSectionData />
       </Suspense>
-      <Suspense fallback={<p>Loading attention required…</p>}>
+      <Suspense fallback={<AttentionRequiredSkeleton />}>
         <AttentionRequiredSectionData />
       </Suspense>
-      <Suspense fallback={<p>Loading latest crawl summary…</p>}>
+      <Suspense fallback={<LatestCrawlSummarySkeleton />}>
         <LatestCrawlSummarySectionData />
       </Suspense>
-      <Suspense fallback={<p>Loading latest block summary…</p>}>
+      <Suspense fallback={<LatestBlockSummarySkeleton />}>
         <LatestBlockSummarySectionData />
       </Suspense>
       <Suspense fallback={<DashboardSummarySkeleton />}>
         <DashboardSummary />
       </Suspense>
-      <Suspense fallback={<p>Loading label overview…</p>}>
+      <Suspense fallback={<LabelOverviewSkeleton />}>
         <LabelOverviewSectionData />
       </Suspense>
-    </main>
+    </div>
   )
 }

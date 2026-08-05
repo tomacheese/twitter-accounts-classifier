@@ -20,6 +20,14 @@ function entry(overrides: Partial<SystemStatusEntry> = {}): SystemStatusEntry {
 }
 
 describe('SystemStatusSection', () => {
+  it('renders the last success time as a relative age with the absolute time as a tooltip', () => {
+    const html = renderToStaticMarkup(
+      <SystemStatusSection entries={[entry({ lastSuccessAt: new Date() })]} />,
+    )
+
+    expect(html).toContain('just now')
+  })
+
   it('renders a badge and detail link for each service', () => {
     const html = renderToStaticMarkup(
       <SystemStatusSection
@@ -27,12 +35,12 @@ describe('SystemStatusSection', () => {
       />,
     )
 
-    expect(html).toContain('healthy')
+    expect(html).toContain('Healthy')
     expect(html).toContain('/crawl-runs')
     expect(html).toContain('/block-runs')
   })
 
-  it('renders the error message when present', () => {
+  it('shows a short indicator instead of the raw error message when present', () => {
     const html = renderToStaticMarkup(
       <SystemStatusSection
         entries={[
@@ -47,13 +55,20 @@ describe('SystemStatusSection', () => {
       />,
     )
 
-    expect(html).toContain('Example failure for a fictional run.')
+    expect(html).toContain('Error recorded')
+    // 全文はカード上の可視テキストではなくホバー用の title 属性としてのみ保持する。
+    expect(html).toContain('title="Example failure for a fictional run."')
+  })
+
+  it('renders nothing about the error when absent', () => {
+    const html = renderToStaticMarkup(<SystemStatusSection entries={[entry()]} />)
+    expect(html).not.toContain('Error recorded')
   })
 
   it('renders a visually distinct badge class per health status', () => {
     function badgeClassFor(healthStatus: SystemStatusEntry['healthStatus']): string {
       const html = renderToStaticMarkup(<SystemStatusSection entries={[entry({ healthStatus })]} />)
-      const match = new RegExp(`class="([^"]*)">${healthStatus}</span>`).exec(html)
+      const match = /<span class="([^"]*rounded-full[^"]*)">/.exec(html)
       return match ? match[1] : ''
     }
 

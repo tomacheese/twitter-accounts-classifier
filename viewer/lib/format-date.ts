@@ -21,3 +21,23 @@ export function formatDateTime(date: Date): string {
   )
   return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
 }
+
+/**
+ * `now` を基準に「経過時間 + ago」の相対表記へ変換する。
+ * 秒未満の粒度はダッシュボードでの判断に不要なため、日・時・分までに丸める。
+ * @param date - 基準にする過去の日時
+ * @param now - 現在時刻
+ * @returns `3d 4h ago` のような相対経過表記。1分未満は `just now`
+ */
+export function formatRelativeTime(date: Date, now: Date): string {
+  const diffMinutes = Math.floor(Math.max(0, now.getTime() - date.getTime()) / 60_000)
+  if (diffMinutes < 1) return 'just now'
+
+  const days = Math.floor(diffMinutes / 1440)
+  const hours = Math.floor((diffMinutes % 1440) / 60)
+  const minutes = diffMinutes % 60
+
+  if (days > 0) return `${days}d ${hours}h ago`
+  if (hours > 0) return `${hours}h ${minutes}m ago`
+  return `${minutes}m ago`
+}

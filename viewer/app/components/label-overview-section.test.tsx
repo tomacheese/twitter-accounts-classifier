@@ -19,4 +19,9 @@ describe('LabelOverviewSection', () => {
     )
     expect(html).toContain('blue_verified')
   })
+
+  it('shows an empty-state message when there is no label data', () => {
+    const html = renderToStaticMarkup(<LabelOverviewSection entries={[]} />)
+    expect(html).toContain('No label data available yet.')
+  })
 })
