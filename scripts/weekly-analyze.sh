@@ -264,8 +264,17 @@ for OLD_WORKTREE in "$(pwd)"/.worktrees/weekly-crawl-review-*/; do
   [ -d "$OLD_WORKTREE" ] || continue
   OLD_WORKTREE="${OLD_WORKTREE%/}"
   [ "$OLD_WORKTREE" = "$WORKTREE_DIR" ] && continue
+  # ディレクトリ名からブランチ名を導出しているのは、`git worktree remove` が
+  # ブランチ自体は削除せず残すため、worktree と対になるローカルブランチも
+  # 明示的に削除しないと実行のたびにブランチだけが蓄積するため。
+  OLD_BRANCH="$(basename "$OLD_WORKTREE")"
   echo "[weekly-analyze] removing older failed worktree at $OLD_WORKTREE"
   git worktree remove --force "$OLD_WORKTREE" 2>/dev/null || rm -rf "$OLD_WORKTREE"
+  case "$OLD_BRANCH" in
+    weekly-crawl-review-*)
+      git branch -D "$OLD_BRANCH" 2>/dev/null || true
+      ;;
+  esac
 done
 git worktree prune
 
