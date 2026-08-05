@@ -66,7 +66,6 @@ WORKTREE_BRANCH="weekly-crawl-review-$RUN_ID"
 DIAGNOSTICS_DIR="$(pwd)/logs/weekly-analysis-runs/$RUN_ID"
 
 # 前回実行が running のまま残っている場合、その PR の状態を確認してから今回の実行に進む。
-# マージ済みなら追認、自動マージ待ちならしばらく待機、それ以外は閉じて失敗として記録する。
 echo "[weekly-analyze] checking for still-running previous WeeklyAnalysisRun records"
 PREVIOUS_RUNS_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts list-running)"
 PREVIOUS_RUN_IDS="$(printf '%s' "$PREVIOUS_RUNS_JSON" | "$JQ_BIN" -r ".[] | select(.id != \"$RUN_ID\") | .id")"
@@ -147,11 +146,10 @@ echo "[weekly-analyze] starting weekly crawl review at $(date -Iseconds) in tmux
 "$TMUX_BIN" pipe-pane -t "$SESSION_NAME" -o "cat >> \"$PANE_LOG\""
 echo "[weekly-analyze] launched tmux session $SESSION_NAME at $(date -Iseconds)"
 
-# The skill now opens a PR with GitHub auto-merge instead of committing directly and
-# rebuilding locally (see .claude/skills/weekly-crawl-review/SKILL.md) — the production
-# machine pulls its own images from GHCR once CI passes and the PR auto-merges. tmux の
-# 生存確認だけでなく DB ステータスも見ることで、セッションが残っていても状態機械側が
-# 終端状態に達した場合を検知できる。
+# スキルは直接コミットしてローカルで再ビルドする代わりに GitHub auto-merge 付きの PR を
+# 開くようになった。本番機は CI 通過・auto-merge 後に GHCR から自分でイメージを取得するため、
+# tmux セッションの生存確認だけでなく DB ステータスも見ることで、セッションは残っていても
+# 状態機械側が終端状態に達した場合を検知できるようにする。
 while true; do
   if ! "$TMUX_BIN" has-session -t "$SESSION_NAME" 2>/dev/null; then
     echo "[weekly-analyze] tmux session $SESSION_NAME finished at $(date -Iseconds)"
