@@ -29,8 +29,8 @@ function toRow(overrides: Record<string, unknown> = {}) {
   }
 }
 
-// toRow が返す生の行と toRecord による変換後の形は、Date がそのまま Date で
-// それ以外は素通しのため一致する。呼び出し側の意図を明確にするための別名。
+// toRow が返す生の行と toRecord による変換後の形は一致するが、
+// 呼び出し側の意図を明確にするための別名として定義する。
 function toRecordLike(overrides: Record<string, unknown> = {}) {
   return toRow({ currentPhase: 'sampling', ...overrides })
 }

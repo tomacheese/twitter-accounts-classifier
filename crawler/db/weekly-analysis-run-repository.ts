@@ -1,5 +1,5 @@
 import { Logger } from '@book000/node-utils'
-import type { PrismaClient, WeeklyAnalysisRun } from '../generated/prisma'
+import type { Prisma, PrismaClient, WeeklyAnalysisRun } from '../generated/prisma'
 
 const logger = Logger.configure('weekly-analysis-run-repository')
 
@@ -95,20 +95,14 @@ export async function listRunningWeeklyAnalysisRuns(
   return runs.map((run) => toRecord(run))
 }
 
-type WeeklyAnalysisRunUpdateData = Parameters<
-  PrismaClient['weeklyAnalysisRun']['update']
->[0]['data']
-
-// sampledAccountIds は呼び出し元の CompleteWeeklyAnalysisRunParams で unknown として
-// 受け取っているため、Prisma の JSON 入力型へは実行時の互換性を前提に明示キャストする。
 async function updateIfRunning(
   prisma: PrismaClient,
   id: string,
-  data: Record<string, unknown>,
+  data: Parameters<PrismaClient['weeklyAnalysisRun']['update']>[0]['data'],
 ): Promise<WeeklyAnalysisRunMutationResult> {
   const { count } = await prisma.weeklyAnalysisRun.updateMany({
     where: { id, status: 'running' },
-    data: data as WeeklyAnalysisRunUpdateData,
+    data,
   })
   const run = await getWeeklyAnalysisRun(prisma, id)
   if (count === 0) {
@@ -167,6 +161,7 @@ export async function completeWeeklyAnalysisRun(
     currentPhase: null,
     errorMessage: null,
     ...params,
+    sampledAccountIds: params.sampledAccountIds as Prisma.InputJsonValue,
   })
 }
 
