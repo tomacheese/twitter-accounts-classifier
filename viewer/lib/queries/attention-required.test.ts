@@ -180,4 +180,21 @@ describe('getAttentionRequiredItems', () => {
 
     expect(items.map((item) => item.href)).toEqual(['/block-runs/run-new', '/block-runs/run-old'])
   })
+
+  it('caps the merged, sorted result at RECENT_LIMIT even when multiple sources each return up to their own take limit', async () => {
+    const baseTime = new Date('2026-08-05T00:00:00Z').getTime()
+    const makeRuns = (count: number, offsetMinutes: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        id: `run-${offsetMinutes}-${index}`,
+        startedAt: new Date(baseTime - (offsetMinutes + index) * 60000),
+        finishedAt: new Date(baseTime - (offsetMinutes + index) * 60000),
+      }))
+    const prisma = createMockPrisma({
+      failedCrawlRuns: makeRuns(20, 0),
+      failedBlockRuns: makeRuns(20, 1000),
+    })
+    const items = await getAttentionRequiredItems(prisma, new Date('2026-08-05T00:00:00Z'))
+
+    expect(items).toHaveLength(20)
+  })
 })

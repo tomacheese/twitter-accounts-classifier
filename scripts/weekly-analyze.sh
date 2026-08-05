@@ -60,6 +60,21 @@ if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
 fi
 export WEEKLY_ANALYSIS_RUN_ID="$RUN_ID"
 
+# スーパーバイザー自身が予期せず異常終了した場合でも WeeklyAnalysisRun を running のまま
+# 放置しないよう、終了時に status を確認しまだ running であれば失敗として終端させる。
+finalize_run_on_unexpected_exit() {
+  EXIT_CODE=$?
+  RUN_STATUS_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts get --id "$RUN_ID" 2>/dev/null || true)"
+  RUN_STATUS="$(printf '%s' "$RUN_STATUS_JSON" | "$JQ_BIN" -r '.status // empty' 2>/dev/null || true)"
+  if [ "$RUN_STATUS" = "running" ]; then
+    echo "[weekly-analyze] supervisor exiting unexpectedly (exit code $EXIT_CODE) while WeeklyAnalysisRun $RUN_ID was still running; marking it failed" >&2
+    pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts fail \
+      --id "$RUN_ID" --message "weekly-analyze.sh supervisor exited unexpectedly (exit code $EXIT_CODE)." >/dev/null 2>&1 || true
+  fi
+  exit "$EXIT_CODE"
+}
+trap finalize_run_on_unexpected_exit EXIT
+
 SESSION_NAME="weekly-crawl-review-$RUN_ID"
 WORKTREE_DIR="$(pwd)/.worktrees/weekly-crawl-review-$RUN_ID"
 WORKTREE_BRANCH="weekly-crawl-review-$RUN_ID"
@@ -72,9 +87,22 @@ PREVIOUS_RUN_IDS="$(printf '%s' "$PREVIOUS_RUNS_JSON" | "$JQ_BIN" -r ".[] | sele
 for PREVIOUS_RUN_ID in $PREVIOUS_RUN_IDS; do
   PREVIOUS_RUN_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts get --id "$PREVIOUS_RUN_ID")"
   PREVIOUS_PR_NUMBER="$(printf '%s' "$PREVIOUS_RUN_JSON" | "$JQ_BIN" -r '.pullRequestNumber // empty')"
+  PREVIOUS_PR_URL="$(printf '%s' "$PREVIOUS_RUN_JSON" | "$JQ_BIN" -r '.pullRequestUrl // empty')"
 
   if [ -z "$PREVIOUS_PR_NUMBER" ]; then
-    echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID has no recorded PR; leaving it for a future check"
+    PREVIOUS_STALE_AFTER="$(printf '%s' "$PREVIOUS_RUN_JSON" | "$JQ_BIN" -r '.staleAfterAt // empty')"
+    PREVIOUS_STALE_AFTER_EPOCH=0
+    [ -n "$PREVIOUS_STALE_AFTER" ] && PREVIOUS_STALE_AFTER_EPOCH="$(date -d "$PREVIOUS_STALE_AFTER" +%s 2>/dev/null || echo 0)"
+    if [ "$PREVIOUS_STALE_AFTER_EPOCH" -gt 0 ] && [ "$(date +%s)" -gt "$PREVIOUS_STALE_AFTER_EPOCH" ]; then
+      echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID has no recorded PR and is past its stale deadline; marking it timed out"
+      TIMEOUT_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts timeout \
+        --id "$PREVIOUS_RUN_ID" --message "この実行は PR を作成しないままハートビートの停止放置判定を超えました。" || true)"
+      if [ "$(printf '%s' "$TIMEOUT_JSON" | "$JQ_BIN" -r '.ok // empty')" != "true" ]; then
+        echo "[weekly-analyze] timeout call for previous run $PREVIOUS_RUN_ID did not apply (already terminal?)" >&2
+      fi
+    else
+      echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID has no recorded PR yet and is not past its stale deadline; leaving it for a future check"
+    fi
     continue
   fi
 
@@ -85,7 +113,7 @@ for PREVIOUS_RUN_ID in $PREVIOUS_RUN_IDS; do
     merged)
       echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER is merged; recording success retroactively"
       COMPLETE_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts complete \
-        --id "$PREVIOUS_RUN_ID" --pull-request-number "$PREVIOUS_PR_NUMBER")"
+        --id "$PREVIOUS_RUN_ID" --pull-request-number "$PREVIOUS_PR_NUMBER" --pull-request-url "$PREVIOUS_PR_URL")"
       if [ "$(printf '%s' "$COMPLETE_JSON" | "$JQ_BIN" -r '.ok')" != "true" ]; then
         echo "[weekly-analyze] complete call for previous run $PREVIOUS_RUN_ID did not apply (already terminal?)" >&2
       fi
@@ -197,6 +225,16 @@ done
 FINAL_RUN_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts get --id "$RUN_ID")"
 FINAL_STATUS="$(printf '%s' "$FINAL_RUN_JSON" | "$JQ_BIN" -r '.status // empty')"
 
+# tmux セッションの終了は PR の auto-merge やレビュー対応の完了と同期しないため、
+# セッションが消えた時点でまだ running のままなら異常終了とみなし失敗として終端させる。
+if [ "$FINAL_STATUS" = "running" ]; then
+  echo "[weekly-analyze] tmux session ended while WeeklyAnalysisRun $RUN_ID was still running; marking it failed"
+  pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts fail \
+    --id "$RUN_ID" --message "tmux セッションが終端状態に到達する前に消滅しました。" || true
+  FINAL_RUN_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts get --id "$RUN_ID")"
+  FINAL_STATUS="$(printf '%s' "$FINAL_RUN_JSON" | "$JQ_BIN" -r '.status // empty')"
+fi
+
 echo "[weekly-analyze] saving diagnostics for run $RUN_ID (status=$FINAL_STATUS) to $DIAGNOSTICS_DIR"
 {
   cd "$WORKTREE_DIR"
@@ -213,11 +251,23 @@ printf '%s\n' "$FINAL_RUN_JSON" > "$DIAGNOSTICS_DIR/run-metadata.json"
 if [ "$FINAL_STATUS" = "success" ]; then
   echo "[weekly-analyze] run succeeded; removing worktree at $WORKTREE_DIR"
   git worktree remove --force "$WORKTREE_DIR" 2>/dev/null || rm -rf "$WORKTREE_DIR"
-  git worktree prune
   git branch -D "$WORKTREE_BRANCH" 2>/dev/null || true
 else
   echo "[weekly-analyze] run ended with status $FINAL_STATUS; keeping worktree at $WORKTREE_DIR for inspection"
 fi
+
+# 失敗した worktree は調査用に残すが、無期限に積み上げないよう直近1件だけを残す。
+# 今回の実行が成功していても、それより前の失敗実行の worktree が残っている場合があるため、
+# 成功・失敗いずれの分岐でも実行する。
+echo "[weekly-analyze] pruning older failed worktrees, keeping only the most recent one"
+for OLD_WORKTREE in "$(pwd)"/.worktrees/weekly-crawl-review-*/; do
+  [ -d "$OLD_WORKTREE" ] || continue
+  OLD_WORKTREE="${OLD_WORKTREE%/}"
+  [ "$OLD_WORKTREE" = "$WORKTREE_DIR" ] && continue
+  echo "[weekly-analyze] removing older failed worktree at $OLD_WORKTREE"
+  git worktree remove --force "$OLD_WORKTREE" 2>/dev/null || rm -rf "$OLD_WORKTREE"
+done
+git worktree prune
 
 # mtime だけでは成功・失敗を区別できないため、run-metadata.json に保存した status を読んで
 # 保持期間を判定する。

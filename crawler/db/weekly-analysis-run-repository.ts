@@ -153,18 +153,21 @@ export async function touchWeeklyAnalysisRunHeartbeat(
 }
 
 export interface CompleteWeeklyAnalysisRunParams {
-  sampledAccountIds: unknown
-  findings: string | null
-  commitSha: string | null
-  pullRequestNumber: number | null
-  pullRequestUrl: string | null
+  sampledAccountIds?: unknown
+  findings?: string | null
+  commitSha?: string | null
+  pullRequestNumber?: number | null
+  pullRequestUrl?: string | null
 }
 
 /**
+ * リカバリ経路 (`scripts/weekly-analyze.sh` が前回実行の PR 状態を追認する場合など) では
+ * `pullRequestUrl` や `findings` を再指定せずに `complete` だけ呼ぶことがあるため、
+ * 未指定のフィールドは既存の DB 値を維持し、指定されたフィールドだけ上書きする。
  * @param prisma - Prisma クライアント
  * @param id - 対象の `WeeklyAnalysisRun` の id
  * @param finishedAt - 完了時刻
- * @param params - 完了時に確定する内容
+ * @param params - 完了時に確定する内容。未指定のフィールドは既存値を維持する
  * @returns 更新結果。既に終端状態だった場合は `alreadyTerminal: true`
  */
 export async function completeWeeklyAnalysisRun(
@@ -173,13 +176,16 @@ export async function completeWeeklyAnalysisRun(
   finishedAt: Date,
   params: CompleteWeeklyAnalysisRunParams,
 ): Promise<WeeklyAnalysisRunMutationResult> {
+  const { sampledAccountIds, ...rest } = params
   return updateIfRunning(prisma, id, {
     finishedAt,
     status: 'success',
     currentPhase: null,
     errorMessage: null,
-    ...params,
-    sampledAccountIds: params.sampledAccountIds as Prisma.InputJsonValue,
+    ...rest,
+    ...(sampledAccountIds !== undefined && {
+      sampledAccountIds: sampledAccountIds as Prisma.InputJsonValue,
+    }),
   })
 }
 

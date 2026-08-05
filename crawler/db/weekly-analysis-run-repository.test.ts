@@ -149,6 +149,29 @@ describe('completeWeeklyAnalysisRun', () => {
     expect(result.ok).toBe(false)
     expect(result.alreadyTerminal).toBe(true)
   })
+
+  it('does not overwrite pullRequestUrl/sampledAccountIds/findings when the caller omits them', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const findUnique = vi.fn().mockResolvedValue(toRow({ status: 'success' }))
+    const prisma = {
+      weeklyAnalysisRun: { updateMany, findUnique },
+    } as unknown as PrismaClient
+
+    await completeWeeklyAnalysisRun(prisma, 'run1', new Date('2026-08-05T01:00:00Z'), {
+      pullRequestNumber: 42,
+    })
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'run1', status: 'running' },
+      data: {
+        finishedAt: new Date('2026-08-05T01:00:00Z'),
+        status: 'success',
+        currentPhase: null,
+        errorMessage: null,
+        pullRequestNumber: 42,
+      },
+    })
+  })
 })
 
 describe('failWeeklyAnalysisRun', () => {

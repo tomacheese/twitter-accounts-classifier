@@ -27,11 +27,11 @@ export interface PrSnapshot {
 /**
  * ここで名前一致のみを見て正規表現等で緩めていないのは、
  * CI ワークフロー名の変更・分割を PR 分類ロジックが黙って見逃すのを避けるため。
+ * Docker CI を含めていないのは、weekly-analysis の PR が `pull_request_target` で
+ * トリガーされ、既定の GITHUB_SHA が base ブランチの HEAD を指すため、
+ * PR の head SHA に対する statusCheckRollup に載らないため。
  */
-const REQUIRED_CHECK_NAMES = [
-  'Node CI / Check finished Node CI',
-  'Docker CI / Check finished Docker CI',
-]
+const REQUIRED_CHECK_NAMES = ['Node CI / Check finished Node CI']
 
 function hasAllRequiredChecksSucceeded(rollup: PrStatusCheckRollupEntry[]): boolean {
   return REQUIRED_CHECK_NAMES.every((name) =>

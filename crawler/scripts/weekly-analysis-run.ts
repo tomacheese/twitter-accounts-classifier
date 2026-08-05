@@ -107,15 +107,17 @@ async function main(): Promise<void> {
         if (!values.id) throw new Error('--id is required')
         reportMutationResult(
           await completeWeeklyAnalysisRun(prisma, values.id, new Date(), {
-            sampledAccountIds: values['sampled-account-ids']
-              ? (JSON.parse(values['sampled-account-ids']) as unknown)
-              : [],
-            findings: values.findings ?? null,
-            commitSha: values['commit-sha'] ?? null,
-            pullRequestNumber: values['pull-request-number']
-              ? Number(values['pull-request-number'])
-              : null,
-            pullRequestUrl: values['pull-request-url'] ?? null,
+            ...(values['sampled-account-ids'] !== undefined && {
+              sampledAccountIds: JSON.parse(values['sampled-account-ids']) as unknown,
+            }),
+            ...(values.findings !== undefined && { findings: values.findings }),
+            ...(values['commit-sha'] !== undefined && { commitSha: values['commit-sha'] }),
+            ...(values['pull-request-number'] !== undefined && {
+              pullRequestNumber: Number(values['pull-request-number']),
+            }),
+            ...(values['pull-request-url'] !== undefined && {
+              pullRequestUrl: values['pull-request-url'],
+            }),
           }),
         )
         return

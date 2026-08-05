@@ -10,7 +10,6 @@ function baseSnapshot(overrides: Partial<PrSnapshot> = {}): PrSnapshot {
     reviewDecision: null,
     statusCheckRollup: [
       { name: 'Node CI / Check finished Node CI', conclusion: 'SUCCESS', status: 'COMPLETED' },
-      { name: 'Docker CI / Check finished Docker CI', conclusion: 'SUCCESS', status: 'COMPLETED' },
     ],
     ...overrides,
   }
@@ -25,7 +24,7 @@ describe('classifyPrStatus', () => {
     expect(classifyPrStatus(baseSnapshot({ state: 'CLOSED' }))).toBe('closed')
   })
 
-  it('classifies a PR with both required checks passing and no blockers as ready', () => {
+  it('classifies a PR with the required check passing and no blockers as ready', () => {
     expect(classifyPrStatus(baseSnapshot())).toBe('ready')
   })
 
@@ -33,11 +32,6 @@ describe('classifyPrStatus', () => {
     const snapshot = baseSnapshot({
       statusCheckRollup: [
         { name: 'Node CI / Check finished Node CI', conclusion: null, status: 'IN_PROGRESS' },
-        {
-          name: 'Docker CI / Check finished Docker CI',
-          conclusion: 'SUCCESS',
-          status: 'COMPLETED',
-        },
       ],
     })
     expect(classifyPrStatus(snapshot)).toBe('waiting_checks')
@@ -48,11 +42,6 @@ describe('classifyPrStatus', () => {
       reviewDecision: 'APPROVED',
       statusCheckRollup: [
         { name: 'Node CI / Check finished Node CI', conclusion: 'FAILURE', status: 'COMPLETED' },
-        {
-          name: 'Docker CI / Check finished Docker CI',
-          conclusion: 'SUCCESS',
-          status: 'COMPLETED',
-        },
       ],
     })
     expect(classifyPrStatus(snapshot)).toBe('failed_checks')
@@ -81,11 +70,6 @@ describe('classifyPrStatus', () => {
       statusCheckRollup: [
         {
           name: 'Node CI / Check finished Node CI (extra)',
-          conclusion: 'SUCCESS',
-          status: 'COMPLETED',
-        },
-        {
-          name: 'Docker CI / Check finished Docker CI',
           conclusion: 'SUCCESS',
           status: 'COMPLETED',
         },
