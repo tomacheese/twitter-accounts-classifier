@@ -113,6 +113,28 @@ describe('buildDuplicateReplyIndex', () => {
     ).toBe(1)
   })
 
+  it('still counts duplicates when known and unknown targets are mixed', () => {
+    const index = buildDuplicateReplyIndex([
+      {
+        accountId: 'a1',
+        fullText: '@target 今だけ無料でエアドロップ配布中！詳細はDMで確認してね',
+        inReplyToTweetId: 'victim-tweet-1',
+      },
+      {
+        accountId: 'a2',
+        fullText: '@other 今だけ無料でエアドロップ配布中！詳細はDMで確認してね',
+        inReplyToTweetId: null,
+      },
+    ])
+
+    expect(
+      index.countOtherAccounts(
+        '@someone 今だけ無料でエアドロップ配布中！詳細はDMで確認してね',
+        'a1',
+      ),
+    ).toBe(1)
+  })
+
   it('does not count the excluded account itself', () => {
     const index = buildDuplicateReplyIndex([
       {

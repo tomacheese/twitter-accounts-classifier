@@ -51,16 +51,24 @@ export interface DuplicateReplyIndex {
  * @returns bundle 構築時にアカウントごとに問い合わせるためのインデックス
  */
 export function buildDuplicateReplyIndex(corpus: ReplyCorpusEntry[]): DuplicateReplyIndex {
-  const groupsByNormalizedText = new Map<string, { accounts: Set<string>; targets: Set<string> }>()
+  const groupsByNormalizedText = new Map<
+    string,
+    { accounts: Set<string>; targets: Set<string>; hasUnknownTarget: boolean }
+  >()
   for (const entry of corpus) {
     const normalized = normalizeReplyText(entry.fullText)
     if (normalized === '') continue
     const group = groupsByNormalizedText.get(normalized) ?? {
       accounts: new Set<string>(),
       targets: new Set<string>(),
+      hasUnknownTarget: false,
     }
     group.accounts.add(entry.accountId)
-    if (entry.inReplyToTweetId !== null) group.targets.add(entry.inReplyToTweetId)
+    if (entry.inReplyToTweetId === null) {
+      group.hasUnknownTarget = true
+    } else {
+      group.targets.add(entry.inReplyToTweetId)
+    }
     groupsByNormalizedText.set(normalized, group)
   }
 
@@ -70,10 +78,10 @@ export function buildDuplicateReplyIndex(corpus: ReplyCorpusEntry[]): DuplicateR
       if (normalized === '') return 0
       const group = groupsByNormalizedText.get(normalized)
       if (!group) return 0
-      // 既知の返信先がちょうど1件なら、この文面は単一のキャンペーン投稿への返信でのみ
-      // 観測されたとみなし、複数スレッドを横断するボットネットワークから除外する。
-      // 返信先が1件も分からない corpus では従来の検出挙動を維持する。
-      if (group.targets.size === 1) return 0
+      // 全件の返信先が判明しており、かつ既知の返信先がちょうど1件なら、この文面は
+      // 単一のキャンペーン投稿への返信でのみ観測されたとみなす。返信先不明が1件でも
+      // 混在する場合は同一ターゲットと確認できないため、従来どおり重複件数を返す。
+      if (!group.hasUnknownTarget && group.targets.size === 1) return 0
       return group.accounts.has(excludeAccountId) ? group.accounts.size - 1 : group.accounts.size
     },
   }
