@@ -275,31 +275,58 @@ else
   rm -f "$WORKTREE_DIR/.env" "$WORKTREE_DIR/.env.weekly-review"
 fi
 
+# ディレクトリ名だけでは、手動作成の worktree や別の稼働中スーパーバイザーの worktree と
+# 区別できない。対応する WeeklyAnalysisRun が終端状態であること、かつ同名の tmux セッションが
+# 生存していないことを確認できた場合にのみ削除候補として扱う。
+is_worktree_prunable() {
+  _branch="$1"
+  _run_id="${_branch#weekly-crawl-review-}"
+  _run_json="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts get --id "$_run_id" 2>/dev/null || true)"
+  _run_status="$(printf '%s' "$_run_json" | "$JQ_BIN" -r '.status // empty' 2>/dev/null || true)"
+  if [ -z "$_run_status" ] || [ "$_run_status" = "running" ]; then
+    return 1
+  fi
+  "$TMUX_BIN" has-session -t "$_branch" 2>/dev/null && return 1
+  return 0
+}
+
 # 失敗した worktree は調査用に残すが、無期限に積み上げないよう直近1件だけを残す。
-# 今回の実行が成功していても、それより前の失敗実行の worktree が残っている場合があるため、
-# 成功・失敗いずれの分岐でも実行する。
+# 成功時はこの実行自身の worktree を既に削除済みのため、削除候補の中から最新の1件を
+# 保持対象として決めておかないと、過去の失敗 worktree が1件も残らなくなってしまう。
+# 失敗時はこの実行自身の worktree が最新のものとしてそのまま残っているため、追加の
+# 保持対象を探す必要はない。
+KEEP_WORKTREE=""
+if [ "$FINAL_STATUS" = "success" ]; then
+  KEEP_MTIME=0
+  for CANDIDATE in "$(pwd)"/.worktrees/weekly-crawl-review-*/; do
+    [ -d "$CANDIDATE" ] || continue
+    CANDIDATE="${CANDIDATE%/}"
+    [ "$CANDIDATE" = "$WORKTREE_DIR" ] && continue
+    CANDIDATE_BRANCH="$(basename "$CANDIDATE")"
+    is_worktree_prunable "$CANDIDATE_BRANCH" || continue
+    CANDIDATE_MTIME="$(stat -c %Y "$CANDIDATE" 2>/dev/null || stat -f %m "$CANDIDATE" 2>/dev/null || echo 0)"
+    if [ "$CANDIDATE_MTIME" -gt "$KEEP_MTIME" ]; then
+      KEEP_MTIME="$CANDIDATE_MTIME"
+      KEEP_WORKTREE="$CANDIDATE"
+    fi
+  done
+  if [ -n "$KEEP_WORKTREE" ]; then
+    echo "[weekly-analyze] keeping most recent older failed worktree at $KEEP_WORKTREE"
+  fi
+fi
+
 echo "[weekly-analyze] pruning older failed worktrees, keeping only the most recent one"
 for OLD_WORKTREE in "$(pwd)"/.worktrees/weekly-crawl-review-*/; do
   [ -d "$OLD_WORKTREE" ] || continue
   OLD_WORKTREE="${OLD_WORKTREE%/}"
   [ "$OLD_WORKTREE" = "$WORKTREE_DIR" ] && continue
+  [ "$OLD_WORKTREE" = "$KEEP_WORKTREE" ] && continue
   # ディレクトリ名からブランチ名を導出しているのは、`git worktree remove` が
   # ブランチ自体は削除せず残すため、worktree と対になるローカルブランチも
   # 明示的に削除しないと実行のたびにブランチだけが蓄積するため。
   OLD_BRANCH="$(basename "$OLD_WORKTREE")"
-  OLD_RUN_ID="${OLD_BRANCH#weekly-crawl-review-}"
-
-  # ディレクトリ名だけでは、手動作成の worktree や別の稼働中スーパーバイザーの
-  # worktree と区別できない。対応する WeeklyAnalysisRun が終端状態であること、
-  # かつ同名の tmux セッションが生存していないことを確認できた場合にのみ削除する。
-  OLD_RUN_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts get --id "$OLD_RUN_ID" 2>/dev/null || true)"
-  OLD_RUN_STATUS="$(printf '%s' "$OLD_RUN_JSON" | "$JQ_BIN" -r '.status // empty' 2>/dev/null || true)"
-  if [ -z "$OLD_RUN_STATUS" ] || [ "$OLD_RUN_STATUS" = "running" ]; then
-    echo "[weekly-analyze] skipping worktree at $OLD_WORKTREE (WeeklyAnalysisRun status: ${OLD_RUN_STATUS:-not found}; not confirmed terminal)"
-    continue
-  fi
-  if "$TMUX_BIN" has-session -t "$OLD_BRANCH" 2>/dev/null; then
-    echo "[weekly-analyze] skipping worktree at $OLD_WORKTREE (tmux session $OLD_BRANCH is still alive)"
+  if ! is_worktree_prunable "$OLD_BRANCH"; then
+    echo "[weekly-analyze] skipping worktree at $OLD_WORKTREE (not confirmed terminal, or tmux session still alive)"
     continue
   fi
 

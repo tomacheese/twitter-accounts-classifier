@@ -23,7 +23,7 @@ export function AttentionRequiredSection({
         <ul className="mt-2 space-y-2">
           {items.map((item, index) => (
             <li
-              key={`${item.href}-${index}`}
+              key={`${item.service}-${item.kind}-${index}`}
               className="rounded border p-3 text-sm dark:border-gray-700"
             >
               <span className="mr-2 text-gray-500 dark:text-gray-400">

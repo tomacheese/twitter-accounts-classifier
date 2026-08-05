@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import React from 'react'
+import { formatDateTime } from '@/lib/format-date'
 import type { LatestBlockSummary } from '@/lib/queries/latest-block-summary'
 import { StatTile } from './stat-tile'
 
@@ -18,11 +19,17 @@ export function LatestBlockSummarySection({
       {summary === null ? (
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">No block runs recorded yet.</p>
       ) : (
-        <div className="mt-2 grid gap-4 sm:grid-cols-3">
-          <StatTile label="Accounts processed" value={summary.accountRunCount.toLocaleString()} />
-          <StatTile label="Blocked" value={summary.blockedCount.toLocaleString()} />
-          <StatTile label="Failed" value={summary.failureCount.toLocaleString()} />
-        </div>
+        <>
+          <div className="mt-2 grid gap-4 sm:grid-cols-4">
+            <StatTile label="Candidates" value={summary.candidatesCount.toLocaleString()} />
+            <StatTile label="Accounts processed" value={summary.accountRunCount.toLocaleString()} />
+            <StatTile label="Blocked" value={summary.blockedCount.toLocaleString()} />
+            <StatTile label="Failed" value={summary.failureCount.toLocaleString()} />
+          </div>
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            Last success: {summary.lastSuccessAt ? formatDateTime(summary.lastSuccessAt) : '—'}
+          </p>
+        </>
       )}
       <Link
         href="/block-runs"

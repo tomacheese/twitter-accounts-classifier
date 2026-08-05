@@ -72,6 +72,7 @@ describe('getAttentionRequiredItems', () => {
     expect(items[0]).toMatchObject({
       kind: 'stale_run',
       service: 'crawler',
+      count: 1,
       href: '/crawl-runs/run1',
     })
   })
@@ -108,20 +109,55 @@ describe('getAttentionRequiredItems', () => {
     expect(items[0]).toMatchObject({
       kind: 'failed_run',
       service: 'blocker',
+      count: 1,
       href: '/block-runs/run1',
       occurredAt: new Date('2026-08-04T01:00:00Z'),
     })
   })
 
-  it('includes an account_warning item for a partial Crawler account run', async () => {
+  it('aggregates multiple failed Crawler runs into a single count, linking to the most recent one', async () => {
+    const prisma = createMockPrisma({
+      failedCrawlRuns: [
+        {
+          id: 'run-newer',
+          startedAt: new Date('2026-08-04T00:00:00Z'),
+          finishedAt: new Date('2026-08-04T01:00:00Z'),
+        },
+        {
+          id: 'run-older',
+          startedAt: new Date('2026-08-03T00:00:00Z'),
+          finishedAt: new Date('2026-08-03T01:00:00Z'),
+        },
+      ],
+    })
+    const items = await getAttentionRequiredItems(prisma, new Date('2026-08-05T00:00:00Z'))
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      kind: 'failed_run',
+      service: 'crawler',
+      count: 2,
+      href: '/crawl-runs/run-newer',
+    })
+    expect(items[0].message).not.toContain('run-newer')
+  })
+
+  it('aggregates account_warning entries for the crawler into a single count, without a raw error message', async () => {
     const prisma = createMockPrisma({
       warnedCrawlAccountRuns: [
         {
           id: 'account-run-1',
-          crawlRunId: 'run-1',
+          crawlRunId: 'run-newer',
           username: 'bob',
           status: 'partial',
           startedAt: new Date('2026-08-04T00:00:00Z'),
+        },
+        {
+          id: 'account-run-2',
+          crawlRunId: 'run-older',
+          username: 'alice',
+          status: 'failed',
+          startedAt: new Date('2026-08-03T00:00:00Z'),
         },
       ],
     })
@@ -131,42 +167,30 @@ describe('getAttentionRequiredItems', () => {
     expect(items[0]).toMatchObject({
       kind: 'account_warning',
       service: 'crawler',
-      href: '/crawl-runs/run-1',
+      count: 2,
+      href: '/crawl-runs/run-newer',
     })
+    expect(items[0].message).not.toContain('bob')
+    expect(items[0].message).not.toContain('alice')
   })
 
-  it('includes a block_failure item for a failed BlockAccountRun', async () => {
+  it('aggregates block_failure entries into a single count, without exposing the raw errorMessage', async () => {
     const prisma = createMockPrisma({
       failedBlockAccountRuns: [
         {
           id: 'account-run-1',
-          blockRunId: 'run-1',
+          blockRunId: 'run-newer',
           username: 'alice',
           errorMessage: 'Example rate limit error.',
           startedAt: new Date('2026-08-04T00:00:00Z'),
         },
-      ],
-    })
-    const items = await getAttentionRequiredItems(prisma, new Date('2026-08-05T00:00:00Z'))
-
-    expect(items).toHaveLength(1)
-    expect(items[0]).toMatchObject({
-      kind: 'block_failure',
-      service: 'blocker',
-      href: '/block-runs/run-1',
-    })
-  })
-
-  it('includes a block_failure item for a BlockAccountRun with failedCount > 0 but no errorMessage', async () => {
-    const prisma = createMockPrisma({
-      failedBlockAccountRuns: [
         {
-          id: 'account-run-1',
-          blockRunId: 'run-1',
-          username: 'alice',
+          id: 'account-run-2',
+          blockRunId: 'run-older',
+          username: 'bob',
           errorMessage: null,
           failedCount: 2,
-          startedAt: new Date('2026-08-04T00:00:00Z'),
+          startedAt: new Date('2026-08-03T00:00:00Z'),
         },
       ],
     })
@@ -176,11 +200,13 @@ describe('getAttentionRequiredItems', () => {
     expect(items[0]).toMatchObject({
       kind: 'block_failure',
       service: 'blocker',
-      href: '/block-runs/run-1',
+      count: 2,
+      href: '/block-runs/run-newer',
     })
+    expect(items[0].message).not.toContain('Example rate limit error.')
   })
 
-  it('sorts items by occurredAt descending across multiple sources', async () => {
+  it('sorts items by their most recent occurrence across different kinds and services', async () => {
     const prisma = createMockPrisma({
       failedBlockRuns: [
         {
@@ -189,35 +215,16 @@ describe('getAttentionRequiredItems', () => {
           finishedAt: new Date('2026-08-01T01:00:00Z'),
         },
       ],
-      failedBlockAccountRuns: [
+      failedCrawlRuns: [
         {
-          id: 'account-run-1',
-          blockRunId: 'run-new',
-          username: 'alice',
-          errorMessage: 'Example error.',
+          id: 'run-new',
           startedAt: new Date('2026-08-04T00:00:00Z'),
+          finishedAt: new Date('2026-08-04T01:00:00Z'),
         },
       ],
     })
     const items = await getAttentionRequiredItems(prisma, new Date('2026-08-05T00:00:00Z'))
 
-    expect(items.map((item) => item.href)).toEqual(['/block-runs/run-new', '/block-runs/run-old'])
-  })
-
-  it('caps the merged, sorted result at RECENT_LIMIT even when multiple sources each return up to their own take limit', async () => {
-    const baseTime = new Date('2026-08-05T00:00:00Z').getTime()
-    const makeRuns = (count: number, offsetMinutes: number) =>
-      Array.from({ length: count }, (_, index) => ({
-        id: `run-${offsetMinutes}-${index}`,
-        startedAt: new Date(baseTime - (offsetMinutes + index) * 60_000),
-        finishedAt: new Date(baseTime - (offsetMinutes + index) * 60_000),
-      }))
-    const prisma = createMockPrisma({
-      failedCrawlRuns: makeRuns(20, 0),
-      failedBlockRuns: makeRuns(20, 1000),
-    })
-    const items = await getAttentionRequiredItems(prisma, new Date('2026-08-05T00:00:00Z'))
-
-    expect(items).toHaveLength(20)
+    expect(items.map((item) => item.href)).toEqual(['/crawl-runs/run-new', '/block-runs/run-old'])
   })
 })

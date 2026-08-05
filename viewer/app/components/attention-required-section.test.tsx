@@ -15,6 +15,7 @@ describe('AttentionRequiredSection', () => {
       {
         kind: 'stale_run',
         service: 'crawler',
+        count: 1,
         message: 'Example stale crawl run message.',
         occurredAt: new Date('2026-08-05T00:00:00Z'),
         href: '/crawl-runs/run1',
@@ -31,6 +32,7 @@ describe('AttentionRequiredSection', () => {
       {
         kind: 'block_failure',
         service: 'blocker',
+        count: 3,
         message: 'Example newer block failure message.',
         occurredAt: new Date('2026-08-05T00:00:00Z'),
         href: '/block-runs/run-new',
@@ -38,6 +40,7 @@ describe('AttentionRequiredSection', () => {
       {
         kind: 'failed_run',
         service: 'blocker',
+        count: 1,
         message: 'Example older failed run message.',
         occurredAt: new Date('2026-08-01T00:00:00Z'),
         href: '/block-runs/run-old',

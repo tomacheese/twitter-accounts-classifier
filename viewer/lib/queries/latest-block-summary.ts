@@ -7,8 +7,10 @@ export interface LatestBlockSummary {
   finishedAt: Date | null
   status: string
   accountRunCount: number
+  candidatesCount: number
   blockedCount: number
   failureCount: number
+  lastSuccessAt: Date | null
 }
 
 /**
@@ -25,12 +27,19 @@ export async function getLatestBlockSummary(
   })
   if (!latestRun) return null
 
-  const accountRuns = await prisma.$queryRaw<{ blockedCount: number; failedCount: number }[]>`
-    SELECT DISTINCT ON ("username") "blockedCount", "failedCount"
+  const accountRuns = await prisma.$queryRaw<
+    { candidatesCount: number; blockedCount: number; failedCount: number }[]
+  >`
+    SELECT DISTINCT ON ("username") "candidatesCount", "blockedCount", "failedCount"
     FROM "BlockAccountRun"
     WHERE "blockRunId" = ${latestRun.id}
     ORDER BY "username", "startedAt" DESC, "id" DESC
   `
+
+  const lastSuccessfulRun = await prisma.blockRun.findFirst({
+    where: { status: 'completed' },
+    orderBy: [{ finishedAt: 'desc' }, { id: 'desc' }],
+  })
 
   return {
     blockRunId: latestRun.id,
@@ -38,7 +47,9 @@ export async function getLatestBlockSummary(
     finishedAt: latestRun.finishedAt,
     status: latestRun.status,
     accountRunCount: accountRuns.length,
+    candidatesCount: accountRuns.reduce((sum, run) => sum + run.candidatesCount, 0),
     blockedCount: accountRuns.reduce((sum, run) => sum + run.blockedCount, 0),
     failureCount: accountRuns.reduce((sum, run) => sum + run.failedCount, 0),
+    lastSuccessAt: lastSuccessfulRun?.finishedAt ?? null,
   }
 }

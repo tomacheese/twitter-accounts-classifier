@@ -9,7 +9,7 @@ describe('LatestCrawlSummarySection', () => {
     expect(html).toContain('No crawl runs recorded yet.')
   })
 
-  it('renders account counts when summary is present', () => {
+  it('renders account counts and per-source metrics when summary is present', () => {
     const html = renderToStaticMarkup(
       <LatestCrawlSummarySection
         summary={{
@@ -20,10 +20,22 @@ describe('LatestCrawlSummarySection', () => {
           accountCount: 10,
           successCount: 9,
           partialOrFailedCount: 1,
+          recommendedCount: 100,
+          followingCount: 50,
+          trendingCount: 20,
+          replyCount: 5,
+          profileCount: 10,
+          labelsAppliedCount: 30,
+          warningCount: 2,
+          totalDurationMs: 15 * 60_000,
+          appVersions: ['1.2.0'],
         }}
       />,
     )
     expect(html).toContain('10')
     expect(html).toContain('9')
+    expect(html).toContain('100')
+    expect(html).toContain('30')
+    expect(html).toContain('1.2.0')
   })
 })

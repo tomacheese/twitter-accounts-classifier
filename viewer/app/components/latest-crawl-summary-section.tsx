@@ -18,14 +18,32 @@ export function LatestCrawlSummarySection({
       {summary === null ? (
         <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">No crawl runs recorded yet.</p>
       ) : (
-        <div className="mt-2 grid gap-4 sm:grid-cols-3">
-          <StatTile label="Accounts processed" value={summary.accountCount.toLocaleString()} />
-          <StatTile label="Succeeded" value={summary.successCount.toLocaleString()} />
-          <StatTile
-            label="Partial or failed"
-            value={summary.partialOrFailedCount.toLocaleString()}
-          />
-        </div>
+        <>
+          <div className="mt-2 grid gap-4 sm:grid-cols-3">
+            <StatTile label="Accounts processed" value={summary.accountCount.toLocaleString()} />
+            <StatTile label="Succeeded" value={summary.successCount.toLocaleString()} />
+            <StatTile
+              label="Partial or failed"
+              value={summary.partialOrFailedCount.toLocaleString()}
+            />
+          </div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-4">
+            <StatTile label="Recommended" value={summary.recommendedCount.toLocaleString()} />
+            <StatTile label="Following" value={summary.followingCount.toLocaleString()} />
+            <StatTile label="Trending" value={summary.trendingCount.toLocaleString()} />
+            <StatTile label="Reply" value={summary.replyCount.toLocaleString()} />
+            <StatTile label="Profile" value={summary.profileCount.toLocaleString()} />
+            <StatTile label="Labels applied" value={summary.labelsAppliedCount.toLocaleString()} />
+            <StatTile label="Warnings" value={summary.warningCount.toLocaleString()} />
+            <StatTile
+              label="Total processing time"
+              value={`${Math.round(summary.totalDurationMs / 60_000).toLocaleString()} min`}
+            />
+          </div>
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            App version: {summary.appVersions.length > 0 ? summary.appVersions.join(', ') : '-'}
+          </p>
+        </>
       )}
       <Link
         href="/crawl-runs"
