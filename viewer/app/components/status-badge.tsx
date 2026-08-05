@@ -1,3 +1,4 @@
+import React from 'react'
 import type { CrawlRunStatus } from '@/lib/crawl-run-status'
 
 const STATUS_STYLES: Partial<Record<CrawlRunStatus, string>> = {
