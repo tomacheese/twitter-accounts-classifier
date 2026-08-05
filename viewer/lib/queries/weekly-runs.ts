@@ -10,6 +10,11 @@ export interface WeeklyRunSummary {
   commitSha: string | null
   sampledAccountCount: number
   findings: string | null
+  status: string
+  currentPhase: string | null
+  errorMessage: string | null
+  pullRequestNumber: number | null
+  pullRequestUrl: string | null
 }
 
 function toSummary(run: WeeklyAnalysisRun): WeeklyRunSummary {
@@ -20,24 +25,12 @@ function toSummary(run: WeeklyAnalysisRun): WeeklyRunSummary {
     commitSha: run.commitSha,
     sampledAccountCount: Array.isArray(run.sampledAccountIds) ? run.sampledAccountIds.length : 0,
     findings: run.findings,
+    status: run.status,
+    currentPhase: run.currentPhase,
+    errorMessage: run.errorMessage,
+    pullRequestNumber: run.pullRequestNumber,
+    pullRequestUrl: run.pullRequestUrl,
   }
-}
-
-/**
- * ダッシュボードの概要向けに、直近の週次分析実行を読み込む。
- * @param prisma - クエリを実行する Prisma クライアント
- * @param limit - 取得する実行数の上限
- * @returns 新しい順で最大 limit 件の実行
- */
-export async function getRecentWeeklyRuns(
-  prisma: PrismaClient,
-  limit: number,
-): Promise<WeeklyRunSummary[]> {
-  const runs = await prisma.weeklyAnalysisRun.findMany({
-    orderBy: { startedAt: 'desc' },
-    take: limit,
-  })
-  return runs.map((run) => toSummary(run))
 }
 
 /**

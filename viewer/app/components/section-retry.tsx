@@ -1,6 +1,6 @@
 'use client'
 
-import { useTransition } from 'react'
+import React, { useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 
 export function SectionRetry(): React.ReactElement {

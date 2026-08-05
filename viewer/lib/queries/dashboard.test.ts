@@ -122,6 +122,36 @@ describe('getLabelDistribution', () => {
   })
 })
 
+describe('getTopLabelOverview', () => {
+  it('returns entries sorted by trueCount descending, limited to the given count', async () => {
+    const { getTopLabelOverview } = await import('./dashboard')
+    const prisma = createMockPrisma([
+      {
+        labeledAccounts: 3n,
+        distribution: [
+          { labelKey: 'topic_tech', labelDescription: 'Tech', trueCount: 5, totalAccounts: 100 },
+          {
+            labelKey: 'blue_verified',
+            labelDescription: 'Verified',
+            trueCount: 20,
+            totalAccounts: 100,
+          },
+          {
+            labelKey: 'topic_finance',
+            labelDescription: 'Finance',
+            trueCount: 12,
+            totalAccounts: 100,
+          },
+        ],
+      },
+    ])
+
+    const entries = await getTopLabelOverview(prisma, 2)
+
+    expect(entries.map((entry) => entry.labelKey)).toEqual(['blue_verified', 'topic_finance'])
+  })
+})
+
 describe('statement_timeout', () => {
   it('sets statement_timeout before running the merged raw query', async () => {
     const { getLabelDistribution } = await import('./dashboard')

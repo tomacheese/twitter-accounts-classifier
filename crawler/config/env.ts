@@ -72,3 +72,12 @@ export function getCrawlIntervalSeconds(): number {
 export function getCrawlStaleThresholdMultiplier(): number {
   return parsePositiveIntEnv('CRAWL_STALE_THRESHOLD_MULTIPLIER', 3)
 }
+
+/**
+ * 週次分析の停止放置判定しきい値 (秒)。1回のハートビート間隔として妥当な値の何倍かではなく、
+ * CI 待ちやレビュー対応を挟む長時間ワークフローであるため、直接秒数で設定できるようにしている。
+ * @returns 停止放置判定のしきい値 (秒)
+ */
+export function getWeeklyAnalysisStaleThresholdSeconds(): number {
+  return parsePositiveIntEnv('WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS', 7200)
+}

@@ -36,7 +36,12 @@ describe('startOrResumeBlockRun', () => {
 
     expect(result.id).toBe('run-1')
     expect(prisma.blockRun.create).toHaveBeenCalledWith({
-      data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
+      data: {
+        startedAt,
+        lastHeartbeatAt: startedAt,
+        status: 'running',
+        staleAfterAt: new Date(startedAt.getTime() + 3_600_000),
+      },
     })
   })
 
@@ -70,7 +75,12 @@ describe('startOrResumeBlockRun', () => {
       data: { finishedAt: staleHeartbeat, status: 'failed' },
     })
     expect(prisma.blockRun.create).toHaveBeenCalledWith({
-      data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
+      data: {
+        startedAt,
+        lastHeartbeatAt: startedAt,
+        status: 'running',
+        staleAfterAt: new Date(startedAt.getTime() + 3_600_000),
+      },
     })
     expect(result.id).toBe('run-1')
   })
@@ -91,15 +101,27 @@ describe('finishBlockRun', () => {
 })
 
 describe('touchBlockRunHeartbeat', () => {
-  it('updates lastHeartbeatAt', async () => {
+  it('updates lastHeartbeatAt and staleAfterAt', async () => {
     const prisma = fakePrisma()
     const at = new Date('2026-08-04T00:30:00Z')
 
-    await touchBlockRunHeartbeat(prisma as never, 'run-1', at)
+    await touchBlockRunHeartbeat(prisma as never, 'run-1', at, 3_600_000)
 
     expect(prisma.blockRun.update).toHaveBeenCalledWith({
       where: { id: 'run-1' },
-      data: { lastHeartbeatAt: at },
+      data: { lastHeartbeatAt: at, staleAfterAt: new Date('2026-08-04T01:30:00Z') },
+    })
+  })
+
+  it('updates lastHeartbeatAt and staleAfterAt from the given time and threshold', async () => {
+    const prisma = fakePrisma()
+    const at = new Date('2026-08-05T00:00:00Z')
+
+    await touchBlockRunHeartbeat(prisma as never, 'run-1', at, 3_600_000)
+
+    expect(prisma.blockRun.update).toHaveBeenCalledWith({
+      where: { id: 'run-1' },
+      data: { lastHeartbeatAt: at, staleAfterAt: new Date('2026-08-05T01:00:00Z') },
     })
   })
 })

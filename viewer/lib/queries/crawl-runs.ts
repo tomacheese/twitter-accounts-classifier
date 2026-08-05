@@ -14,28 +14,9 @@ export interface CrawlRunListItem extends CrawlRun {
 }
 
 /**
- * ダッシュボードの概要向けに、直近のクロール実行をアカウント件数のみで読み込む。
+ * 履歴一覧ページ向けに、クロール実行の全履歴をアカウント件数のみで読み込む。
  * アカウント単位の詳細は意図的に含めない (詳細は {@link getCrawlRunDetail})。
  * 各実行に蓄積したアカウント数によらず、このクエリを軽量に保つため。
- * @param prisma - クエリを実行する Prisma クライアント
- * @param limit - 取得する実行数の上限
- * @returns 新しい順で最大 limit 件の実行 (アカウント件数のみ)
- */
-export async function getRecentCrawlRuns(
-  prisma: PrismaClient,
-  limit: number,
-): Promise<CrawlRunListItem[]> {
-  const runs = await prisma.crawlRun.findMany({
-    orderBy: { startedAt: 'desc' },
-    take: limit,
-    include: { _count: { select: { accountRuns: true } } },
-  })
-  return runs.map(({ _count, ...run }) => ({ ...run, accountRunCount: _count.accountRuns }))
-}
-
-/**
- * 履歴一覧ページ向けに、クロール実行の全履歴をアカウント件数のみで読み込む。
- * アカウント単位の詳細を含めない理由は {@link getRecentCrawlRuns} と同じ。
  * 実行自体はページネーションしていないため、クロールを重ねるほど件数は増え続ける。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns 新しい順の全実行 (アカウント件数のみ)

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
-import { getAllCrawlRuns, getCrawlRunDetail, getRecentCrawlRuns } from './crawl-runs'
+import { getAllCrawlRuns, getCrawlRunDetail } from './crawl-runs'
 
 function buildRun(overrides: Record<string, unknown> = {}) {
   return {
@@ -31,27 +31,6 @@ function buildRun(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 }
-
-describe('getRecentCrawlRuns', () => {
-  it('loads recent runs, most recent first, with only their account count', async () => {
-    const { accountRuns, ...runWithoutAccountRuns } = buildRun()
-    const findMany = vi
-      .fn()
-      .mockResolvedValue([
-        { ...runWithoutAccountRuns, _count: { accountRuns: accountRuns.length } },
-      ])
-    const prisma = { crawlRun: { findMany } } as unknown as PrismaClient
-
-    const result = await getRecentCrawlRuns(prisma, 5)
-
-    expect(result).toEqual([{ ...runWithoutAccountRuns, accountRunCount: accountRuns.length }])
-    expect(findMany).toHaveBeenCalledWith({
-      orderBy: { startedAt: 'desc' },
-      take: 5,
-      include: { _count: { select: { accountRuns: true } } },
-    })
-  })
-})
 
 describe('getAllCrawlRuns', () => {
   it('loads every run, most recent first, with only its account count', async () => {
