@@ -4,6 +4,7 @@ import {
   getCrawlIntervalSeconds,
   getCrawlStaleThresholdMultiplier,
   getCrawlWarningThreshold,
+  getWeeklyAnalysisStaleThresholdSeconds,
 } from './env'
 
 const { warnMock } = vi.hoisted(() => ({ warnMock: vi.fn() }))
@@ -167,6 +168,35 @@ describe('getCrawlStaleThresholdMultiplier', () => {
     process.env.CRAWL_STALE_THRESHOLD_MULTIPLIER = '-1'
     expect(() => getCrawlStaleThresholdMultiplier()).toThrow(
       'CRAWL_STALE_THRESHOLD_MULTIPLIER environment variable must be a positive integer',
+    )
+  })
+})
+
+describe('getWeeklyAnalysisStaleThresholdSeconds', () => {
+  const originalValue = process.env.WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env.WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS
+    } else {
+      process.env.WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS = originalValue
+    }
+  })
+
+  it('returns 7200 when unset', () => {
+    delete process.env.WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS
+    expect(getWeeklyAnalysisStaleThresholdSeconds()).toBe(7200)
+  })
+
+  it('returns the configured value', () => {
+    process.env.WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS = '3600'
+    expect(getWeeklyAnalysisStaleThresholdSeconds()).toBe(3600)
+  })
+
+  it('throws when the value is not a positive integer', () => {
+    process.env.WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS = '-1'
+    expect(() => getWeeklyAnalysisStaleThresholdSeconds()).toThrow(
+      'WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS environment variable must be a positive integer',
     )
   })
 })
