@@ -1,48 +1,99 @@
 import { Suspense } from 'react'
-import {
-  DashboardSummary,
-  DashboardSummarySkeleton,
-  LabelDistributionSection,
-  LabelDistributionSkeleton,
-  RecentCrawlRuns,
-  RecentWeeklyRuns,
-  RunListSkeleton,
-} from './components/dashboard-sections'
+import { getPrismaClient } from '../lib/prisma'
+import { getSystemStatus } from '../lib/queries/system-status'
+import { getAttentionRequiredItems } from '../lib/queries/attention-required'
+import { getLatestCrawlSummary } from '../lib/queries/latest-crawl-summary'
+import { getLatestBlockSummary } from '../lib/queries/latest-block-summary'
+import { getTopLabelOverview } from '../lib/queries/dashboard'
+import { SystemStatusSection } from './components/system-status-section'
+import { AttentionRequiredSection } from './components/attention-required-section'
+import { LatestCrawlSummarySection } from './components/latest-crawl-summary-section'
+import { LatestBlockSummarySection } from './components/latest-block-summary-section'
+import { DashboardSummary, DashboardSummarySkeleton } from './components/dashboard-kpi-section'
+import { LabelOverviewSection } from './components/label-overview-section'
+import { ErrorFallback } from './components/error-fallback'
 
 export const dynamic = 'force-dynamic'
 
-export default function DashboardPage(): React.ReactElement {
+const TOP_LABEL_LIMIT = 10
+
+async function SystemStatusSectionData(): Promise<React.JSX.Element> {
+  const prisma = getPrismaClient()
+  try {
+    const entries = await getSystemStatus(prisma, new Date())
+    return <SystemStatusSection entries={entries} />
+  } catch (error) {
+    console.error('Failed to load system status:', error)
+    return <ErrorFallback message="Failed to load the system status." />
+  }
+}
+
+async function AttentionRequiredSectionData(): Promise<React.JSX.Element> {
+  const prisma = getPrismaClient()
+  try {
+    const items = await getAttentionRequiredItems(prisma, new Date())
+    return <AttentionRequiredSection items={items} />
+  } catch (error) {
+    console.error('Failed to load attention required items:', error)
+    return <ErrorFallback message="Failed to load the attention required items." />
+  }
+}
+
+async function LatestCrawlSummarySectionData(): Promise<React.JSX.Element> {
+  const prisma = getPrismaClient()
+  try {
+    const summary = await getLatestCrawlSummary(prisma)
+    return <LatestCrawlSummarySection summary={summary} />
+  } catch (error) {
+    console.error('Failed to load the latest crawl summary:', error)
+    return <ErrorFallback message="Failed to load the latest crawl summary." />
+  }
+}
+
+async function LatestBlockSummarySectionData(): Promise<React.JSX.Element> {
+  const prisma = getPrismaClient()
+  try {
+    const summary = await getLatestBlockSummary(prisma)
+    return <LatestBlockSummarySection summary={summary} />
+  } catch (error) {
+    console.error('Failed to load the latest block summary:', error)
+    return <ErrorFallback message="Failed to load the latest block summary." />
+  }
+}
+
+async function LabelOverviewSectionData(): Promise<React.JSX.Element> {
+  const prisma = getPrismaClient()
+  try {
+    const entries = await getTopLabelOverview(prisma, TOP_LABEL_LIMIT)
+    return <LabelOverviewSection entries={entries} />
+  } catch (error) {
+    console.error('Failed to load the label overview:', error)
+    return <ErrorFallback message="Failed to load the label overview." />
+  }
+}
+
+export default function DashboardPage(): React.JSX.Element {
   return (
-    <div className="flex flex-col gap-8">
+    <main className="flex flex-col gap-8 p-8">
       <h1 className="sr-only">Dashboard</h1>
+      <Suspense fallback={<p>Loading system status…</p>}>
+        <SystemStatusSectionData />
+      </Suspense>
+      <Suspense fallback={<p>Loading attention required…</p>}>
+        <AttentionRequiredSectionData />
+      </Suspense>
+      <Suspense fallback={<p>Loading latest crawl summary…</p>}>
+        <LatestCrawlSummarySectionData />
+      </Suspense>
+      <Suspense fallback={<p>Loading latest block summary…</p>}>
+        <LatestBlockSummarySectionData />
+      </Suspense>
       <Suspense fallback={<DashboardSummarySkeleton />}>
         <DashboardSummary />
       </Suspense>
-      <Suspense
-        fallback={
-          <RunListSkeleton
-            headingId="recent-weekly-runs-heading"
-            title="Recent weekly runs"
-            contentLineCount={4}
-          />
-        }
-      >
-        <RecentWeeklyRuns />
+      <Suspense fallback={<p>Loading label overview…</p>}>
+        <LabelOverviewSectionData />
       </Suspense>
-      <Suspense
-        fallback={
-          <RunListSkeleton
-            headingId="recent-crawl-runs-heading"
-            title="Recent crawl runs"
-            contentLineCount={1}
-          />
-        }
-      >
-        <RecentCrawlRuns />
-      </Suspense>
-      <Suspense fallback={<LabelDistributionSkeleton />}>
-        <LabelDistributionSection />
-      </Suspense>
-    </div>
+    </main>
   )
 }
