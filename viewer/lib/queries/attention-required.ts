@@ -205,5 +205,5 @@ export async function getAttentionRequiredItems(
     })
   }
 
-  return items.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())
+  return items.toSorted((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())
 }

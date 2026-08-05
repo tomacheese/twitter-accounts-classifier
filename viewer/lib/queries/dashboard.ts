@@ -207,5 +207,5 @@ export async function getTopLabelOverview(
   limit: number,
 ): Promise<LabelDistributionEntry[]> {
   const distribution = await getLabelDistribution(prisma)
-  return [...distribution].sort((a, b) => b.trueCount - a.trueCount).slice(0, limit)
+  return distribution.toSorted((a, b) => b.trueCount - a.trueCount).slice(0, limit)
 }

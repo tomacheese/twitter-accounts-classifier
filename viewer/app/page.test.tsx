@@ -19,7 +19,7 @@ const { SystemStatusSectionData } = await import('./page')
 describe('SystemStatusSectionData', () => {
   beforeEach(() => {
     vi.mocked(getSystemStatus).mockReset()
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
   })
 
   it('renders a section-scoped retry button instead of the whole-route fallback when the query fails', async () => {
