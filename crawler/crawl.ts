@@ -1301,7 +1301,7 @@ async function main(): Promise<void> {
     clearCrawlAccountCheckpoints: (crawlRunId) =>
       clearCrawlAccountCheckpointsRecord(prisma, crawlRunId),
     touchCrawlRunHeartbeat: (crawlRunId) =>
-      touchCrawlRunHeartbeatRecord(prisma, crawlRunId, new Date()),
+      touchCrawlRunHeartbeatRecord(prisma, crawlRunId, new Date(), staleThresholdMs),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }
 

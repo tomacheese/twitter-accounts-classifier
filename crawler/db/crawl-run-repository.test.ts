@@ -29,7 +29,12 @@ describe('startOrResumeCrawlRun', () => {
       select: { id: true, lastHeartbeatAt: true },
     })
     expect(create).toHaveBeenCalledWith({
-      data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
+      data: {
+        startedAt,
+        lastHeartbeatAt: startedAt,
+        status: 'running',
+        staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
+      },
     })
   })
 
@@ -112,7 +117,12 @@ describe('startOrResumeCrawlRun', () => {
     expect(deleteCheckpoints).toHaveBeenCalledWith({ where: { crawlRunId: 'abandoned-run' } })
     expect(deleteLabelClaims).toHaveBeenCalledWith({ where: { crawlRunId: 'abandoned-run' } })
     expect(create).toHaveBeenCalledWith({
-      data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
+      data: {
+        startedAt,
+        lastHeartbeatAt: startedAt,
+        status: 'running',
+        staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
+      },
     })
   })
 
@@ -137,16 +147,16 @@ describe('startOrResumeCrawlRun', () => {
 })
 
 describe('touchCrawlRunHeartbeat', () => {
-  it('updates lastHeartbeatAt for the given run id', async () => {
+  it('updates lastHeartbeatAt and staleAfterAt from the given time and threshold', async () => {
     const update = vi.fn().mockResolvedValue({})
     const prisma = { crawlRun: { update } } as unknown as PrismaClient
-    const at = new Date('2026-07-28T00:10:00Z')
+    const at = new Date('2026-08-05T00:00:00Z')
 
-    await touchCrawlRunHeartbeat(prisma, 'run1', at)
+    await touchCrawlRunHeartbeat(prisma, 'run1', at, 3_600_000)
 
     expect(update).toHaveBeenCalledWith({
       where: { id: 'run1' },
-      data: { lastHeartbeatAt: at },
+      data: { lastHeartbeatAt: at, staleAfterAt: new Date('2026-08-05T01:00:00Z') },
     })
   })
 })

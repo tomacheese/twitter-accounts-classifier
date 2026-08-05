@@ -95,18 +95,23 @@ export interface CrawlRunStartResult {
 }
 
 /**
- * アカウント処理が進む限り定期的に呼び出す必要がある:
+ * アカウント処理が進む限り定期的に呼び出す必要がある。
  * 放置判定 (startOrResumeCrawlRun) がこの値を基準にするため。
  * @param prisma - Prisma クライアント
  * @param id - 対象の CrawlRun ID
  * @param at - 記録する時刻
+ * @param staleThresholdMs - 放置判定のしきい値 (ミリ秒)。staleAfterAt の算出に使う
  */
 export async function touchCrawlRunHeartbeat(
   prisma: PrismaClient,
   id: string,
   at: Date,
+  staleThresholdMs: number,
 ): Promise<void> {
-  await prisma.crawlRun.update({ where: { id }, data: { lastHeartbeatAt: at } })
+  await prisma.crawlRun.update({
+    where: { id },
+    data: { lastHeartbeatAt: at, staleAfterAt: new Date(at.getTime() + staleThresholdMs) },
+  })
 }
 
 /**
@@ -278,7 +283,12 @@ export async function startOrResumeCrawlRun(
   }
 
   const run = await prisma.crawlRun.create({
-    data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
+    data: {
+      startedAt,
+      lastHeartbeatAt: startedAt,
+      status: 'running',
+      staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
+    },
   })
   return { id: run.id, latestAccountStatuses: new Map() }
 }
