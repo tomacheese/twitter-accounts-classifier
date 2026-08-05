@@ -63,6 +63,27 @@ export async function getLatestCrawlSummary(
   const successCount = accountRuns.filter((run) => run.status === 'success').length
   const appVersions = [...new Set(accountRuns.map((run) => run.appVersion))].toSorted()
 
+  let recommendedCount = 0
+  let followingCount = 0
+  let trendingCount = 0
+  let replyCount = 0
+  let profileCount = 0
+  let labelsAppliedCount = 0
+  let warningCount = 0
+  let totalDurationMs = 0
+  for (const run of accountRuns) {
+    recommendedCount += run.recommendedCount
+    followingCount += run.followingCount
+    trendingCount += run.trendingCount
+    replyCount += run.replyCount
+    profileCount += run.profileCount
+    labelsAppliedCount += run.labelsAppliedCount
+    warningCount += run.warnings.length
+    if (run.finishedAt) {
+      totalDurationMs += run.finishedAt.getTime() - run.startedAt.getTime()
+    }
+  }
+
   return {
     crawlRunId: latestRun.id,
     startedAt: latestRun.startedAt,
@@ -71,17 +92,14 @@ export async function getLatestCrawlSummary(
     accountCount: accountRuns.length,
     successCount,
     partialOrFailedCount: accountRuns.length - successCount,
-    recommendedCount: accountRuns.reduce((sum, run) => sum + run.recommendedCount, 0),
-    followingCount: accountRuns.reduce((sum, run) => sum + run.followingCount, 0),
-    trendingCount: accountRuns.reduce((sum, run) => sum + run.trendingCount, 0),
-    replyCount: accountRuns.reduce((sum, run) => sum + run.replyCount, 0),
-    profileCount: accountRuns.reduce((sum, run) => sum + run.profileCount, 0),
-    labelsAppliedCount: accountRuns.reduce((sum, run) => sum + run.labelsAppliedCount, 0),
-    warningCount: accountRuns.reduce((sum, run) => sum + run.warnings.length, 0),
-    totalDurationMs: accountRuns.reduce((sum, run) => {
-      if (!run.finishedAt) return sum
-      return sum + (run.finishedAt.getTime() - run.startedAt.getTime())
-    }, 0),
+    recommendedCount,
+    followingCount,
+    trendingCount,
+    replyCount,
+    profileCount,
+    labelsAppliedCount,
+    warningCount,
+    totalDurationMs,
     appVersions,
   }
 }

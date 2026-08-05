@@ -41,15 +41,24 @@ export async function getLatestBlockSummary(
     orderBy: [{ finishedAt: 'desc' }, { id: 'desc' }],
   })
 
+  let candidatesCount = 0
+  let blockedCount = 0
+  let failureCount = 0
+  for (const run of accountRuns) {
+    candidatesCount += run.candidatesCount
+    blockedCount += run.blockedCount
+    failureCount += run.failedCount
+  }
+
   return {
     blockRunId: latestRun.id,
     startedAt: latestRun.startedAt,
     finishedAt: latestRun.finishedAt,
     status: latestRun.status,
     accountRunCount: accountRuns.length,
-    candidatesCount: accountRuns.reduce((sum, run) => sum + run.candidatesCount, 0),
-    blockedCount: accountRuns.reduce((sum, run) => sum + run.blockedCount, 0),
-    failureCount: accountRuns.reduce((sum, run) => sum + run.failedCount, 0),
+    candidatesCount,
+    blockedCount,
+    failureCount,
     lastSuccessAt: lastSuccessfulRun?.finishedAt ?? null,
   }
 }
