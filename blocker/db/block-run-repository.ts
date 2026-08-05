@@ -58,13 +58,18 @@ export async function finishBlockRun(
  * @param prisma - Prisma クライアント
  * @param id - 対象の `BlockRun` ID
  * @param at - 記録する時刻
+ * @param staleThresholdMs - 放置判定のしきい値 (ミリ秒)。staleAfterAt の算出に使う
  */
 export async function touchBlockRunHeartbeat(
   prisma: PrismaClient,
   id: string,
   at: Date,
+  staleThresholdMs: number,
 ): Promise<void> {
-  await prisma.blockRun.update({ where: { id }, data: { lastHeartbeatAt: at } })
+  await prisma.blockRun.update({
+    where: { id },
+    data: { lastHeartbeatAt: at, staleAfterAt: new Date(at.getTime() + staleThresholdMs) },
+  })
 }
 
 /**
@@ -102,7 +107,12 @@ export async function startOrResumeBlockRun(
   }
 
   const run = await prisma.blockRun.create({
-    data: { startedAt, lastHeartbeatAt: startedAt, status: 'running' },
+    data: {
+      startedAt,
+      lastHeartbeatAt: startedAt,
+      status: 'running',
+      staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
+    },
   })
   return { id: run.id }
 }

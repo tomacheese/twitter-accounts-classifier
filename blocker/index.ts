@@ -57,7 +57,7 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
   )
 
   for (const account of targetAccounts) {
-    await deps.touchBlockRunHeartbeat(deps.prisma, run.id, new Date())
+    await deps.touchBlockRunHeartbeat(deps.prisma, run.id, new Date(), staleThresholdMs)
     try {
       const summary = await deps.runBlockAccountCycle(
         {
