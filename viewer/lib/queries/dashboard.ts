@@ -196,3 +196,16 @@ export async function getLabelDistribution(
   const summary = await getLatestLabelsSummary(prisma)
   return summary.distribution
 }
+
+/**
+ * @param prisma - クエリを実行する Prisma クライアント
+ * @param limit - 取得する件数の上限
+ * @returns 陽性件数の多い順で最大 limit 件のラベル分布
+ */
+export async function getTopLabelOverview(
+  prisma: PrismaClient,
+  limit: number,
+): Promise<LabelDistributionEntry[]> {
+  const distribution = await getLabelDistribution(prisma)
+  return [...distribution].sort((a, b) => b.trueCount - a.trueCount).slice(0, limit)
+}

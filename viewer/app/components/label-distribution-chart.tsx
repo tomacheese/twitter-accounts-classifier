@@ -1,5 +1,6 @@
 'use client'
 
+import React from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import Link from 'next/link'
 import type { LabelDistributionEntry } from '@/lib/queries/dashboard'
