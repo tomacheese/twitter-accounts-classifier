@@ -1,3 +1,5 @@
+import React from 'react'
+
 /**
  * @param props - タイルに表示するラベルと値
  * @returns 描画された stat タイル
