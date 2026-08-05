@@ -186,8 +186,8 @@ describe('getAttentionRequiredItems', () => {
     const makeRuns = (count: number, offsetMinutes: number) =>
       Array.from({ length: count }, (_, index) => ({
         id: `run-${offsetMinutes}-${index}`,
-        startedAt: new Date(baseTime - (offsetMinutes + index) * 60000),
-        finishedAt: new Date(baseTime - (offsetMinutes + index) * 60000),
+        startedAt: new Date(baseTime - (offsetMinutes + index) * 60_000),
+        finishedAt: new Date(baseTime - (offsetMinutes + index) * 60_000),
       }))
     const prisma = createMockPrisma({
       failedCrawlRuns: makeRuns(20, 0),
