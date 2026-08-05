@@ -11,8 +11,8 @@ const HEALTHY_STATUSES = new Set(['success', 'completed'])
 const FAILED_STATUSES = new Set(['failed', 'timeout'])
 
 /**
- * 各サービスの raw status の語彙差 (Crawler は success/partial/failed、Blocker は completed/failed、週次分析は success/failed/timeout) がある。
- * ここではそれをまとめて健全性の4分類 (healthy/degraded/failed/unknown) へ畳み込む。
+ * サービスごとに raw status の語彙が異なるため、個別に分岐を用意するのではなく
+ * ここで共通の health status へ畳み込むことで、判定ロジックを一箇所に集約している。
  * @param run - 対象サービスの直近の実行。実行記録が一件もなければ `null`
  * @param now - 判定基準時刻
  * @returns 導出された health status

@@ -310,6 +310,7 @@ model BlockAccountRun {
 
   @@index([blockRunId])
   @@index([blockRunId, username, startedAt(sort: Desc), id(sort: Desc)])
+  @@index([errorMessage, startedAt(sort: Desc), id(sort: Desc)])
 }
 
 model BlockAction {

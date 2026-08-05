@@ -5,7 +5,9 @@ import {
   createWeeklyAnalysisRun,
   failWeeklyAnalysisRun,
   getWeeklyAnalysisRun,
+  isWeeklyAnalysisRunStatus,
   listRunningWeeklyAnalysisRuns,
+  recordWeeklyAnalysisRunPullRequest,
   timeoutWeeklyAnalysisRun,
   touchWeeklyAnalysisRunHeartbeat,
 } from './weekly-analysis-run-repository'
@@ -29,8 +31,6 @@ function toRow(overrides: Record<string, unknown> = {}) {
   }
 }
 
-// toRow が返す生の行と toRecord による変換後の形は一致するが、
-// 呼び出し側の意図を明確にするための別名として定義する。
 function toRecordLike(overrides: Record<string, unknown> = {}) {
   return toRow({ currentPhase: 'sampling', ...overrides })
 }
@@ -168,6 +168,64 @@ describe('failWeeklyAnalysisRun', () => {
 
     expect(result.ok).toBe(false)
     expect(result.alreadyTerminal).toBe(true)
+  })
+})
+
+describe('recordWeeklyAnalysisRunPullRequest', () => {
+  it('updates pullRequestNumber and pullRequestUrl while status is running', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const findUnique = vi
+      .fn()
+      .mockResolvedValue(
+        toRow({ pullRequestNumber: 42, pullRequestUrl: 'https://example.com/pr/42' }),
+      )
+    const prisma = {
+      weeklyAnalysisRun: { updateMany, findUnique },
+    } as unknown as PrismaClient
+
+    const result = await recordWeeklyAnalysisRunPullRequest(
+      prisma,
+      'run1',
+      42,
+      'https://example.com/pr/42',
+    )
+
+    expect(result.ok).toBe(true)
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'run1', status: 'running' },
+      data: { pullRequestNumber: 42, pullRequestUrl: 'https://example.com/pr/42' },
+    })
+  })
+
+  it('reports alreadyTerminal when the row is no longer running', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 })
+    const findUnique = vi.fn().mockResolvedValue(toRow({ status: 'failed' }))
+    const prisma = {
+      weeklyAnalysisRun: { updateMany, findUnique },
+    } as unknown as PrismaClient
+
+    const result = await recordWeeklyAnalysisRunPullRequest(
+      prisma,
+      'run1',
+      42,
+      'https://example.com/pr/42',
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.alreadyTerminal).toBe(true)
+  })
+})
+
+describe('isWeeklyAnalysisRunStatus', () => {
+  it('accepts every known status value', () => {
+    expect(isWeeklyAnalysisRunStatus('running')).toBe(true)
+    expect(isWeeklyAnalysisRunStatus('success')).toBe(true)
+    expect(isWeeklyAnalysisRunStatus('failed')).toBe(true)
+    expect(isWeeklyAnalysisRunStatus('timeout')).toBe(true)
+  })
+
+  it('rejects an unknown status value', () => {
+    expect(isWeeklyAnalysisRunStatus('unknown')).toBe(false)
   })
 })
 

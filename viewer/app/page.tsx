@@ -1,4 +1,4 @@
-import { Suspense } from 'react'
+import React, { Suspense } from 'react'
 import { getPrismaClient } from '../lib/prisma'
 import { getSystemStatus } from '../lib/queries/system-status'
 import { getAttentionRequiredItems } from '../lib/queries/attention-required'
@@ -11,20 +11,26 @@ import { LatestCrawlSummarySection } from './components/latest-crawl-summary-sec
 import { LatestBlockSummarySection } from './components/latest-block-summary-section'
 import { DashboardSummary, DashboardSummarySkeleton } from './components/dashboard-kpi-section'
 import { LabelOverviewSection } from './components/label-overview-section'
-import { ErrorFallback } from './components/error-fallback'
+import { DashboardSectionError } from './components/dashboard-section-error'
 
 export const dynamic = 'force-dynamic'
 
 const TOP_LABEL_LIMIT = 10
 
-async function SystemStatusSectionData(): Promise<React.JSX.Element> {
+export async function SystemStatusSectionData(): Promise<React.JSX.Element> {
   const prisma = getPrismaClient()
   try {
     const entries = await getSystemStatus(prisma, new Date())
     return <SystemStatusSection entries={entries} />
   } catch (error) {
     console.error('Failed to load system status:', error)
-    return <ErrorFallback message="Failed to load the system status." />
+    return (
+      <DashboardSectionError
+        headingId="system-status-heading"
+        title="System status"
+        message="Failed to load the system status."
+      />
+    )
   }
 }
 
@@ -35,7 +41,13 @@ async function AttentionRequiredSectionData(): Promise<React.JSX.Element> {
     return <AttentionRequiredSection items={items} />
   } catch (error) {
     console.error('Failed to load attention required items:', error)
-    return <ErrorFallback message="Failed to load the attention required items." />
+    return (
+      <DashboardSectionError
+        headingId="attention-required-heading"
+        title="Attention required"
+        message="Failed to load the attention required items."
+      />
+    )
   }
 }
 
@@ -46,7 +58,13 @@ async function LatestCrawlSummarySectionData(): Promise<React.JSX.Element> {
     return <LatestCrawlSummarySection summary={summary} />
   } catch (error) {
     console.error('Failed to load the latest crawl summary:', error)
-    return <ErrorFallback message="Failed to load the latest crawl summary." />
+    return (
+      <DashboardSectionError
+        headingId="latest-crawl-summary-heading"
+        title="Latest crawl summary"
+        message="Failed to load the latest crawl summary."
+      />
+    )
   }
 }
 
@@ -57,7 +75,13 @@ async function LatestBlockSummarySectionData(): Promise<React.JSX.Element> {
     return <LatestBlockSummarySection summary={summary} />
   } catch (error) {
     console.error('Failed to load the latest block summary:', error)
-    return <ErrorFallback message="Failed to load the latest block summary." />
+    return (
+      <DashboardSectionError
+        headingId="latest-block-summary-heading"
+        title="Latest block summary"
+        message="Failed to load the latest block summary."
+      />
+    )
   }
 }
 
@@ -68,7 +92,13 @@ async function LabelOverviewSectionData(): Promise<React.JSX.Element> {
     return <LabelOverviewSection entries={entries} />
   } catch (error) {
     console.error('Failed to load the label overview:', error)
-    return <ErrorFallback message="Failed to load the label overview." />
+    return (
+      <DashboardSectionError
+        headingId="label-overview-heading"
+        title="Label overview"
+        message="Failed to load the label overview."
+      />
+    )
   }
 }
 

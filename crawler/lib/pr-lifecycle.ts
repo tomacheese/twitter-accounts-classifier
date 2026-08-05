@@ -27,7 +27,6 @@ export interface PrSnapshot {
 /**
  * ここで名前一致のみを見て正規表現等で緩めていないのは、
  * CI ワークフロー名の変更・分割を PR 分類ロジックが黙って見逃すのを避けるため。
- * 一致しない場合は waiting_checks 側に倒し、ready と誤判定しない。
  */
 const REQUIRED_CHECK_NAMES = [
   'Node CI / Check finished Node CI',

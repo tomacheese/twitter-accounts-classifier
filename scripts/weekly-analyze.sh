@@ -49,8 +49,8 @@ if [ -z "$JQ_BIN" ]; then
   exit 1
 fi
 
-# WeeklyAnalysisRun の ID から各種名前を決定的に導出することで、新旧のスーパーバイザーが
-# 同時に走っても衝突しない (固定名前提だった従来のセッション・worktree 管理を置き換える)。
+# 固定名前提だった従来の管理方式では新旧のスーパーバイザーが同時に走ると衝突するため、
+# WeeklyAnalysisRun の ID から各種名前を決定的に導出する。
 echo "[weekly-analyze] creating WeeklyAnalysisRun record"
 RUN_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts create)"
 RUN_ID="$(printf '%s' "$RUN_JSON" | "$JQ_BIN" -r '.id')"
@@ -65,7 +65,6 @@ WORKTREE_DIR="$(pwd)/.worktrees/weekly-crawl-review-$RUN_ID"
 WORKTREE_BRANCH="weekly-crawl-review-$RUN_ID"
 DIAGNOSTICS_DIR="$(pwd)/logs/weekly-analysis-runs/$RUN_ID"
 
-# 前回実行が running のまま残っている場合、その PR の状態を確認してから今回の実行に進む。
 echo "[weekly-analyze] checking for still-running previous WeeklyAnalysisRun records"
 PREVIOUS_RUNS_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts list-running)"
 PREVIOUS_RUN_IDS="$(printf '%s' "$PREVIOUS_RUNS_JSON" | "$JQ_BIN" -r ".[] | select(.id != \"$RUN_ID\") | .id")"
@@ -85,8 +84,11 @@ for PREVIOUS_RUN_ID in $PREVIOUS_RUN_IDS; do
   case "$PREVIOUS_PR_STATUS" in
     merged)
       echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER is merged; recording success retroactively"
-      pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts complete \
-        --id "$PREVIOUS_RUN_ID" --pull-request-number "$PREVIOUS_PR_NUMBER"
+      COMPLETE_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts complete \
+        --id "$PREVIOUS_RUN_ID" --pull-request-number "$PREVIOUS_PR_NUMBER")"
+      if [ "$(printf '%s' "$COMPLETE_JSON" | "$JQ_BIN" -r '.ok')" != "true" ]; then
+        echo "[weekly-analyze] complete call for previous run $PREVIOUS_RUN_ID did not apply (already terminal?)" >&2
+      fi
       ;;
     ready)
       echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER is auto-mergeable; waiting up to 10 minutes"
@@ -96,8 +98,11 @@ for PREVIOUS_RUN_ID in $PREVIOUS_RUN_IDS; do
         RECHECK_STATUS="$(printf '%s' "$RECHECK_JSON" | "$JQ_BIN" -r '.status // empty')"
         if [ "$RECHECK_STATUS" = "merged" ]; then
           echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER merged while waiting"
-          pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts complete \
-            --id "$PREVIOUS_RUN_ID" --pull-request-number "$PREVIOUS_PR_NUMBER"
+          COMPLETE_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts complete \
+            --id "$PREVIOUS_RUN_ID" --pull-request-number "$PREVIOUS_PR_NUMBER")"
+          if [ "$(printf '%s' "$COMPLETE_JSON" | "$JQ_BIN" -r '.ok')" != "true" ]; then
+            echo "[weekly-analyze] complete call for previous run $PREVIOUS_RUN_ID did not apply (already terminal?)" >&2
+          fi
           break
         fi
         sleep 30
@@ -106,13 +111,38 @@ for PREVIOUS_RUN_ID in $PREVIOUS_RUN_IDS; do
         echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER still not merged after 10 minutes; leaving it untouched for the next check"
       fi
       ;;
+    review_required)
+      echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER needs review; leaving it untouched for the next cron cycle"
+      continue
+      ;;
+    auto_merge_disabled)
+      echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER has auto-merge disabled; closing it and marking the run failed"
+      pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts close --pr "$PREVIOUS_PR_NUMBER" \
+        --message "この PR は後続の週次分析実行に置き換えられたため閉じます。" || true
+      FAIL_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts fail \
+        --id "$PREVIOUS_RUN_ID" --message "後続の週次分析実行に置き換えられました。" || true)"
+      if [ "$(printf '%s' "$FAIL_JSON" | "$JQ_BIN" -r '.ok // empty')" != "true" ]; then
+        echo "[weekly-analyze] fail call for previous run $PREVIOUS_RUN_ID did not apply (already terminal?)" >&2
+      fi
+      ;;
+    closed)
+      echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER is already closed; marking the run failed"
+      FAIL_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts fail \
+        --id "$PREVIOUS_RUN_ID" --message "後続の週次分析実行に置き換えられました。" || true)"
+      if [ "$(printf '%s' "$FAIL_JSON" | "$JQ_BIN" -r '.ok // empty')" != "true" ]; then
+        echo "[weekly-analyze] fail call for previous run $PREVIOUS_RUN_ID did not apply (already terminal?)" >&2
+      fi
+      ;;
     *)
       echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER is not mergeable ($PREVIOUS_PR_STATUS); closing it and marking the run failed"
-      pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts disable-auto-merge --pr "$PREVIOUS_PR_NUMBER"
+      pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts disable-auto-merge --pr "$PREVIOUS_PR_NUMBER" || true
       pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts close --pr "$PREVIOUS_PR_NUMBER" \
-        --message "この PR は後続の週次分析実行に置き換えられたため閉じます。"
-      pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts fail \
-        --id "$PREVIOUS_RUN_ID" --message "後続の週次分析実行に置き換えられました。"
+        --message "この PR は後続の週次分析実行に置き換えられたため閉じます。" || true
+      FAIL_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts fail \
+        --id "$PREVIOUS_RUN_ID" --message "後続の週次分析実行に置き換えられました。" || true)"
+      if [ "$(printf '%s' "$FAIL_JSON" | "$JQ_BIN" -r '.ok // empty')" != "true" ]; then
+        echo "[weekly-analyze] fail call for previous run $PREVIOUS_RUN_ID did not apply (already terminal?)" >&2
+      fi
       ;;
   esac
 done
@@ -146,10 +176,8 @@ echo "[weekly-analyze] starting weekly crawl review at $(date -Iseconds) in tmux
 "$TMUX_BIN" pipe-pane -t "$SESSION_NAME" -o "cat >> \"$PANE_LOG\""
 echo "[weekly-analyze] launched tmux session $SESSION_NAME at $(date -Iseconds)"
 
-# スキルは直接コミットしてローカルで再ビルドする代わりに GitHub auto-merge 付きの PR を
-# 開くようになった。本番機は CI 通過・auto-merge 後に GHCR から自分でイメージを取得するため、
-# tmux セッションの生存確認だけでなく DB ステータスも見ることで、セッションは残っていても
-# 状態機械側が終端状態に達した場合を検知できるようにする。
+# PR の auto-merge は tmux セッションの終了と同期しないため、
+# セッションの生存確認だけでなく DB 上のステータスも見て終端を判定する。
 while true; do
   if ! "$TMUX_BIN" has-session -t "$SESSION_NAME" 2>/dev/null; then
     echo "[weekly-analyze] tmux session $SESSION_NAME finished at $(date -Iseconds)"
@@ -191,8 +219,8 @@ else
   echo "[weekly-analyze] run ended with status $FINAL_STATUS; keeping worktree at $WORKTREE_DIR for inspection"
 fi
 
-# 単純な mtime ベースの find だと成功・失敗を区別できないため、各実行ディレクトリの
-# run-metadata.json に保存した status を読んで保持期間 (成功 30 日・失敗 90 日) を判定する。
+# mtime だけでは成功・失敗を区別できないため、run-metadata.json に保存した status を読んで
+# 保持期間を判定する。
 echo "[weekly-analyze] pruning diagnostics older than retention window"
 NOW_EPOCH="$(date +%s)"
 for DIR in "$(pwd)"/logs/weekly-analysis-runs/*/; do

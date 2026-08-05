@@ -20,5 +20,12 @@ if [ -z "$PNPM_BIN" ]; then
   exit 1
 fi
 
+set +e
 "$PNPM_BIN" --filter crawler exec tsx scripts/weekly-analysis-run.ts heartbeat \
   --id "$WEEKLY_ANALYSIS_RUN_ID" --phase "$PHASE"
+STATUS=$?
+set -e
+if [ "$STATUS" -ne 0 ]; then
+  echo "[weekly-analysis-heartbeat] heartbeat CLI exited non-zero (status=$STATUS)" >&2
+fi
+exit "$STATUS"

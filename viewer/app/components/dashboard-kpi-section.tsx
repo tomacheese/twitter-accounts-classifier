@@ -1,35 +1,8 @@
 import { formatDateTime } from '@/lib/format-date'
 import { getPrismaClient } from '@/lib/prisma'
 import { getDashboardKpis } from '@/lib/queries/dashboard'
-import { SectionRetry } from './section-retry'
+import { DashboardSectionError } from './dashboard-section-error'
 import { StatTile } from './stat-tile'
-
-interface DashboardSectionErrorProps {
-  headingId: string
-  title: string
-  message: string
-}
-
-function DashboardSectionError({
-  headingId,
-  title,
-  message,
-}: DashboardSectionErrorProps): React.ReactElement {
-  return (
-    <section
-      aria-labelledby={headingId}
-      className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950"
-    >
-      <h2 id={headingId} className="text-lg font-semibold">
-        {title}
-      </h2>
-      <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">
-        {message}
-      </p>
-      <SectionRetry />
-    </section>
-  )
-}
 
 function LoadingStatus({ label }: { label: string }): React.ReactElement {
   return (

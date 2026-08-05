@@ -1,3 +1,4 @@
+import { Logger } from '@book000/node-utils'
 import { parseArgs } from 'node:util'
 import { PrismaClient } from '../generated/prisma'
 import {
@@ -6,13 +7,28 @@ import {
   failWeeklyAnalysisRun,
   getWeeklyAnalysisRun,
   listRunningWeeklyAnalysisRuns,
+  recordWeeklyAnalysisRunPullRequest,
   timeoutWeeklyAnalysisRun,
   touchWeeklyAnalysisRunHeartbeat,
+  type WeeklyAnalysisRunMutationResult,
 } from '../db/weekly-analysis-run-repository'
 import { getWeeklyAnalysisStaleThresholdSeconds } from '../config/env'
 
+const logger = Logger.configure('weekly-analysis-run')
+
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value))
+}
+
+/**
+ * @param result - 状態遷移系サブコマンドの実行結果
+ */
+function reportMutationResult(result: WeeklyAnalysisRunMutationResult): void {
+  printJson(result)
+  if (!result.ok) {
+    logger.warn(`WeeklyAnalysisRun mutation did not apply: ${JSON.stringify(result)}`)
+    process.exitCode = 1
+  }
 }
 
 async function main(): Promise<void> {
@@ -43,13 +59,35 @@ async function main(): Promise<void> {
           options: { id: { type: 'string' }, phase: { type: 'string' } },
         })
         if (!values.id) throw new Error('--id is required')
-        printJson(
+        reportMutationResult(
           await touchWeeklyAnalysisRunHeartbeat(
             prisma,
             values.id,
             new Date(),
             staleThresholdMs,
             values.phase ?? null,
+          ),
+        )
+        return
+      }
+      case 'record-pr': {
+        const { values } = parseArgs({
+          args: rest,
+          options: {
+            id: { type: 'string' },
+            'pull-request-number': { type: 'string' },
+            'pull-request-url': { type: 'string' },
+          },
+        })
+        if (!values.id || !values['pull-request-number'] || !values['pull-request-url']) {
+          throw new Error('--id, --pull-request-number and --pull-request-url are required')
+        }
+        reportMutationResult(
+          await recordWeeklyAnalysisRunPullRequest(
+            prisma,
+            values.id,
+            Number(values['pull-request-number']),
+            values['pull-request-url'],
           ),
         )
         return
@@ -67,7 +105,7 @@ async function main(): Promise<void> {
           },
         })
         if (!values.id) throw new Error('--id is required')
-        printJson(
+        reportMutationResult(
           await completeWeeklyAnalysisRun(prisma, values.id, new Date(), {
             sampledAccountIds: values['sampled-account-ids']
               ? (JSON.parse(values['sampled-account-ids']) as unknown)
@@ -88,7 +126,9 @@ async function main(): Promise<void> {
           options: { id: { type: 'string' }, message: { type: 'string' } },
         })
         if (!values.id || !values.message) throw new Error('--id and --message are required')
-        printJson(await failWeeklyAnalysisRun(prisma, values.id, new Date(), values.message))
+        reportMutationResult(
+          await failWeeklyAnalysisRun(prisma, values.id, new Date(), values.message),
+        )
         return
       }
       case 'timeout': {
@@ -97,7 +137,9 @@ async function main(): Promise<void> {
           options: { id: { type: 'string' }, message: { type: 'string' } },
         })
         if (!values.id || !values.message) throw new Error('--id and --message are required')
-        printJson(await timeoutWeeklyAnalysisRun(prisma, values.id, new Date(), values.message))
+        reportMutationResult(
+          await timeoutWeeklyAnalysisRun(prisma, values.id, new Date(), values.message),
+        )
         return
       }
       default: {

@@ -9,15 +9,36 @@ function runGh(args: string[]): string {
   return execFileSync('gh', args, { encoding: 'utf8' })
 }
 
+const PR_STATES: readonly PrSnapshot['state'][] = ['OPEN', 'CLOSED', 'MERGED']
+const MERGEABLE_VALUES: readonly PrSnapshot['mergeable'][] = ['MERGEABLE', 'CONFLICTING', 'UNKNOWN']
+
+/**
+ * @param value - `gh pr view --json` の出力を `JSON.parse` した値
+ * @returns value が `PrSnapshot` の形を満たすか
+ */
+export function isPrSnapshot(value: unknown): value is PrSnapshot {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  if (
+    typeof candidate.state !== 'string' ||
+    !(PR_STATES as readonly string[]).includes(candidate.state)
+  ) {
+    return false
+  }
+  if (
+    typeof candidate.mergeable !== 'string' ||
+    !(MERGEABLE_VALUES as readonly string[]).includes(candidate.mergeable)
+  ) {
+    return false
+  }
+  return Array.isArray(candidate.statusCheckRollup)
+}
+
 function fetchSnapshot(prNumber: string): PrSnapshot {
   const raw = runGh(['pr', 'view', prNumber, '--json', PR_VIEW_FIELDS])
-  const parsed = JSON.parse(raw) as {
-    state: PrSnapshot['state']
-    mergeable: PrSnapshot['mergeable']
-    mergeStateStatus: string
-    autoMergeRequest: { enabledAt: string } | null
-    reviewDecision: string | null
-    statusCheckRollup: { name: string; conclusion: string | null; status: string }[]
+  const parsed: unknown = JSON.parse(raw)
+  if (!isPrSnapshot(parsed)) {
+    throw new Error(`Unexpected \`gh pr view\` JSON shape for PR #${prNumber}`)
   }
   return parsed
 }

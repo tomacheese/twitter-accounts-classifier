@@ -40,9 +40,15 @@ while true; do
     exit 6
   fi
 
-  scripts/weekly-analysis-heartbeat.sh waiting_ci
+  if ! scripts/weekly-analysis-heartbeat.sh waiting_ci; then
+    echo "[weekly-analysis-wait-pr] heartbeat call failed" >&2
+    exit 7
+  fi
 
-  STATUS_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts status --pr "$PR_NUMBER")"
+  if ! STATUS_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts status --pr "$PR_NUMBER")"; then
+    echo "[weekly-analysis-wait-pr] failed to fetch PR #$PR_NUMBER status" >&2
+    exit 7
+  fi
   PR_STATUS="$(printf '%s' "$STATUS_JSON" | jq -r '.status // empty')"
 
   case "$PR_STATUS" in
@@ -65,6 +71,10 @@ while true; do
     auto_merge_disabled)
       echo "[weekly-analysis-wait-pr] PR #$PR_NUMBER has auto-merge disabled" >&2
       exit 5
+      ;;
+    closed)
+      echo "[weekly-analysis-wait-pr] PR #$PR_NUMBER was closed without merging" >&2
+      exit 8
       ;;
     waiting_checks|mergeability_unknown)
       sleep "$POLL_INTERVAL_SECONDS"

@@ -5,6 +5,21 @@ const logger = Logger.configure('weekly-analysis-run-repository')
 
 export type WeeklyAnalysisRunStatus = 'running' | 'success' | 'failed' | 'timeout'
 
+const WEEKLY_ANALYSIS_RUN_STATUSES: readonly WeeklyAnalysisRunStatus[] = [
+  'running',
+  'success',
+  'failed',
+  'timeout',
+]
+
+/**
+ * @param value - DB から読んだ生の status 値
+ * @returns value が `WeeklyAnalysisRunStatus` のいずれかと一致するか
+ */
+export function isWeeklyAnalysisRunStatus(value: string): value is WeeklyAnalysisRunStatus {
+  return (WEEKLY_ANALYSIS_RUN_STATUSES as readonly string[]).includes(value)
+}
+
 export interface WeeklyAnalysisRunRecord {
   id: string
   startedAt: Date
@@ -28,13 +43,16 @@ export interface WeeklyAnalysisRunMutationResult {
 }
 
 function toRecord(run: WeeklyAnalysisRun): WeeklyAnalysisRunRecord {
+  if (!isWeeklyAnalysisRunStatus(run.status)) {
+    throw new Error(`Unexpected WeeklyAnalysisRun status: ${run.status}`)
+  }
   return {
     id: run.id,
     startedAt: run.startedAt,
     lastHeartbeatAt: run.lastHeartbeatAt,
     finishedAt: run.finishedAt,
     staleAfterAt: run.staleAfterAt,
-    status: run.status as WeeklyAnalysisRunStatus,
+    status: run.status,
     currentPhase: run.currentPhase,
     errorMessage: run.errorMessage,
     pullRequestNumber: run.pullRequestNumber,
@@ -179,6 +197,24 @@ export async function failWeeklyAnalysisRun(
   errorMessage: string,
 ): Promise<WeeklyAnalysisRunMutationResult> {
   return updateIfRunning(prisma, id, { finishedAt, status: 'failed', errorMessage })
+}
+
+/**
+ * PR オープン直後に呼び、`complete` を待たずに pullRequestNumber/pullRequestUrl を記録する。
+ * これにより、`complete` 呼び出し前にセッションが落ちても後続実行が PR の存在を検知できる。
+ * @param prisma - Prisma クライアント
+ * @param id - 対象の `WeeklyAnalysisRun` の id
+ * @param pullRequestNumber - オープンした PR の番号
+ * @param pullRequestUrl - オープンした PR の URL
+ * @returns 更新結果。既に終端状態だった場合は `alreadyTerminal: true`
+ */
+export async function recordWeeklyAnalysisRunPullRequest(
+  prisma: PrismaClient,
+  id: string,
+  pullRequestNumber: number,
+  pullRequestUrl: string,
+): Promise<WeeklyAnalysisRunMutationResult> {
+  return updateIfRunning(prisma, id, { pullRequestNumber, pullRequestUrl })
 }
 
 /**

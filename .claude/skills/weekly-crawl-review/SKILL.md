@@ -137,12 +137,13 @@ nothing this skill does needs to survive locally beyond opening the PR in step 9
       `fix(labels): tighten blue_verified rule for legacy verified_type values`, and push
       the branch.
    3. PR を作成する前に `scripts/weekly-analysis-heartbeat.sh opening_pull_request` を呼ぶ。
-   4. Open a PR: `gh pr create --fill`。返された PR 番号を控える。
-   5. `pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts request-review --pr <番号> --reviewer book000` を実行し、レビュアーとして `book000` を指定する。
-   6. `pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts enable-auto-merge --pr <番号>` を実行し、GitHub ネイティブのオートマージを有効化する。
-   7. `pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts heartbeat --id "$WEEKLY_ANALYSIS_RUN_ID" --phase opening_pull_request` を呼び、控えた PR 番号を手順10・11 に引き渡す。
-      `WeeklyAnalysisRun.pullRequestNumber`・`pullRequestUrl` への反映は、この手順ではなく手順11 の `complete` 呼び出しでまとめて行う。
-   8. If CI passes, GitHub merges the PR into `master` automatically — no further action
+   4. Open a PR: `gh pr create --fill`。返された PR 番号・URL を控える。
+   5. `pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts record-pr --id "$WEEKLY_ANALYSIS_RUN_ID" --pull-request-number <番号> --pull-request-url <URL>` を呼び、
+      `complete` を待たずに `WeeklyAnalysisRun.pullRequestNumber`・`pullRequestUrl` を記録する。
+   6. `pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts request-review --pr <番号> --reviewer book000` を実行し、レビュアーとして `book000` を指定する。
+   7. `pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts enable-auto-merge --pr <番号>` を実行し、GitHub ネイティブのオートマージを有効化する。
+   8. 控えた PR 番号を手順10・11 に引き渡す。
+   9. If CI passes, GitHub merges the PR into `master` automatically — no further action
       needed here. If CI fails, the PR stays open for the next run or a human to look at;
       `master` is never contaminated with a broken commit. 実際の終了コードごとの分岐は手順10 で行う。
 10. **CI・レビューを待つ。**
@@ -157,6 +158,7 @@ nothing this skill does needs to survive locally beyond opening the PR in step 9
     - `5` (auto_merge_disabled): `enable-auto-merge` を再実行し、再度この手順を実行する。
     - `6` (run_terminal): 既に別経路でこの実行が終端している。何もせず終了する。
     - `7` (execution_error): `scripts/weekly-analysis-run.ts fail` で実行を失敗として終端させる。
+    - `8` (closed): PR がマージされずにクローズされている。`scripts/weekly-analysis-run.ts fail` で実行を失敗として終端させる。
 11. **実行を終端させる。**
     ここまでのどの経路をたどった場合でも、必ず `complete`・`fail`・`timeout` のいずれかを一度だけ呼んで `WeeklyAnalysisRun` を終端状態にする。
     手順2 (クロスチェック) で変更不要と判断した「no_changes」の場合は、PR を作らず `scripts/weekly-analysis-run.ts complete --id "$WEEKLY_ANALYSIS_RUN_ID" --findings "<変更不要の理由>"` を直接呼ぶ。

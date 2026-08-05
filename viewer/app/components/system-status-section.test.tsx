@@ -49,4 +49,27 @@ describe('SystemStatusSection', () => {
 
     expect(html).toContain('Example failure for a fictional run.')
   })
+
+  it('renders a visually distinct badge class per health status', () => {
+    function badgeClassFor(healthStatus: SystemStatusEntry['healthStatus']): string {
+      const html = renderToStaticMarkup(<SystemStatusSection entries={[entry({ healthStatus })]} />)
+      const match = new RegExp(`class="([^"]*)">${healthStatus}</span>`).exec(html)
+      return match ? match[1] : ''
+    }
+
+    const classes = {
+      healthy: badgeClassFor('healthy'),
+      degraded: badgeClassFor('degraded'),
+      stale: badgeClassFor('stale'),
+      notRun: badgeClassFor('not_run'),
+      unknown: badgeClassFor('unknown'),
+    }
+
+    expect(classes.healthy).not.toBe(classes.degraded)
+    expect(classes.healthy).not.toBe(classes.stale)
+    expect(classes.degraded).not.toBe(classes.stale)
+    expect(classes.stale).not.toBe(classes.unknown)
+    expect(classes.notRun).not.toBe(classes.unknown)
+    expect(classes.healthy).not.toBe(classes.unknown)
+  })
 })
