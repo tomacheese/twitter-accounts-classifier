@@ -151,10 +151,19 @@ model AccountLabelLatest {
 model WeeklyAnalysisRun {
   id                String    @id @default(cuid())
   startedAt         DateTime
+  lastHeartbeatAt   DateTime
   finishedAt        DateTime?
+  staleAfterAt      DateTime?
+  status            String
+  currentPhase      String?
+  errorMessage      String?
+  pullRequestNumber Int?
+  pullRequestUrl    String?
   sampledAccountIds Json
   findings          String?
   commitSha         String?
+
+  @@index([status, startedAt(sort: Desc), id(sort: Desc)])
 }
 
 model Follow {
@@ -206,6 +215,7 @@ model CrawlRun {
   status                  String
   currentUsername         String?
   currentAccountStartedAt DateTime?
+  staleAfterAt            DateTime?
   accountRuns             CrawlAccountRun[]
   checkpoints             CrawlAccountCheckpoint[]
   accountLabelRuns        CrawlAccountLabelRun[]
@@ -277,6 +287,7 @@ model BlockRun {
   lastHeartbeatAt DateTime
   finishedAt      DateTime?
   status          String
+  staleAfterAt    DateTime?
   accountRuns     BlockAccountRun[]
 
   @@index([startedAt])
