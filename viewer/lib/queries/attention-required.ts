@@ -48,6 +48,7 @@ interface BlockAccountFailure {
   blockRunId: string
   username: string
   errorMessage: string | null
+  failedCount: number
   startedAt: Date
 }
 
@@ -143,7 +144,7 @@ export async function getAttentionRequiredItems(
       take: RECENT_LIMIT,
     }),
     prisma.blockAccountRun.findMany({
-      where: { errorMessage: { not: null } },
+      where: { OR: [{ errorMessage: { not: null } }, { failedCount: { gt: 0 } }] },
       orderBy: { startedAt: 'desc' },
       take: RECENT_LIMIT,
     }),

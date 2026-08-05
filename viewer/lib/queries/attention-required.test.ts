@@ -157,6 +157,29 @@ describe('getAttentionRequiredItems', () => {
     })
   })
 
+  it('includes a block_failure item for a BlockAccountRun with failedCount > 0 but no errorMessage', async () => {
+    const prisma = createMockPrisma({
+      failedBlockAccountRuns: [
+        {
+          id: 'account-run-1',
+          blockRunId: 'run-1',
+          username: 'alice',
+          errorMessage: null,
+          failedCount: 2,
+          startedAt: new Date('2026-08-04T00:00:00Z'),
+        },
+      ],
+    })
+    const items = await getAttentionRequiredItems(prisma, new Date('2026-08-05T00:00:00Z'))
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      kind: 'block_failure',
+      service: 'blocker',
+      href: '/block-runs/run-1',
+    })
+  })
+
   it('sorts items by occurredAt descending across multiple sources', async () => {
     const prisma = createMockPrisma({
       failedBlockRuns: [

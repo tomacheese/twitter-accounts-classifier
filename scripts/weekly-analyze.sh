@@ -139,10 +139,6 @@ for PREVIOUS_RUN_ID in $PREVIOUS_RUN_IDS; do
         echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER still not merged after 10 minutes; leaving it untouched for the next check"
       fi
       ;;
-    review_required)
-      echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER needs review; leaving it untouched for the next cron cycle"
-      continue
-      ;;
     auto_merge_disabled)
       echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER has auto-merge disabled; closing it and marking the run failed"
       pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts close --pr "$PREVIOUS_PR_NUMBER" \
@@ -220,6 +216,19 @@ while true; do
   sleep 30
 done
 
+# DB が終端状態に達した直後でも tmux 側では後処理中の可能性があるため、
+# worktree を削除する前に自然終了を猶予をもって待ち、
+# 猶予を過ぎてもセッションが残っていれば明示的に終了させる。
+TMUX_GRACE_DEADLINE=$(($(date +%s) + 120))
+while "$TMUX_BIN" has-session -t "$SESSION_NAME" 2>/dev/null; do
+  if [ "$(date +%s)" -ge "$TMUX_GRACE_DEADLINE" ]; then
+    echo "[weekly-analyze] tmux session $SESSION_NAME still alive after grace period; killing it"
+    "$TMUX_BIN" kill-session -t "$SESSION_NAME" 2>/dev/null || true
+    break
+  fi
+  sleep 5
+done
+
 # 成功・失敗いずれの終了でも診断情報を残す。worktree の状態は失敗調査に必要だが、
 # 成功時まで残すと使い捨てのはずの worktree が無期限に積み上がってしまう。
 FINAL_RUN_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts get --id "$RUN_ID")"
@@ -261,6 +270,9 @@ if [ "$FINAL_STATUS" = "success" ]; then
   git branch -D "$WORKTREE_BRANCH" 2>/dev/null || true
 else
   echo "[weekly-analyze] run ended with status $FINAL_STATUS; keeping worktree at $WORKTREE_DIR for inspection"
+  # 診断ディレクトリへコピーしないだけでは worktree 内に残った実体を消せないため、
+  # 保持する worktree からも認証情報ファイル自体を削除する。
+  rm -f "$WORKTREE_DIR/.env" "$WORKTREE_DIR/.env.weekly-review"
 fi
 
 # 失敗した worktree は調査用に残すが、無期限に積み上げないよう直近1件だけを残す。
@@ -275,6 +287,22 @@ for OLD_WORKTREE in "$(pwd)"/.worktrees/weekly-crawl-review-*/; do
   # ブランチ自体は削除せず残すため、worktree と対になるローカルブランチも
   # 明示的に削除しないと実行のたびにブランチだけが蓄積するため。
   OLD_BRANCH="$(basename "$OLD_WORKTREE")"
+  OLD_RUN_ID="${OLD_BRANCH#weekly-crawl-review-}"
+
+  # ディレクトリ名だけでは、手動作成の worktree や別の稼働中スーパーバイザーの
+  # worktree と区別できない。対応する WeeklyAnalysisRun が終端状態であること、
+  # かつ同名の tmux セッションが生存していないことを確認できた場合にのみ削除する。
+  OLD_RUN_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts get --id "$OLD_RUN_ID" 2>/dev/null || true)"
+  OLD_RUN_STATUS="$(printf '%s' "$OLD_RUN_JSON" | "$JQ_BIN" -r '.status // empty' 2>/dev/null || true)"
+  if [ -z "$OLD_RUN_STATUS" ] || [ "$OLD_RUN_STATUS" = "running" ]; then
+    echo "[weekly-analyze] skipping worktree at $OLD_WORKTREE (WeeklyAnalysisRun status: ${OLD_RUN_STATUS:-not found}; not confirmed terminal)"
+    continue
+  fi
+  if "$TMUX_BIN" has-session -t "$OLD_BRANCH" 2>/dev/null; then
+    echo "[weekly-analyze] skipping worktree at $OLD_WORKTREE (tmux session $OLD_BRANCH is still alive)"
+    continue
+  fi
+
   echo "[weekly-analyze] removing older failed worktree at $OLD_WORKTREE"
   # `git worktree remove` が失敗して rm -rf にフォールバックした場合、Git 側の
   # worktree 管理情報がまだ残り、対応するブランチは「別 worktree で checkout 中」
