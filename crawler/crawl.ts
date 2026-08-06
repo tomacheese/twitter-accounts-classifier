@@ -12,6 +12,7 @@ import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
 import { ensureLabelDefinitionsForRules, recordCrawlAccountLabel } from './db/label-repository'
+import { refreshLabelAggregate } from './db/label-aggregate-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
@@ -1308,6 +1309,12 @@ async function main(): Promise<void> {
   try {
     await runCrawlCycle(deps)
   } finally {
+    try {
+      await refreshLabelAggregate(prisma)
+    } catch (error) {
+      logger.error('Failed to refresh label aggregate:', error as Error)
+      captureException(error, { source: 'crawl.refreshLabelAggregate' })
+    }
     await disconnectPrisma()
   }
 }
