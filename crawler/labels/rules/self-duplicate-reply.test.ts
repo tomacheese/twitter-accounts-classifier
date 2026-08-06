@@ -7,6 +7,7 @@ function makeBundle(
     fullText: string
     isReply?: boolean
     isRetweet?: boolean
+    inReplyToTweetId?: string | null
   }[],
 ): AccountFeatureBundle {
   return {
@@ -32,6 +33,7 @@ function makeBundle(
       isRetweet: t.isRetweet ?? false,
       isPromoted: false,
       isPaidPromotion: false,
+      inReplyToTweetId: t.inReplyToTweetId,
     })),
   }
 }
@@ -91,6 +93,75 @@ describe('selfDuplicateReplyRule', () => {
       {
         fullText: '@target これはとても素晴らしい情報ですね！ぜひ拡散をお願いします',
         isReply: true,
+      },
+    ])
+
+    const result = selfDuplicateReplyRule.evaluate(bundle)
+
+    expect(result.value).toBe(false)
+  })
+
+  it('is false when the duplicate reply is thread narration replying to the account’s own tweet, not someone else’s', () => {
+    const bundle = makeBundle([
+      { fullText: '会場に到着しました、これから配信を始めます', isReply: false },
+      {
+        fullText: '会場に到着しました、これから配信を始めます',
+        isReply: true,
+        inReplyToTweetId: 't0',
+      },
+      { fullText: 'この後のセットリストを発表します、お楽しみに', isReply: false },
+      {
+        fullText: 'この後のセットリストを発表します、お楽しみに',
+        isReply: true,
+        inReplyToTweetId: 't0',
+      },
+    ])
+
+    const result = selfDuplicateReplyRule.evaluate(bundle)
+
+    expect(result.value).toBe(false)
+  })
+
+  it('is true when two external duplicate pairs exist alongside an excluded self-thread duplicate', () => {
+    const bundle = makeBundle([
+      { fullText: '会場に到着しました、これから配信を始めます', isReply: false },
+      {
+        fullText: '会場に到着しました、これから配信を始めます',
+        isReply: true,
+        inReplyToTweetId: 't0',
+      },
+      { fullText: 'これはとても素晴らしい情報ですね！ぜひ拡散をお願いします', isReply: false },
+      {
+        fullText: '@target これはとても素晴らしい情報ですね！ぜひ拡散をお願いします',
+        isReply: true,
+        inReplyToTweetId: 'someone-elses-tweet',
+      },
+      { fullText: 'This is really wonderful information, please spread it', isReply: false },
+      {
+        fullText: '@target This is really wonderful information, please spread it',
+        isReply: true,
+        inReplyToTweetId: 'someone-elses-tweet',
+      },
+    ])
+
+    const result = selfDuplicateReplyRule.evaluate(bundle)
+
+    expect(result.value).toBe(true)
+  })
+
+  it('is false when only one external duplicate pair exists alongside an excluded self-thread duplicate', () => {
+    const bundle = makeBundle([
+      { fullText: '会場に到着しました、これから配信を始めます', isReply: false },
+      {
+        fullText: '会場に到着しました、これから配信を始めます',
+        isReply: true,
+        inReplyToTweetId: 't0',
+      },
+      { fullText: 'これはとても素晴らしい情報ですね！ぜひ拡散をお願いします', isReply: false },
+      {
+        fullText: '@target これはとても素晴らしい情報ですね！ぜひ拡散をお願いします',
+        isReply: true,
+        inReplyToTweetId: 'someone-elses-tweet',
       },
     ])
 

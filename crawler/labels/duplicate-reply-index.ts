@@ -28,13 +28,17 @@ export function normalizeReplyText(text: string): string {
 export interface ReplyCorpusEntry {
   accountId: string
   fullText: string
+  /** このリプライの返信先ツイート ID。不明な場合は `null`。 */
+  inReplyToTweetId: string | null
 }
 
 export interface DuplicateReplyIndex {
   /**
    * @param text - 検索対象となるリプライの生本文
    * @param excludeAccountId - 対象のリプライを投稿した本人のアカウント。件数から除外する
-   * @returns `excludeAccountId` 以外で、`text` の正規化形と一致するリプライを投稿したアカウントの数
+   * @returns `excludeAccountId` 以外で、`text` の正規化形と一致するリプライを投稿したアカウントの数。
+   *   一致した全リプライが同一ツイート宛てと確認できた場合は、ハッシュタグキャンペーン等の
+   *   偶発的一致として 0 を返す
    */
   countOtherAccounts(text: string, excludeAccountId: string): number
 }
@@ -47,22 +51,38 @@ export interface DuplicateReplyIndex {
  * @returns bundle 構築時にアカウントごとに問い合わせるためのインデックス
  */
 export function buildDuplicateReplyIndex(corpus: ReplyCorpusEntry[]): DuplicateReplyIndex {
-  const accountsByNormalizedText = new Map<string, Set<string>>()
+  const groupsByNormalizedText = new Map<
+    string,
+    { accounts: Set<string>; targets: Set<string>; hasUnknownTarget: boolean }
+  >()
   for (const entry of corpus) {
     const normalized = normalizeReplyText(entry.fullText)
     if (normalized === '') continue
-    const accounts = accountsByNormalizedText.get(normalized) ?? new Set<string>()
-    accounts.add(entry.accountId)
-    accountsByNormalizedText.set(normalized, accounts)
+    const group = groupsByNormalizedText.get(normalized) ?? {
+      accounts: new Set<string>(),
+      targets: new Set<string>(),
+      hasUnknownTarget: false,
+    }
+    group.accounts.add(entry.accountId)
+    if (entry.inReplyToTweetId === null) {
+      group.hasUnknownTarget = true
+    } else {
+      group.targets.add(entry.inReplyToTweetId)
+    }
+    groupsByNormalizedText.set(normalized, group)
   }
 
   return {
     countOtherAccounts(text, excludeAccountId) {
       const normalized = normalizeReplyText(text)
       if (normalized === '') return 0
-      const accounts = accountsByNormalizedText.get(normalized)
-      if (!accounts) return 0
-      return accounts.has(excludeAccountId) ? accounts.size - 1 : accounts.size
+      const group = groupsByNormalizedText.get(normalized)
+      if (!group) return 0
+      // 全件の返信先が判明しており、かつ既知の返信先がちょうど1件なら、この文面は
+      // 単一のキャンペーン投稿への返信でのみ観測されたとみなす。返信先不明が1件でも
+      // 混在する場合は同一ターゲットと確認できないため、従来どおり重複件数を返す。
+      if (!group.hasUnknownTarget && group.targets.size === 1) return 0
+      return group.accounts.has(excludeAccountId) ? group.accounts.size - 1 : group.accounts.size
     },
   }
 }

@@ -12,11 +12,20 @@ export const selfDuplicateReplyRule: LabelRule = {
   key: 'self_duplicate_reply',
   description:
     '同一内容(URL/メンションを除去した上で比較)を単独ツイートとしても @リプライとしても繰り返し投稿している。インプレッション稼ぎ(「インプレゾンビ」)行為の特徴',
-  version: '1.0.0',
+  version: '1.1.0',
   evaluate(bundle) {
+    // A reply whose parent is one of this account's own tweets within the bundle is thread
+    // narration (the author continuing their own post), not a reply hijacked under someone
+    // else's viral tweet - the pattern this rule targets. Excluding those avoids flagging
+    // ordinary corporate/personal accounts that repeat a tagline across a self-thread. A
+    // parent tweet outside the bundle's recent window is treated as unknown and not excluded.
+    const ownTweetIds = new Set(bundle.recentTweets.map((t) => t.id))
     const groups = new Map<string, { hasStandalone: boolean; hasReply: boolean }>()
     for (const tweet of bundle.recentTweets) {
       if (tweet.isRetweet) continue
+      const isSelfThreadReply =
+        tweet.isReply && tweet.inReplyToTweetId != null && ownTweetIds.has(tweet.inReplyToTweetId)
+      if (isSelfThreadReply) continue
       const normalized = normalizeReplyText(tweet.fullText)
       if (normalized === '') continue
       const group = groups.get(normalized) ?? { hasStandalone: false, hasReply: false }
