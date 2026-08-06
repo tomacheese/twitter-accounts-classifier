@@ -387,6 +387,10 @@ async function main(): Promise<void> {
     logger.info(
       `Relabel backfill complete: ${accountsProcessed} accounts processed, ${labelsPersisted} labels persisted`,
     )
+    // runRelabelBackfill が完了した場合のみ集計し直す
+    // (crawl.ts は逐次書き込みのため finally で必ず呼ぶが、
+    // relabel はバックフィル未完了のまま反映すると新旧ラベルが
+    // 混在した中途半端な集計を表示してしまうため、成功時のみ呼ぶ)。
     try {
       await refreshLabelAggregate(prisma)
     } catch (error) {

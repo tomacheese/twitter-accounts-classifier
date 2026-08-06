@@ -14,7 +14,7 @@ function createMockPrisma(options: {
     lastAttemptStatus: string
   } | null
 }) {
-  return {
+  const prisma = {
     account: {
       count: vi.fn().mockResolvedValue(120),
       aggregate: vi
@@ -28,12 +28,18 @@ function createMockPrisma(options: {
     labelAggregateStatus: {
       findUnique: vi.fn().mockResolvedValue(options.status ?? null),
     },
+    // getLabelAggregateSnapshot は2テーブルの読み取りを RepeatableRead の
+    // インタラクティブトランザクションで包むため、テストダブルでも同じ形で
+    // コールバックへ自分自身を渡して呼び出す。
+    $transaction: vi.fn((callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
   } as unknown as PrismaClient & {
     account: { count: ReturnType<typeof vi.fn>; aggregate: ReturnType<typeof vi.fn> }
     tweet: { count: ReturnType<typeof vi.fn> }
     labelAggregate: { findMany: ReturnType<typeof vi.fn> }
     labelAggregateStatus: { findUnique: ReturnType<typeof vi.fn> }
+    $transaction: ReturnType<typeof vi.fn>
   }
+  return prisma
 }
 
 describe('getLabelAggregateSnapshot', () => {
@@ -83,6 +89,56 @@ describe('getLabelAggregateSnapshot', () => {
       distribution: [],
       lastSuccessAt: null,
       lastAttemptStatus: null,
+    })
+  })
+
+  it('sorts distribution entries by labelKey even when rows arrive unsorted', async () => {
+    const { getLabelAggregateSnapshot } = await import('./dashboard')
+    const prisma = createMockPrisma({
+      labelAggregateRows: [
+        { labelKey: 'topic_tech', labelDescription: 'Tech', trueCount: 5, totalCount: 100 },
+        { labelKey: 'blue_verified', labelDescription: 'Verified', trueCount: 20, totalCount: 100 },
+        {
+          labelKey: 'spam',
+          labelDescription: 'Likely spam account',
+          trueCount: 7,
+          totalCount: 120,
+        },
+      ],
+    })
+
+    const result = await getLabelAggregateSnapshot(prisma)
+
+    expect(result.distribution.map((entry) => entry.labelKey)).toEqual([
+      'blue_verified',
+      'spam',
+      'topic_tech',
+    ])
+  })
+
+  it('falls back to null when lastAttemptStatus holds an unrecognized value', async () => {
+    const { getLabelAggregateSnapshot } = await import('./dashboard')
+    const prisma = createMockPrisma({
+      status: {
+        labeledAccounts: 42,
+        lastSuccessAt: new Date('2026-08-05T00:00:00Z'),
+        lastAttemptStatus: 'unknown-status',
+      },
+    })
+
+    const result = await getLabelAggregateSnapshot(prisma)
+
+    expect(result.lastAttemptStatus).toBeNull()
+  })
+
+  it('reads LabelAggregate and LabelAggregateStatus inside the same RepeatableRead transaction', async () => {
+    const { getLabelAggregateSnapshot } = await import('./dashboard')
+    const prisma = createMockPrisma({})
+
+    await getLabelAggregateSnapshot(prisma)
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: 'RepeatableRead',
     })
   })
 })

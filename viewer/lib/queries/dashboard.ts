@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import type { PrismaClient } from '../../generated/prisma'
 
 export interface DashboardKpis {
@@ -14,31 +15,48 @@ export interface LabelDistributionEntry {
   totalAccounts: number
 }
 
+export type LabelAggregateAttemptStatus = 'success' | 'failed'
+
 export interface LabelAggregateSnapshot {
   labeledAccounts: number
   distribution: LabelDistributionEntry[]
   lastSuccessAt: Date | null
-  lastAttemptStatus: string | null
+  lastAttemptStatus: LabelAggregateAttemptStatus | null
 }
 
 const STATUS_ID = 'global'
 
 /**
- * LabelAggregate/LabelAggregateStatus は crawler がラベリング完了時に書き込む
- * 事前計算済みテーブルのため、ここでは主キー・固定IDで読むだけで
- * AccountLabelLatest には一切触れない。
- * LabelAggregateStatus がまだ1行も書き込まれていない場合は、
- * 集計が一度も成功していない初期状態としてゼロ値を返す。
+ * crawler/db/label-aggregate-repository.ts が書き込む文字列は TypeScript の
+ * 型では強制できないため、想定外の値は成功扱いにせず null (未集計扱い) へ
+ * fail closed させる。
+ * @param value - LabelAggregateStatus.lastAttemptStatus の生値
+ * @returns 既知の状態値、または null
+ */
+function toAttemptStatus(value: string | undefined): LabelAggregateAttemptStatus | null {
+  return value === 'success' || value === 'failed' ? value : null
+}
+
+/**
+ * LabelAggregate と LabelAggregateStatus は crawler が書き込む事前計算済みテーブルであるため、
+ * 主キー・固定 ID で読むだけで済ませ、AccountLabelLatest への Seq Scan を避けている。
+ * 2つのテーブルを同一トランザクション内の RepeatableRead で読むのは、
+ * crawler 側の upsert 途中の中間状態を読んでラベル分布と labeledAccounts の値が
+ * ずれるのを防ぐため。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns ラベル付けずみアカウント数、ラベル分布、直近の集計成否
  */
-export async function getLabelAggregateSnapshot(
+export const getLabelAggregateSnapshot = cache(async function getLabelAggregateSnapshot(
   prisma: PrismaClient,
 ): Promise<LabelAggregateSnapshot> {
-  const [rows, status] = await Promise.all([
-    prisma.labelAggregate.findMany(),
-    prisma.labelAggregateStatus.findUnique({ where: { id: STATUS_ID } }),
-  ])
+  const [rows, status] = await prisma.$transaction(
+    async (tx) =>
+      Promise.all([
+        tx.labelAggregate.findMany(),
+        tx.labelAggregateStatus.findUnique({ where: { id: STATUS_ID } }),
+      ]),
+    { isolationLevel: 'RepeatableRead' },
+  )
 
   return {
     labeledAccounts: status?.labeledAccounts ?? 0,
@@ -51,9 +69,9 @@ export async function getLabelAggregateSnapshot(
       }))
       .toSorted((a, b) => a.labelKey.localeCompare(b.labelKey)),
     lastSuccessAt: status?.lastSuccessAt ?? null,
-    lastAttemptStatus: status?.lastAttemptStatus ?? null,
+    lastAttemptStatus: toAttemptStatus(status?.lastAttemptStatus),
   }
-}
+})
 
 /**
  * @param prisma - クエリを実行する Prisma クライアント

@@ -39,7 +39,9 @@ export default async function LabelsPage(): Promise<React.ReactElement> {
           role="alert"
           className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
         >
-          最新の集計に失敗しました。表示中の値は前回成功時点のものです。
+          {lastSuccessAt
+            ? '最新の集計に失敗しました。表示中の値は前回成功時点のものです。'
+            : '最新の集計に失敗しました。まだ一度も集計が成功していないため、ラベル分布は表示できません。'}
         </div>
       )}
       {entries.length === 0 ? (
