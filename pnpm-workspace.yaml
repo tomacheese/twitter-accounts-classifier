@@ -3,3 +3,20 @@ packages:
   - "viewer"
   - "twitter-client"
   - "blocker"
+
+overrides:
+  jiti: 2.7.0
+
+# Prisma Clientのpostinstallはworkspace内のgeneratedディレクトリへ出力する。
+# side-effects cacheでpostinstallを省略すると生成物が欠落するため、毎回実行させる。
+sideEffectsCache: false
+
+# pnpm 11では依存パッケージのbuild scriptを明示的に許可する。
+# Prisma Client生成と、利用中のネイティブ依存・bundlerに必要なものだけを列挙する。
+allowBuilds:
+  "@prisma/client": true
+  "@prisma/engines": true
+  esbuild: true
+  prisma: true
+  sharp: true
+  unrs-resolver: true

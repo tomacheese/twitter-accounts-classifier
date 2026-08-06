@@ -10,9 +10,20 @@ const compat = new FlatCompat({
   baseDirectory: path.dirname(fileURLToPath(import.meta.url)),
 })
 
+// @book000/eslint-config と eslint-config-next はどちらも import plugin を登録する。
+// pnpm 11 の frozen install では同じバージョンでも別のpluginオブジェクトとして
+// 解決される場合があり、ESLintが再定義として拒否するため、Next側の重複だけ除く。
+const nextConfig = compat.extends('next/core-web-vitals').map((entry) => {
+  if (entry.plugins?.import === undefined) return entry
+  const plugins = Object.fromEntries(
+    Object.entries(entry.plugins).filter(([name]) => name !== 'import'),
+  )
+  return { ...entry, plugins }
+})
+
 const config = [
   ...book000Config,
-  ...compat.extends('next/core-web-vitals'),
+  ...nextConfig,
   {
     files: ['**/*.ts', '**/*.tsx'],
     languageOptions: {
