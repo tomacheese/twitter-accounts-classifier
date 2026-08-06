@@ -3,6 +3,7 @@ import { captureException, initMonitoring } from './monitoring/sentry'
 import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { ensureLabelDefinitionsForRules, recordAccountLabelsBulk } from './db/label-repository'
+import { refreshLabelAggregate } from './db/label-aggregate-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
@@ -386,6 +387,12 @@ async function main(): Promise<void> {
     logger.info(
       `Relabel backfill complete: ${accountsProcessed} accounts processed, ${labelsPersisted} labels persisted`,
     )
+    try {
+      await refreshLabelAggregate(prisma)
+    } catch (error) {
+      logger.error('Failed to refresh label aggregate:', error as Error)
+      captureException(error, { source: 'relabel.refreshLabelAggregate' })
+    }
   } finally {
     await disconnectPrisma()
   }
