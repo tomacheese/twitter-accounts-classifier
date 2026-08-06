@@ -374,3 +374,228 @@ model AnalysisRun {
 
   @@index([workItemId, startedAt(sort: Desc)])
 }
+
+model OperationCycle {
+  id                String           @id @default(cuid())
+  kind              String
+  sourceType        String
+  sourceId          String
+  triggeredAt       DateTime
+  expectedAt        DateTime?
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  status            String           @default("scheduled")
+  attentionRequired Boolean          @default(false)
+  currentStageKey   String?
+  sourceWatermarkAt DateTime?
+  modelVersion      String
+  updatedAt         DateTime         @updatedAt
+  stages            OperationStage[]
+
+  @@unique([sourceType, sourceId])
+  @@index([kind, startedAt(sort: Desc), id(sort: Desc)])
+  @@index([attentionRequired, status])
+}
+
+model OperationStage {
+  id            String         @id @default(cuid())
+  cycleId       String
+  cycle         OperationCycle @relation(fields: [cycleId], references: [id])
+  stageKey      String
+  sequence      Int
+  requiredness  String
+  status        String         @default("waiting")
+  attemptCount  Int            @default(0)
+  sourceType    String?
+  sourceId      String?
+  expectedAt    DateTime?
+  delayedAt     DateTime?
+  staleAt       DateTime?
+  startedAt     DateTime?
+  heartbeatAt   DateTime?
+  finishedAt    DateTime?
+  counters      Json           @default("{}")
+  errorCode     String?
+  errorSummary  String?
+  analysisRunId String?
+
+  @@unique([cycleId, stageKey])
+  @@index([cycleId, sequence])
+}
+
+model OperationalIssue {
+  id                  String                       @id @default(cuid())
+  component           String
+  type                String
+  fingerprint         String
+  status              String                       @default("active")
+  severity            String
+  firstDetectedAt     DateTime                     @default(now())
+  lastDetectedAt      DateTime                     @default(now())
+  resolvedAt          DateTime?
+  currentOccurrenceId String?
+  sourceCycleId       String?
+  sourceStageId       String?
+  occurrences         OperationalIssueOccurrence[]
+
+  @@unique([fingerprint])
+  @@index([status, severity, lastDetectedAt(sort: Desc), id(sort: Desc)])
+}
+
+model OperationalIssueOccurrence {
+  id              String           @id @default(cuid())
+  issueId         String
+  issue           OperationalIssue @relation(fields: [issueId], references: [id])
+  observedAt      DateTime         @default(now())
+  stateTransition String
+  severity        String
+  sourceType      String
+  sourceId        String
+  measurements    Json             @default("{}")
+  observationKey  String
+
+  @@unique([issueId, observationKey])
+  @@index([issueId, observedAt(sort: Desc), id(sort: Desc)])
+}
+
+model ReviewFinding {
+  id                   String                    @id @default(cuid())
+  fingerprint          String
+  identityVersion      Int
+  episodeNumber        Int                       @default(1)
+  type                 String
+  primaryScopeType     String
+  primaryScopeId       String
+  status               String                    @default("active")
+  currentSeverity      String
+  maximumSeverity      String
+  firstDetectedAt      DateTime                  @default(now())
+  lastDetectedAt       DateTime                  @default(now())
+  resolvedAt           DateTime?
+  recurrenceCount      Int                       @default(0)
+  previousFindingId    String?
+  supersededByFindingId String?
+  currentOccurrenceId  String?
+  occurrences          ReviewFindingOccurrence[]
+  evidences            FindingEvidence[]
+  entityLinks          FindingEntityLink[]
+
+  @@unique([fingerprint, identityVersion, episodeNumber])
+  @@index([status, currentSeverity, lastDetectedAt(sort: Desc), id(sort: Desc)])
+  @@index([primaryScopeType, primaryScopeId])
+}
+
+model ReviewFindingOccurrence {
+  id                  String        @id @default(cuid())
+  findingId           String
+  finding             ReviewFinding @relation(fields: [findingId], references: [id])
+  observedAt          DateTime      @default(now())
+  stateTransition     String
+  severity            String
+  sourceType          String
+  sourceId            String
+  observedValue       Float?
+  baselineValue       Float?
+  absoluteDifference  Float?
+  relativeDifference  Float?
+  affectedCount       Int?
+  totalCount          Int?
+  affectedRatio       Float?
+  consecutiveCount    Int           @default(0)
+  confidence          Float?
+  thresholds          Json          @default("{}")
+  measurements        Json          @default("{}")
+  policyHash          String
+  detectorVersion     String
+  observationKey      String
+
+  @@unique([findingId, observationKey])
+  @@index([findingId, observedAt(sort: Desc), id(sort: Desc)])
+}
+
+model FindingEvidence {
+  id                    String        @id @default(cuid())
+  findingId             String
+  finding               ReviewFinding @relation(fields: [findingId], references: [id])
+  kind                  String
+  schemaVersion         Int
+  redactionVersion      Int
+  sampleStrategyVersion String?
+  payload               Json
+  createdAt             DateTime      @default(now())
+
+  @@index([findingId, kind, createdAt(sort: Desc)])
+}
+
+// Raw Analysis や大容量 artifact を遅延取得できるよう Finding 本体から分離する。
+// 1 件 1 MiB を超える内容は書き込み時に切り詰め、isTruncated を立てる。
+model FindingRawArtifact {
+  id          String   @id @default(cuid())
+  findingId   String
+  kind        String
+  content     String
+  isTruncated Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([findingId, kind])
+}
+
+model FindingEntityLink {
+  id         String        @id @default(cuid())
+  findingId  String
+  finding    ReviewFinding @relation(fields: [findingId], references: [id])
+  entityType String
+  entityId   String
+
+  @@unique([findingId, entityType, entityId])
+  @@index([entityType, entityId])
+}
+
+model DetectionPolicyVersion {
+  id            String   @id @default(cuid())
+  policyVersion String   @unique
+  contentHash   String
+  schemaVersion Int
+  content       Json
+  loadedAt      DateTime @default(now())
+}
+
+// active 化前の候補を含む detector 評価結果。通常の Review 一覧には表示しない。
+model DetectorEvaluation {
+  id              String   @id @default(cuid())
+  detectorType    String
+  fingerprint     String
+  identityVersion Int
+  evaluatedAt     DateTime @default(now())
+  isShadow        Boolean  @default(false)
+  result          Json
+  policyHash      String
+
+  @@index([detectorType, fingerprint, evaluatedAt(sort: Desc)])
+  @@index([isShadow, evaluatedAt(sort: Desc)])
+}
+
+model PolicyBacktestRun {
+  id                  String                  @id @default(cuid())
+  candidatePolicyHash String
+  baselinePolicyHash  String
+  targetFrom          DateTime
+  targetTo            DateTime
+  startedAt           DateTime                @default(now())
+  finishedAt          DateTime?
+  status              String                  @default("running")
+  summary             Json                    @default("{}")
+  findings            PolicyBacktestFinding[]
+}
+
+model PolicyBacktestFinding {
+  id          String            @id @default(cuid())
+  runId       String
+  run         PolicyBacktestRun @relation(fields: [runId], references: [id])
+  fingerprint String
+  severity    String
+  diffKind    String
+  detail      Json              @default("{}")
+
+  @@index([runId, diffKind])
+}
