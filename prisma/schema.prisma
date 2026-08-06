@@ -333,3 +333,44 @@ model BlockAction {
   @@index([blockerId, blockedId, result])
   @@index([blockAccountRunId])
 }
+
+// analyzer が処理する耐久キュー。at-least-once を前提とし、
+// exactly-once は装わない。冪等性は出力側の unique constraint で担保する。
+model AnalysisWorkItem {
+  id               String        @id @default(cuid())
+  kind             String
+  triggerType      String
+  triggerId        String
+  status           String        @default("queued")
+  priority         Int           @default(0)
+  availableAt      DateTime      @default(now())
+  leaseOwner       String?
+  leaseExpiresAt   DateTime?
+  attemptCount     Int           @default(0)
+  maxAttempts      Int           @default(5)
+  dependencyKey    String?
+  lastErrorCode    String?
+  lastErrorSummary String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  runs             AnalysisRun[]
+
+  // 同じ完了イベントを複数回通知しても WorkItem を重複生成しないための論理一意キー。
+  @@unique([kind, triggerType, triggerId])
+  // FOR UPDATE SKIP LOCKED での claim 用。
+  @@index([status, availableAt, priority])
+}
+
+model AnalysisRun {
+  id            String           @id @default(cuid())
+  workItemId    String
+  workItem      AnalysisWorkItem @relation(fields: [workItemId], references: [id])
+  attemptNumber Int
+  startedAt     DateTime         @default(now())
+  finishedAt    DateTime?
+  status        String
+  errorCode     String?
+  errorSummary  String?
+
+  @@index([workItemId, startedAt(sort: Desc)])
+}
