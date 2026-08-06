@@ -23,35 +23,35 @@ generator blockerClient {
 }
 
 model Account {
-  id                       String         @id
-  screenName               String
-  displayName              String
-  bio                      String?
-  profileImageUrl          String?
-  followersCount           Int
-  followingCount           Int
-  tweetCount               Int
-  accountCreatedAt         DateTime
-  location                 String?
-  url                      String?
-  isBlueVerified           Boolean        @default(false)
-  verifiedType             String?
-  professionalType         String?
-  parodyCommentaryFanLabel String?
-  firstSeenAt              DateTime       @default(now())
-  lastCrawledAt            DateTime       @default(now())
-  updatedAt                DateTime       @updatedAt
-  tweets                   Tweet[]
-  labels                   AccountLabel[]
-  latestLabels             AccountLabelLatest[]
-  followerEdges            Follow[]       @relation("FollowerEdges")
-  followeeEdges            Follow[]       @relation("FolloweeEdges")
+  id                             String                 @id
+  screenName                     String
+  displayName                    String
+  bio                            String?
+  profileImageUrl                String?
+  followersCount                 Int
+  followingCount                 Int
+  tweetCount                     Int
+  accountCreatedAt               DateTime
+  location                       String?
+  url                            String?
+  isBlueVerified                 Boolean                @default(false)
+  verifiedType                   String?
+  professionalType               String?
+  parodyCommentaryFanLabel       String?
+  firstSeenAt                    DateTime               @default(now())
+  lastCrawledAt                  DateTime               @default(now())
+  updatedAt                      DateTime               @updatedAt
+  tweets                         Tweet[]
+  labels                         AccountLabel[]
+  latestLabels                   AccountLabelLatest[]
+  followerEdges                  Follow[]               @relation("FollowerEdges")
+  followeeEdges                  Follow[]               @relation("FolloweeEdges")
   labelingFollowSampleAsAccount  LabelingFollowSample[] @relation("LabelingFollowSampleAccount")
   labelingFollowSampleAsFollowee LabelingFollowSample[] @relation("LabelingFollowSampleFollowee")
-  blockerEdges             Block[]        @relation("BlockerEdges")
-  blockedEdges             Block[]        @relation("BlockedEdges")
-  blockActionsAsBlocker    BlockAction[]  @relation("BlockActionBlocker")
-  blockActionsAsBlocked    BlockAction[]  @relation("BlockActionBlocked")
+  blockerEdges                   Block[]                @relation("BlockerEdges")
+  blockedEdges                   Block[]                @relation("BlockedEdges")
+  blockActionsAsBlocker          BlockAction[]          @relation("BlockActionBlocker")
+  blockActionsAsBlocked          BlockAction[]          @relation("BlockActionBlocked")
 
   // この3カラムは絞り込みなしで並び替えに使われうるため、
   // インデックスがないと行数増加に伴い全件ソートが発生する。
@@ -459,26 +459,26 @@ model OperationalIssueOccurrence {
 }
 
 model ReviewFinding {
-  id                   String                    @id @default(cuid())
-  fingerprint          String
-  identityVersion      Int
-  episodeNumber        Int                       @default(1)
-  type                 String
-  primaryScopeType     String
-  primaryScopeId       String
-  status               String                    @default("active")
-  currentSeverity      String
-  maximumSeverity      String
-  firstDetectedAt      DateTime                  @default(now())
-  lastDetectedAt       DateTime                  @default(now())
-  resolvedAt           DateTime?
-  recurrenceCount      Int                       @default(0)
-  previousFindingId    String?
+  id                    String                    @id @default(cuid())
+  fingerprint           String
+  identityVersion       Int
+  episodeNumber         Int                       @default(1)
+  type                  String
+  primaryScopeType      String
+  primaryScopeId        String
+  status                String                    @default("active")
+  currentSeverity       String
+  maximumSeverity       String
+  firstDetectedAt       DateTime                  @default(now())
+  lastDetectedAt        DateTime                  @default(now())
+  resolvedAt            DateTime?
+  recurrenceCount       Int                       @default(0)
+  previousFindingId     String?
   supersededByFindingId String?
-  currentOccurrenceId  String?
-  occurrences          ReviewFindingOccurrence[]
-  evidences            FindingEvidence[]
-  entityLinks          FindingEntityLink[]
+  currentOccurrenceId   String?
+  occurrences           ReviewFindingOccurrence[]
+  evidences             FindingEvidence[]
+  entityLinks           FindingEntityLink[]
 
   @@unique([fingerprint, identityVersion, episodeNumber])
   @@index([status, currentSeverity, lastDetectedAt(sort: Desc), id(sort: Desc)])
@@ -486,28 +486,28 @@ model ReviewFinding {
 }
 
 model ReviewFindingOccurrence {
-  id                  String        @id @default(cuid())
-  findingId           String
-  finding             ReviewFinding @relation(fields: [findingId], references: [id])
-  observedAt          DateTime      @default(now())
-  stateTransition     String
-  severity            String
-  sourceType          String
-  sourceId            String
-  observedValue       Float?
-  baselineValue       Float?
-  absoluteDifference  Float?
-  relativeDifference  Float?
-  affectedCount       Int?
-  totalCount          Int?
-  affectedRatio       Float?
-  consecutiveCount    Int           @default(0)
-  confidence          Float?
-  thresholds          Json          @default("{}")
-  measurements        Json          @default("{}")
-  policyHash          String
-  detectorVersion     String
-  observationKey      String
+  id                 String        @id @default(cuid())
+  findingId          String
+  finding            ReviewFinding @relation(fields: [findingId], references: [id])
+  observedAt         DateTime      @default(now())
+  stateTransition    String
+  severity           String
+  sourceType         String
+  sourceId           String
+  observedValue      Float?
+  baselineValue      Float?
+  absoluteDifference Float?
+  relativeDifference Float?
+  affectedCount      Int?
+  totalCount         Int?
+  affectedRatio      Float?
+  consecutiveCount   Int           @default(0)
+  confidence         Float?
+  thresholds         Json          @default("{}")
+  measurements       Json          @default("{}")
+  policyHash         String
+  detectorVersion    String
+  observationKey     String
 
   @@unique([findingId, observationKey])
   @@index([findingId, observedAt(sort: Desc), id(sort: Desc)])
@@ -598,4 +598,216 @@ model PolicyBacktestFinding {
   detail      Json              @default("{}")
 
   @@index([runId, diffKind])
+}
+
+model LabelMetricSnapshot {
+  id                      String   @id @default(cuid())
+  sourceCrawlRunId        String
+  labelDefinitionId       String
+  observedAt              DateTime
+  generatedAt             DateTime @default(now())
+  sourceWatermarkAt       DateTime
+  evaluatedCount          Int
+  trueCount               Int
+  prevalence              Float
+  trueConfidenceAverage   Float?
+  falseConfidenceAverage  Float?
+  confidenceBuckets       Json     @default("{}")
+  reasonDistribution      Json     @default("{}")
+  ruleVersionDistribution Json     @default("{}")
+  completeness            String
+  policyHash              String
+  analyzerVersion         String
+  analysisRunId           String?
+
+  @@unique([sourceCrawlRunId, labelDefinitionId])
+  @@index([labelDefinitionId, observedAt(sort: Desc), id(sort: Desc)])
+}
+
+model LabelMetricDaily {
+  id                 String   @id @default(cuid())
+  date               DateTime @db.Date
+  labelDefinitionId  String
+  evaluatedCount     Int
+  trueCount          Int
+  prevalence         Float
+  confidenceBuckets  Json     @default("{}")
+  reasonDistribution Json     @default("{}")
+
+  @@unique([date, labelDefinitionId])
+  @@index([labelDefinitionId, date(sort: Desc)])
+}
+
+// normalizedDisplayName の部分一致検索は pg_trgm の GIN インデックスで支える
+// (Task 5 Step 2b の raw SQL で作成する。Prisma の schema DSL では表現できない)。
+model AccountSummaryCurrent {
+  generationId                String
+  accountId                   String
+  normalizedScreenName        String
+  normalizedDisplayName       String
+  searchDocument              String
+  activeLabelKeys             String[]
+  activeLabelCount            Int
+  lastClassificationChangedAt DateTime?
+  lastRuleVersionChangedAt    DateTime?
+  activeFindingCount          Int       @default(0)
+  highestFindingSeverity      String?
+  sourceWatermarkAt           DateTime
+  updatedAt                   DateTime  @updatedAt
+
+  @@id([generationId, accountId])
+  @@index([generationId, lastClassificationChangedAt(sort: Desc), accountId])
+  @@index([generationId, highestFindingSeverity, activeFindingCount, accountId])
+  @@index([normalizedScreenName])
+}
+
+model AccountClassificationCurrent {
+  generationId      String
+  accountId         String
+  labelDefinitionId String
+  value             Boolean
+  confidence        Float
+  reason            String
+  lastChangedAt     DateTime
+
+  @@id([generationId, accountId, labelDefinitionId])
+  @@index([generationId, labelDefinitionId, value, accountId])
+}
+
+model AccountLabelChange {
+  id                 String   @id @default(cuid())
+  accountId          String
+  labelDefinitionId  String
+  changeType         String
+  previousValue      Boolean?
+  newValue           Boolean?
+  previousConfidence Float?
+  newConfidence      Float?
+  previousReason     String?
+  newReason          String?
+  sourceId           String?
+  changedAt          DateTime @default(now())
+
+  @@index([accountId, changedAt(sort: Desc)])
+  @@index([labelDefinitionId, changedAt(sort: Desc), id(sort: Desc)])
+}
+
+model LabelSummaryCurrent {
+  generationId           String
+  labelDefinitionId      String
+  latestSnapshotId       String?
+  evaluatedCount         Int
+  trueCount              Int
+  prevalence             Float
+  previousRunDelta       Float?
+  dayDelta               Float?
+  weekDelta              Float?
+  confidenceShift        Json     @default("{}")
+  reasonShift            Json     @default("{}")
+  activeFindingCount     Int      @default(0)
+  highestFindingSeverity String?
+  qualityStatus          String
+  sourceWatermarkAt      DateTime
+  updatedAt              DateTime @updatedAt
+
+  @@id([generationId, labelDefinitionId])
+  @@index([generationId, qualityStatus])
+}
+
+model BlockRelationCurrent {
+  generationId                String
+  blockId                     String
+  normalizedBlockerScreenName String
+  normalizedBlockedScreenName String
+  status                      String
+  statusChangedAt             DateTime
+  activeFindingCount          Int      @default(0)
+  highestFindingSeverity      String?
+  sourceWatermarkAt           DateTime
+
+  @@id([generationId, blockId])
+  @@index([generationId, status, statusChangedAt(sort: Desc), blockId])
+}
+
+model BlockStateChange {
+  id         String   @id @default(cuid())
+  blockId    String
+  fromStatus String?
+  toStatus   String
+  changedAt  DateTime @default(now())
+  sourceId   String?
+
+  @@index([blockId, changedAt(sort: Desc), id(sort: Desc)])
+}
+
+// Overview の Attention Queue 用に OperationalIssue と ReviewFinding を正規化する
+// 読み取りモデル。正本ではなく、独自ライフサイクルを持たない (元データへの参照必須)。
+model AttentionItemCurrent {
+  generationId String
+  sourceType   String
+  sourceId     String
+  category     String
+  priority     Int
+  severity     String
+  summary      String
+  impact       Json     @default("{}")
+  detectedAt   DateTime
+  freshness    String
+  detailHref   String
+
+  @@id([generationId, sourceType, sourceId])
+  @@index([generationId, priority])
+}
+
+model OverviewSnapshot {
+  id                String   @id @default(cuid())
+  schemaVersion     Int
+  generatedAt       DateTime @default(now())
+  sourceWatermarkAt DateTime
+  operationalStatus String
+  qualityStatus     String
+  payload           Json
+  analysisRunId     String?
+
+  @@index([generatedAt(sort: Desc)])
+}
+
+model ReadModelGeneration {
+  id                String    @id @default(cuid())
+  modelKey          String
+  schemaVersion     Int
+  status            String    @default("building")
+  sourceWatermarkAt DateTime?
+  startedAt         DateTime  @default(now())
+  completedAt       DateTime?
+  rowCount          Int?
+  validationSummary Json      @default("{}")
+  analysisRunId     String?
+
+  @@index([modelKey, status, startedAt(sort: Desc)])
+}
+
+model ReadModelPointer {
+  modelKey            String   @id
+  currentGenerationId String
+  switchedAt          DateTime @default(now())
+}
+
+model ReadModelState {
+  modelKey            String    @id
+  schemaVersion       Int
+  status              String    @default("unknown")
+  currentGenerationId String?
+  sourceWatermarkAt   DateTime?
+  lastStartedAt       DateTime?
+  lastSuccessAt       DateTime?
+  lastFailureAt       DateTime?
+  expectedNextAt      DateTime?
+  delayedAt           DateTime?
+  staleAt             DateTime?
+  rowCount            Int?
+  policyHash          String?
+  analyzerVersion     String?
+  errorCode           String?
+  errorSummary        String?
 }
