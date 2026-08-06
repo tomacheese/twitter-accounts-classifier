@@ -115,11 +115,19 @@ model AccountLabel {
   method            String
   ruleVersion       String
   labeledAt         DateTime        @default(now())
+  // 発生源追跡: どの Crawl・relabel・Weekly Review・backfill が作った行かを監査可能にする。
+  // 既存行は sourceKind = "legacy"、sourceId = null とし、推定 backfill しない。
+  sourceKind        String          @default("legacy")
+  sourceId          String?
+  sourceUsername    String?
 
   // account-detail.ts の accountId 絞り込みにはこの単一インデックスで足りる。
   // labeledAt 降順の並び替え性能まで複合インデックスで確保する必要はないと判断している。
   // ルールバージョン検索は AccountLabelLatest で足りるため、AccountLabel 側には置かない。
   @@index([accountId])
+  @@index([labeledAt(sort: Desc), id(sort: Desc)])
+  @@index([labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])
+  @@index([sourceKind, sourceId])
 }
 
 // AccountLabel は監査証跡としてほぼ無制限に増え続ける履歴テーブルであり、
@@ -141,6 +149,9 @@ model AccountLabelLatest {
   method            String
   ruleVersion       String
   labeledAt         DateTime
+  sourceKind        String          @default("legacy")
+  sourceId          String?
+  sourceUsername    String?
 
   @@id([accountId, labelDefinitionId])
   // value = true で絞り込む dashboard.ts/accounts.ts の各クエリを支えるインデックス。
@@ -194,17 +205,26 @@ model LabelingFollowSample {
 }
 
 model Block {
-  id          String   @id @default(cuid())
-  blockerId   String
-  blocker     Account  @relation("BlockerEdges", fields: [blockerId], references: [id])
-  blockedId   String
-  blocked     Account  @relation("BlockedEdges", fields: [blockedId], references: [id])
-  firstSeenAt DateTime @default(now())
-  lastSeenAt  DateTime @default(now())
+  id                      String    @id @default(cuid())
+  blockerId               String
+  blocker                 Account   @relation("BlockerEdges", fields: [blockerId], references: [id])
+  blockedId               String
+  blocked                 Account   @relation("BlockedEdges", fields: [blockedId], references: [id])
+  firstSeenAt             DateTime  @default(now())
+  lastSeenAt              DateTime  @default(now())
+  // 完全同期で対象が存在しない場合のみ論理状態を進める。物理削除はしない。
+  status                  String    @default("active")
+  lastCheckedAt           DateTime  @default(now())
+  missingSinceAt          DateTime?
+  resolvedAt              DateTime?
+  consecutiveMissingCount Int       @default(0)
+  sourceKind              String    @default("legacy")
+  sourceId                String?
 
   @@unique([blockerId, blockedId])
   @@index([blockerId])
   @@index([blockedId])
+  @@index([status, lastCheckedAt(sort: Desc)])
 }
 
 model CrawlRun {
