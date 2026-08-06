@@ -100,6 +100,7 @@ model LabelDefinition {
   createdAt           DateTime             @default(now())
   accountLabels       AccountLabel[]
   accountLabelsLatest AccountLabelLatest[]
+  labelAggregate      LabelAggregate?
   blockActions        BlockAction[]
 }
 
@@ -146,6 +147,32 @@ model AccountLabelLatest {
   // value = true で絞り込む dashboard.ts/accounts.ts の各クエリを支えるインデックス。
   @@index([labelDefinitionId, value])
   @@index([value, accountId])
+}
+
+// AccountLabelLatest から都度集計すると全件 Seq Scan になり本番の応答時間を守れないため、
+// crawler がラベリング完了時に計算した結果をここへ書き込み、viewer はここだけを読む。
+model LabelAggregate {
+  labelDefinitionId String          @id
+  labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
+  labelKey          String
+  labelDescription  String
+  trueCount         Int
+  totalCount        Int
+  updatedAt         DateTime
+
+  @@index([labelKey])
+}
+
+// 集計処理自体の成否と、全体の labeledAccounts を保持する固定1行のテーブル。
+// 集計に失敗しても LabelAggregate 側の値は上書きしないため、
+// このテーブルだけで「前回成功時点の値を表示中かどうか」を viewer から判別できる。
+model LabelAggregateStatus {
+  id                String    @id
+  labeledAccounts   Int
+  lastSuccessAt     DateTime?
+  lastAttemptAt     DateTime
+  lastAttemptStatus String
+  lastErrorMessage  String?
 }
 
 model WeeklyAnalysisRun {
