@@ -3,6 +3,7 @@ import { captureException, initMonitoring } from './monitoring/sentry'
 import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { ensureLabelDefinitionsForRules, recordAccountLabelsBulk } from './db/label-repository'
+import { refreshLabelAggregate } from './db/label-aggregate-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
@@ -386,6 +387,16 @@ async function main(): Promise<void> {
     logger.info(
       `Relabel backfill complete: ${accountsProcessed} accounts processed, ${labelsPersisted} labels persisted`,
     )
+    // runRelabelBackfill が完了した場合のみ集計し直す
+    // (crawl.ts は逐次書き込みのため finally で必ず呼ぶが、
+    // relabel はバックフィル未完了のまま反映すると新旧ラベルが
+    // 混在した中途半端な集計を表示してしまうため、成功時のみ呼ぶ)。
+    try {
+      await refreshLabelAggregate(prisma)
+    } catch (error) {
+      logger.error('Failed to refresh label aggregate:', error as Error)
+      captureException(error, { source: 'relabel.refreshLabelAggregate' })
+    }
   } finally {
     await disconnectPrisma()
   }
