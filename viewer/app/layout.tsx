@@ -2,6 +2,9 @@ import type { Metadata } from 'next'
 import Script from 'next/script'
 import './globals.css'
 import { SiteNav } from './components/site-nav'
+import { getPrismaClient } from '@/lib/prisma'
+import { getNavBadgeCounts } from '@/lib/queries/global-search'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
 // hydration 前に適用することで、最初の描画から保存済みの選択 (未保存なら OS の設定) に合わせ、
 // ライトモードが一瞬表示されるのを防ぐ。
@@ -22,11 +25,21 @@ export const metadata: Metadata = {
  * @param props - レイアウト内に描画するページ本体
  * @returns ナビゲーションを含む HTML ドキュメントの骨格
  */
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
-}): React.ReactElement {
+}): Promise<React.ReactElement> {
+  const isNewNavEnabled = isNewUiSectionEnabled('overview')
+  // badge 件数の取得に失敗してもナビゲーション自体は必ず描画する必要があるため、
+  // ここでの失敗は 0 件表示にフォールバックする。
+  const badgeCounts = isNewNavEnabled
+    ? await getNavBadgeCounts(getPrismaClient()).catch((error: unknown) => {
+        console.error('Failed to load nav badge counts:', error)
+        return { qualityReviewCount: 0, operationsCount: 0 }
+      })
+    : { qualityReviewCount: 0, operationsCount: 0 }
+
   return (
     <html lang="en">
       <head>
@@ -35,7 +48,11 @@ export default function RootLayout({
         </Script>
       </head>
       <body className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100">
-        <SiteNav />
+        <SiteNav
+          isNewNavEnabled={isNewNavEnabled}
+          qualityReviewBadgeCount={badgeCounts.qualityReviewCount}
+          operationsBadgeCount={badgeCounts.operationsCount}
+        />
         <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">{children}</main>
       </body>
     </html>
