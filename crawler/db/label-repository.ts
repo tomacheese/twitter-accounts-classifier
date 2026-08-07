@@ -168,7 +168,13 @@ export async function recordAccountLabelsBulk(
       // このバルク経路は INSERT 列に sourceKind/sourceId/sourceUsername を含めず、
       // スキーマ側のデフォルト ("legacy" / null / null) に委ねているため、
       // 返却するオブジェクトもそれに合わせる。
-      history.push({ ...rest, labeledAt, sourceKind: 'legacy', sourceId: null, sourceUsername: null })
+      history.push({
+        ...rest,
+        labeledAt,
+        sourceKind: 'legacy',
+        sourceId: null,
+        sourceUsername: null,
+      })
     }
   }
 

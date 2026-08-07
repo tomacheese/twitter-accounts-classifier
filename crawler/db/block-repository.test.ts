@@ -27,18 +27,30 @@ function makeResult(ids: string[], reachedEnd: boolean): BlockListResult {
   }
 }
 
-function makePrisma() {
+function makePrisma(
+  existingBlocks: {
+    id: string
+    blockedId: string
+    status: string
+    consecutiveMissingCount: number
+    missingSinceAt: Date | null
+  }[] = [],
+) {
   const accountUpsert = vi.fn().mockResolvedValue({})
   const blockCreateMany = vi.fn().mockResolvedValue({ count: 0 })
   const blockUpdateMany = vi.fn().mockResolvedValue({ count: 0 })
-  const blockDeleteMany = vi.fn().mockResolvedValue({ count: 0 })
+  const blockFindMany = vi.fn().mockResolvedValue(existingBlocks)
+  const blockUpdate = vi.fn().mockResolvedValue({})
+  const blockStateChangeCreate = vi.fn().mockResolvedValue({})
   const tx = {
     account: { upsert: accountUpsert },
     block: {
       createMany: blockCreateMany,
       updateMany: blockUpdateMany,
-      deleteMany: blockDeleteMany,
+      findMany: blockFindMany,
+      update: blockUpdate,
     },
+    blockStateChange: { create: blockStateChangeCreate },
   }
   const $transaction = vi
     .fn()
@@ -47,7 +59,16 @@ function makePrisma() {
     account: { upsert: accountUpsert },
     $transaction,
   } as unknown as PrismaClient
-  return { prisma, accountUpsert, blockCreateMany, blockUpdateMany, blockDeleteMany, $transaction }
+  return {
+    prisma,
+    accountUpsert,
+    blockCreateMany,
+    blockUpdateMany,
+    blockFindMany,
+    blockUpdate,
+    blockStateChangeCreate,
+    $transaction,
+  }
 }
 
 describe('syncBlocks', () => {
@@ -87,30 +108,63 @@ describe('syncBlocks', () => {
     )
   })
 
-  it('deletes stale edges for the same blocker when reachedEnd is true', async () => {
-    const { prisma, blockDeleteMany } = makePrisma()
+  it('moves a stale edge to missing (not physically deleted) when reachedEnd is true', async () => {
+    const existing = {
+      id: 'block-1',
+      blockedId: 'stale',
+      status: 'active',
+      consecutiveMissingCount: 0,
+      missingSinceAt: null,
+    }
+    const { prisma, blockUpdate, blockStateChangeCreate } = makePrisma([existing])
 
     await syncBlocks(prisma, 'me', makeResult(['a'], true))
 
-    expect(blockDeleteMany).toHaveBeenCalledWith({
-      where: { blockerId: 'me', blockedId: { notIn: ['a'] } },
-    })
+    expect(blockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'block-1' },
+        data: expect.objectContaining({ status: 'missing', consecutiveMissingCount: 1 }),
+      }),
+    )
+    expect(blockStateChangeCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          blockId: 'block-1',
+          fromStatus: 'active',
+          toStatus: 'missing',
+        }),
+      }),
+    )
   })
 
-  it('does not delete anything when reachedEnd is false', async () => {
-    const { prisma, blockDeleteMany } = makePrisma()
+  it('does not reconcile anything when reachedEnd is false', async () => {
+    const existing = {
+      id: 'block-1',
+      blockedId: 'stale',
+      status: 'active',
+      consecutiveMissingCount: 0,
+      missingSinceAt: null,
+    }
+    const { prisma, blockFindMany } = makePrisma([existing])
 
     await syncBlocks(prisma, 'me', makeResult(['a'], false))
 
-    expect(blockDeleteMany).not.toHaveBeenCalled()
+    expect(blockFindMany).not.toHaveBeenCalled()
   })
 
-  it('does not delete anything when reachedEnd is true but no ids were observed', async () => {
-    const { prisma, blockDeleteMany, blockCreateMany } = makePrisma()
+  it('does not reconcile anything when reachedEnd is true but no ids were observed', async () => {
+    const existing = {
+      id: 'block-1',
+      blockedId: 'stale',
+      status: 'active',
+      consecutiveMissingCount: 0,
+      missingSinceAt: null,
+    }
+    const { prisma, blockFindMany, blockCreateMany } = makePrisma([existing])
 
     await syncBlocks(prisma, 'me', makeResult([], true))
 
-    expect(blockDeleteMany).not.toHaveBeenCalled()
+    expect(blockFindMany).not.toHaveBeenCalled()
     expect(blockCreateMany).not.toHaveBeenCalled()
   })
 

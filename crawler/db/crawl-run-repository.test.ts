@@ -100,7 +100,9 @@ describe('startOrResumeCrawlRun', () => {
       analysisWorkItem: { upsert },
     }
     const transaction = vi.fn((arg: unknown) =>
-      typeof arg === 'function' ? (arg as (transactionClient: unknown) => Promise<unknown>)(tx) : arg,
+      typeof arg === 'function'
+        ? (arg as (transactionClient: unknown) => Promise<unknown>)(tx)
+        : arg,
     )
     const prisma = {
       crawlRun: { findFirst, create, update },
