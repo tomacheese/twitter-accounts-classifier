@@ -18,10 +18,16 @@ const FAILED_STATUSES = new Set(['failed', 'timeout'])
  * @param prisma - Prisma クライアント
  * @param input - 対象 run の状態
  */
-export async function detectRunFailures(prisma: PrismaClient, input: DetectRunFailuresInput): Promise<void> {
+export async function detectRunFailures(
+  prisma: PrismaClient,
+  input: DetectRunFailuresInput,
+): Promise<void> {
   if (!FAILED_STATUSES.has(input.runStatus)) return
 
-  const fingerprint = computeFingerprint('run_failure', { component: input.component, runId: input.runId })
+  const fingerprint = computeFingerprint('run_failure', {
+    component: input.component,
+    runId: input.runId,
+  })
 
   const issue = await prisma.operationalIssue.upsert({
     where: { fingerprint },

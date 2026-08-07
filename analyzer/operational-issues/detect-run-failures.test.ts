@@ -21,7 +21,9 @@ describe('detectRunFailures', () => {
       now: new Date(),
     })
 
-    const issues = await prisma.operationalIssue.findMany({ where: { component: 'crawl', type: 'run_failure' } })
+    const issues = await prisma.operationalIssue.findMany({
+      where: { component: 'crawl', type: 'run_failure' },
+    })
     expect(issues).toHaveLength(1)
     expect(issues[0]?.status).toBe('active')
   })
@@ -43,7 +45,9 @@ describe('detectRunFailures', () => {
       now: new Date(),
     })
 
-    const issues = await prisma.operationalIssue.findMany({ where: { component: 'crawl', type: 'run_failure' } })
+    const issues = await prisma.operationalIssue.findMany({
+      where: { component: 'crawl', type: 'run_failure' },
+    })
     expect(issues).toHaveLength(1)
 
     const occurrences = await prisma.operationalIssueOccurrence.findMany({
@@ -62,7 +66,9 @@ describe('detectRunFailures', () => {
       now: new Date(),
     })
 
-    const issues = await prisma.operationalIssue.findMany({ where: { component: 'crawl', type: 'run_failure' } })
+    const issues = await prisma.operationalIssue.findMany({
+      where: { component: 'crawl', type: 'run_failure' },
+    })
     expect(issues).toHaveLength(0)
   })
 })

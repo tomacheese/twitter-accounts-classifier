@@ -16,20 +16,42 @@ const rule: DetectionPolicyRule = {
 
 describe('applyLifecycleTransition', () => {
   it('activationCount 未満の連続超過では active 化しない', () => {
-    const state: FindingLifecycleState = { status: 'none', consecutiveExceed: 0, consecutiveNormal: 0 }
-    const next = applyLifecycleTransition(state, { exceeded: true, isMissingOrFailed: false }, rule, new Date())
+    const state: FindingLifecycleState = {
+      status: 'none',
+      consecutiveExceed: 0,
+      consecutiveNormal: 0,
+    }
+    const next = applyLifecycleTransition(
+      state,
+      { exceeded: true, isMissingOrFailed: false },
+      rule,
+      new Date(),
+    )
     expect(next.status).toBe('none')
     expect(next.consecutiveExceed).toBe(1)
   })
 
   it('activationCount に達すると active 化する', () => {
-    const state: FindingLifecycleState = { status: 'none', consecutiveExceed: 1, consecutiveNormal: 0 }
-    const next = applyLifecycleTransition(state, { exceeded: true, isMissingOrFailed: false }, rule, new Date())
+    const state: FindingLifecycleState = {
+      status: 'none',
+      consecutiveExceed: 1,
+      consecutiveNormal: 0,
+    }
+    const next = applyLifecycleTransition(
+      state,
+      { exceeded: true, isMissingOrFailed: false },
+      rule,
+      new Date(),
+    )
     expect(next.status).toBe('active')
   })
 
   it('criticalImmediate な rule は 1 回の超過で active 化する', () => {
-    const state: FindingLifecycleState = { status: 'none', consecutiveExceed: 0, consecutiveNormal: 0 }
+    const state: FindingLifecycleState = {
+      status: 'none',
+      consecutiveExceed: 0,
+      consecutiveNormal: 0,
+    }
     const next = applyLifecycleTransition(
       state,
       { exceeded: true, isMissingOrFailed: false },
@@ -40,15 +62,33 @@ describe('applyLifecycleTransition', () => {
   })
 
   it('母数不足・評価失敗は連続回数を進めない', () => {
-    const state: FindingLifecycleState = { status: 'none', consecutiveExceed: 1, consecutiveNormal: 0 }
-    const next = applyLifecycleTransition(state, { exceeded: true, isMissingOrFailed: true }, rule, new Date())
+    const state: FindingLifecycleState = {
+      status: 'none',
+      consecutiveExceed: 1,
+      consecutiveNormal: 0,
+    }
+    const next = applyLifecycleTransition(
+      state,
+      { exceeded: true, isMissingOrFailed: true },
+      rule,
+      new Date(),
+    )
     expect(next.consecutiveExceed).toBe(1)
     expect(next.status).toBe('none')
   })
 
   it('resolutionCount に達すると resolved 化する', () => {
-    const state: FindingLifecycleState = { status: 'active', consecutiveExceed: 2, consecutiveNormal: 1 }
-    const next = applyLifecycleTransition(state, { exceeded: false, isMissingOrFailed: false }, rule, new Date())
+    const state: FindingLifecycleState = {
+      status: 'active',
+      consecutiveExceed: 2,
+      consecutiveNormal: 1,
+    }
+    const next = applyLifecycleTransition(
+      state,
+      { exceeded: false, isMissingOrFailed: false },
+      rule,
+      new Date(),
+    )
     expect(next.status).toBe('resolved')
   })
 

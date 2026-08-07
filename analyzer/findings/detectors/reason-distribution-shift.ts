@@ -23,14 +23,17 @@ export function evaluateReasonDistributionShift(
 ): ReasonDistributionShiftResult {
   const reasons = new Set([...Object.keys(input.current), ...Object.keys(input.baseline)])
 
-  let best: { reason: string; currentCount: number; baselineCount: number; relativeDifference: number } | undefined
+  let best:
+    | { reason: string; currentCount: number; baselineCount: number; relativeDifference: number }
+    | undefined
 
   for (const reason of reasons) {
     const currentCount = input.current[reason] ?? 0
     const baselineCount = input.baseline[reason] ?? 0
     if (baselineCount < rule.minimumSampleSize) continue
 
-    const relativeDifference = baselineCount === 0 ? 0 : (baselineCount - currentCount) / baselineCount
+    const relativeDifference =
+      baselineCount === 0 ? 0 : (baselineCount - currentCount) / baselineCount
     if (!best || relativeDifference > best.relativeDifference) {
       best = { reason, currentCount, baselineCount, relativeDifference }
     }

@@ -83,7 +83,10 @@ export async function generateLabelMetricSnapshots(
     if (result.status === 'rejected') {
       const labelDefinitionId = labelDefinitions[index]?.id
       if (!labelDefinitionId) continue
-      logger.error(`label metric snapshot failed for label ${labelDefinitionId}`, result.reason as Error)
+      logger.error(
+        `label metric snapshot failed for label ${labelDefinitionId}`,
+        result.reason as Error,
+      )
       await prisma.labelMetricSnapshot.upsert({
         where: {
           sourceCrawlRunId_labelDefinitionId: {

@@ -75,7 +75,9 @@ describe('generateFindingsForCrawlCycle', () => {
       policyHash: 'hash-1',
       detectorVersion: 'v1',
     })
-    const afterFirst = await prisma.reviewFinding.findMany({ where: { primaryScopeId: labelDefinitionId } })
+    const afterFirst = await prisma.reviewFinding.findMany({
+      where: { primaryScopeId: labelDefinitionId },
+    })
     expect(afterFirst).toHaveLength(0)
 
     await generateFindingsForCrawlCycle(prisma, {
@@ -84,7 +86,9 @@ describe('generateFindingsForCrawlCycle', () => {
       policyHash: 'hash-1',
       detectorVersion: 'v1',
     })
-    const afterSecond = await prisma.reviewFinding.findMany({ where: { primaryScopeId: labelDefinitionId } })
+    const afterSecond = await prisma.reviewFinding.findMany({
+      where: { primaryScopeId: labelDefinitionId },
+    })
     expect(afterSecond).toHaveLength(1)
     expect(afterSecond[0]?.status).toBe('active')
   })
@@ -109,7 +113,9 @@ describe('generateFindingsForCrawlCycle', () => {
       })
     }
 
-    const findings = await prisma.reviewFinding.findMany({ where: { primaryScopeId: labelDefinitionId } })
+    const findings = await prisma.reviewFinding.findMany({
+      where: { primaryScopeId: labelDefinitionId },
+    })
     expect(findings).toHaveLength(1)
 
     const occurrences = await prisma.reviewFindingOccurrence.findMany({

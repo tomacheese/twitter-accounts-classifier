@@ -1,6 +1,10 @@
 import type { Prisma, PrismaClient, ReviewFinding } from '../generated/prisma'
 import { computeFingerprint } from './fingerprint'
-import { applyLifecycleTransition, type FindingLifecycleState, type DetectorObservation } from './lifecycle'
+import {
+  applyLifecycleTransition,
+  type FindingLifecycleState,
+  type DetectorObservation,
+} from './lifecycle'
 import { evaluateLabelCountDrop } from './detectors/label-count-drop'
 import { evaluateReasonDistributionShift } from './detectors/reason-distribution-shift'
 import type { DetectionPolicy, DetectionPolicyRule } from '../policy/schema'
@@ -182,7 +186,9 @@ async function processObservation(
         lastDetectedAt: now,
         resolvedAt: next.status === 'resolved' ? now : null,
         recurrenceCount:
-          next.status === 'recurring' ? existingFinding.recurrenceCount + 1 : existingFinding.recurrenceCount,
+          next.status === 'recurring'
+            ? existingFinding.recurrenceCount + 1
+            : existingFinding.recurrenceCount,
       },
     })
     await upsertOccurrence(prisma, existingFinding.id, next.status, input, ctx, now)
