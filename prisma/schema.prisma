@@ -178,6 +178,13 @@ model WeeklyAnalysisRun {
   sampledAccountIds Json
   findings          String?
   commitSha         String?
+  targetFrom        DateTime?
+  targetTo          DateTime?
+  analysisVersion   String?
+  modelIdentity     String?
+  toolIdentity      String?
+  policyHash        String?
+  structuredOutput  Json?
 
   @@index([status, startedAt(sort: Desc), id(sort: Desc)])
 }
