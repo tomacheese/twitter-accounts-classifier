@@ -82,7 +82,7 @@ function buildPageHref(
 
 /**
  * 旧 Accounts 一覧画面。`isNewUiSectionEnabled('accounts')` が無効な間はこちらを表示する。
- * 新実装は {@link NewAccountsView} を参照 (Task 31 の旧実装撤去まで両方を残す)。
+ * 新実装は {@link NewAccountsView} を参照。
  * @param props - `label` (繰り返し指定可能)・`sort`・`direction`・`page` の各検索パラメータ
  * @returns アカウント一覧ページの描画結果
  */
@@ -211,7 +211,7 @@ async function LegacyAccountsPage({
 }
 
 /**
- * 新 Accounts 一覧画面。account_summary read model (Task 17) を参照する。
+ * 新 Accounts 一覧画面。account_summary read model を参照する。
  * `view=recentlyChanged` (既定) は最近分類が変わった順、`view=all` は screenName 順に表示する。
  * @param props - `view` 検索パラメータ
  * @returns アカウント一覧画面の描画結果

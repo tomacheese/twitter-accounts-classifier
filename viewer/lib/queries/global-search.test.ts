@@ -2,11 +2,22 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
 import { getNavBadgeCounts, searchAcrossEntities } from './global-search'
 
-function createMockPrisma() {
+function createMockPrisma(overrides: { pointer?: unknown; summaryRows?: unknown[] } = {}) {
   const tweetFindMany = vi.fn()
+  const accountSummaryFindMany = vi.fn().mockResolvedValue(overrides.summaryRows ?? [])
   return {
     prisma: {
       account: { findMany: vi.fn().mockResolvedValue([]) },
+      readModelPointer: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue(
+            overrides.pointer === undefined
+              ? { currentGenerationId: 'generation-1' }
+              : overrides.pointer,
+          ),
+      },
+      accountSummaryCurrent: { findMany: accountSummaryFindMany },
       labelDefinition: { findMany: vi.fn().mockResolvedValue([]) },
       reviewFinding: {
         findMany: vi.fn().mockResolvedValue([]),
@@ -19,6 +30,7 @@ function createMockPrisma() {
       tweet: { findMany: tweetFindMany },
     } as unknown as PrismaClient,
     tweetFindMany,
+    accountSummaryFindMany,
   }
 }
 
@@ -29,18 +41,37 @@ describe('searchAcrossEntities', () => {
     expect(tweetFindMany).not.toHaveBeenCalled()
   })
 
-  it('Account の screenName/displayName、Label の key、Finding の id/type、Operation の cycleId のみを参照する', async () => {
-    const { prisma } = createMockPrisma()
+  it('アカウント検索は Account 本体ではなく read model を参照する', async () => {
+    const { prisma, accountSummaryFindMany } = createMockPrisma()
     await searchAcrossEntities(prisma, { query: 'example' })
 
     const accountFindMany = (
       prisma as unknown as { account: { findMany: ReturnType<typeof vi.fn> } }
     ).account.findMany
-    const accountCall = accountFindMany.mock.calls[0][0] as {
-      where: { OR: Record<string, unknown>[] }
+    expect(accountFindMany).not.toHaveBeenCalled()
+
+    const call = accountSummaryFindMany.mock.calls[0][0] as {
+      where: { generationId: string; OR: Record<string, unknown>[] }
     }
-    const accountFields = accountCall.where.OR.map((condition) => Object.keys(condition)[0])
-    expect(accountFields).toEqual(['screenName', 'displayName'])
+    expect(call.where.generationId).toBe('generation-1')
+    expect(call.where.OR.map((condition) => Object.keys(condition)[0])).toEqual([
+      'normalizedDisplayName',
+      'normalizedScreenName',
+    ])
+  })
+
+  it('ReadModelPointer が無ければアカウント検索結果は空になる', async () => {
+    const { prisma, accountSummaryFindMany } = createMockPrisma({ pointer: null })
+
+    const result = await searchAcrossEntities(prisma, { query: 'example' })
+
+    expect(result.accounts).toEqual([])
+    expect(accountSummaryFindMany).not.toHaveBeenCalled()
+  })
+
+  it('Label の key、Finding の id/type、Operation の cycleId のみを参照する', async () => {
+    const { prisma } = createMockPrisma()
+    await searchAcrossEntities(prisma, { query: 'example' })
 
     const labelFindMany = (
       prisma as unknown as { labelDefinition: { findMany: ReturnType<typeof vi.fn> } }

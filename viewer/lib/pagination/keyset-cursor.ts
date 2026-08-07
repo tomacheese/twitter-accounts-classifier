@@ -1,11 +1,12 @@
+/** encodeCursor の入力。 */
 export interface EncodeCursorInput {
   sortValues: string[]
   filterHash: string
 }
 
 /**
- * cursor は base64 化した JSON とし、filter・sort の hash を含めることで
- * filter が変わった cursor を誤って使い回さないようにする。
+ * cursor は base64 化した JSON とし、filter・sort の hash を含める。
+ * filter が変わった cursor を誤って使い回さないようにするため。
  * @param input - cursor に含めるソート値と filter hash
  * @returns URL に埋め込める不透明な cursor 文字列
  */
@@ -31,7 +32,11 @@ export function decodeCursor(cursor: string, expectedFilterHash: string): string
     }
     const { sortValues, filterHash } = decoded as { sortValues: unknown; filterHash: unknown }
     if (filterHash !== expectedFilterHash || !Array.isArray(sortValues)) return null
-    return sortValues as string[]
+    // filterHash は filter の JSON そのもので秘密ではないため、
+    // 一致する hash を添えたまま要素だけ差し替えた cursor を作れる。
+    // 要素型を見ないと Number()・new Date() が NaN・Invalid Date のまま SQL へ渡る。
+    if (!sortValues.every((value) => typeof value === 'string')) return null
+    return sortValues
   } catch {
     return null
   }

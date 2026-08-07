@@ -22,8 +22,7 @@ const QUALITY_STATUS_LABEL: Record<string, string> = {
 
 /**
  * 新 UI の Overview 画面。旧ダッシュボードとは独立した URL (`/overview`) で提供し、
- * `isNewUiSectionEnabled('overview')` が false の場合は旧ダッシュボードをそのまま表示する
- * (Task 31 の URL 切り替えまでは両方を併設する)。
+ * `isNewUiSectionEnabled('overview')` が false の場合は旧ダッシュボードをそのまま表示する。
  * @returns Overview 画面
  */
 export default async function OverviewPage(): Promise<React.JSX.Element> {

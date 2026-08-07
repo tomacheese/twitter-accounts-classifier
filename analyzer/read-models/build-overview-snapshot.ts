@@ -1,19 +1,30 @@
 import type { Prisma, PrismaClient } from '../generated/prisma'
 
+const ATTENTION_PAYLOAD_LIMIT = 8
+
+/** Operational Health の総合状態。 */
 export type OperationalStatus = 'healthy' | 'attention' | 'critical' | 'unknown'
+/** Classification Quality の総合状態。 */
 export type QualityStatus = 'stable' | 'watch' | 'degraded' | 'unknown'
 
+/**
+ * deriveOperationalStatus の入力。
+ */
 export interface DeriveOperationalStatusInput {
+  /** severity が critical の OperationalIssue があるか。 */
   hasCriticalIssue: boolean
+  /** 必須 Stage に failed/stale があるか。 */
   hasFailedOrStaleCoreStage: boolean
+  /** 必須 Stage に unknown があるか。 */
   hasUnknownCoreStage: boolean
+  /** active な OperationalIssue があるか。 */
   hasActiveIssue: boolean
 }
 
 /**
- * spec の Operational Health 優先順位 (critical → unknown → attention → healthy) を実装する。
- * Crawl が succeeded でも必須後続 Stage が failed/stale なら critical とする規則を
- * `hasFailedOrStaleCoreStage` として critical 判定へ含める。
+ * critical → unknown → attention → healthy の優先順位で総合状態を決める。
+ * Crawl が succeeded でも必須後続 Stage が failed/stale なら
+ * パイプライン全体としては信頼できないため critical 判定へ含める。
  * @param input - 判定に必要な各種フラグ
  * @returns Operational Health の総合状態
  */
@@ -24,15 +35,22 @@ export function deriveOperationalStatus(input: DeriveOperationalStatusInput): Op
   return 'healthy'
 }
 
+/**
+ * deriveQualityStatus の入力。
+ */
 export interface DeriveQualityStatusInput {
+  /** 評価データ自体が unknown か。 */
   isDataUnknown: boolean
+  /** critical/high の ReviewFinding があるか。 */
   hasDegradingFinding: boolean
+  /** medium の ReviewFinding があるか。 */
   hasWatchFinding: boolean
 }
 
 /**
- * 評価データ自体が unknown の場合、過去の状態を引き継がず現在状態を unknown にする
- * (spec: 「評価データが unknown の場合、過去の状態を現在状態として維持しない」)。
+ * 評価データ自体が unknown の場合、過去の状態を引き継がず現在状態を unknown にする。
+ * 古い評価結果を現在の品質として提示すると、
+ * 未評価の状態を「問題なし」と誤読させるため。
  * @param input - 判定に必要な各種フラグ
  * @returns Classification Quality の総合状態
  */
@@ -43,16 +61,21 @@ export function deriveQualityStatus(input: DeriveQualityStatusInput): QualitySta
   return 'stable'
 }
 
+/**
+ * buildOverviewSnapshot の入力。
+ */
 export interface BuildOverviewSnapshotInput {
+  /** 集計の基準時刻。 */
   sourceWatermarkAt: Date
+  /** 紐づく AnalysisRun の ID。 */
   analysisRunId?: string
 }
 
 /**
  * OperationalIssue・OperationCycle・ReviewFinding・ReadModelState を集約し、
- * Operational Health / Classification Quality の総合判定を bounded payload とともに
- * OverviewSnapshot へ書く。巨大な正本テーブルを直接返さず、上位 Attention 8 件など
- * 上限付きの情報だけを payload に含める。
+ * 総合判定と bounded payload を OverviewSnapshot へ書く。
+ * 巨大な正本テーブルを直接返さず、
+ * ATTENTION_PAYLOAD_LIMIT 件までの Attention など上限付きの情報だけを payload に含める。
  * @param prisma - Prisma クライアント
  * @param input - 対象 generation の検索基準時刻
  * @returns 作成した OverviewSnapshot の ID
@@ -121,7 +144,7 @@ export async function buildOverviewSnapshot(
     ? await prisma.attentionItemCurrent.findMany({
         where: { generationId: attentionPointer.currentGenerationId },
         orderBy: [{ priority: 'asc' }],
-        take: 8,
+        take: ATTENTION_PAYLOAD_LIMIT,
       })
     : []
 

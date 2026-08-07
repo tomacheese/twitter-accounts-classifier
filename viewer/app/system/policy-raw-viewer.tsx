@@ -3,9 +3,9 @@
 import { useState } from 'react'
 
 /**
- * Active policy の生設定を初期折りたたみで表示し、展開時のみ
- * `/api/system/policy` から取得する。設定は数百行になりうるため、
- * 常時取得せずユーザー操作を起点にする。
+ * Active policy の生設定を初期折りたたみで表示し、
+ * 展開時のみ `/api/system/policy` から取得する。
+ * 設定は数百行になりうるため、常時取得せずユーザー操作を起点にする。
  * @returns 展開可能な Active policy 生設定ビューア
  */
 export function PolicyRawViewer(): React.ReactElement {

@@ -5,14 +5,12 @@ import { listLabelSummaries } from '@/lib/queries/label-summary'
 import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { ErrorFallback } from '../components/error-fallback'
 
-// このページは常に最新データを読むため、
-// 静的プリレンダリングの対象から外している。指定しないと、
-// DB 接続がないビルド時に next build が静的生成を試みてしまう。
+// 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
 
 /**
  * 旧 Labels 一覧画面。`isNewUiSectionEnabled('labels')` が無効な間はこちらを表示する。
- * 新実装は {@link NewLabelsView} を参照 (Task 31 の旧実装撤去まで両方を残す)。
+ * 新実装は {@link NewLabelsView} を参照。
  * @returns ラベル一覧ページの描画結果
  */
 async function LegacyLabelsPage(): Promise<React.ReactElement> {
@@ -71,7 +69,7 @@ async function LegacyLabelsPage(): Promise<React.ReactElement> {
 }
 
 /**
- * 新 Labels 一覧画面。label_summary read model (Task 17) を参照する。
+ * 新 Labels 一覧画面。label_summary read model を参照する。
  * @returns ラベル一覧画面の描画結果
  */
 async function NewLabelsView(): Promise<React.ReactElement> {

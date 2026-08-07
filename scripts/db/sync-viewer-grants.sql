@@ -1,5 +1,5 @@
 -- viewer の権限を、現在のスキーマへ冪等に同期する。
--- Prisma migration を実行するテーブル所有者ロールで、migration後に毎回実行する。
+-- Prisma migration を実行するテーブル所有者ロールで、migration 後に毎回実行する。
 -- 方針: public の全テーブルを読める。write は一切許可しない。
 
 DO $$
@@ -17,7 +17,7 @@ $$;
 
 GRANT USAGE ON SCHEMA public TO viewer;
 
--- 過去の個別GRANTや設定変更で増えたwrite権限を一度除去する。
+-- 過去の個別 GRANT や設定変更で増えた write 権限を一度除去する。
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
   ON ALL TABLES IN SCHEMA public
   FROM viewer;
@@ -25,11 +25,11 @@ REVOKE ALL PRIVILEGES
   ON ALL SEQUENCES IN SCHEMA public
   FROM viewer;
 
--- 現在存在する全テーブル・view・materialized viewを読み取り可能にする。
+-- 現在存在する全テーブル・view・materialized view を読み取り可能にする。
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO viewer;
 
--- 以後、このSQLを実行した所有者が作るテーブルにも同じread方針を適用する。
--- テーブル入れ替えmigrationでも新オブジェクトへSELECTが自動付与される。
+-- 以後、この SQL を実行した所有者が作るテーブルにも同じ read 方針を適用する。
+-- テーブル入れ替え migration でも新オブジェクトへ SELECT が自動付与される。
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
   ON TABLES FROM viewer;

@@ -4,16 +4,11 @@ import { formatDateTime } from '@/lib/format-date'
 import { ErrorFallback } from '../components/error-fallback'
 import { PolicyRawViewer } from './policy-raw-viewer'
 
-// このページは常に最新データを読むため、
-// 静的プリレンダリングの対象から外している。指定しないと、
-// DB 接続がないビルド時に next build が静的生成を試みてしまう。
+// 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
 
 /**
- * System 画面。spec の 8 セクション (System identity → Component health →
- * Active policy → Detector/schema versions → Schedule/freshness →
- * Read model status → Data retention → Diagnostics) のうち、DB から取得可能な
- * 部分を表示する。Component health は Overview が保存した値をそのまま読み、
+ * System 画面。Component health は Overview が保存した値をそのまま読み、
  * ここでは再計算しない。
  * @returns 描画された System 画面
  */

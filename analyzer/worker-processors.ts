@@ -38,7 +38,7 @@ function getPolicy(): { policy: ReturnType<typeof loadPolicy>; policyHash: strin
 }
 
 /**
- * Task 13: LabelMetricSnapshot を生成し、後続の finding_generation を enqueue する。
+ * LabelMetricSnapshot を生成し、後続の finding_generation を enqueue する。
  * @param prisma - Prisma クライアント
  * @param workItem - `triggerType: 'crawl_run'` の WorkItem
  */
@@ -64,7 +64,7 @@ export async function processLabelMetrics(
 }
 
 /**
- * Task 14+15: ReviewFinding と OperationalIssue (run_failure) を評価し、
+ * ReviewFinding と OperationalIssue (run_failure) を評価し、
  * 後続の read_model_refresh を enqueue する。
  * @param prisma - Prisma クライアント
  * @param workItem - `triggerType: 'crawl_run'` の WorkItem
@@ -99,7 +99,7 @@ export async function processFindingGeneration(
 }
 
 /**
- * Task 16+17: OperationCycle を更新し、読み取りモデル各種を原子的に再公開する。
+ * OperationCycle を更新し、読み取りモデル各種を原子的に再公開する。
  * @param prisma - Prisma クライアント
  * @param workItem - `triggerType: 'crawl_run'` の WorkItem
  */
@@ -142,7 +142,7 @@ export async function processReadModelRefresh(
 }
 
 /**
- * Task 18: WeeklyAnalysisRun の structuredOutput を検証・取り込む。
+ * WeeklyAnalysisRun の structuredOutput を検証・取り込む。
  * @param prisma - Prisma クライアント
  * @param workItem - `triggerType: 'weekly_analysis_run'` の WorkItem
  */
@@ -179,7 +179,7 @@ export async function processWeeklyReviewIngest(
 }
 
 /**
- * Task 19: BlockRun 完了を契機に BlockRelationCurrent を再公開する。
+ * BlockRun 完了を契機に BlockRelationCurrent を再公開する。
  * Block 自体の論理状態遷移は crawler 側の syncBlocks で fetch のたびに確定済みのため、
  * ここでは read model の再構築のみを担う。
  * @param prisma - Prisma クライアント

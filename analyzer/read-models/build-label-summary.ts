@@ -21,14 +21,21 @@ function computePrevalence(evaluatedCount: number, trueCount: number): number {
   return evaluatedCount === 0 ? 0 : trueCount / evaluatedCount
 }
 
+/**
+ * buildLabelSummary の入力。
+ */
 export interface BuildLabelSummaryInput {
+  /** 書き込み先の generationId。 */
   generationId: string
+  /** 集計の基準時刻。 */
   sourceWatermarkAt: Date
 }
 
 /**
  * LabelDefinition ごとに最新の LabelMetricSnapshot と、直近の日次・週次比較用 snapshot、
  * 対応する ReviewFinding の active/recurring 件数を集約して LabelSummaryCurrent を構築する。
+ * Label ごとの 2 本の読み取りは互いに独立しているため並行実行し、
+ * 書き込みは 1 回の createMany にまとめて往復回数を Label 数に比例させない。
  * @param prisma - Prisma クライアント
  * @param input - 対象 generationId と検索基準時刻
  * @returns 作成した行数
@@ -39,53 +46,54 @@ export async function buildLabelSummary(
 ): Promise<{ rowCount: number }> {
   const labelDefinitions = await prisma.labelDefinition.findMany({ select: { id: true } })
 
-  let rowCount = 0
-  for (const labelDefinition of labelDefinitions) {
-    const snapshots = await prisma.labelMetricSnapshot.findMany({
-      where: { labelDefinitionId: labelDefinition.id },
-      orderBy: [{ observedAt: 'desc' }],
-      take: 8,
-    })
-    const latest = snapshots.at(0)
-    if (!latest) continue
+  const rows = await Promise.all(
+    labelDefinitions.map(async (labelDefinition) => {
+      const [snapshots, activeFindings] = await Promise.all([
+        prisma.labelMetricSnapshot.findMany({
+          where: { labelDefinitionId: labelDefinition.id },
+          orderBy: [{ observedAt: 'desc' }],
+          take: 8,
+        }),
+        prisma.reviewFinding.findMany({
+          where: {
+            status: { in: ['active', 'recurring'] },
+            primaryScopeType: 'label',
+            primaryScopeId: labelDefinition.id,
+          },
+          select: { currentSeverity: true },
+        }),
+      ])
 
-    const previous = snapshots.at(1)
-    const dayAgo = snapshots.find(
-      (snapshot) =>
-        latest.observedAt.getTime() - snapshot.observedAt.getTime() >= 24 * 60 * 60 * 1000,
-    )
-    const weekAgo = snapshots.find(
-      (snapshot) =>
-        latest.observedAt.getTime() - snapshot.observedAt.getTime() >= 7 * 24 * 60 * 60 * 1000,
-    )
+      const latest = snapshots.at(0)
+      if (!latest) return undefined
 
-    const activeFindings = await prisma.reviewFinding.findMany({
-      where: {
-        status: { in: ['active', 'recurring'] },
-        primaryScopeType: 'label',
-        primaryScopeId: labelDefinition.id,
-      },
-      select: { currentSeverity: true },
-    })
+      const previous = snapshots.at(1)
+      const dayAgo = snapshots.find(
+        (snapshot) =>
+          latest.observedAt.getTime() - snapshot.observedAt.getTime() >= 24 * 60 * 60 * 1000,
+      )
+      const weekAgo = snapshots.find(
+        (snapshot) =>
+          latest.observedAt.getTime() - snapshot.observedAt.getTime() >= 7 * 24 * 60 * 60 * 1000,
+      )
 
-    let highestFindingSeverity: string | null = null
-    for (const finding of activeFindings) {
-      highestFindingSeverity = maxSeverity(highestFindingSeverity, finding.currentSeverity)
-    }
+      let highestFindingSeverity: string | null = null
+      for (const finding of activeFindings) {
+        highestFindingSeverity = maxSeverity(highestFindingSeverity, finding.currentSeverity)
+      }
 
-    const prevalence = computePrevalence(latest.evaluatedCount, latest.trueCount)
-    const previousRunDelta = previous
-      ? prevalence - computePrevalence(previous.evaluatedCount, previous.trueCount)
-      : null
-    const dayDelta = dayAgo
-      ? prevalence - computePrevalence(dayAgo.evaluatedCount, dayAgo.trueCount)
-      : null
-    const weekDelta = weekAgo
-      ? prevalence - computePrevalence(weekAgo.evaluatedCount, weekAgo.trueCount)
-      : null
+      const prevalence = computePrevalence(latest.evaluatedCount, latest.trueCount)
+      const previousRunDelta = previous
+        ? prevalence - computePrevalence(previous.evaluatedCount, previous.trueCount)
+        : null
+      const dayDelta = dayAgo
+        ? prevalence - computePrevalence(dayAgo.evaluatedCount, dayAgo.trueCount)
+        : null
+      const weekDelta = weekAgo
+        ? prevalence - computePrevalence(weekAgo.evaluatedCount, weekAgo.trueCount)
+        : null
 
-    await prisma.labelSummaryCurrent.create({
-      data: {
+      return {
         generationId: input.generationId,
         labelDefinitionId: labelDefinition.id,
         latestSnapshotId: latest.id,
@@ -99,10 +107,14 @@ export async function buildLabelSummary(
         highestFindingSeverity,
         qualityStatus: activeFindings.length > 0 ? 'attention' : 'normal',
         sourceWatermarkAt: input.sourceWatermarkAt,
-      },
-    })
-    rowCount++
-  }
+      }
+    }),
+  )
 
-  return { rowCount }
+  const data = rows.filter((row) => row !== undefined)
+  if (data.length === 0) return { rowCount: 0 }
+
+  await prisma.labelSummaryCurrent.createMany({ data })
+
+  return { rowCount: data.length }
 }

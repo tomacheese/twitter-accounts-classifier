@@ -8,11 +8,21 @@ import {
 import { evaluateLabelCountDrop } from './detectors/label-count-drop'
 import { evaluateReasonDistributionShift } from './detectors/reason-distribution-shift'
 import type { DetectionPolicy, DetectionPolicyRule } from '../policy/schema'
+import { Logger } from '@book000/node-utils'
 
+const logger = Logger.configure('analyzer:generate-findings')
+
+/**
+ * generateFindingsForCrawlCycle の入力。
+ */
 export interface GenerateFindingsForCrawlCycleInput {
+  /** 対象の CrawlRun ID。 */
   crawlRunId: string
+  /** 適用する検出ポリシー。 */
   policy: DetectionPolicy
+  /** 適用したポリシーの content hash。 */
   policyHash: string
+  /** 検出器のバージョン。 */
   detectorVersion: string
 }
 
@@ -28,9 +38,9 @@ function maxSeverity(a: string, b: string): string {
 }
 
 /**
- * ReviewFinding は「現在の lifecycle 状態」そのものを持たないため、
- * 直近の DetectorEvaluation 列を新しい順に辿り、連続する超過/非超過の回数を
- * 数え直すことで状態を再構築する。専用の state テーブルを増やさずに済む。
+ * ReviewFinding は現在の lifecycle 状態そのものを持たないため、
+ * 直近の DetectorEvaluation 列から連続回数を数え直して状態を再構築する。
+ * 専用の state テーブルを増やさずに済むため。
  * @param prisma - Prisma クライアント
  * @param fingerprint - 対象の fingerprint
  * @param identityVersion - 対象の identityVersion
@@ -180,7 +190,7 @@ async function processObservation(
     await prisma.reviewFinding.update({
       where: { id: existingFinding.id },
       data: {
-        status: next.status === 'resolved' ? 'resolved' : 'active',
+        status: next.status,
         currentSeverity: input.rule.severity,
         maximumSeverity: maxSeverity(existingFinding.maximumSeverity, input.rule.severity),
         lastDetectedAt: now,
@@ -222,7 +232,7 @@ async function processObservation(
 }
 
 /**
- * Crawl サイクル完了を契機に、Label 別 metric snapshot から検出器を実行し
+ * Crawl サイクル完了を契機に Label 別 metric snapshot から検出器を実行し、
  * ReviewFinding/ReviewFindingOccurrence/DetectorEvaluation を更新する。
  * @param prisma - Prisma クライアント
  * @param input - 対象 crawl run と検出ポリシー
@@ -231,9 +241,14 @@ export async function generateFindingsForCrawlCycle(
   prisma: PrismaClient,
   input: GenerateFindingsForCrawlCycleInput,
 ): Promise<void> {
+  // completeness: 'unknown' は集計自体に失敗した記録であり、
+  // 実測値として検出器へ渡すと分析エラーを品質劣化として誤検出させる。
   const currentSnapshots = await prisma.labelMetricSnapshot.findMany({
-    where: { sourceCrawlRunId: input.crawlRunId },
+    where: { sourceCrawlRunId: input.crawlRunId, completeness: { not: 'unknown' } },
   })
+
+  // 同じ種別を Label 数だけ繰り返し警告しないよう、実行全体で 1 回にまとめる。
+  const unimplementedRuleTypes = new Set<string>()
 
   for (const snapshot of currentSnapshots) {
     const baseline = await prisma.labelMetricSnapshot.findFirst({
@@ -241,6 +256,7 @@ export async function generateFindingsForCrawlCycle(
         labelDefinitionId: snapshot.labelDefinitionId,
         sourceCrawlRunId: { not: input.crawlRunId },
         observedAt: { lt: snapshot.observedAt },
+        completeness: { not: 'unknown' },
       },
       orderBy: [{ observedAt: 'desc' }],
     })
@@ -305,7 +321,14 @@ export async function generateFindingsForCrawlCycle(
           },
           input,
         )
+        continue
       }
+
+      unimplementedRuleTypes.add(rule.type)
     }
+  }
+
+  for (const ruleType of unimplementedRuleTypes) {
+    logger.warn(`no detector implemented for enabled policy rule type: ${ruleType}`)
   }
 }

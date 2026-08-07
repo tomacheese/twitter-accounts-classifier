@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { severitySchema } from '../policy/schema'
 
+/** Weekly Review が出力する finding candidate 1 件のスキーマ。 */
 export const weeklyReviewFindingCandidateSchema = z.object({
   type: z.string().min(1),
   dimensions: z.record(z.string()),
@@ -15,6 +16,7 @@ export const weeklyReviewFindingCandidateSchema = z.object({
   unavailableReason: z.string().optional(),
 })
 
+/** Weekly Review の structuredOutput 全体のスキーマ。 */
 export const structuredOutputSchema = z.object({
   schemaVersion: z.number().int().min(1),
   promptVersion: z.string().min(1),
@@ -28,5 +30,7 @@ export const structuredOutputSchema = z.object({
   findings: z.array(weeklyReviewFindingCandidateSchema),
 })
 
+/** 検証済みの finding candidate 1 件。 */
 export type WeeklyReviewFindingCandidate = z.infer<typeof weeklyReviewFindingCandidateSchema>
+/** 検証済みの structuredOutput 全体。 */
 export type StructuredOutput = z.infer<typeof structuredOutputSchema>

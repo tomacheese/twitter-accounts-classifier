@@ -17,7 +17,7 @@ interface AccountDetailPageProps {
 
 /**
  * 旧 Account 詳細画面。`isNewUiSectionEnabled('accounts')` が無効な間はこちらを表示する。
- * 新実装は {@link NewAccountDetailView} を参照 (Task 31 の旧実装撤去まで両方を残す)。
+ * 新実装は {@link NewAccountDetailView} を参照。
  * @param props - ルートの `accountId` パスパラメータ
  * @returns アカウント詳細ページの描画結果
  */
@@ -237,8 +237,7 @@ async function LegacyAccountDetailPage({
 
 /**
  * 新 Account 詳細画面。初期表示は overview subview のみを Server Component で描画し、
- * classification/evidence/relations/history/technical は tab 切り替え時に
- * `/api/accounts/[accountId]/[subview]` から Client Component で遅延取得する想定。
+ * 残りは `/api/accounts/[accountId]/[subview]` から遅延取得する。
  * @param props - Next.js の dynamic route params
  * @returns 描画された Account 詳細画面
  */

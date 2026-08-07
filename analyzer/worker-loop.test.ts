@@ -4,6 +4,19 @@ import { runWorkerLoopOnce } from './worker-loop'
 
 const claimNextWorkItem = vi.fn()
 const completeWorkItem = vi.fn()
+const loggerWarn = vi.fn()
+const loggerError = vi.fn()
+
+vi.mock('@book000/node-utils', () => ({
+  Logger: {
+    configure: () => ({
+      warn: (...args: unknown[]): unknown => loggerWarn(...args) as unknown,
+      error: (...args: unknown[]): unknown => loggerError(...args) as unknown,
+      info: vi.fn(),
+      debug: vi.fn(),
+    }),
+  },
+}))
 
 vi.mock('./queue/work-item-repository', () => ({
   claimNextWorkItem: (...args: unknown[]): unknown => claimNextWorkItem(...args) as unknown,
@@ -53,6 +66,8 @@ describe('runWorkerLoopOnce', () => {
   beforeEach(() => {
     claimNextWorkItem.mockReset()
     completeWorkItem.mockReset().mockResolvedValue(true)
+    loggerWarn.mockReset()
+    loggerError.mockReset()
   })
 
   it('queue が空なら false を返し、どの処理関数も呼ばない', async () => {
@@ -108,5 +123,26 @@ describe('runWorkerLoopOnce', () => {
       prisma,
       expect.objectContaining({ status: 'dead' }),
     )
+  })
+
+  it('処理が例外を投げたとき Error オブジェクトごとログへ出す', async () => {
+    const error = new Error('boom')
+    claimNextWorkItem.mockResolvedValue(makeWorkItem({}))
+    const deps = makeDeps()
+    deps.processLabelMetrics.mockRejectedValue(error)
+
+    await runWorkerLoopOnce(prisma, deps)
+
+    expect(loggerError).toHaveBeenCalledWith(expect.stringContaining('work-item-1'), error)
+  })
+
+  it('lease を失って完了を記録できなかった場合に警告を出す', async () => {
+    claimNextWorkItem.mockResolvedValue(makeWorkItem({}))
+    completeWorkItem.mockResolvedValue(false)
+    const deps = makeDeps()
+
+    await runWorkerLoopOnce(prisma, deps)
+
+    expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining('lease lost'))
   })
 })

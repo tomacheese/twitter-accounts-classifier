@@ -1,7 +1,7 @@
 /**
  * 環境変数を正の整数として読み取る。未設定・空文字ならデフォルト値を返す。
- * `Number()` は 16進数・指数表記・符号付き文字列なども受理してしまうため、
- * 10進数の数字列のみを許可する正規表現で事前に絞り込む。
+ * `Number()` は 16 進数・指数表記・符号付き文字列なども受理してしまうため、
+ * 10 進数の数字列のみを許可する正規表現で事前に絞り込む。
  * @param name - 環境変数名
  * @param defaultValue - 未設定・空文字時のデフォルト値
  * @returns 読み取った正の整数
@@ -16,8 +16,9 @@ function parsePositiveIntEnv(name: string, defaultValue: number): number {
 }
 
 /**
- * worker ループを何並列で走らせるか。crawler/blocker と異なり analyzer は
- * queue 消費型のため、単一プロセス内で複数の poll ループを並走させて捌く。
+ * worker ループを何並列で走らせるか。
+ * analyzer は crawler/blocker と違って queue 消費型のため、
+ * 単一プロセス内で複数の poll ループを並走させて捌く。
  * @returns 並列数
  */
 export function getWorkerConcurrency(): number {

@@ -1,12 +1,15 @@
 import type { PrismaClient } from '../../generated/prisma'
 
+/** OperationCycle の種別。 */
 export type OperationCycleKind = 'crawl' | 'weekly_review' | 'block'
 
+/** Cycle 一覧の絞り込み条件。 */
 export interface ListOperationCyclesFilters {
   kind?: OperationCycleKind
   attentionRequired?: boolean
 }
 
+/** Cycle 一覧の 1 行。 */
 export interface OperationCycleListItem {
   id: string
   kind: string
@@ -18,13 +21,11 @@ export interface OperationCycleListItem {
 }
 
 const DEFAULT_LIMIT = 30
-// attentionRequired filter が対象とする Cycle 状態。spec の「partial/failed/stale/unknown を含む」定義。
-const ATTENTION_STATUSES = new Set(['partial', 'failed', 'stale', 'unknown'])
 
 /**
  * @param prisma - Prisma クライアント
  * @param input - filters・limit
- * @returns 直近の Cycle 一覧 (既定 30 件)
+ * @returns 新しい順に並べた Cycle 一覧
  */
 export async function listOperationCycles(
   prisma: PrismaClient,
@@ -50,14 +51,7 @@ export async function listOperationCycles(
   }))
 }
 
-/**
- * @param status - 対象 Cycle の status
- * @returns spec の attentionRequired filter (partial/failed/stale/unknown) に該当すれば true
- */
-export function isAttentionRequiredStatus(status: string): boolean {
-  return ATTENTION_STATUSES.has(status)
-}
-
+/** Cycle を構成する Stage 1 件。 */
 export interface OperationStageView {
   stageKey: string
   sequence: number
@@ -68,6 +62,7 @@ export interface OperationStageView {
   errorSummary: string | null
 }
 
+/** Cycle 詳細の表示内容。 */
 export interface OperationCycleDetailView {
   id: string
   kind: string
@@ -115,7 +110,6 @@ async function getCycleDetail(
 }
 
 /**
- * `kind: 'crawl'` の Cycle 詳細を取得する。
  * @param prisma - Prisma クライアント
  * @param cycleId - 対象 OperationCycle の ID
  * @returns Cycle 詳細。存在しない、または kind が一致しなければ null
@@ -129,7 +123,6 @@ export async function getCrawlCycleDetail(
 }
 
 /**
- * `kind: 'weekly_review'` の Cycle 詳細を取得する。
  * @param prisma - Prisma クライアント
  * @param cycleId - 対象 OperationCycle の ID
  * @returns Cycle 詳細。存在しない、または kind が一致しなければ null
@@ -143,7 +136,6 @@ export async function getWeeklyReviewCycleDetail(
 }
 
 /**
- * `kind: 'block'` の Cycle 詳細を取得する。
  * @param prisma - Prisma クライアント
  * @param cycleId - 対象 OperationCycle の ID
  * @returns Cycle 詳細。存在しない、または kind が一致しなければ null

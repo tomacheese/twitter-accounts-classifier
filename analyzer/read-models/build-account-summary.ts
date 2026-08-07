@@ -2,9 +2,15 @@ import type { PrismaClient } from '../generated/prisma'
 
 const SEVERITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 }
 
+/**
+ * buildAccountSummary の入力。
+ */
 export interface BuildAccountSummaryInput {
+  /** 書き込み先の generationId。 */
   generationId: string
+  /** 集計の基準時刻。 */
   sourceWatermarkAt: Date
+  /** 1 ページあたりの Account 取得件数。 */
   pageSize?: number
 }
 
@@ -32,6 +38,14 @@ export async function buildAccountSummary(
   const pageSize = input.pageSize ?? 2000
   let rowCount = 0
   let cursor: string | undefined
+
+  // LabelDefinition は件数が少なく全ページで共通のため、ページごとに join せず一度だけ引く。
+  const labelDefinitions = await prisma.labelDefinition.findMany({
+    select: { id: true, key: true },
+  })
+  const labelKeyById = new Map(
+    labelDefinitions.map((definition) => [definition.id, definition.key]),
+  )
 
   for (;;) {
     const accounts = await prisma.account.findMany({
@@ -85,14 +99,17 @@ export async function buildAccountSummary(
         for (const label of labels) {
           if (!lastLabeledAt || label.labeledAt > lastLabeledAt) lastLabeledAt = label.labeledAt
         }
+        const activeLabelKeys = labels
+          .map((label) => labelKeyById.get(label.labelDefinitionId))
+          .filter((key): key is string => key !== undefined)
         return {
           generationId: input.generationId,
           accountId: account.id,
           normalizedScreenName: account.screenName.toLowerCase(),
           normalizedDisplayName: account.displayName.toLowerCase(),
           searchDocument: `${account.screenName} ${account.displayName}`.toLowerCase(),
-          activeLabelKeys: labels.map((label) => label.labelDefinitionId),
-          activeLabelCount: labels.length,
+          activeLabelKeys,
+          activeLabelCount: activeLabelKeys.length,
           lastClassificationChangedAt: lastLabeledAt,
           lastRuleVersionChangedAt: null,
           activeFindingCount: finding?.count ?? 0,

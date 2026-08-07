@@ -4,9 +4,9 @@ import { getOverviewSnapshot } from '../../../lib/queries/overview'
 import { buildApiResponseMeta } from '../../../lib/api-response'
 
 /**
- * Operational Health / Classification Quality / Attention Queue / Latest Pipeline を
- * まとめて返す。current health・Attention・running Cycle は process-local cache を
- * 正本にしないため (spec の cache 方針)、常に `Cache-Control: no-store` を返す。
+ * Overview 画面が必要とする各セクションをまとめて返す。
+ * current health・Attention・running Cycle は process-local cache を正本にしないため、
+ * 常に `Cache-Control: no-store` を返す。
  * ポーリング間隔自体はクライアント側で制御する。
  * @returns Overview 画面向けのレスポンス
  */

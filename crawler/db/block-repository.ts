@@ -61,45 +61,70 @@ export async function syncBlocks(
       const existingBlocks = await tx.block.findMany({
         where: { blockerId, blockedId: { notIn: result.ids } },
       })
-      for (const block of existingBlocks) {
-        const reconciliation = computeBlockReconciliation({
-          existingStatus: block.status as BlockStatus,
-          consecutiveMissingCount: block.consecutiveMissingCount,
-          isPresent: fetchedIdSet.has(block.blockedId),
-          isCompleteSync,
-        })
-        if (
-          reconciliation.nextStatus === block.status &&
-          reconciliation.consecutiveMissingCount === block.consecutiveMissingCount
-        ) {
-          continue
-        }
-
-        await tx.block.update({
-          where: { id: block.id },
-          data: {
-            status: reconciliation.nextStatus,
+      const changes = existingBlocks
+        .map((block) => {
+          const reconciliation = computeBlockReconciliation({
+            existingStatus: block.status as BlockStatus,
+            consecutiveMissingCount: block.consecutiveMissingCount,
+            isPresent: fetchedIdSet.has(block.blockedId),
+            isCompleteSync,
+          })
+          if (
+            reconciliation.nextStatus === block.status &&
+            reconciliation.consecutiveMissingCount === block.consecutiveMissingCount
+          ) {
+            return null
+          }
+          return {
+            id: block.id,
+            fromStatus: block.status,
+            toStatus: reconciliation.nextStatus,
             consecutiveMissingCount: reconciliation.consecutiveMissingCount,
-            lastCheckedAt: now,
             missingSinceAt:
               reconciliation.nextStatus === 'missing' && block.status !== 'missing'
                 ? now
                 : block.missingSinceAt,
             resolvedAt: reconciliation.nextStatus === 'resolved' ? now : null,
-          },
+          }
         })
-        await tx.blockStateChange.create({
-          data: {
-            blockId: block.id,
-            fromStatus: block.status,
-            toStatus: reconciliation.nextStatus,
-            changedAt: now,
-          },
-        })
-      }
+        .filter((change): change is NonNullable<typeof change> => change !== null)
+
+      if (changes.length === 0) return
+
+      // 変更対象を 1 件ずつ update/create すると HDD 環境ではブロック件数に比例して
+      // トランザクションが長引くため、UNNEST を使い update・insert をそれぞれ 1 回にまとめる。
+      await tx.$executeRaw`
+        UPDATE "Block" AS b
+        SET
+          status = data.status,
+          "consecutiveMissingCount" = data."consecutiveMissingCount",
+          "lastCheckedAt" = ${now},
+          "missingSinceAt" = data."missingSinceAt",
+          "resolvedAt" = data."resolvedAt"
+        FROM (
+          SELECT * FROM UNNEST(
+            ${changes.map((change) => change.id)}::text[],
+            ${changes.map((change) => change.toStatus)}::text[],
+            ${changes.map((change) => change.consecutiveMissingCount)}::int[],
+            ${changes.map((change) => change.missingSinceAt)}::timestamptz[],
+            ${changes.map((change) => change.resolvedAt)}::timestamptz[]
+          ) AS t(id, status, "consecutiveMissingCount", "missingSinceAt", "resolvedAt")
+        ) AS data
+        WHERE b.id = data.id
+      `
+
+      await tx.blockStateChange.createMany({
+        data: changes.map((change) => ({
+          blockId: change.id,
+          fromStatus: change.fromStatus,
+          toStatus: change.toStatus,
+          changedAt: now,
+        })),
+      })
     },
-    // `./labeling-follow-sample-repository` の同じコメントを参照。
-    // ロック保持時間も同様に伸びるが、blocker 側の書き込み間隔で吸収できる範囲に収まる。
+    // 変更行の update・insert をそれぞれ 1 クエリへまとめたため、ブロック件数に比例して
+    // 伸びるのは読み取り (findMany) のみになる。HDD の I/O 滞留を吸収する余地として
+    // `./labeling-follow-sample-repository` と同じ 15 秒を踏襲する。
     { maxWait: 15_000, timeout: 15_000 },
   )
 }

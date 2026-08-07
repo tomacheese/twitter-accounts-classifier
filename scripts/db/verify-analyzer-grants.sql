@@ -1,6 +1,6 @@
--- analyzer の権限が allowlist 方式 (正本はSELECTのみ、分析・read modelはwrite可) に
+-- analyzer の権限が allowlist 方式 (正本は SELECT のみ、分析・read model は write 可) に
 -- 一致することを、データを書き換えず検証する。
--- psql で対象DBへ接続し、このファイルを実行する。条件違反時は例外で終了する。
+-- psql で対象 DB へ接続し、このファイルを実行する。条件違反時は例外で終了する。
 
 DO $$
 DECLARE
@@ -71,6 +71,26 @@ BEGIN
     RAISE EXCEPTION 'analyzer has write privileges on non-allowlisted tables: %',
       unexpected_write_tables;
   END IF;
+
+  DECLARE
+    unexpected_sequence_privileges text;
+  BEGIN
+    SELECT string_agg(format('%I.%I', n.nspname, c.relname), ', ' ORDER BY c.relname)
+    INTO unexpected_sequence_privileges
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relkind = 'S'
+      AND (
+        has_sequence_privilege('analyzer', format('%I.%I', n.nspname, c.relname), 'USAGE')
+        OR has_sequence_privilege('analyzer', format('%I.%I', n.nspname, c.relname), 'SELECT')
+      );
+
+    IF unexpected_sequence_privileges IS NOT NULL THEN
+      RAISE EXCEPTION 'analyzer has unexpected sequence privileges on: %',
+        unexpected_sequence_privileges;
+    END IF;
+  END;
 END
 $$;
 

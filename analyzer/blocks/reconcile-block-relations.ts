@@ -1,24 +1,38 @@
 import type { Prisma, PrismaClient } from '../generated/prisma'
 
+/** Block 行の論理状態。 */
 export type BlockStatus = 'active' | 'missing' | 'resolved'
 
+/**
+ * computeBlockReconciliation の入力。
+ */
 export interface ComputeBlockReconciliationInput {
+  /** 現在の Block 状態。 */
   existingStatus: BlockStatus
+  /** これまで連続で不在だった回数。 */
   consecutiveMissingCount: number
+  /** 今回の fetch 結果に含まれていたか。 */
   isPresent: boolean
+  /** 今回の fetch がページングを完走したか。 */
   isCompleteSync: boolean
+  /** resolved を確定させるまでの連続不在回数。 */
   resolutionCount?: number
 }
 
+/**
+ * computeBlockReconciliation の結果。
+ */
 export interface ComputeBlockReconciliationResult {
+  /** 遷移後の Block 状態。 */
   nextStatus: BlockStatus
+  /** 遷移後の連続不在回数。 */
   consecutiveMissingCount: number
 }
 
 /**
- * fetch 対象に存在すれば無条件で active へ戻す。存在しない場合は、完全同期
- * (isCompleteSync) のときだけ不在を確定させ、不完全な取得では絶対に absence を
- * 確定しない (レート制限やページング途中断による誤検知を防ぐ)。
+ * fetch 対象に存在すれば無条件で active へ戻す。
+ * 存在しない場合は完全同期 (isCompleteSync) のときだけ不在を確定させる。
+ * 不完全な取得で不在を確定すると、レート制限やページング中断を誤検知するため。
  * @param input - 現在の Block 状態と今回の観測結果
  * @returns 次の状態と連続 missing 回数
  */
@@ -43,12 +57,21 @@ export function computeBlockReconciliation(
   return { nextStatus: 'missing', consecutiveMissingCount: nextConsecutiveMissingCount }
 }
 
+/**
+ * reconcileBlockRelations の入力。
+ */
 export interface ReconcileBlockRelationsInput {
+  /** 対象のブロック元 Account ID。 */
   blockerId: string
+  /** 今回の fetch で観測されたブロック先 Account ID 一覧。 */
   fetchedBlockedIds: string[]
+  /** 今回の fetch がページングを完走したか。 */
   isCompleteSync: boolean
+  /** 判定の基準時刻。 */
   now: Date
+  /** 状態変化の出所を示す ID。 */
   sourceId?: string
+  /** resolved を確定させるまでの連続不在回数。 */
   resolutionCount?: number
 }
 

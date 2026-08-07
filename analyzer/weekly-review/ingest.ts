@@ -4,6 +4,9 @@ import { applyLifecycleTransition, type FindingLifecycleState } from '../finding
 import { computePolicyHash } from '../policy/policy-hash'
 import type { DetectionPolicy, DetectionPolicyRule } from '../policy/schema'
 import type { StructuredOutput, WeeklyReviewFindingCandidate } from './structured-output-schema'
+import { Logger } from '@book000/node-utils'
+
+const logger = Logger.configure('analyzer:weekly-review-ingest')
 
 const SEVERITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 }
 
@@ -45,9 +48,15 @@ function deriveWeeklyPriorState(existingFinding: ReviewFinding | null): FindingL
   return { status: 'active', consecutiveExceed: 0, consecutiveNormal: 0 }
 }
 
+/**
+ * ingestWeeklyReviewFindings の入力。
+ */
 export interface IngestWeeklyReviewFindingsInput {
+  /** 取り込み元の WeeklyAnalysisRun ID。 */
   weeklyAnalysisRunId: string
+  /** 検証済みの structuredOutput。 */
   structuredOutput: StructuredOutput
+  /** 適用する検出ポリシー。 */
   policy: DetectionPolicy
 }
 
@@ -97,7 +106,7 @@ async function ingestOneFinding(
     await prisma.reviewFinding.update({
       where: { id: existingFinding.id },
       data: {
-        status: next.status === 'resolved' ? 'resolved' : 'active',
+        status: next.status,
         currentSeverity: appliedSeverity,
         maximumSeverity: maxSeverity(existingFinding.maximumSeverity, appliedSeverity),
         lastDetectedAt: now,
@@ -171,9 +180,10 @@ async function ingestOneFinding(
 }
 
 /**
- * WeeklyAnalysisRun の structuredOutput を取り込み、確度に応じて
+ * WeeklyAnalysisRun の structuredOutput を確度に応じて取り込み、
  * ReviewFinding・ReviewFindingOccurrence・FindingEvidence を更新する。
- * unavailableReason が設定された candidate (確度不足などで判定不能) は取り込まない。
+ * unavailableReason が設定された candidate (確度不足などで判定不能) と、
+ * 有効な policy rule が無い type の candidate は取り込まない。
  * @param prisma - Prisma クライアント
  * @param input - 対象 WeeklyAnalysisRun と structuredOutput、適用する policy
  */
@@ -189,7 +199,12 @@ export async function ingestWeeklyReviewFindings(
     const rule = input.policy.rules.find(
       (candidateRule) => candidateRule.type === candidate.type && candidateRule.enabled,
     )
-    if (!rule) continue
+    if (!rule) {
+      logger.warn(
+        `dropped weekly review candidate ${candidate.primaryScopeType}:${candidate.primaryScopeId}: no enabled policy rule for type ${candidate.type}`,
+      )
+      continue
+    }
 
     await ingestOneFinding(prisma, candidate, rule, { ...input, policyHash })
   }

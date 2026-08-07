@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../../generated/prisma'
 
+/** Finding の観測 1 件。 */
 export interface ReviewFindingOccurrenceView {
   id: string
   observedAt: Date
@@ -12,6 +13,7 @@ export interface ReviewFindingOccurrenceView {
   affectedRatio: number | null
 }
 
+/** Finding の根拠 1 件。 */
 export interface ReviewFindingEvidenceView {
   id: string
   kind: string
@@ -19,6 +21,7 @@ export interface ReviewFindingEvidenceView {
   createdAt: Date
 }
 
+/** Finding 詳細の表示内容。 */
 export interface ReviewFindingDetailView {
   id: string
   type: string
@@ -38,10 +41,9 @@ export interface ReviewFindingDetailView {
 const RECENT_OCCURRENCE_LIMIT = 10
 
 /**
- * spec の情報階層 (Conclusion→Impact→Detection Basis→Evidence→...) のうち、
- * 初期表示に必要な部分 (Conclusion〜Detection Basis、Occurrence 直近 10 件、
- * Evidence) だけを 1 クエリで取得する。Raw Analysis (FindingRawArtifact) は
- * 容量が大きく初期表示に不要なため、別関数 (getFindingRawArtifacts) で遅延取得する。
+ * 初期表示に必要な範囲だけを 1 クエリで取得する。
+ * Raw Analysis (FindingRawArtifact) は容量が大きく初期表示に不要なため、
+ * getFindingRawArtifacts へ分けて遅延取得する。
  * @param prisma - Prisma クライアント
  * @param findingId - 対象 ReviewFinding の ID
  * @returns Finding 詳細。存在しなければ null
@@ -97,8 +99,8 @@ export async function getReviewFindingDetail(
 }
 
 /**
- * Raw Analysis (FindingRawArtifact) を遅延取得する。1 件 1 MiB を超える内容は
- * 書き込み時に切り詰め済み (isTruncated) のため、ここでは追加の truncate は行わない。
+ * Raw Analysis (FindingRawArtifact) を遅延取得する。
+ * 内容は書き込み時に切り詰め済み (isTruncated) のため、ここでは追加の truncate は行わない。
  * @param prisma - Prisma クライアント
  * @param findingId - 対象 ReviewFinding の ID
  * @returns Raw Analysis の一覧

@@ -22,8 +22,9 @@ const logger = Logger.configure('analyzer')
  * @param deps - kind ごとの処理関数一式
  */
 async function drainLane(prisma: PrismaClient, deps: WorkerLoopDeps): Promise<void> {
-  while (await runWorkerLoopOnce(prisma, deps)) {
-    // 戻り値 true の間は queue に処理対象が残っているため、次の 1 件へ進む。
+  let hasMore = true
+  while (hasMore) {
+    hasMore = await runWorkerLoopOnce(prisma, deps)
   }
 }
 

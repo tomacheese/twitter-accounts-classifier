@@ -11,6 +11,7 @@ async function getCurrentGenerationId(prisma: PrismaClient): Promise<string | nu
   return pointer?.currentGenerationId ?? null
 }
 
+/** Account 詳細の Overview subview。 */
 export interface AccountOverviewView {
   accountId: string
   screenName: string
@@ -62,6 +63,7 @@ export async function getAccountOverview(
   }
 }
 
+/** 1 ラベル分の分類結果。 */
 export interface AccountClassificationEntryView {
   labelKey: string
   value: boolean
@@ -99,6 +101,7 @@ export async function getAccountClassification(
   }))
 }
 
+/** アカウントを primary scope とする Finding の要約。 */
 export interface AccountEvidenceView {
   findingId: string
   type: string
@@ -132,6 +135,7 @@ export async function getAccountEvidence(
   }))
 }
 
+/** アカウントが関与する Block 関係 1 件。 */
 export interface AccountRelationView {
   blockId: string
   direction: 'blocker' | 'blocked'
@@ -163,6 +167,7 @@ export async function getAccountRelations(
   }))
 }
 
+/** ラベル変化履歴の 1 件。 */
 export interface AccountLabelChangeView {
   id: string
   labelDefinitionId: string
@@ -199,6 +204,7 @@ export async function getAccountHistory(
   }))
 }
 
+/** Account 詳細の Technical subview。 */
 export interface AccountTechnicalView {
   accountId: string
   firstSeenAt: Date

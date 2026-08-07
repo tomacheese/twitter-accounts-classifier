@@ -28,6 +28,7 @@ export const dynamic = 'force-dynamic'
 
 const TOP_LABEL_LIMIT = 10
 
+/** System status セクションのデータを取得して描画する。 */
 export async function SystemStatusSectionData(): Promise<React.JSX.Element> {
   const prisma = getPrismaClient()
   try {
@@ -114,8 +115,8 @@ async function LabelOverviewSectionData(): Promise<React.JSX.Element> {
 }
 
 /**
- * `/overview` の legacy フォールバックからも呼ばれるが、その呼び出しはフラグ無効時に限られる
- * ため、ここで redirect しても無限ループにはならない。
+ * `/overview` の legacy フォールバックからも呼ばれるが、
+ * その呼び出しはフラグ無効時に限られるため無限ループにはならない。
  * @returns 描画された旧ダッシュボード画面
  */
 export default function DashboardPage(): React.JSX.Element {

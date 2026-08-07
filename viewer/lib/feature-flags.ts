@@ -1,3 +1,4 @@
+/** フラグで個別に切り替えられる新 UI のセクション。 */
 export type NewUiSection =
   'overview' | 'review' | 'accounts' | 'labels' | 'operations' | 'blocks' | 'system'
 

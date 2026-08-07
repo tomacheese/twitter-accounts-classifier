@@ -1,8 +1,21 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { getPrismaClient } from '../db/client'
 import { generateFindingsForCrawlCycle } from './generate-findings'
 import type { DetectionPolicy } from '../policy/schema'
 import { randomUUID } from 'node:crypto'
+
+const loggerWarn = vi.fn()
+
+vi.mock('@book000/node-utils', () => ({
+  Logger: {
+    configure: () => ({
+      warn: (...args: unknown[]): unknown => loggerWarn(...args) as unknown,
+      info: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }),
+  },
+}))
 
 const policy: DetectionPolicy = {
   schemaVersion: 1,
@@ -28,6 +41,7 @@ describe('generateFindingsForCrawlCycle', () => {
   let labelDefinitionId: string
 
   beforeEach(async () => {
+    await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
     await prisma.detectorEvaluation.deleteMany()
@@ -122,5 +136,70 @@ describe('generateFindingsForCrawlCycle', () => {
       where: { findingId: findings[0]?.id },
     })
     expect(occurrences).toHaveLength(2)
+  })
+
+  it('completeness が unknown の snapshot は検出器へ渡さない', async () => {
+    const run1 = `crawl-${randomUUID()}`
+    const run2 = `crawl-${randomUUID()}`
+
+    await makeSnapshot(run1, 100, new Date('2026-08-01T00:00:00Z'))
+    await prisma.labelMetricSnapshot.create({
+      data: {
+        sourceCrawlRunId: run2,
+        labelDefinitionId,
+        observedAt: new Date('2026-08-02T00:00:00Z'),
+        sourceWatermarkAt: new Date('2026-08-02T00:00:00Z'),
+        evaluatedCount: 0,
+        trueCount: 0,
+        prevalence: 0,
+        completeness: 'unknown',
+        policyHash: 'hash-1',
+        analyzerVersion: 'test',
+      },
+    })
+
+    await generateFindingsForCrawlCycle(prisma, {
+      crawlRunId: run2,
+      policy,
+      policyHash: 'hash-1',
+      detectorVersion: 'v1',
+    })
+
+    const evaluationCount = await prisma.detectorEvaluation.count()
+    expect(evaluationCount).toBe(0)
+  })
+
+  it('検出器が実装されていない有効ルールは警告を出す', async () => {
+    loggerWarn.mockClear()
+    const run1 = `crawl-${randomUUID()}`
+    const run2 = `crawl-${randomUUID()}`
+    await makeSnapshot(run1, 100, new Date('2026-08-01T00:00:00Z'))
+    await makeSnapshot(run2, 50, new Date('2026-08-02T00:00:00Z'))
+
+    await generateFindingsForCrawlCycle(prisma, {
+      crawlRunId: run2,
+      policy: {
+        ...policy,
+        rules: [
+          ...policy.rules,
+          {
+            type: 'crawl_quality_degradation',
+            enabled: true,
+            detectorType: 'invariant',
+            identityVersion: 1,
+            severity: 'medium',
+            activationCount: 1,
+            resolutionCount: 1,
+            criticalImmediate: false,
+          },
+        ],
+      },
+      policyHash: 'hash-1',
+      detectorVersion: 'v1',
+    })
+
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('crawl_quality_degradation') as unknown as string,
+    )
   })
 })

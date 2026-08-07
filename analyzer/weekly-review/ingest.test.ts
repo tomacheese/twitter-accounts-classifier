@@ -1,9 +1,22 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { getPrismaClient } from '../db/client'
 import { ingestWeeklyReviewFindings } from './ingest'
 import type { DetectionPolicy } from '../policy/schema'
 import type { StructuredOutput } from './structured-output-schema'
+
+const loggerWarn = vi.fn()
+
+vi.mock('@book000/node-utils', () => ({
+  Logger: {
+    configure: () => ({
+      warn: (...args: unknown[]): unknown => loggerWarn(...args) as unknown,
+      info: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }),
+  },
+}))
 
 const prisma = getPrismaClient()
 
@@ -153,5 +166,55 @@ describe('ingestWeeklyReviewFindings', () => {
       where: { type: 'possible_false_positive', primaryScopeId: 'account-1' },
     })
     expect(findings).toHaveLength(0)
+  })
+
+  it('有効な policy rule が無い type の candidate は警告を出して取り込まない', async () => {
+    loggerWarn.mockClear()
+    const structuredOutput = buildStructuredOutput({ type: 'unknown_finding_type' })
+
+    await ingestWeeklyReviewFindings(prisma, {
+      weeklyAnalysisRunId: `weekly-${randomUUID()}`,
+      structuredOutput,
+      policy,
+    })
+
+    const findings = await prisma.reviewFinding.findMany({
+      where: { type: 'unknown_finding_type' },
+    })
+    expect(findings).toHaveLength(0)
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('unknown_finding_type') as unknown as string,
+    )
+  })
+
+  it('resolved 後に再発した Finding は recurring として永続化する', async () => {
+    const dimensions = { label: `test_label_${randomUUID()}` }
+    const recurringPolicy: DetectionPolicy = {
+      ...policy,
+      rules: policy.rules.map((rule) => ({ ...rule, recurrenceWindow: 'P30D' })),
+    }
+
+    await ingestWeeklyReviewFindings(prisma, {
+      weeklyAnalysisRunId: `weekly-${randomUUID()}`,
+      structuredOutput: buildStructuredOutput({ dimensions }),
+      policy: recurringPolicy,
+    })
+    const created = await prisma.reviewFinding.findFirstOrThrow({
+      where: { type: 'possible_false_positive', primaryScopeId: 'account-1' },
+    })
+    await prisma.reviewFinding.update({
+      where: { id: created.id },
+      data: { status: 'resolved', resolvedAt: new Date() },
+    })
+
+    await ingestWeeklyReviewFindings(prisma, {
+      weeklyAnalysisRunId: `weekly-${randomUUID()}`,
+      structuredOutput: buildStructuredOutput({ dimensions }),
+      policy: recurringPolicy,
+    })
+
+    const updated = await prisma.reviewFinding.findUniqueOrThrow({ where: { id: created.id } })
+    expect(updated.status).toBe('recurring')
+    expect(updated.recurrenceCount).toBe(1)
   })
 })

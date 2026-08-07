@@ -19,9 +19,9 @@ function toSingleValue(value: string | string[] | undefined): string | undefined
 }
 
 /**
- * Quality Review 一覧画面。status/severity/type/primaryScopeType の絞り込みと
- * keyset pagination (cursor) の次ページリンクのみを実装し、
- * 詳細な filter UI は最小限のクエリパラメータ操作に留める。
+ * Quality Review 一覧画面。
+ * 絞り込みと keyset pagination の次ページリンクのみを実装し、
+ * filter UI はクエリパラメータ操作に留める。
  * @param props - Next.js の searchParams
  * @returns 描画された一覧画面
  */

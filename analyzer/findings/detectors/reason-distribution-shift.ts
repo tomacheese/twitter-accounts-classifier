@@ -1,18 +1,28 @@
+/**
+ * reason_distribution_shift の判定結果。
+ */
 export interface ReasonDistributionShiftResult {
+  /** 閾値を超過したか。 */
   exceeded: boolean
+  /** 母数不足などで判定不能か。 */
   isMissingOrFailed: boolean
+  /** 最も大きく変化した reason。 */
   reason?: string
+  /** 今回の観測値。 */
   observedValue: number
+  /** 比較対象の baseline 値。 */
   baselineValue: number
+  /** baseline に対する相対変化量。 */
   relativeDifference: number
+  /** 影響を受けた件数。 */
   affectedCount: number
   totalCount: number
 }
 
 /**
  * reason ごとの現在値・baseline を比較し、最大の相対減少幅を持つ reason を選ぶ。
- * 複数の reason が同時に閾値を超えても、fingerprint は 1 件に対応させるため
- * 変化幅最大の reason のみを返す。
+ * 複数の reason が同時に閾値を超えても変化幅最大のものだけを返す。
+ * fingerprint を 1 件に対応させるため。
  * @param input - reason ごとの現在の分布と baseline
  * @param rule - 判定に使う閾値
  * @returns 検出結果

@@ -2,6 +2,8 @@ import type { Prisma, PrismaClient } from '../generated/prisma'
 
 const SEVERITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 }
 const MAX_ITEMS = 8
+// 異常に active な finding/issue が積み上がっても worker が全件ロードしないための上限。
+const CANDIDATE_FETCH_LIMIT = MAX_ITEMS * 50
 
 interface AttentionCandidate {
   sourceType: string
@@ -19,10 +21,10 @@ interface AttentionCandidate {
 }
 
 /**
- * spec の複合優先順位 (severity → recurring → affected ratio → affected count →
- * 継続時間 → detectedAt) で候補を並べる。必須性・critical フラグは
- * OperationalIssue/ReviewFinding のどちらにも永続化されていないため、
- * この 2 段は severity と同値タイの範囲でしか意味を持たず、比較キーへ含めない。
+ * severity、recurring、affected ratio、affected count、firstDetectedAt の順で候補を並べる。
+ * 必須性・critical フラグは OperationalIssue/ReviewFinding のどちらにも永続化されておらず、
+ * severity と同値タイの範囲でしか意味を持たないため比較キーへ含めない。
+ * 継続時間は firstDetectedAt の昇順と同順になるため独立した比較段を設けない。
  * @param a - 比較対象の候補
  * @param b - 比較対象の候補
  * @returns 並び替え用の比較値
@@ -40,20 +42,24 @@ function compareCandidates(a: AttentionCandidate, b: AttentionCandidate): number
   const countDiff = b.affectedCount - a.affectedCount
   if (countDiff !== 0) return countDiff
 
-  const durationDiff = a.firstDetectedAt.getTime() - b.firstDetectedAt.getTime()
-  if (durationDiff !== 0) return durationDiff
-
   return a.firstDetectedAt.getTime() - b.firstDetectedAt.getTime()
 }
 
+/**
+ * buildAttentionItems の入力。
+ */
 export interface BuildAttentionItemsInput {
+  /** 書き込み先の generationId。 */
   generationId: string
+  /** 集計の基準時刻。 */
   sourceWatermarkAt: Date
 }
 
 /**
  * OperationalIssue (active) と ReviewFinding (active/recurring) を統合し、
- * spec が定める複合優先順位で上位 8 件だけを AttentionItemCurrent へ書く。
+ * compareCandidates の優先順位で上位 MAX_ITEMS 件だけを AttentionItemCurrent へ書く。
+ * 最終順位は全候補を突き合わせないと決まらないため、
+ * 取得段では CANDIDATE_FETCH_LIMIT の上限だけを課し、厳密な絞り込みはメモリ上で行う。
  * @param prisma - Prisma クライアント
  * @param input - 対象 generationId と検索基準時刻
  * @returns 作成した行数
@@ -63,10 +69,16 @@ export async function buildAttentionItems(
   input: BuildAttentionItemsInput,
 ): Promise<{ rowCount: number }> {
   const [operationalIssues, reviewFindings] = await Promise.all([
-    prisma.operationalIssue.findMany({ where: { status: 'active' } }),
+    prisma.operationalIssue.findMany({
+      where: { status: 'active' },
+      orderBy: [{ firstDetectedAt: 'asc' }],
+      take: CANDIDATE_FETCH_LIMIT,
+    }),
     prisma.reviewFinding.findMany({
       where: { status: { in: ['active', 'recurring'] } },
       include: { occurrences: { orderBy: [{ observedAt: 'desc' }], take: 1 } },
+      orderBy: [{ firstDetectedAt: 'asc' }],
+      take: CANDIDATE_FETCH_LIMIT,
     }),
   ])
 

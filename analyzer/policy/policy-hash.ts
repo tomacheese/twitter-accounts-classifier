@@ -17,6 +17,11 @@ function normalize(value: unknown): unknown {
   return value
 }
 
+/**
+ * policy の内容から content hash を計算する。
+ * @param policy - hash 対象の policy
+ * @returns SHA-256 の hex 文字列
+ */
 export function computePolicyHash(policy: unknown): string {
   const normalized = normalize(policy)
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex')

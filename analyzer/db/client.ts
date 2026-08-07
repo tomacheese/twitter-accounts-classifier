@@ -13,7 +13,8 @@ export function getPrismaClient(): PrismaClient {
 }
 
 /**
- * 共有している PrismaClient の接続を切断する。
+ * 切断後に client を破棄するのは、再度 getPrismaClient が呼ばれた際に
+ * 切断済みインスタンスを再利用させないため。
  */
 export async function disconnectPrisma(): Promise<void> {
   if (client) {

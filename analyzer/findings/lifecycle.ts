@@ -1,21 +1,32 @@
 import type { DetectionPolicyRule } from '../policy/schema'
 
 /**
- * 'new_episode' は呼び出し側 (Task 14) が「新しい episodeNumber の ReviewFinding を
- * 作る」トリガーとして扱う一時的な遷移結果であり、次回以降の永続状態としては
- * 'active' に相当する。
+ * 'new_episode' は新しい episodeNumber の ReviewFinding を作るトリガーを表す一時的な結果で、
+ * 永続状態としては 'active' に相当する。
  */
 export type FindingLifecycleStatus = 'none' | 'active' | 'resolved' | 'recurring' | 'new_episode'
 
+/**
+ * lifecycle 状態機械が保持する状態。
+ */
 export interface FindingLifecycleState {
+  /** 現在の lifecycle 状態。 */
   status: FindingLifecycleStatus
+  /** 連続で閾値を超過した回数。 */
   consecutiveExceed: number
+  /** 連続で閾値を下回った回数。 */
   consecutiveNormal: number
+  /** 直近で resolved になった時刻。 */
   resolvedAt?: Date
 }
 
+/**
+ * 1 回の検出器評価の結果。
+ */
 export interface DetectorObservation {
+  /** 閾値を超過したか。 */
   exceeded: boolean
+  /** 母数不足や評価失敗で判定不能か。 */
   isMissingOrFailed: boolean
 }
 
@@ -49,10 +60,8 @@ function isWithinRecurrenceWindow(
 }
 
 /**
- * status: 'new_episode' は呼び出し側 (Task 14) が「新しい episodeNumber の
- * ReviewFinding を作る」トリガーとして扱う。lifecycle 自体は state を
- * 直接 DB へ書かず、次に取るべき状態だけを返す純粋関数にする
- * (DB access を含めるとテストのために毎回接続が必要になるため)。
+ * 状態を DB へ直接書かず、次に取るべき状態だけを返す純粋関数にしている。
+ * DB access を含めるとテストのたびに接続が必要になるため。
  * @param state - 現在の lifecycle 状態
  * @param observation - 今回の評価結果
  * @param rule - 適用する検出ルール
@@ -94,7 +103,6 @@ export function applyLifecycleTransition(
     return { status: 'active', consecutiveExceed, consecutiveNormal: 0 }
   }
 
-  // active: 解消判定
   if (observation.exceeded) {
     return { ...state, consecutiveNormal: 0 }
   }

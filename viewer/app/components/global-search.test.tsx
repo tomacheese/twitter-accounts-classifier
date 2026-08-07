@@ -1,7 +1,7 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { GlobalSearch } from './global-search'
+import { GlobalSearch, resolveDisplayState } from './global-search'
 
 describe('GlobalSearch', () => {
   it('renders an accessible search input', () => {
@@ -14,5 +14,38 @@ describe('GlobalSearch', () => {
     const html = renderToStaticMarkup(<GlobalSearch />)
     expect(html).not.toContain('No results.')
     expect(html).not.toContain('Searching...')
+  })
+})
+
+const emptyResult = { accounts: [], labels: [], findings: [], operations: [] }
+
+describe('resolveDisplayState', () => {
+  it('検索失敗は空の結果と区別して error になる', () => {
+    expect(
+      resolveDisplayState({ isLoading: false, error: 'Failed to search.', result: null }),
+    ).toBe('error')
+  })
+
+  it('結果が 0 件のときだけ empty になる', () => {
+    expect(resolveDisplayState({ isLoading: false, error: null, result: emptyResult })).toBe(
+      'empty',
+    )
+    expect(resolveDisplayState({ isLoading: false, error: null, result: null })).toBe('empty')
+  })
+
+  it('いずれかの entity type に結果があれば results になる', () => {
+    expect(
+      resolveDisplayState({
+        isLoading: false,
+        error: null,
+        result: { ...emptyResult, labels: [{ id: 'label-1', key: 'spam' }] },
+      }),
+    ).toBe('results')
+  })
+
+  it('読み込み中は error より先に loading になる', () => {
+    expect(resolveDisplayState({ isLoading: true, error: 'Failed to search.', result: null })).toBe(
+      'loading',
+    )
   })
 })

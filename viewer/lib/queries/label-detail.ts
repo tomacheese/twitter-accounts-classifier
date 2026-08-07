@@ -1,7 +1,9 @@
 import type { PrismaClient } from '../../generated/prisma'
 
+/** Label 詳細のトレンド表示期間。 */
 export type LabelDetailRangePreset = '24h' | '7d' | '30d' | '90d'
 
+/** getLabelDetail の入力。 */
 export interface GetLabelDetailInput {
   range?: LabelDetailRangePreset
 }
@@ -13,6 +15,7 @@ const RANGE_TO_DAYS: Record<LabelDetailRangePreset, number> = {
   '90d': 90,
 }
 
+/** トレンドグラフの 1 点。 */
 export interface LabelDetailTrendPoint {
   date: Date
   prevalence: number
@@ -20,6 +23,7 @@ export interface LabelDetailTrendPoint {
   trueCount: number
 }
 
+/** Label 詳細の表示内容。 */
 export interface LabelDetailView {
   labelKey: string
   description: string
@@ -34,9 +38,9 @@ export interface LabelDetailView {
 }
 
 /**
- * トレンドは `LabelMetricSnapshot` (crawl 単位、全件保持) ではなく
- * `LabelMetricDaily` (日次ロールアップ) から取得する。`LabelMetricSnapshot` を
- * 期間 filter なしで全件スキャンすると、履歴が伸びるほど遅くなるため。
+ * トレンドは `LabelMetricSnapshot` ではなく `LabelMetricDaily` から取得する。
+ * 前者は crawl 単位で全件保持しており、
+ * 期間 filter なしで走査すると履歴が伸びるほど遅くなるため。
  * @param prisma - Prisma クライアント
  * @param labelKey - `LabelDefinition.key` (表示名変更の影響を受けない安定識別子)
  * @param input - 期間 preset

@@ -10,6 +10,7 @@ describe('buildBlockRelationSummary', () => {
     await prisma.blockRelationCurrent.deleteMany()
     await prisma.blockStateChange.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -51,5 +52,35 @@ describe('buildBlockRelationSummary', () => {
     expect(rows[0]?.normalizedBlockerScreenName).toBe('blocker_user')
     expect(rows[0]?.normalizedBlockedScreenName).toBe('blocked_user')
     expect(rows[0]?.status).toBe('active')
+  })
+
+  it('ページサイズを超える件数の Block でも全件が新 generationId で作られる', async () => {
+    const blockerId = `account-${randomUUID()}`
+    const blockedIds = Array.from({ length: 5 }, () => `account-${randomUUID()}`)
+    await prisma.account.createMany({
+      data: [blockerId, ...blockedIds].map((id, index) => ({
+        id,
+        screenName: `user_${index}_${randomUUID().slice(0, 8)}`,
+        displayName: `User ${index}`,
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      })),
+    })
+    await prisma.block.createMany({
+      data: blockedIds.map((blockedId) => ({ blockerId, blockedId })),
+    })
+
+    const generationId = `generation-${randomUUID()}`
+    const result = await buildBlockRelationSummary(prisma, {
+      generationId,
+      sourceWatermarkAt: new Date(),
+      pageSize: 2,
+    })
+
+    expect(result.rowCount).toBe(5)
+    const rows = await prisma.blockRelationCurrent.findMany({ where: { generationId } })
+    expect(rows).toHaveLength(5)
   })
 })

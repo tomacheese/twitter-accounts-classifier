@@ -4,9 +4,7 @@ import { listBlockRelations } from '@/lib/queries/block-relations'
 import { formatDateTime } from '@/lib/format-date'
 import { ErrorFallback } from '../components/error-fallback'
 
-// このページは常に最新データを読むため、
-// 静的プリレンダリングの対象から外している。指定しないと、
-// DB 接続がないビルド時に next build が静的生成を試みてしまう。
+// 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
 
 /**

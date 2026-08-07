@@ -20,10 +20,7 @@ function isRangePreset(value: string | undefined): value is LabelDetailRangePres
 }
 
 /**
- * Label 詳細画面。spec の情報階層 (Conclusion→Current metrics→Trend→
- * Confidence/reason distributions→Membership transitions→Findings→
- * Representative Accounts→Rule/policy metadata→Technical details) のうち、
- * Conclusion〜Trend・Findings を実装する。
+ * Label 詳細画面。
  * @param props - Next.js の dynamic route params と `range` 検索パラメータ
  * @returns 描画された Label 詳細画面
  */

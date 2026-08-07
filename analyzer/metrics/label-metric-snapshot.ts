@@ -3,11 +3,19 @@ import { Logger } from '@book000/node-utils'
 
 const logger = Logger.configure('analyzer:label-metric-snapshot')
 
+/**
+ * generateLabelMetricSnapshots の入力。
+ */
 export interface GenerateLabelMetricSnapshotsInput {
+  /** 集計対象の CrawlRun ID。 */
   crawlRunId: string
+  /** 集計の基準時刻。 */
   sourceWatermarkAt: Date
+  /** 適用したポリシーの content hash。 */
   policyHash: string
+  /** 集計を行った analyzer のバージョン。 */
   analyzerVersion: string
+  /** 紐づく AnalysisRun の ID。 */
   analysisRunId?: string
 }
 
@@ -63,9 +71,9 @@ async function generateOneLabelSnapshot(
 
 /**
  * LabelDefinition ごとに独立して集計・checkpoint する。
- * 1 Label の失敗が他 Label の結果を巻き込まないよう、Promise.allSettled で
- * 並行実行し、失敗した Label は completeness: 'unknown' の行として記録する
- * (行自体を欠落させると「集計されていない」のか「値が0件」なのか区別できなくなるため)。
+ * 1 Label の失敗が他 Label の結果を巻き込まないよう、Promise.allSettled で並行実行する。
+ * 失敗した Label は completeness: 'unknown' の行として記録する。
+ * 行自体を欠落させると「集計されていない」のか「値が 0 件」なのか区別できなくなるため。
  * @param prisma - Prisma クライアント
  * @param input - 対象 crawl run と付随メタデータ
  */

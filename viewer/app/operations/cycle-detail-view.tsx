@@ -2,8 +2,7 @@ import type { OperationCycleDetailView } from '@/lib/queries/operation-cycles'
 import { formatDateTime } from '@/lib/format-date'
 
 /**
- * crawl/weekly_review/block の 3 種類の Cycle 詳細ページで共通の
- * Stage timeline 描画を提供する。spec の情報階層 (Cycle 概要→Stage timeline) に従う。
+ * crawl/weekly_review/block の 3 種類の Cycle 詳細ページで共通の Stage timeline を描画する。
  * @param props - 表示する Cycle 詳細
  * @returns 描画された Cycle 詳細
  */

@@ -5,11 +5,19 @@ import { computeFingerprint } from '../findings/fingerprint'
 import { computePolicyHash } from '../policy/policy-hash'
 import type { DetectionPolicy } from '../policy/schema'
 
+/**
+ * runBacktest の入力。
+ */
 export interface RunBacktestInput {
+  /** replay 対象期間の開始時刻。 */
   targetFrom: Date
+  /** replay 対象期間の終了時刻。 */
   targetTo: Date
+  /** replay 対象の LabelDefinition ID 一覧。 */
   labelDefinitionIds: string[]
+  /** 評価したい候補 policy。 */
   candidatePolicy: DetectionPolicy
+  /** 比較基準となる現行 policy。 */
   baselinePolicy: DetectionPolicy
 }
 
@@ -69,9 +77,8 @@ function evaluateAllRules(
 }
 
 /**
- * 過去 snapshot を replay して candidatePolicy と baselinePolicy の判定差分を
- * PolicyBacktestRun/PolicyBacktestFinding へ記録する。ReviewFinding・
- * ReviewFindingOccurrence・ReadModelPointer への書き込みを一切行わないことを、
+ * 過去 snapshot を replay し、判定差分を PolicyBacktestRun へ記録する。
+ * 本番の Finding や Pointer を書き換えないことは、
  * それらを操作する関数を一切 import しないことでコード上も保証する。
  * @param prisma - Prisma クライアント
  * @param input - 対象期間・対象ラベルと比較する 2 つの policy

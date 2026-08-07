@@ -1,20 +1,27 @@
 import type { PrismaClient } from '../generated/prisma'
 import { computeFingerprint } from '../findings/fingerprint'
 
+/**
+ * detectRunFailures の入力。
+ */
 export interface DetectRunFailuresInput {
+  /** 対象コンポーネント (crawl、block など)。 */
   component: string
+  /** 対象 Run の ID。 */
   runId: string
+  /** 対象 Run の終了状態。 */
   runStatus: string
+  /** 記録するエラー概要。 */
   errorSummary: string | null
+  /** 判定の基準時刻。 */
   now: Date
 }
 
 const FAILED_STATUSES = new Set(['failed', 'timeout'])
 
 /**
- * Run 単位で一意な fingerprint (`run_failure` + component + runId) の
- * OperationalIssue を upsert する。同一 run を複数回処理しても
- * observationKey = runId で Occurrence が重複しない。
+ * Run 単位で一意な fingerprint の OperationalIssue を upsert する。
+ * observationKey に runId を使うため、同一 run を複数回処理しても Occurrence が重複しない。
  * @param prisma - Prisma クライアント
  * @param input - 対象 run の状態
  */

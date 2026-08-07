@@ -9,10 +9,8 @@ interface FindingDetailPageProps {
 }
 
 /**
- * Finding 詳細画面。spec の情報階層 (Conclusion→Impact→Detection Basis→Evidence→
- * Occurrence History) のうち固定の情報階層で表示し、Occurrence 追加分・Raw Analysis は
- * `/api/review/findings/[findingId]/occurrences` から Client Component で遅延取得する
- * 想定だが、本タスクでは初期表示に必要な直近 10 件の Occurrence までを Server Component で描画する。
+ * Finding 詳細画面。Occurrence は初期表示に必要な直近分のみ Server Component で描画し、
+ * それ以降は `/api/review/findings/[findingId]/occurrences` から取得させる。
  * @param props - Next.js の dynamic route params
  * @returns 描画された Finding 詳細画面
  */

@@ -426,6 +426,7 @@ model OperationCycle {
 
   @@unique([sourceType, sourceId])
   @@index([kind, startedAt(sort: Desc), id(sort: Desc)])
+  @@index([kind, triggeredAt(sort: Desc), id(sort: Desc)])
   @@index([attentionRequired, status])
 }
 
@@ -605,6 +606,7 @@ model DetectorEvaluation {
 
   @@index([detectorType, fingerprint, evaluatedAt(sort: Desc)])
   @@index([isShadow, evaluatedAt(sort: Desc)])
+  @@index([fingerprint, identityVersion, evaluatedAt(sort: Desc)])
 }
 
 model PolicyBacktestRun {
@@ -690,6 +692,7 @@ model AccountSummaryCurrent {
   @@id([generationId, accountId])
   @@index([generationId, lastClassificationChangedAt(sort: Desc), accountId])
   @@index([generationId, highestFindingSeverity, activeFindingCount, accountId])
+  @@index([generationId, normalizedScreenName, accountId])
   @@index([normalizedScreenName])
 }
 

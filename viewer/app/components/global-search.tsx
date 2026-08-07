@@ -6,8 +6,35 @@ import type { GlobalSearchResult } from '@/lib/queries/global-search'
 
 const DEBOUNCE_MS = 300
 
+/** 検索結果ドロップダウンが取りうる表示状態。 */
+export type GlobalSearchDisplayState = 'loading' | 'error' | 'empty' | 'results'
+
 /**
- * Account/Label/Finding/Operation を横断検索する。Tweet 本文は検索対象に含まれない。
+ * 検索失敗を result: null で表すと「該当なし」と同じ表示になり、
+ * 検索対象が存在しないという誤った断定を出してしまう。
+ * error を独立した状態として持ち、empty より先に判定する。
+ * @param input - 現在の読み込み状態・エラー・検索結果
+ * @returns 描画すべき表示状態
+ */
+export function resolveDisplayState(input: {
+  isLoading: boolean
+  error: string | null
+  result: GlobalSearchResult | null
+}): GlobalSearchDisplayState {
+  if (input.isLoading) return 'loading'
+  if (input.error !== null) return 'error'
+  const { result } = input
+  const hasResults =
+    result !== null &&
+    (result.accounts.length > 0 ||
+      result.labels.length > 0 ||
+      result.findings.length > 0 ||
+      result.operations.length > 0)
+  return hasResults ? 'results' : 'empty'
+}
+
+/**
+ * Account/Label/Finding/Operation を横断検索する。
  * 入力のたびに叩くと DB 負荷が高いため、入力停止から一定時間後にのみ検索する。
  * @returns 描画された Global Search 入力欄と結果一覧
  */
@@ -15,11 +42,13 @@ export function GlobalSearch(): React.ReactElement {
   const [query, setQuery] = useState('')
   const [result, setResult] = useState<GlobalSearchResult | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const trimmed = query.trim()
     if (!trimmed) {
       setResult(null)
+      setError(null)
       return
     }
 
@@ -30,10 +59,12 @@ export function GlobalSearch(): React.ReactElement {
           if (!response.ok) throw new Error(`Unexpected status: ${String(response.status)}`)
           const data = (await response.json()) as GlobalSearchResult
           setResult(data)
+          setError(null)
         })
-        .catch((error: unknown) => {
-          console.error('Failed to search:', error)
+        .catch((fetchError: unknown) => {
+          console.error('Failed to search:', fetchError)
           setResult(null)
+          setError('Failed to search.')
         })
         .finally(() => {
           setIsLoading(false)
@@ -45,12 +76,7 @@ export function GlobalSearch(): React.ReactElement {
     }
   }, [query])
 
-  const hasResults =
-    result !== null &&
-    (result.accounts.length > 0 ||
-      result.labels.length > 0 ||
-      result.findings.length > 0 ||
-      result.operations.length > 0)
+  const displayState = resolveDisplayState({ isLoading, error, result })
 
   return (
     <div className="relative w-full max-w-xs">
@@ -66,11 +92,14 @@ export function GlobalSearch(): React.ReactElement {
       />
       {query.trim() && (
         <div className="absolute z-10 mt-1 w-full rounded-md border bg-white p-2 text-sm shadow-lg dark:border-gray-700 dark:bg-gray-800">
-          {isLoading && <p className="text-gray-500 dark:text-gray-400">Searching...</p>}
-          {!isLoading && !hasResults && (
+          {displayState === 'loading' && (
+            <p className="text-gray-500 dark:text-gray-400">Searching...</p>
+          )}
+          {displayState === 'error' && <p className="text-red-600 dark:text-red-400">{error}</p>}
+          {displayState === 'empty' && (
             <p className="text-gray-500 dark:text-gray-400">No results.</p>
           )}
-          {!isLoading && result && (
+          {displayState === 'results' && result && (
             <ul className="flex flex-col gap-2">
               {result.accounts.map((account) => (
                 <li key={`account-${account.id}`}>

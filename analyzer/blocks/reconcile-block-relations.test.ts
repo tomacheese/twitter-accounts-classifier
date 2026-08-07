@@ -55,6 +55,7 @@ describe('reconcileBlockRelations', () => {
   beforeEach(async () => {
     await prisma.blockStateChange.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
     await prisma.account.deleteMany()
   })
 

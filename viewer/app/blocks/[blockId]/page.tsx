@@ -10,9 +10,7 @@ interface BlockDetailPageProps {
 }
 
 /**
- * Block 関係詳細画面。spec の情報階層 (Current relationship→Accounts→
- * Observation summary→Timeline→Related OperationCycle→Related Label/Finding→Technical)
- * に従う。
+ * Block 関係詳細画面。
  * @param props - Next.js の dynamic route params
  * @returns 描画された Block 関係詳細画面
  */
@@ -115,26 +113,6 @@ export default async function BlockDetailPage({
               ))}
             </tbody>
           </table>
-        )}
-      </section>
-
-      <section aria-labelledby="related-operation-cycle-heading">
-        <h2 id="related-operation-cycle-heading" className="text-lg font-semibold">
-          Related OperationCycle
-        </h2>
-        {detail.relatedOperationCycle ? (
-          <p className="mt-2">
-            <Link
-              href={`/operations/block/${detail.relatedOperationCycle.id}`}
-              className="text-blue-600 hover:underline dark:text-blue-400"
-            >
-              {detail.relatedOperationCycle.id}
-            </Link>{' '}
-            ({detail.relatedOperationCycle.status}, triggered{' '}
-            {formatDateTime(detail.relatedOperationCycle.triggeredAt)})
-          </p>
-        ) : (
-          <p className="mt-2">No related cycle recorded.</p>
         )}
       </section>
 

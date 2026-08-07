@@ -4,9 +4,15 @@ import { evaluateReasonDistributionShift } from '../findings/detectors/reason-di
 import { computeFingerprint } from '../findings/fingerprint'
 import type { DetectionPolicy } from '../policy/schema'
 
+/**
+ * evaluateShadow の入力。
+ */
 export interface EvaluateShadowInput {
+  /** 評価対象の CrawlRun ID。 */
   crawlRunId: string
+  /** shadow 評価に使う検出ポリシー。 */
   policy: DetectionPolicy
+  /** 適用したポリシーの content hash。 */
   policyHash: string
 }
 

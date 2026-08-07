@@ -51,7 +51,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Apply database migrations
         run: pnpm --filter crawler run db:migrate
-      # ロール作成用SQLは実運用でパスワードを手動で置き換える前提のプレースホルダーを含み、
+      # ロール作成用 SQL は実運用でパスワードを手動で置き換える前提のプレースホルダーを含み、
       # \ir で同じディレクトリの sync-*.sql を相対 include するため、
       # 置換後もそのディレクトリ内に置いた状態で実行する必要がある。
       - name: Create roles with a CI-only test password
@@ -59,7 +59,7 @@ jobs:
           for role in viewer analyzer weekly-review; do
             sed "s/CHANGE_ME_[A-Z_]*_PASSWORD/ci-test-password/" \
               "create-${role}-role.sql" > "create-${role}-role.ci.sql"
-            psql "$DATABASE_URL" -f "create-${role}-role.ci.sql"
+            psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "create-${role}-role.ci.sql"
             rm "create-${role}-role.ci.sql"
           done
         working-directory: scripts/db

@@ -1,8 +1,10 @@
 import type { PrismaClient } from '../generated/prisma'
 
+/** OperationStage 1 件の状態。 */
 export type StageStatus =
   'waiting' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'delayed' | 'stale' | 'unknown'
 
+/** OperationCycle 全体の状態。 */
 export type CycleStatus =
   | 'scheduled'
   | 'running'
@@ -21,9 +23,8 @@ const ANALYSIS_WORK_ITEM_STAGE_KINDS = [
 ] as const
 
 /**
- * 起点 Stage (crawl) が成功しても、必須後続 Stage が failed/未完了なら
- * succeeded にせず partial とする。Crawl 成功後の後続失敗を成功として
- * 表示しないための唯一の判定箇所として、この関数へ集約する。
+ * 起点 Stage (crawl) が成功していても、必須後続 Stage が failed/未完了なら partial とする。
+ * Crawl 成功後の後続失敗を成功として表示しないための判定を、この関数へ集約する。
  * @param requiredStages - 先頭が crawl Stage の状態列
  * @returns Cycle 全体の状態
  */
@@ -51,9 +52,9 @@ function deriveCrawlStageStatus(crawlRunStatus: string): StageStatus {
 }
 
 /**
- * crawl 完了時に必ず AnalysisWorkItem が enqueue される設計 (Task 9) を前提に、
- * WorkItem 自体が存在しないことは「本来行われるはずの処理が欠落した」状態とみなし
- * failed として扱う。これにより Operations 画面が欠落を見逃さず attention として拾える。
+ * crawl 完了時には必ず AnalysisWorkItem が enqueue される。
+ * そのため WorkItem 自体が存在しないことは処理の欠落を意味し、
+ * waiting ではなく failed として扱って Operations 画面が見逃さないようにする。
  * @param prisma - Prisma クライアント
  * @param kind - AnalysisWorkItem.kind
  * @param crawlRunId - 起点となった CrawlRun の ID
@@ -82,14 +83,17 @@ async function deriveWorkItemStageStatus(
   return workItem.status === 'running' ? 'running' : 'waiting'
 }
 
+/**
+ * buildOrUpdateCrawlCycle の入力。
+ */
 export interface BuildOrUpdateCrawlCycleInput {
+  /** 起点となる CrawlRun の ID。 */
   crawlRunId: string
 }
 
 /**
- * CrawlRun 1 件を起点に、crawl・label_metrics・finding_generation・read_model_refresh の
- * 4 Stage を upsert し、Cycle 全体の状態を再計算する。Task 17 (read model 生成) の最後で
- * 呼ばれ、Operations 画面はこの Cycle/Stage のみを読む。
+ * CrawlRun 1 件を起点に 4 Stage を upsert し、Cycle 全体の状態を再計算する。
+ * Operations 画面は正本テーブルではなくこの Cycle/Stage のみを読む。
  * @param prisma - Prisma クライアント
  * @param input - 対象 CrawlRun
  */

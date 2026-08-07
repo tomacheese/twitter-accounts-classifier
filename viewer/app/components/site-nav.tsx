@@ -20,6 +20,7 @@ const LEGACY_NAV_ITEMS: NavItem[] = [
   { href: '/block-runs', label: 'Block Runs' },
 ]
 
+/** SiteNav の props。 */
 export interface SiteNavProps {
   /** `isNewUiSectionEnabled('overview')` が有効なら新ナビゲーション項目一式を表示する */
   isNewNavEnabled: boolean

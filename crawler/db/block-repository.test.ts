@@ -40,17 +40,17 @@ function makePrisma(
   const blockCreateMany = vi.fn().mockResolvedValue({ count: 0 })
   const blockUpdateMany = vi.fn().mockResolvedValue({ count: 0 })
   const blockFindMany = vi.fn().mockResolvedValue(existingBlocks)
-  const blockUpdate = vi.fn().mockResolvedValue({})
-  const blockStateChangeCreate = vi.fn().mockResolvedValue({})
+  const executeRaw = vi.fn().mockResolvedValue(0)
+  const blockStateChangeCreateMany = vi.fn().mockResolvedValue({ count: 0 })
   const tx = {
     account: { upsert: accountUpsert },
     block: {
       createMany: blockCreateMany,
       updateMany: blockUpdateMany,
       findMany: blockFindMany,
-      update: blockUpdate,
     },
-    blockStateChange: { create: blockStateChangeCreate },
+    blockStateChange: { createMany: blockStateChangeCreateMany },
+    $executeRaw: executeRaw,
   }
   const $transaction = vi
     .fn()
@@ -65,8 +65,8 @@ function makePrisma(
     blockCreateMany,
     blockUpdateMany,
     blockFindMany,
-    blockUpdate,
-    blockStateChangeCreate,
+    executeRaw,
+    blockStateChangeCreateMany,
     $transaction,
   }
 }
@@ -116,23 +116,31 @@ describe('syncBlocks', () => {
       consecutiveMissingCount: 0,
       missingSinceAt: null,
     }
-    const { prisma, blockUpdate, blockStateChangeCreate } = makePrisma([existing])
+    const { prisma, executeRaw, blockStateChangeCreateMany } = makePrisma([existing])
 
     await syncBlocks(prisma, 'me', makeResult(['a'], true))
 
-    expect(blockUpdate).toHaveBeenCalledWith(
+    expect(executeRaw).toHaveBeenCalledTimes(1)
+    const [rawStrings, , ids, statuses, counts] = executeRaw.mock.calls[0] as [
+      TemplateStringsArray,
+      Date,
+      string[],
+      string[],
+      number[],
+    ]
+    expect(rawStrings.join('')).toContain('UPDATE "Block"')
+    expect(ids).toEqual(['block-1'])
+    expect(statuses).toEqual(['missing'])
+    expect(counts).toEqual([1])
+    expect(blockStateChangeCreateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'block-1' },
-        data: expect.objectContaining({ status: 'missing', consecutiveMissingCount: 1 }),
-      }),
-    )
-    expect(blockStateChangeCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          blockId: 'block-1',
-          fromStatus: 'active',
-          toStatus: 'missing',
-        }),
+        data: [
+          expect.objectContaining({
+            blockId: 'block-1',
+            fromStatus: 'active',
+            toStatus: 'missing',
+          }),
+        ],
       }),
     )
   })

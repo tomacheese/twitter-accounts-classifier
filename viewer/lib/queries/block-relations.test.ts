@@ -7,20 +7,21 @@ function createMockPrisma(overrides: {
   rows?: unknown[]
   block?: unknown
   timeline?: unknown[]
-  cycle?: unknown
   findingLinks?: unknown[]
 }) {
   const findMany = vi.fn().mockResolvedValue(overrides.rows ?? [])
+  const operationCycleFindFirst = vi.fn().mockResolvedValue(null)
   return {
     prisma: {
       readModelPointer: { findUnique: vi.fn().mockResolvedValue(overrides.pointer ?? null) },
       blockRelationCurrent: { findMany },
       block: { findUnique: vi.fn().mockResolvedValue(overrides.block ?? null) },
       blockStateChange: { findMany: vi.fn().mockResolvedValue(overrides.timeline ?? []) },
-      operationCycle: { findFirst: vi.fn().mockResolvedValue(overrides.cycle ?? null) },
+      operationCycle: { findFirst: operationCycleFindFirst },
       findingEntityLink: { findMany: vi.fn().mockResolvedValue(overrides.findingLinks ?? []) },
     } as unknown as PrismaClient,
     findMany,
+    operationCycleFindFirst,
   }
 }
 
@@ -83,5 +84,13 @@ describe('getBlockRelationDetail', () => {
     const call = blockStateChangeFindMany.mock.calls[0][0] as { take: number }
     expect(call.take).toBe(10)
     expect(detail?.timeline).toHaveLength(3)
+  })
+
+  it('Block と対応付けられない OperationCycle は取得しない', async () => {
+    const prismaMock = createMockPrisma({ block: baseBlock })
+    const detail = await getBlockRelationDetail(prismaMock.prisma, 'block-1')
+
+    expect(prismaMock.operationCycleFindFirst).not.toHaveBeenCalled()
+    expect(detail).not.toHaveProperty('relatedOperationCycle')
   })
 })

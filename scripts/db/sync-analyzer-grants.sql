@@ -41,10 +41,14 @@ GRANT INSERT, UPDATE, DELETE ON TABLE
   "AttentionItemCurrent", "OverviewSnapshot",
   "ReadModelGeneration", "ReadModelPointer", "ReadModelState"
   TO analyzer;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO analyzer;
 
+-- 現行スキーマは autoincrement を使わずシーケンスを持たないため、schema 全体への
+-- USAGE/SELECT は付与しない。write allowlist のテーブルがシーケンス列を持つに至った
+-- 時点で、個別のシーケンスを名指しして GRANT を追加する。
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
   ON TABLES FROM analyzer;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT ON TABLES TO analyzer;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  REVOKE ALL PRIVILEGES ON SEQUENCES FROM analyzer;

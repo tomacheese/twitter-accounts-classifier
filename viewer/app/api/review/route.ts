@@ -10,15 +10,34 @@ import { buildApiResponseMeta } from '@/lib/api-response'
 const DEFAULT_LIMIT = 25
 const MAX_LIMIT = 100
 
+const VALID_STATUSES: ReviewFindingStatus[] = ['active', 'recurring', 'resolved', 'superseded']
+
+/**
+ * @param value - 生の status パラメータの値
+ * @returns サポートされている status であれば true
+ */
+function isReviewFindingStatus(value: string): value is ReviewFindingStatus {
+  return (VALID_STATUSES as string[]).includes(value)
+}
+
+/**
+ * @param status - カンマ区切りの status パラメータ
+ * @returns 既知の status のみを残した配列。1 つも残らなければ undefined (既定 filter に委ねる)
+ */
+function parseStatuses(status: string | null): ReviewFindingStatus[] | undefined {
+  if (!status) return undefined
+  const parsed = status.split(',').filter((value) => isReviewFindingStatus(value))
+  return parsed.length > 0 ? parsed : undefined
+}
+
 /**
  * @param searchParams - リクエストの query string
  * @returns listReviewFindings 向けに変換した filters
  */
 function parseFilters(searchParams: URLSearchParams): ReviewFindingListFilters {
-  const status = searchParams.get('status')
   const severity = searchParams.get('severity')
   return {
-    status: status ? (status.split(',') as ReviewFindingStatus[]) : undefined,
+    status: parseStatuses(searchParams.get('status')),
     severity: severity ? severity.split(',') : undefined,
     type: searchParams.get('type') ?? undefined,
     primaryScopeType: searchParams.get('primaryScopeType') ?? undefined,

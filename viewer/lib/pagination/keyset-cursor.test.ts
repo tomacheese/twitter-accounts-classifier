@@ -24,4 +24,25 @@ describe('keyset cursor', () => {
     const cursor = Buffer.from(JSON.stringify({ filterHash: 'f1' })).toString('base64url')
     expect(decodeCursor(cursor, 'f1')).toBeNull()
   })
+
+  it('sortValues が配列でなければ null を返す', () => {
+    const cursor = Buffer.from(JSON.stringify({ sortValues: 'x', filterHash: 'f1' })).toString(
+      'base64url',
+    )
+    expect(decodeCursor(cursor, 'f1')).toBeNull()
+  })
+
+  it('sortValues に文字列以外の要素が混ざっていたら null を返す', () => {
+    for (const sortValues of [[1, 'account-1'], ['2026-08-07T00:00:00.000Z', null], [{}], [[]]]) {
+      const cursor = Buffer.from(JSON.stringify({ sortValues, filterHash: 'f1' })).toString(
+        'base64url',
+      )
+      expect(decodeCursor(cursor, 'f1')).toBeNull()
+    }
+  })
+
+  it('空の sortValues は有効な cursor として扱う', () => {
+    const cursor = encodeCursor({ sortValues: [], filterHash: 'f1' })
+    expect(decodeCursor(cursor, 'f1')).toEqual([])
+  })
 })

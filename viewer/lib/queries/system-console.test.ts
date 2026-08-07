@@ -40,6 +40,64 @@ describe('getSystemConsoleData', () => {
     expect(data.componentHealth).toBeNull()
   })
 
+  it('errorSummary は先頭 1 行だけを返し、後続行は表示しない', async () => {
+    const prisma = createMockPrisma({
+      readModelStates: [
+        {
+          modelKey: 'account_summary',
+          status: 'failed',
+          schemaVersion: 1,
+          lastSuccessAt: null,
+          staleAt: null,
+          errorSummary:
+            'PrismaClientKnownRequestError: query failed\nargs: { screenName: "alice", bio: "..." }',
+        },
+      ],
+    })
+
+    const data = await getSystemConsoleData(prisma)
+
+    expect(data.readModels[0].errorSummary).toBe('PrismaClientKnownRequestError: query failed')
+  })
+
+  it('errorSummary は 200 文字を超えたら切り詰める', async () => {
+    const prisma = createMockPrisma({
+      readModelStates: [
+        {
+          modelKey: 'account_summary',
+          status: 'failed',
+          schemaVersion: 1,
+          lastSuccessAt: null,
+          staleAt: null,
+          errorSummary: 'x'.repeat(500),
+        },
+      ],
+    })
+
+    const data = await getSystemConsoleData(prisma)
+
+    expect(data.readModels[0].errorSummary).toBe(`${'x'.repeat(200)}…`)
+  })
+
+  it('errorSummary が null なら null のまま返す', async () => {
+    const prisma = createMockPrisma({
+      readModelStates: [
+        {
+          modelKey: 'account_summary',
+          status: 'healthy',
+          schemaVersion: 1,
+          lastSuccessAt: null,
+          staleAt: null,
+          errorSummary: null,
+        },
+      ],
+    })
+
+    const data = await getSystemConsoleData(prisma)
+
+    expect(data.readModels[0].errorSummary).toBeNull()
+  })
+
   it('秘密情報を含む環境変数は allowlist に無ければ含まれない', async () => {
     const original = process.env.DATABASE_URL
     process.env.DATABASE_URL = 'postgresql://user:pass@localhost:5432/db'

@@ -63,4 +63,48 @@ describe('publishGeneration', () => {
     })
     expect(state.status).toBe('failed')
   })
+
+  it('公開のたびに不要となった世代の行と ReadModelGeneration を削除する', async () => {
+    await prisma.attentionItemCurrent.deleteMany()
+
+    const generationIds: string[] = []
+    for (let index = 0; index < 4; index++) {
+      const generationId = await publishGeneration(prisma, {
+        modelKey: 'attention_items',
+        schemaVersion: 1,
+        sourceWatermarkAt: new Date(),
+        build: async (id) => {
+          await prisma.attentionItemCurrent.create({
+            data: {
+              generationId: id,
+              sourceType: 'operational_issue',
+              sourceId: `issue-${index}`,
+              category: 'run_failure',
+              priority: 1,
+              severity: 'high',
+              summary: 'test',
+              impact: {},
+              detectedAt: new Date(),
+              freshness: 'current',
+              detailHref: '/operations/issues/test',
+            },
+          })
+          return { rowCount: 1 }
+        },
+      })
+      generationIds.push(generationId)
+    }
+
+    const generations = await prisma.readModelGeneration.findMany({
+      where: { modelKey: 'attention_items' },
+    })
+    expect(generations).toHaveLength(2)
+    expect(generations.map((generation) => generation.id).toSorted()).toEqual(
+      generationIds.slice(-2).toSorted(),
+    )
+
+    const rows = await prisma.attentionItemCurrent.findMany()
+    expect(rows).toHaveLength(2)
+    expect(rows.every((row) => generationIds.slice(-2).includes(row.generationId))).toBe(true)
+  })
 })

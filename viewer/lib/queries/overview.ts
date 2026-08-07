@@ -1,6 +1,7 @@
 import type { PrismaClient } from '../../generated/prisma'
 import type { ReadModelFreshnessStatus } from '../api-response'
 
+/** Attention Queue の 1 件。 */
 export interface AttentionItemView {
   sourceType: string
   sourceId: string
@@ -10,17 +11,20 @@ export interface AttentionItemView {
   detailHref: string
 }
 
+/** 直近パイプラインの Stage 1 件。 */
 export interface LatestPipelineStageView {
   stageKey: string
   status: string
 }
 
+/** 直近パイプラインの実行状況。 */
 export interface LatestPipelineView {
   cycleId: string
   status: string
   stages: LatestPipelineStageView[]
 }
 
+/** Overview 画面の表示内容。 */
 export interface OverviewSnapshotView {
   operationalStatus: string
   qualityStatus: string
@@ -35,8 +39,32 @@ export interface OverviewSnapshotView {
 const MODEL_KEY = 'overview_snapshot'
 
 /**
- * OverviewSnapshot の payload は build-overview-snapshot.ts が書いた形をそのまま信頼する。
- * ここでは実行時に壊れた値が渡っても画面全体を落とさないよう、最小限の形だけ検証する。
+ * @param value - 検証対象の値
+ * @param keys - 文字列であることを要求するプロパティ名
+ * @returns すべてのプロパティが文字列を持つオブジェクトであれば true
+ */
+function hasStringProps<K extends string>(
+  value: unknown,
+  keys: readonly K[],
+): value is Record<K, string> {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  return keys.every((key) => typeof record[key] === 'string')
+}
+
+const ATTENTION_ITEM_KEYS = [
+  'sourceType',
+  'sourceId',
+  'category',
+  'severity',
+  'summary',
+  'detailHref',
+] as const
+
+/**
+ * OverviewSnapshot の payload は Json 列であり、型は実行時に保証されない。
+ * 壊れた行が 1 件混ざっても画面全体を落とさないよう、
+ * 表示に使うプロパティが揃っている要素だけを通す。
  * @param payload - OverviewSnapshot.payload (Json)
  * @returns attention と latestPipeline
  */
@@ -48,18 +76,36 @@ function parsePayload(payload: unknown): {
     return { attention: [], latestPipeline: null }
   }
   const record = payload as Record<string, unknown>
-  const attention = Array.isArray(record.attention) ? (record.attention as AttentionItemView[]) : []
-  const latestPipeline =
-    typeof record.latestPipeline === 'object' && record.latestPipeline !== null
-      ? (record.latestPipeline as LatestPipelineView)
-      : null
+  const attention = Array.isArray(record.attention)
+    ? record.attention.filter((item): item is AttentionItemView =>
+        hasStringProps(item, ATTENTION_ITEM_KEYS),
+      )
+    : []
+
+  const rawPipeline = record.latestPipeline
+  let latestPipeline: LatestPipelineView | null = null
+  if (hasStringProps(rawPipeline, ['cycleId', 'status'])) {
+    const rawStages = (rawPipeline as unknown as Record<string, unknown>).stages
+    latestPipeline = {
+      cycleId: rawPipeline.cycleId,
+      status: rawPipeline.status,
+      stages: Array.isArray(rawStages)
+        ? rawStages.filter((stage): stage is LatestPipelineStageView =>
+            hasStringProps(stage, ['stageKey', 'status']),
+          )
+        : [],
+    }
+  }
+
   return { attention, latestPipeline }
 }
 
 /**
- * 最新の OverviewSnapshot を取得し、ReadModelState(modelKey: 'overview_snapshot') の
- * status を freshnessStatus として重ねる。ReadModelState が stale/failed でも、
- * 直近成功した OverviewSnapshot の内容自体は消さずに返す。
+ * 最新の OverviewSnapshot を取得し、
+ * ReadModelState の status を freshnessStatus として重ねる。
+ * ReadModelState が stale・failed でも、直近成功した内容自体は消さずに返す。
+ * 「最新」の判定には索引のある generatedAt を使う。
+ * snapshot は逐次生成されるため、sourceWatermarkAt で並べ替えても順序は変わらない。
  * @param prisma - Prisma クライアント
  * @returns 表示に必要な Overview の内容。OverviewSnapshot が 1 件も無ければ null
  */
@@ -67,7 +113,7 @@ export async function getOverviewSnapshot(
   prisma: PrismaClient,
 ): Promise<OverviewSnapshotView | null> {
   const [snapshot, readModelState] = await Promise.all([
-    prisma.overviewSnapshot.findFirst({ orderBy: [{ sourceWatermarkAt: 'desc' }] }),
+    prisma.overviewSnapshot.findFirst({ orderBy: [{ generatedAt: 'desc' }] }),
     prisma.readModelState.findUnique({ where: { modelKey: MODEL_KEY } }),
   ])
 

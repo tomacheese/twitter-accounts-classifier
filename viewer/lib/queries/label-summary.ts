@@ -2,6 +2,7 @@ import type { PrismaClient } from '../../generated/prisma'
 
 const MODEL_KEY = 'label_summary'
 
+/** ラベル一覧の 1 行。 */
 export interface LabelSummaryListItem {
   labelDefinitionId: string
   labelKey: string

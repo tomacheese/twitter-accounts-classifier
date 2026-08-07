@@ -84,4 +84,60 @@ describe('getOverviewSnapshot', () => {
 
     expect(result?.freshnessStatus).toBe('unknown')
   })
+
+  it('索引のある generatedAt で最新 snapshot を選ぶ', async () => {
+    const prisma = createMockPrisma({ snapshot: baseSnapshot })
+
+    await getOverviewSnapshot(prisma)
+
+    const findFirst = (
+      prisma as unknown as { overviewSnapshot: { findFirst: ReturnType<typeof vi.fn> } }
+    ).overviewSnapshot.findFirst
+    expect(findFirst.mock.calls[0][0]).toEqual({ orderBy: [{ generatedAt: 'desc' }] })
+  })
+
+  it('payload の attention に壊れた要素があればその要素だけ捨てる', async () => {
+    const prisma = createMockPrisma({
+      snapshot: {
+        ...baseSnapshot,
+        payload: {
+          ...baseSnapshot.payload,
+          attention: [...baseSnapshot.payload.attention, { sourceType: 'operational_issue' }, null],
+        },
+      },
+    })
+
+    const result = await getOverviewSnapshot(prisma)
+
+    expect(result?.attention).toHaveLength(1)
+  })
+
+  it('payload の latestPipeline が必要なプロパティを欠くなら null にする', async () => {
+    const prisma = createMockPrisma({
+      snapshot: {
+        ...baseSnapshot,
+        payload: { ...baseSnapshot.payload, latestPipeline: { cycleId: 'cycle-1' } },
+      },
+    })
+
+    const result = await getOverviewSnapshot(prisma)
+
+    expect(result?.latestPipeline).toBeNull()
+  })
+
+  it('latestPipeline の stages が配列でなければ空配列にする', async () => {
+    const prisma = createMockPrisma({
+      snapshot: {
+        ...baseSnapshot,
+        payload: {
+          ...baseSnapshot.payload,
+          latestPipeline: { cycleId: 'cycle-1', status: 'succeeded', stages: 'broken' },
+        },
+      },
+    })
+
+    const result = await getOverviewSnapshot(prisma)
+
+    expect(result?.latestPipeline?.stages).toEqual([])
+  })
 })

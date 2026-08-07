@@ -17,9 +17,7 @@ interface OperationsPageProps {
 }
 
 /**
- * Operations 一覧画面。running 中 Cycle があれば 15 秒、なければ 60 秒間隔で
- * ポーリングするクライアント側自動更新は本タスクの初期実装では省略し、
- * Server Component による都度取得のみを実装する。
+ * Operations 一覧画面。
  * @param props - `kind`/`attentionRequired` 検索パラメータ
  * @returns 描画された Operations 一覧画面
  */

@@ -1,8 +1,10 @@
 import { Prisma, type PrismaClient } from '../../generated/prisma'
 import { encodeCursor, decodeCursor } from '../pagination/keyset-cursor'
 
+/** ReviewFinding のライフサイクル状態。 */
 export type ReviewFindingStatus = 'active' | 'recurring' | 'resolved' | 'superseded'
 
+/** Finding 一覧の絞り込み条件。 */
 export interface ReviewFindingListFilters {
   status?: ReviewFindingStatus[]
   severity?: string[]
@@ -10,12 +12,14 @@ export interface ReviewFindingListFilters {
   primaryScopeType?: string
 }
 
+/** listReviewFindings の入力。 */
 export interface ListReviewFindingsInput {
   filters: ReviewFindingListFilters
   cursor?: string | null
   limit: number
 }
 
+/** Finding 一覧の 1 行。 */
 export interface ReviewFindingListItem {
   id: string
   type: string
@@ -28,6 +32,7 @@ export interface ReviewFindingListItem {
   recurrenceCount: number
 }
 
+/** listReviewFindings の返り値。 */
 export interface ListReviewFindingsResult {
   items: ReviewFindingListItem[]
   nextCursor: string | null
@@ -36,8 +41,6 @@ export interface ListReviewFindingsResult {
 const DEFAULT_STATUSES: ReviewFindingStatus[] = ['active', 'recurring']
 
 // severity は文字列カラムのため、DB 側で数値順に比較できるよう CASE で rank へ変換する。
-// spec のページネーション設計 (severity rank + lastDetectedAt + id) がこの 3 キーだけを
-// cursor に含める前提のため、一覧の表示順もこの 3 キーに揃える。
 const SEVERITY_RANK_SQL = Prisma.sql`
   CASE "currentSeverity"
     WHEN 'critical' THEN 3
@@ -97,11 +100,9 @@ interface ReviewFindingRow {
 }
 
 /**
- * spec の「severity → recurring → affected ratio → affected count → duration →
- * lastDetectedAt → id」という表示ソート順のうち、cursor で安定して辿れるのは
- * severity rank・lastDetectedAt・id の 3 キーだけである
- * (affected ratio/count・duration は occurrence 側の値で Finding 一覧クエリ単体では
- * 決定的な keyset 条件を組めない)。そのため一覧の実ソート順もこの 3 キーに揃える。
+ * 表示ソート順は severity rank・lastDetectedAt・id の 3 キーに揃える。
+ * affected ratio・affected count・duration は occurrence 側の値であり、
+ * Finding 一覧クエリ単体では決定的な keyset 条件を組めない。
  * @param prisma - Prisma クライアント
  * @param input - filters・cursor・limit
  * @returns 1 ページ分の Finding 一覧と次ページの cursor

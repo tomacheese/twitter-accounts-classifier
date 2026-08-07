@@ -1,15 +1,30 @@
+/**
+ * 1 時点における Label の集計値。
+ */
 export interface LabelCountSample {
+  /** Label が true と判定された件数。 */
   trueCount: number
+  /** 判定対象となった件数。 */
   evaluatedCount: number
 }
 
+/**
+ * label_count_drop の判定結果。
+ */
 export interface LabelCountDropResult {
+  /** 閾値を超過したか。 */
   exceeded: boolean
+  /** 母数不足などで判定不能か。 */
   isMissingOrFailed: boolean
+  /** 今回の観測値。 */
   observedValue: number
+  /** 比較対象の baseline 値。 */
   baselineValue: number
+  /** baseline に対する相対変化量。 */
   relativeDifference: number
+  /** 影響を受けた件数。 */
   affectedCount: number
+  /** 影響範囲の母数。 */
   totalCount: number
 }
 

@@ -3,7 +3,6 @@ import type { PrismaClient } from '../../generated/prisma'
 import {
   getCrawlCycleDetail,
   getWeeklyReviewCycleDetail,
-  isAttentionRequiredStatus,
   listOperationCycles,
 } from './operation-cycles'
 
@@ -13,19 +12,6 @@ function createMockPrisma(overrides: { cycles?: unknown[]; cycle?: unknown }) {
   const prisma = { operationCycle: { findMany, findUnique } } as unknown as PrismaClient
   return { prisma, findMany, findUnique }
 }
-
-describe('isAttentionRequiredStatus', () => {
-  it('partial/failed/stale/unknown を含む', () => {
-    expect(isAttentionRequiredStatus('partial')).toBe(true)
-    expect(isAttentionRequiredStatus('failed')).toBe(true)
-    expect(isAttentionRequiredStatus('stale')).toBe(true)
-    expect(isAttentionRequiredStatus('unknown')).toBe(true)
-  })
-
-  it('succeeded は含まない', () => {
-    expect(isAttentionRequiredStatus('succeeded')).toBe(false)
-  })
-})
 
 describe('listOperationCycles', () => {
   it('既定で 30 件まで取得する', async () => {
