@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { getPrismaClient } from '../db/client'
 import { buildLabelSummary } from './build-label-summary'
 
-describe('buildLabelSummary', () => {
+describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {

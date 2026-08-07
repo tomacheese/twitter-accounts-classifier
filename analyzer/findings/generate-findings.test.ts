@@ -36,7 +36,7 @@ const policy: DetectionPolicy = {
   ],
 }
 
-describe('generateFindingsForCrawlCycle', () => {
+describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () => {
   const prisma = getPrismaClient()
   let labelDefinitionId: string
 

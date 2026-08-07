@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { getPrismaClient } from '../db/client'
 import { publishGeneration } from './publish'
 
-describe('publishGeneration', () => {
+describe.skipIf(!process.env.DATABASE_URL)('publishGeneration', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {

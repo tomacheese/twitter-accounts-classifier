@@ -3,7 +3,7 @@ import { getPrismaClient } from '../db/client'
 import { detectRunFailures } from './detect-run-failures'
 import { randomUUID } from 'node:crypto'
 
-describe('detectRunFailures', () => {
+describe.skipIf(!process.env.DATABASE_URL)('detectRunFailures', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {

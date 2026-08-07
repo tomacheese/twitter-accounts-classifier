@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { Logger } from '@book000/node-utils'
 import { getPrismaClient, disconnectPrisma } from './db/client'
+import { initMonitoring, captureException } from './monitoring/sentry'
 import { runWorkerLoopOnce, type WorkerLoopDeps } from './worker-loop'
 import {
   processLabelMetrics,
@@ -56,9 +57,11 @@ export async function main(): Promise<void> {
 // CommonJS を採用する本プロジェクトでこれを判定するのに適した手段である。
 // eslint-disable-next-line unicorn/prefer-module
 if (require.main === module) {
+  initMonitoring()
   main()
     .catch((error: unknown) => {
       logger.error('analyzer failed', error as Error)
+      captureException(error)
       process.exitCode = 1
     })
     .finally(() => disconnectPrisma())

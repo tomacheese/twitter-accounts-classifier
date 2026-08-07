@@ -65,3 +65,48 @@ jobs:
         working-directory: scripts/db
       - name: Sync and verify grants
         run: bash scripts/db/run-migration-and-sync-grants.sh
+
+  db-integration-tests:
+    name: DB integration tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: crawler
+          POSTGRES_PASSWORD: crawler
+          POSTGRES_DB: twitter_accounts_classifier
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crawler -d twitter_accounts_classifier"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    # node-ci (reusable-nodejs-ci-pnpm.yml) には DB を用意できないため、
+    # 実 DB 接続を必要とするテストは describe.skipIf(!process.env.DATABASE_URL) で
+    # そちらでは skip し、このジョブでのみ実行する。
+    env:
+      DATABASE_URL: postgresql://crawler:crawler@localhost:5432/twitter_accounts_classifier
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a15d269cd4658e1107c09f1fabf4cbd7bd1f308a # v4.4.0
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: crawler/.node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply database migrations
+        run: pnpm --filter crawler run db:migrate
+      - name: Run analyzer tests
+        run: pnpm --filter analyzer run test
+      - name: Run crawler tests
+        run: pnpm --filter crawler run test
+      - name: Run blocker tests
+        run: pnpm --filter blocker run test

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { getPrismaClient } from '../db/client'
 import { generateLabelMetricSnapshots } from './label-metric-snapshot'
 
-describe('generateLabelMetricSnapshots', () => {
+describe.skipIf(!process.env.DATABASE_URL)('generateLabelMetricSnapshots', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {

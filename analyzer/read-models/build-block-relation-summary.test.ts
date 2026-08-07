@@ -5,7 +5,7 @@ import { buildBlockRelationSummary } from './build-block-relation-summary'
 
 const prisma = getPrismaClient()
 
-describe('buildBlockRelationSummary', () => {
+describe.skipIf(!process.env.DATABASE_URL)('buildBlockRelationSummary', () => {
   beforeEach(async () => {
     await prisma.blockRelationCurrent.deleteMany()
     await prisma.blockStateChange.deleteMany()

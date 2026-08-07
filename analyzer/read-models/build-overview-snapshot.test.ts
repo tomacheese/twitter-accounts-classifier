@@ -106,7 +106,7 @@ describe('deriveQualityStatus', () => {
   })
 })
 
-describe('buildOverviewSnapshot', () => {
+describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {

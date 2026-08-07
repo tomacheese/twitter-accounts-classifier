@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { getPrismaClient } from '../db/client'
 import { buildAttentionItems } from './build-attention-items'
 
-describe('buildAttentionItems', () => {
+describe.skipIf(!process.env.DATABASE_URL)('buildAttentionItems', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {

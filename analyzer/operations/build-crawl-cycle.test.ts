@@ -19,7 +19,7 @@ describe('deriveCycleStatus', () => {
   })
 })
 
-describe('buildOrUpdateCrawlCycle', () => {
+describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {

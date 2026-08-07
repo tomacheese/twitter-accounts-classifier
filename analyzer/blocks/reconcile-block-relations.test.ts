@@ -49,7 +49,7 @@ describe('computeBlockReconciliation', () => {
   })
 })
 
-describe('reconcileBlockRelations', () => {
+describe.skipIf(!process.env.DATABASE_URL)('reconcileBlockRelations', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {

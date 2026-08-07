@@ -73,7 +73,7 @@ function buildStructuredOutput(
   }
 }
 
-describe('ingestWeeklyReviewFindings', () => {
+describe.skipIf(!process.env.DATABASE_URL)('ingestWeeklyReviewFindings', () => {
   beforeEach(async () => {
     await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { getPrismaClient } from './client'
 import { enqueueWorkItem } from './analysis-work-item-repository'
 
-describe('enqueueWorkItem (blocker)', () => {
+describe.skipIf(!process.env.DATABASE_URL)('enqueueWorkItem (blocker)', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {

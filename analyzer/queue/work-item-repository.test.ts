@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { getPrismaClient } from '../db/client'
 import { enqueueWorkItem, claimNextWorkItem, completeWorkItem } from './work-item-repository'
 
-describe('enqueueWorkItem', () => {
+describe.skipIf(!process.env.DATABASE_URL)('enqueueWorkItem', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {
@@ -26,7 +26,7 @@ describe('enqueueWorkItem', () => {
   })
 })
 
-describe('claimNextWorkItem / completeWorkItem', () => {
+describe.skipIf(!process.env.DATABASE_URL)('claimNextWorkItem / completeWorkItem', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {

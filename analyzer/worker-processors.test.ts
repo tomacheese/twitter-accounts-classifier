@@ -8,7 +8,7 @@ import {
 
 const prisma = getPrismaClient()
 
-describe('worker-processors', () => {
+describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
   beforeEach(async () => {
     await prisma.analysisWorkItem.deleteMany()
     await prisma.blockRelationCurrent.deleteMany()

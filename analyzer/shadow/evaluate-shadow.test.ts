@@ -25,7 +25,7 @@ const policy: DetectionPolicy = {
   ],
 }
 
-describe('evaluateShadow', () => {
+describe.skipIf(!process.env.DATABASE_URL)('evaluateShadow', () => {
   beforeEach(async () => {
     await prisma.detectorEvaluation.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()

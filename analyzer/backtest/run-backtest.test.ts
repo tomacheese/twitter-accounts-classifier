@@ -68,7 +68,7 @@ function buildPolicy(relativeThreshold: number): DetectionPolicy {
   }
 }
 
-describe('runBacktest', () => {
+describe.skipIf(!process.env.DATABASE_URL)('runBacktest', () => {
   beforeEach(async () => {
     await prisma.policyBacktestFinding.deleteMany()
     await prisma.policyBacktestRun.deleteMany()
