@@ -1,5 +1,7 @@
 import React, { Suspense } from 'react'
+import { redirect } from 'next/navigation'
 import { getPrismaClient } from '../lib/prisma'
+import { isNewUiSectionEnabled } from '../lib/feature-flags'
 import { getSystemStatus } from '../lib/queries/system-status'
 import { getAttentionRequiredItems } from '../lib/queries/attention-required'
 import { getLatestCrawlSummary } from '../lib/queries/latest-crawl-summary'
@@ -111,7 +113,16 @@ async function LabelOverviewSectionData(): Promise<React.JSX.Element> {
   }
 }
 
+/**
+ * `/overview` の legacy フォールバックからも呼ばれるが、その呼び出しはフラグ無効時に限られる
+ * ため、ここで redirect しても無限ループにはならない。
+ * @returns 描画された旧ダッシュボード画面
+ */
 export default function DashboardPage(): React.JSX.Element {
+  if (isNewUiSectionEnabled('overview')) {
+    redirect('/overview')
+  }
+
   return (
     <div className="flex flex-col gap-8">
       <h1 className="sr-only">Dashboard</h1>

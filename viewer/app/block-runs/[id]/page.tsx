@@ -1,11 +1,30 @@
-import { notFound } from 'next/navigation'
+import { notFound, permanentRedirect } from 'next/navigation'
 import Link from 'next/link'
 import { formatDateTime } from '@/lib/format-date'
 import { formatDuration } from '@/lib/format-duration'
 import { getPrismaClient } from '@/lib/prisma'
 import { getBlockRunDetail } from '@/lib/queries/block-runs'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
+import { resolveOperationCycleRedirectTarget } from '@/lib/legacy-redirect'
 import { ErrorFallback } from '../../components/error-fallback'
 import { StatusBadge } from '../../components/status-badge'
+
+/**
+ * 旧 `/block-runs/[id]` から対応する `/operations/block/[cycleId]` へ 308 リダイレクトする。
+ * 対応する OperationCycle がまだ存在しない場合は Operations 一覧の Block filter へ逃がす。
+ * @param id - 旧 BlockRun の ID (OperationCycle.sourceId と一致する)
+ */
+async function redirectToOperationsIfEnabled(id: string): Promise<void> {
+  if (!isNewUiSectionEnabled('operations')) return
+
+  const target = await resolveOperationCycleRedirectTarget(getPrismaClient(), {
+    sourceType: 'block_run',
+    sourceId: id,
+    detailPathPrefix: '/operations/block',
+    fallbackHref: '/operations?kind=block',
+  })
+  permanentRedirect(target)
+}
 
 // このページは常に最新データを読むため、
 // 静的プリレンダリングの対象から外している。
@@ -33,6 +52,8 @@ export default async function BlockRunDetailPage({
   params: Promise<{ id: string }>
 }): Promise<React.ReactElement> {
   const { id } = await params
+  await redirectToOperationsIfEnabled(id)
+
   let run: Awaited<ReturnType<typeof getBlockRunDetail>>
   try {
     run = await getBlockRunDetail(getPrismaClient(), id)

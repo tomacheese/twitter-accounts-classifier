@@ -1,6 +1,8 @@
+import { permanentRedirect } from 'next/navigation'
 import { formatDateTime } from '@/lib/format-date'
 import { getPrismaClient } from '@/lib/prisma'
 import { getAllWeeklyRuns } from '@/lib/queries/weekly-runs'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { ErrorFallback } from '../components/error-fallback'
 import { StatusBadge } from '../components/status-badge'
 
@@ -13,6 +15,10 @@ export const dynamic = 'force-dynamic'
  * @returns 週次分析実行履歴ページの描画結果
  */
 export default async function WeeklyRunsPage(): Promise<React.ReactElement> {
+  if (isNewUiSectionEnabled('operations')) {
+    permanentRedirect('/operations?kind=weekly_review')
+  }
+
   let runs: Awaited<ReturnType<typeof getAllWeeklyRuns>>
   try {
     runs = await getAllWeeklyRuns(getPrismaClient())

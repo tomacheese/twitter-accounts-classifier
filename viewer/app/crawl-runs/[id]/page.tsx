@@ -1,12 +1,31 @@
-import { notFound } from 'next/navigation'
+import { notFound, permanentRedirect } from 'next/navigation'
 import Link from 'next/link'
 import { formatDateTime } from '@/lib/format-date'
 import { isCurrentAccountStale } from '@/lib/crawl-run-progress'
 import { formatDuration } from '@/lib/format-duration'
 import { getPrismaClient } from '@/lib/prisma'
 import { getCrawlRunDetail } from '@/lib/queries/crawl-runs'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
+import { resolveOperationCycleRedirectTarget } from '@/lib/legacy-redirect'
 import { ErrorFallback } from '../../components/error-fallback'
 import { StatusBadge } from '../../components/status-badge'
+
+/**
+ * 旧 `/crawl-runs/[id]` から対応する `/operations/crawl/[cycleId]` へ 308 リダイレクトする。
+ * 対応する OperationCycle がまだ存在しない場合は Operations 一覧の Crawl filter へ逃がす。
+ * @param id - 旧 CrawlRun の ID (OperationCycle.sourceId と一致する)
+ */
+async function redirectToOperationsIfEnabled(id: string): Promise<void> {
+  if (!isNewUiSectionEnabled('operations')) return
+
+  const target = await resolveOperationCycleRedirectTarget(getPrismaClient(), {
+    sourceType: 'crawl_run',
+    sourceId: id,
+    detailPathPrefix: '/operations/crawl',
+    fallbackHref: '/operations?kind=crawl',
+  })
+  permanentRedirect(target)
+}
 
 // このページは処理中アカウントの経過時間などリクエスト時点の値を描画するため、
 // 静的プリレンダリングの対象から外している。指定しないと、
@@ -84,6 +103,8 @@ export default async function CrawlRunDetailPage({
   params: Promise<{ id: string }>
 }): Promise<React.ReactElement> {
   const { id } = await params
+  await redirectToOperationsIfEnabled(id)
+
   let run: Awaited<ReturnType<typeof getCrawlRunDetail>>
   try {
     run = await getCrawlRunDetail(getPrismaClient(), id)
