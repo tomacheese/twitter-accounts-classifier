@@ -13,5 +13,5 @@ jobs:
     name: Node CI
     uses: book000/templates/.github/workflows/reusable-nodejs-ci-pnpm.yml@master
     with:
-      directorys: "crawler, viewer, twitter-client, blocker"
+      directorys: "crawler, viewer, twitter-client, blocker, analyzer"
       lock-path: "pnpm-lock.yaml"

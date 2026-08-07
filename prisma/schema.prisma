@@ -22,6 +22,11 @@ generator blockerClient {
   output   = "../blocker/generated/prisma"
 }
 
+generator analyzerClient {
+  provider = "prisma-client-js"
+  output   = "../analyzer/generated/prisma"
+}
+
 model Account {
   id                             String                 @id
   screenName                     String
