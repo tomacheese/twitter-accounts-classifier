@@ -1,0 +1,170 @@
+import type { PrismaClient } from '../generated/prisma'
+import { evaluateLabelCountDrop } from '../findings/detectors/label-count-drop'
+import { evaluateReasonDistributionShift } from '../findings/detectors/reason-distribution-shift'
+import { computeFingerprint } from '../findings/fingerprint'
+import { computePolicyHash } from '../policy/policy-hash'
+import type { DetectionPolicy } from '../policy/schema'
+
+export interface RunBacktestInput {
+  targetFrom: Date
+  targetTo: Date
+  labelDefinitionIds: string[]
+  candidatePolicy: DetectionPolicy
+  baselinePolicy: DetectionPolicy
+}
+
+/**
+ * candidatePolicy と baselinePolicy それぞれで snapshot pair を評価し、
+ * exceeded 判定が食い違った場合だけ diff とみなす。
+ * @param current - 現在の snapshot 相当の入力
+ * @param baseline - 比較対象の snapshot 相当の入力
+ * @param policy - 評価対象の policy
+ * @param labelDefinitionId - 評価対象ラベル
+ * @returns type ごとの exceeded 判定 (rule が無効/未定義なら false)
+ */
+function evaluateAllRules(
+  current: {
+    trueCount: number
+    evaluatedCount: number
+    reasonDistribution: Record<string, number>
+  },
+  baseline: {
+    trueCount: number
+    evaluatedCount: number
+    reasonDistribution: Record<string, number>
+  },
+  policy: DetectionPolicy,
+): { type: string; exceeded: boolean }[] {
+  const results: { type: string; exceeded: boolean }[] = []
+
+  const labelCountDropRule = policy.rules.find(
+    (rule) => rule.type === 'label_count_drop' && rule.enabled,
+  )
+  if (labelCountDropRule) {
+    const result = evaluateLabelCountDrop(
+      { current, baseline },
+      {
+        relativeThreshold: labelCountDropRule.relativeThreshold ?? 0,
+        minimumSampleSize: labelCountDropRule.minimumSampleSize ?? 0,
+      },
+    )
+    results.push({ type: 'label_count_drop', exceeded: result.exceeded })
+  }
+
+  const reasonShiftRule = policy.rules.find(
+    (rule) => rule.type === 'reason_distribution_shift' && rule.enabled,
+  )
+  if (reasonShiftRule) {
+    const result = evaluateReasonDistributionShift(
+      { current: current.reasonDistribution, baseline: baseline.reasonDistribution },
+      {
+        relativeThreshold: reasonShiftRule.relativeThreshold ?? 0,
+        minimumSampleSize: reasonShiftRule.minimumSampleSize ?? 0,
+      },
+    )
+    results.push({ type: 'reason_distribution_shift', exceeded: result.exceeded })
+  }
+
+  return results
+}
+
+/**
+ * 過去 snapshot を replay して candidatePolicy と baselinePolicy の判定差分を
+ * PolicyBacktestRun/PolicyBacktestFinding へ記録する。ReviewFinding・
+ * ReviewFindingOccurrence・ReadModelPointer への書き込みを一切行わないことを、
+ * それらを操作する関数を一切 import しないことでコード上も保証する。
+ * @param prisma - Prisma クライアント
+ * @param input - 対象期間・対象ラベルと比較する 2 つの policy
+ * @returns 作成した PolicyBacktestRun の ID
+ */
+export async function runBacktest(prisma: PrismaClient, input: RunBacktestInput): Promise<string> {
+  const candidatePolicyHash = computePolicyHash(input.candidatePolicy)
+  const baselinePolicyHash = computePolicyHash(input.baselinePolicy)
+
+  const run = await prisma.policyBacktestRun.create({
+    data: {
+      candidatePolicyHash,
+      baselinePolicyHash,
+      targetFrom: input.targetFrom,
+      targetTo: input.targetTo,
+      status: 'running',
+    },
+  })
+
+  let findingCount = 0
+  for (const labelDefinitionId of input.labelDefinitionIds) {
+    const snapshots = await prisma.labelMetricSnapshot.findMany({
+      where: {
+        labelDefinitionId,
+        observedAt: { gte: input.targetFrom, lte: input.targetTo },
+      },
+      orderBy: [{ observedAt: 'asc' }],
+    })
+
+    for (let index = 1; index < snapshots.length; index++) {
+      const current = snapshots.at(index)
+      const baseline = snapshots.at(index - 1)
+      if (!current || !baseline) continue
+
+      const currentInput = {
+        trueCount: current.trueCount,
+        evaluatedCount: current.evaluatedCount,
+        reasonDistribution: current.reasonDistribution as unknown as Record<string, number>,
+      }
+      const baselineInput = {
+        trueCount: baseline.trueCount,
+        evaluatedCount: baseline.evaluatedCount,
+        reasonDistribution: baseline.reasonDistribution as unknown as Record<string, number>,
+      }
+
+      const candidateResults = evaluateAllRules(currentInput, baselineInput, input.candidatePolicy)
+      const baselineResults = evaluateAllRules(currentInput, baselineInput, input.baselinePolicy)
+
+      for (const candidateResult of candidateResults) {
+        const baselineResult = baselineResults.find(
+          (result) => result.type === candidateResult.type,
+        )
+        if (candidateResult.exceeded && !(baselineResult?.exceeded ?? false)) {
+          await prisma.policyBacktestFinding.create({
+            data: {
+              runId: run.id,
+              fingerprint: computeFingerprint(candidateResult.type, { label: labelDefinitionId }),
+              severity:
+                input.candidatePolicy.rules.find((rule) => rule.type === candidateResult.type)
+                  ?.severity ?? 'low',
+              diffKind: 'new_in_candidate',
+              detail: { snapshotId: current.id },
+            },
+          })
+          findingCount++
+        }
+      }
+      for (const baselineResult of baselineResults) {
+        const candidateResult = candidateResults.find(
+          (result) => result.type === baselineResult.type,
+        )
+        if (baselineResult.exceeded && !(candidateResult?.exceeded ?? false)) {
+          await prisma.policyBacktestFinding.create({
+            data: {
+              runId: run.id,
+              fingerprint: computeFingerprint(baselineResult.type, { label: labelDefinitionId }),
+              severity:
+                input.baselinePolicy.rules.find((rule) => rule.type === baselineResult.type)
+                  ?.severity ?? 'low',
+              diffKind: 'missing_in_candidate',
+              detail: { snapshotId: current.id },
+            },
+          })
+          findingCount++
+        }
+      }
+    }
+  }
+
+  await prisma.policyBacktestRun.update({
+    where: { id: run.id },
+    data: { status: 'completed', finishedAt: new Date(), summary: { findingCount } },
+  })
+
+  return run.id
+}
