@@ -1,7 +1,14 @@
 import type { DetectionPolicyRule } from '../policy/schema'
 
+/**
+ * 'new_episode' は呼び出し側 (Task 14) が「新しい episodeNumber の ReviewFinding を
+ * 作る」トリガーとして扱う一時的な遷移結果であり、次回以降の永続状態としては
+ * 'active' に相当する。
+ */
+export type FindingLifecycleStatus = 'none' | 'active' | 'resolved' | 'recurring' | 'new_episode'
+
 export interface FindingLifecycleState {
-  status: 'none' | 'active' | 'resolved' | 'recurring'
+  status: FindingLifecycleStatus
   consecutiveExceed: number
   consecutiveNormal: number
   resolvedAt?: Date
@@ -81,7 +88,7 @@ export function applyLifecycleTransition(
         status: withinWindow ? 'recurring' : 'new_episode',
         consecutiveExceed,
         consecutiveNormal: 0,
-      } as FindingLifecycleState
+      }
     }
 
     return { status: 'active', consecutiveExceed, consecutiveNormal: 0 }
