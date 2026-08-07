@@ -1,7 +1,7 @@
 import React from 'react'
-import { getPrismaClient } from '../../lib/prisma'
-import { getOverviewSnapshot } from '../../lib/queries/overview'
-import { isNewUiSectionEnabled } from '../../lib/feature-flags'
+import { getPrismaClient } from '@/lib/prisma'
+import { getOverviewSnapshot } from '@/lib/queries/overview'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import DashboardPage from '../page'
 
 export const dynamic = 'force-dynamic'
