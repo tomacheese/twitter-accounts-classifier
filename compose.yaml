@@ -147,3 +147,23 @@ services:
       # (/app/data ではない)。
       - ./data:/app/blocker/data
     logging: *default-logging
+
+  analyzer:
+    build:
+      context: .
+      dockerfile: analyzer/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      # crawler/blocker/viewer と異なり、analyzer は正本テーブルへ SELECT のみ・
+      # 分析/運用テーブルへ書き込み可能な allowlist 権限の analyzer ロールで接続する
+      # (scripts/db/create-analyzer-role.sql 参照)。
+      DATABASE_URL: postgresql://analyzer:${ANALYZER_DB_PASSWORD:?ANALYZER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
+      ANALYZER_WORKER_CONCURRENCY: ${ANALYZER_WORKER_CONCURRENCY:-1}
+      ANALYZER_POLL_INTERVAL_SECONDS: ${ANALYZER_POLL_INTERVAL_SECONDS:-10}
+      GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
+    logging: *default-logging

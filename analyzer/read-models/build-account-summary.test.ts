@@ -11,6 +11,8 @@ describe('buildAccountSummary', () => {
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
     await prisma.accountLabelLatest.deleteMany()
+    await prisma.blockStateChange.deleteMany()
+    await prisma.block.deleteMany()
     await prisma.account.deleteMany()
   })
 

@@ -7,7 +7,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp -r generated dist/generated",
+    "build": "tsc -p tsconfig.json && cp -r generated dist/generated && cp -r policy dist/policy",
     "start": "node dist/index.js",
     "lint": "eslint .",
     "format": "prettier --check .",
