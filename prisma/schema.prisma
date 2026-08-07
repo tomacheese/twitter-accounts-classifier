@@ -105,6 +105,7 @@ model LabelDefinition {
   createdAt           DateTime             @default(now())
   accountLabels       AccountLabel[]
   accountLabelsLatest AccountLabelLatest[]
+  labelAggregate      LabelAggregate?
   blockActions        BlockAction[]
 }
 
@@ -140,7 +141,7 @@ model AccountLabel {
 // ダッシュボードやアカウント一覧のクエリが全件スキャンになり本番の応答時間を守れない。
 // そのため (accountId, labelDefinitionId) ごとの最新値のみを保持する専用テーブルとして用意し、
 // recordCrawlAccountLabel 等が AccountLabel への履歴 INSERT と同時に upsert する。
-// crawler/db/label-repository.ts・viewer/lib/queries/dashboard.ts・
+// crawler/db/label-repository.ts・crawler/db/label-aggregate-repository.ts・
 // viewer/lib/queries/accounts.ts・対応するマイグレーションのコメントは、
 // この経緯の説明をここへの参照のみとし、重複させない。
 model AccountLabelLatest {
@@ -162,6 +163,32 @@ model AccountLabelLatest {
   // value = true で絞り込む dashboard.ts/accounts.ts の各クエリを支えるインデックス。
   @@index([labelDefinitionId, value])
   @@index([value, accountId])
+}
+
+// AccountLabelLatest から都度集計すると全件 Seq Scan になり本番の応答時間を守れないため、
+// crawler がラベリング完了時に計算した結果をここへ書き込み、viewer はここだけを読む。
+model LabelAggregate {
+  labelDefinitionId String          @id
+  labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
+  labelKey          String
+  labelDescription  String
+  trueCount         Int
+  totalCount        Int
+  updatedAt         DateTime
+
+  @@index([labelKey])
+}
+
+// 集計処理自体の成否と全体件数を LabelAggregate とは別テーブルに分けているのは、
+// 集計失敗時に LabelAggregate 側を上書きせず前回成功時点の値を残したまま、
+// 「前回成功時点の値を表示中かどうか」だけをこのテーブルで viewer から判別できるようにするため。
+model LabelAggregateStatus {
+  id                String    @id
+  labeledAccounts   Int
+  lastSuccessAt     DateTime?
+  lastAttemptAt     DateTime
+  lastAttemptStatus String
+  lastErrorMessage  String?
 }
 
 model WeeklyAnalysisRun {

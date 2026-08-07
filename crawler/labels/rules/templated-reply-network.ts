@@ -10,7 +10,7 @@ export const templatedReplyNetworkRule: LabelRule = {
   key: 'templated_reply_network',
   description:
     '投稿したリプライの文面(URL/メンションを除去した上で比較)が、他の複数の別アカウントと一字一句同一である。定型文を大量生成するリプライボットネットワークの特徴',
-  version: '1.0.0',
+  version: '1.1.0',
   evaluate(bundle) {
     const networkSize = bundle.templatedReplyNetworkSize ?? 0
     const value = networkSize >= MIN_NETWORK_SIZE

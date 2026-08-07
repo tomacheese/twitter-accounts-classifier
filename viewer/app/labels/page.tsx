@@ -1,6 +1,8 @@
+import React from 'react'
 import Link from 'next/link'
+import { formatDateTime } from '@/lib/format-date'
 import { getPrismaClient } from '@/lib/prisma'
-import { getLabelDistribution, type LabelDistributionEntry } from '@/lib/queries/dashboard'
+import { getLabelAggregateSnapshot } from '@/lib/queries/dashboard'
 import { listLabelSummaries } from '@/lib/queries/label-summary'
 import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { ErrorFallback } from '../components/error-fallback'
@@ -14,9 +16,9 @@ export const dynamic = 'force-dynamic'
  * @returns ラベル一覧ページの描画結果
  */
 async function LegacyLabelsPage(): Promise<React.ReactElement> {
-  let entries: LabelDistributionEntry[]
+  let snapshot: Awaited<ReturnType<typeof getLabelAggregateSnapshot>>
   try {
-    entries = await getLabelDistribution(getPrismaClient())
+    snapshot = await getLabelAggregateSnapshot(getPrismaClient())
   } catch (error) {
     // error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため、
     // 詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。
@@ -24,9 +26,26 @@ async function LegacyLabelsPage(): Promise<React.ReactElement> {
     return <ErrorFallback message="Failed to load label definitions." />
   }
 
+  const { distribution: entries, lastSuccessAt, lastAttemptStatus } = snapshot
+
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold">Labels</h1>
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold">Labels</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Last aggregated: {lastSuccessAt ? formatDateTime(lastSuccessAt) : '—'}
+        </p>
+      </div>
+      {lastAttemptStatus === 'failed' && (
+        <div
+          role="alert"
+          className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
+        >
+          {lastSuccessAt
+            ? '最新の集計に失敗しました。表示中の値は前回成功時点のものです。'
+            : '最新の集計に失敗しました。まだ一度も集計が成功していないため、ラベル分布は表示できません。'}
+        </div>
+      )}
       {entries.length === 0 ? (
         <p className="text-sm text-gray-500 dark:text-gray-400">No labels are registered yet.</p>
       ) : (

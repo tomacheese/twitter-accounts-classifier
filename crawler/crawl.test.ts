@@ -429,8 +429,16 @@ describe('runCrawlCycle', () => {
 
     const deps = makeDeps({
       loadReplyCorpus: vi.fn().mockResolvedValue([
-        { accountId: 'other1', fullText: 'this exact templated reply text appears everywhere' },
-        { accountId: 'other2', fullText: 'this exact templated reply text appears everywhere' },
+        {
+          accountId: 'other1',
+          fullText: 'this exact templated reply text appears everywhere',
+          inReplyToTweetId: 'victim-tweet-1',
+        },
+        {
+          accountId: 'other2',
+          fullText: 'this exact templated reply text appears everywhere',
+          inReplyToTweetId: 'victim-tweet-2',
+        },
       ]),
       createOpenApiClient: vi.fn().mockResolvedValue({
         client: {
