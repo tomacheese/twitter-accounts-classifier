@@ -15,6 +15,9 @@ cd /app/crawler
 echo "[entrypoint] applying database migrations"
 pnpm exec prisma migrate deploy --schema=../prisma/schema.prisma
 
+echo "[entrypoint] syncing and verifying role grants"
+(cd /app && bash scripts/db/run-migration-and-sync-grants.sh)
+
 echo "[entrypoint] seeding label definitions"
 pnpm exec prisma db seed --schema=../prisma/schema.prisma
 

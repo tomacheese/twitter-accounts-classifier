@@ -53,7 +53,11 @@ services:
     environment:
       DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
     entrypoint:
-      ["sh", "-c", "cd /app/crawler && pnpm exec prisma migrate deploy --schema=../prisma/schema.prisma"]
+      [
+        "sh",
+        "-c",
+        "cd /app/crawler && pnpm exec prisma migrate deploy --schema=../prisma/schema.prisma && cd /app && bash scripts/db/run-migration-and-sync-grants.sh",
+      ]
     logging: *default-logging
 
   crawler:

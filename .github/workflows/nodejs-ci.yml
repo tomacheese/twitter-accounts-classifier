@@ -15,3 +15,53 @@ jobs:
     with:
       directorys: "crawler, viewer, twitter-client, blocker, analyzer"
       lock-path: "pnpm-lock.yaml"
+
+  db-grants-verification:
+    name: DB grants verification
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: crawler
+          POSTGRES_PASSWORD: crawler
+          POSTGRES_DB: twitter_accounts_classifier
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crawler -d twitter_accounts_classifier"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://crawler:crawler@localhost:5432/twitter_accounts_classifier
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a15d269cd4658e1107c09f1fabf4cbd7bd1f308a # v4.4.0
+      - name: Setup Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: crawler/.node-version
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply database migrations
+        run: pnpm --filter crawler run db:migrate
+      # ロール作成用SQLは実運用でパスワードを手動で置き換える前提のプレースホルダーを含み、
+      # \ir で同じディレクトリの sync-*.sql を相対 include するため、
+      # 置換後もそのディレクトリ内に置いた状態で実行する必要がある。
+      - name: Create roles with a CI-only test password
+        run: |
+          for role in viewer analyzer weekly-review; do
+            sed "s/CHANGE_ME_[A-Z_]*_PASSWORD/ci-test-password/" \
+              "create-${role}-role.sql" > "create-${role}-role.ci.sql"
+            psql "$DATABASE_URL" -f "create-${role}-role.ci.sql"
+            rm "create-${role}-role.ci.sql"
+          done
+        working-directory: scripts/db
+      - name: Sync and verify grants
+        run: bash scripts/db/run-migration-and-sync-grants.sh
