@@ -92,9 +92,16 @@ describe('startOrResumeCrawlRun', () => {
     })
     const create = vi.fn().mockResolvedValue({ id: 'new-run' })
     const update = vi.fn().mockResolvedValue({})
+    const upsert = vi.fn().mockResolvedValue({})
     const deleteCheckpoints = vi.fn().mockReturnValue({})
     const deleteLabelClaims = vi.fn().mockReturnValue({})
-    const transaction = vi.fn().mockResolvedValue([])
+    const tx = {
+      crawlRun: { update },
+      analysisWorkItem: { upsert },
+    }
+    const transaction = vi.fn((arg: unknown) =>
+      typeof arg === 'function' ? (arg as (transactionClient: unknown) => Promise<unknown>)(tx) : arg,
+    )
     const prisma = {
       crawlRun: { findFirst, create, update },
       crawlAccountCheckpoint: { deleteMany: deleteCheckpoints },
@@ -164,7 +171,11 @@ describe('touchCrawlRunHeartbeat', () => {
 describe('finishCrawlRun', () => {
   it('updates finishedAt, status, and clears the current-account fields', async () => {
     const update = vi.fn().mockResolvedValue({})
-    const prisma = { crawlRun: { update } } as unknown as PrismaClient
+    const upsert = vi.fn().mockResolvedValue({})
+    const tx = { crawlRun: { update }, analysisWorkItem: { upsert } }
+    const prisma = {
+      $transaction: vi.fn((fn: (tx: unknown) => Promise<void>) => fn(tx)),
+    } as unknown as PrismaClient
     const finishedAt = new Date('2026-07-28T01:00:00Z')
 
     await finishCrawlRun(prisma, 'run1', finishedAt, 'partial')
@@ -178,6 +189,29 @@ describe('finishCrawlRun', () => {
         currentAccountStartedAt: null,
       },
     })
+  })
+
+  it('enqueues a label_metrics AnalysisWorkItem for the finished run', async () => {
+    const update = vi.fn().mockResolvedValue({})
+    const upsert = vi.fn().mockResolvedValue({})
+    const tx = { crawlRun: { update }, analysisWorkItem: { upsert } }
+    const prisma = {
+      $transaction: vi.fn((fn: (tx: unknown) => Promise<void>) => fn(tx)),
+    } as unknown as PrismaClient
+
+    await finishCrawlRun(prisma, 'run1', new Date('2026-07-28T01:00:00Z'), 'failed')
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          kind_triggerType_triggerId: {
+            kind: 'label_metrics',
+            triggerType: 'crawl_run',
+            triggerId: 'run1',
+          },
+        },
+      }),
+    )
   })
 })
 

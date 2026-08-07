@@ -129,8 +129,10 @@ describe('completeWeeklyAnalysisRun', () => {
   it('reports alreadyTerminal when the row is no longer running', async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 })
     const findUnique = vi.fn().mockResolvedValue(toRow({ status: 'success' }))
+    const upsert = vi.fn().mockResolvedValue({})
+    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, analysisWorkItem: { upsert } }
     const prisma = {
-      weeklyAnalysisRun: { updateMany, findUnique },
+      $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
     } as unknown as PrismaClient
 
     const result = await completeWeeklyAnalysisRun(
@@ -148,13 +150,16 @@ describe('completeWeeklyAnalysisRun', () => {
 
     expect(result.ok).toBe(false)
     expect(result.alreadyTerminal).toBe(true)
+    expect(upsert).not.toHaveBeenCalled()
   })
 
   it('does not overwrite pullRequestUrl/sampledAccountIds/findings when the caller omits them', async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 })
     const findUnique = vi.fn().mockResolvedValue(toRow({ status: 'success' }))
+    const upsert = vi.fn().mockResolvedValue({})
+    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, analysisWorkItem: { upsert } }
     const prisma = {
-      weeklyAnalysisRun: { updateMany, findUnique },
+      $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
     } as unknown as PrismaClient
 
     await completeWeeklyAnalysisRun(prisma, 'run1', new Date('2026-08-05T01:00:00Z'), {
@@ -171,6 +176,30 @@ describe('completeWeeklyAnalysisRun', () => {
         pullRequestNumber: 42,
       },
     })
+  })
+
+  it('enqueues a weekly_review_ingest AnalysisWorkItem when the run transitions to success', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const findUnique = vi.fn().mockResolvedValue(toRow({ status: 'success' }))
+    const upsert = vi.fn().mockResolvedValue({})
+    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, analysisWorkItem: { upsert } }
+    const prisma = {
+      $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
+    } as unknown as PrismaClient
+
+    await completeWeeklyAnalysisRun(prisma, 'run1', new Date('2026-08-05T01:00:00Z'), {})
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          kind_triggerType_triggerId: {
+            kind: 'weekly_review_ingest',
+            triggerType: 'weekly_analysis_run',
+            triggerId: 'run1',
+          },
+        },
+      }),
+    )
   })
 })
 

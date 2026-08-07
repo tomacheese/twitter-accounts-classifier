@@ -1,5 +1,6 @@
 import { Logger } from '@book000/node-utils'
 import type { Prisma, PrismaClient } from '../generated/prisma'
+import { enqueueWorkItem } from './analysis-work-item-repository'
 
 const logger = Logger.configure('crawl-run-repository')
 
@@ -126,9 +127,18 @@ export async function finishCrawlRun(
   finishedAt: Date,
   status: string,
 ): Promise<void> {
-  await prisma.crawlRun.update({
-    where: { id },
-    data: { finishedAt, status, currentUsername: null, currentAccountStartedAt: null },
+  await prisma.$transaction(async (tx) => {
+    await tx.crawlRun.update({
+      where: { id },
+      data: { finishedAt, status, currentUsername: null, currentAccountStartedAt: null },
+    })
+    // failed で終わった run でも、途中まで取得できたデータの指標更新には価値があるため
+    // 常に enqueue する。完全性の記録は label_metrics 側の責務とする。
+    await enqueueWorkItem(tx, {
+      kind: 'label_metrics',
+      triggerType: 'crawl_run',
+      triggerId: id,
+    })
   })
 }
 

@@ -1,5 +1,6 @@
 import { Logger } from '@book000/node-utils'
 import type { PrismaClient } from '../generated/prisma'
+import { enqueueWorkItem } from './analysis-work-item-repository'
 
 const logger = Logger.configure('block-run-repository')
 
@@ -50,7 +51,14 @@ export async function finishBlockRun(
   finishedAt: Date,
   status: string,
 ): Promise<void> {
-  await prisma.blockRun.update({ where: { id }, data: { finishedAt, status } })
+  await prisma.$transaction(async (tx) => {
+    await tx.blockRun.update({ where: { id }, data: { finishedAt, status } })
+    await enqueueWorkItem(tx, {
+      kind: 'block_reconciliation',
+      triggerType: 'block_run',
+      triggerId: id,
+    })
+  })
 }
 
 /**
