@@ -51,6 +51,7 @@ make_case_repo "$STALE_CASE"
 STALE_SHIMS="$STALE_CASE/home/.local/share/mise/shims"
 export TIMEOUT_MARKER="$STALE_CASE/timeout-called"
 export TMUX_COUNT="$STALE_CASE/tmux-count"
+export TMUX_ARGS="$STALE_CASE/tmux-args"
 cat > "$STALE_SHIMS/claude" <<'SCRIPT'
 #!/bin/sh
 if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then
@@ -86,6 +87,9 @@ exit 0
 SCRIPT
 cat > "$STALE_SHIMS/tmux" <<'SCRIPT'
 #!/bin/sh
+if [ "${1:-}" = new-session ]; then
+  printf '%s\n' "$*" > "$TMUX_ARGS"
+fi
 if [ "${1:-}" = has-session ]; then
   count=0
   [ -f "$TMUX_COUNT" ] && count="$(cat "$TMUX_COUNT")"
@@ -106,5 +110,7 @@ set -e
 [ -e "$TIMEOUT_MARKER" ] || fail 'stale WeeklyAnalysisRun was not transitioned to timeout'
 grep -q 'exceeded staleAfterAt=' "$STALE_CASE/repo/logs/weekly-analyze.log" || \
   fail 'stale timeout was not recorded in the supervisor log'
+grep -Fq -- "-e PATH=$STALE_SHIMS:" "$TMUX_ARGS" || \
+  fail 'tmux session did not receive the cron-repaired PATH explicitly'
 
 echo '[weekly-analyze-supervisor.test] ok'
