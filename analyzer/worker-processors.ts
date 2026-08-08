@@ -402,7 +402,14 @@ export async function processReadModelRefresh(
     modelKey: 'label_summary',
     schemaVersion: 1,
     sourceWatermarkAt,
-    build: (generationId) => buildLabelSummary(prisma, { generationId, sourceWatermarkAt }),
+    // Task 13 で processLabelAggregateRefresh からの呼び出しへ差し替えるまでの
+    // 暫定値。この経路は既に旧 snapshot 生成が壊れているため実行時には到達しない。
+    build: (generationId) =>
+      buildLabelSummary(prisma, {
+        generationId,
+        triggerWorkItemId: crawlRun.id,
+        sourceWatermarkAt,
+      }),
   })
   await publishAttentionAndOverview(prisma, sourceWatermarkAt)
 }
@@ -457,7 +464,14 @@ export async function processWeeklyReviewIngest(
     modelKey: 'label_summary',
     schemaVersion: 1,
     sourceWatermarkAt,
-    build: (generationId) => buildLabelSummary(prisma, { generationId, sourceWatermarkAt }),
+    // Task 13 で processLabelAggregateRefresh からの呼び出しへ差し替えるまでの
+    // 暫定値。この経路は既に旧 snapshot 生成が壊れているため実行時には到達しない。
+    build: (generationId) =>
+      buildLabelSummary(prisma, {
+        generationId,
+        triggerWorkItemId: weeklyAnalysisRun.id,
+        sourceWatermarkAt,
+      }),
   })
   await publishAttentionAndOverview(prisma, sourceWatermarkAt)
 }

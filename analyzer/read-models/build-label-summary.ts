@@ -24,9 +24,9 @@ function computePrevalence(evaluatedCount: number, trueCount: number): number {
   return evaluatedCount === 0 ? 0 : trueCount / evaluatedCount
 }
 
-// generateFindingsForCrawlCycle も completeness: 'complete' の snapshot だけを評価対象にしている。
-// ここで partial も許すと、Finding は更新されないまま LabelSummary と watermark だけが
-// 不完全な値で進み、qualityStatus が実際には検出できていない状態を normal と表示しうる。
+// 過去の比較対象としては、集計が完全に成立した snapshot だけを使う。
+// partial・unknown を比較対象に混ぜると、実際には検出できていない変化を
+// prevalence の増減として誤って見せてしまう。
 /** 集計に成功した snapshot だけを対象にする where 条件。 */
 const COMPLETED_SNAPSHOT_FILTER = { completeness: 'complete' } as const
 
@@ -36,6 +36,8 @@ const COMPLETED_SNAPSHOT_FILTER = { completeness: 'complete' } as const
 export interface BuildLabelSummaryInput {
   /** 書き込み先の generationId。 */
   generationId: string
+  /** 今回の LabelSummaryCurrent の元になる snapshot set の識別子。 */
+  triggerWorkItemId: string
   /** 集計の基準時刻。 */
   sourceWatermarkAt: Date
 }
@@ -68,16 +70,17 @@ async function findSnapshotAtOrBefore(
 }
 
 /**
- * LabelDefinition ごとに最新の LabelMetricSnapshot と、直近の日次・週次比較用 snapshot、
- * 対応する ReviewFinding の active/recurring 件数を集約して LabelSummaryCurrent を構築し、
- * Label 詳細のトレンドが参照する LabelMetricDaily も併せて更新する。
- * completeness が complete でない snapshot (unknown・partial) は Label 単位の
- * 集計が完全ではない記録であり、prevalence をそのまま採用すると誤った変化として
- * 伝播するため対象から除く。
+ * 今回の triggerWorkItemId の snapshot set (Task 10 の buildLabelAggregateSnapshotSet
+ * が構築した、全 LabelDefinition 分の一貫した snapshot 群) から LabelSummaryCurrent を
+ * 構築し、Label 詳細のトレンドが参照する LabelMetricDaily も併せて更新する。
+ * completeness が complete でない snapshot (unknown・partial) も、古い complete
+ * snapshot へフォールバックせずそのまま今回の値として採用する。fallback すると
+ * LabelSummary が実際には検出できていない状態を normal のまま見せてしまうため、
+ * 代わりに qualityStatus を unknown/watch にして品質の劣化を表示する。
  * Label ごとの読み取りは互いに独立しているため並行実行し、
  * 書き込みは 1 回の createMany にまとめて往復回数を Label 数に比例させない。
  * @param prisma - Prisma クライアント
- * @param input - 対象 generationId と検索基準時刻
+ * @param input - 対象 generationId・snapshot set の識別子・検索基準時刻
  * @returns 作成した行数
  */
 export async function buildLabelSummary(
@@ -86,80 +89,87 @@ export async function buildLabelSummary(
 ): Promise<{ rowCount: number }> {
   await rollUpLabelMetricDaily(prisma, { now: input.sourceWatermarkAt })
 
-  const labelDefinitions = await prisma.labelDefinition.findMany({ select: { id: true } })
+  const currentSnapshots = await prisma.labelMetricSnapshot.findMany({
+    where: { triggerWorkItemId: input.triggerWorkItemId },
+  })
+  if (currentSnapshots.length === 0) return { rowCount: 0 }
 
   const rows = await Promise.all(
-    labelDefinitions.map(async (labelDefinition) => {
-      const [recentSnapshots, activeFindings] = await Promise.all([
-        prisma.labelMetricSnapshot.findMany({
-          where: {
-            labelDefinitionId: labelDefinition.id,
-            observedAt: { lte: input.sourceWatermarkAt },
-            ...COMPLETED_SNAPSHOT_FILTER,
-          },
-          orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
-          take: 2,
-        }),
-        prisma.reviewFinding.findMany({
-          where: {
-            status: { in: ['active', 'recurring'] },
-            primaryScopeType: 'label',
-            primaryScopeId: labelDefinition.id,
-          },
-          select: { currentSeverity: true },
-        }),
-      ])
-
-      const latest = recentSnapshots.at(0)
-      if (!latest) return undefined
-
-      const previous = recentSnapshots.at(1)
-      const [dayAgo, weekAgo] = await Promise.all([
-        findSnapshotAtOrBefore(
-          prisma,
-          labelDefinition.id,
-          new Date(latest.observedAt.getTime() - DAY_MS),
-        ),
-        findSnapshotAtOrBefore(
-          prisma,
-          labelDefinition.id,
-          new Date(latest.observedAt.getTime() - 7 * DAY_MS),
-        ),
-      ])
+    currentSnapshots.map(async (current) => {
+      const activeFindings = await prisma.reviewFinding.findMany({
+        where: {
+          status: { in: ['active', 'recurring'] },
+          primaryScopeType: 'label',
+          primaryScopeId: current.labelDefinitionId,
+        },
+        select: { currentSeverity: true },
+      })
 
       let highestFindingSeverity: string | null = null
       for (const finding of activeFindings) {
         highestFindingSeverity = maxSeverity(highestFindingSeverity, finding.currentSeverity)
       }
 
-      const prevalence = computePrevalence(latest.evaluatedCount, latest.trueCount)
-      const deltaFrom = (snapshot: ComparableSnapshot | null | undefined): number | null =>
-        snapshot
-          ? prevalence - computePrevalence(snapshot.evaluatedCount, snapshot.trueCount)
-          : null
+      const prevalence = computePrevalence(current.evaluatedCount, current.trueCount)
+      const isComplete = current.completeness === 'complete'
+
+      let previousRunDelta: number | null = null
+      let dayDelta: number | null = null
+      let weekDelta: number | null = null
+      if (isComplete) {
+        const [previous, dayAgo, weekAgo] = await Promise.all([
+          findSnapshotAtOrBefore(
+            prisma,
+            current.labelDefinitionId,
+            new Date(current.observedAt.getTime() - 1),
+          ),
+          findSnapshotAtOrBefore(
+            prisma,
+            current.labelDefinitionId,
+            new Date(current.observedAt.getTime() - DAY_MS),
+          ),
+          findSnapshotAtOrBefore(
+            prisma,
+            current.labelDefinitionId,
+            new Date(current.observedAt.getTime() - 7 * DAY_MS),
+          ),
+        ])
+        const deltaFrom = (snapshot: ComparableSnapshot | null): number | null =>
+          snapshot
+            ? prevalence - computePrevalence(snapshot.evaluatedCount, snapshot.trueCount)
+            : null
+        previousRunDelta = deltaFrom(previous)
+        dayDelta = deltaFrom(dayAgo)
+        weekDelta = deltaFrom(weekAgo)
+      }
+
+      const qualityStatus =
+        current.completeness === 'unknown'
+          ? 'unknown'
+          : current.completeness === 'partial'
+            ? 'watch'
+            : activeFindings.length > 0
+              ? 'attention'
+              : 'normal'
 
       return {
         generationId: input.generationId,
-        labelDefinitionId: labelDefinition.id,
-        latestSnapshotId: latest.id,
-        evaluatedCount: latest.evaluatedCount,
-        trueCount: latest.trueCount,
+        labelDefinitionId: current.labelDefinitionId,
+        latestSnapshotId: current.id,
+        evaluatedCount: current.evaluatedCount,
+        trueCount: current.trueCount,
         prevalence,
-        previousRunDelta: deltaFrom(previous),
-        dayDelta: deltaFrom(dayAgo),
-        weekDelta: deltaFrom(weekAgo),
+        previousRunDelta,
+        dayDelta,
+        weekDelta,
         activeFindingCount: activeFindings.length,
         highestFindingSeverity,
-        qualityStatus: activeFindings.length > 0 ? 'attention' : 'normal',
+        qualityStatus,
         sourceWatermarkAt: input.sourceWatermarkAt,
       }
     }),
   )
 
-  const data = rows.filter((row) => row !== undefined)
-  if (data.length === 0) return { rowCount: 0 }
-
-  await prisma.labelSummaryCurrent.createMany({ data })
-
-  return { rowCount: data.length }
+  await prisma.labelSummaryCurrent.createMany({ data: rows })
+  return { rowCount: rows.length }
 }

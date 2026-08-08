@@ -19,9 +19,11 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
     })
+    const triggerWorkItemId = `work_item_${randomUUID()}`
 
     await prisma.labelMetricSnapshot.create({
       data: {
+        triggerWorkItemId,
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: new Date(),
@@ -49,7 +51,11 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     })
 
     const generationId = `generation-${randomUUID()}`
-    const result = await buildLabelSummary(prisma, { generationId, sourceWatermarkAt: new Date() })
+    const result = await buildLabelSummary(prisma, {
+      generationId,
+      triggerWorkItemId,
+      sourceWatermarkAt: new Date(),
+    })
 
     expect(result.rowCount).toBe(1)
 
@@ -63,90 +69,106 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     expect(rows[0]?.qualityStatus).toBe('attention')
   })
 
-  it('completeness が unknown の snapshot は最新値としても比較対象としても使わない', async () => {
+  it('builds from the current triggerWorkItemId snapshot set without falling back to an old complete snapshot', async () => {
     const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
+      data: { key: `test_summary_label_${randomUUID()}`, description: 'ラベル' },
     })
 
-    const now = Date.now()
-    await prisma.labelMetricSnapshot.createMany({
-      data: [
-        {
-          sourceCrawlRunId: `crawl-${randomUUID()}`,
-          labelDefinitionId: labelDefinition.id,
-          observedAt: new Date(now),
-          sourceWatermarkAt: new Date(now),
-          evaluatedCount: 0,
-          trueCount: 0,
-          prevalence: 0,
-          completeness: 'unknown',
-          policyHash: 'hash',
-          analyzerVersion: '1',
-        },
-        {
-          sourceCrawlRunId: `crawl-${randomUUID()}`,
-          labelDefinitionId: labelDefinition.id,
-          observedAt: new Date(now - 60 * 60 * 1000),
-          sourceWatermarkAt: new Date(now - 60 * 60 * 1000),
-          evaluatedCount: 100,
-          trueCount: 20,
-          prevalence: 0.2,
-          completeness: 'complete',
-          policyHash: 'hash',
-          analyzerVersion: '1',
-        },
-      ],
+    await prisma.labelMetricSnapshot.create({
+      data: {
+        triggerWorkItemId: 'work_item_old',
+        labelDefinitionId: labelDefinition.id,
+        observedAt: new Date('2026-01-01T00:00:00Z'),
+        sourceWatermarkAt: new Date('2026-01-01T00:00:00Z'),
+        evaluatedCount: 100,
+        trueCount: 10,
+        prevalence: 0.1,
+        completeness: 'complete',
+        policyHash: 'hash',
+        analyzerVersion: 'test',
+      },
+    })
+    await prisma.labelMetricSnapshot.create({
+      data: {
+        triggerWorkItemId: 'work_item_new',
+        labelDefinitionId: labelDefinition.id,
+        observedAt: new Date('2026-01-02T00:00:00Z'),
+        sourceWatermarkAt: new Date('2026-01-02T00:00:00Z'),
+        evaluatedCount: 100,
+        trueCount: 20,
+        prevalence: 0.2,
+        completeness: 'partial',
+        policyHash: 'hash',
+        analyzerVersion: 'test',
+      },
     })
 
-    const generationId = `generation-${randomUUID()}`
-    await buildLabelSummary(prisma, { generationId, sourceWatermarkAt: new Date() })
+    const result = await buildLabelSummary(prisma, {
+      generationId: 'gen_1',
+      triggerWorkItemId: 'work_item_new',
+      sourceWatermarkAt: new Date('2026-01-02T00:00:00Z'),
+    })
+    expect(result.rowCount).toBe(1)
 
-    const rows = await prisma.labelSummaryCurrent.findMany({ where: { generationId } })
-    expect(rows[0]?.prevalence).toBeCloseTo(0.2)
-    expect(rows[0]?.evaluatedCount).toBe(100)
+    const row = await prisma.labelSummaryCurrent.findUnique({
+      where: {
+        generationId_labelDefinitionId: {
+          generationId: 'gen_1',
+          labelDefinitionId: labelDefinition.id,
+        },
+      },
+    })
+    expect(row?.qualityStatus).toBe('watch')
+    expect(row?.previousRunDelta).toBeNull()
   })
 
-  it('completeness が partial の snapshot は最新値としても比較対象としても使わない', async () => {
+  it('completeness が unknown の今回 snapshot は unknown のまま採用し、過去の complete snapshot へフォールバックしない', async () => {
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
     })
 
-    const now = Date.now()
-    await prisma.labelMetricSnapshot.createMany({
-      data: [
-        {
-          sourceCrawlRunId: `crawl-${randomUUID()}`,
-          labelDefinitionId: labelDefinition.id,
-          observedAt: new Date(now),
-          sourceWatermarkAt: new Date(now),
-          evaluatedCount: 40,
-          trueCount: 30,
-          prevalence: 0.75,
-          completeness: 'partial',
-          policyHash: 'hash',
-          analyzerVersion: '1',
-        },
-        {
-          sourceCrawlRunId: `crawl-${randomUUID()}`,
-          labelDefinitionId: labelDefinition.id,
-          observedAt: new Date(now - 60 * 60 * 1000),
-          sourceWatermarkAt: new Date(now - 60 * 60 * 1000),
-          evaluatedCount: 100,
-          trueCount: 20,
-          prevalence: 0.2,
-          completeness: 'complete',
-          policyHash: 'hash',
-          analyzerVersion: '1',
-        },
-      ],
+    await prisma.labelMetricSnapshot.create({
+      data: {
+        triggerWorkItemId: 'work_item_unknown_old',
+        sourceCrawlRunId: `crawl-${randomUUID()}`,
+        labelDefinitionId: labelDefinition.id,
+        observedAt: new Date(Date.now() - 60 * 60 * 1000),
+        sourceWatermarkAt: new Date(Date.now() - 60 * 60 * 1000),
+        evaluatedCount: 100,
+        trueCount: 20,
+        prevalence: 0.2,
+        completeness: 'complete',
+        policyHash: 'hash',
+        analyzerVersion: '1',
+      },
+    })
+    await prisma.labelMetricSnapshot.create({
+      data: {
+        triggerWorkItemId: 'work_item_unknown_current',
+        sourceCrawlRunId: `crawl-${randomUUID()}`,
+        labelDefinitionId: labelDefinition.id,
+        observedAt: new Date(),
+        sourceWatermarkAt: new Date(),
+        evaluatedCount: 0,
+        trueCount: 0,
+        prevalence: 0,
+        completeness: 'unknown',
+        policyHash: 'hash',
+        analyzerVersion: '1',
+      },
     })
 
     const generationId = `generation-${randomUUID()}`
-    await buildLabelSummary(prisma, { generationId, sourceWatermarkAt: new Date() })
+    await buildLabelSummary(prisma, {
+      generationId,
+      triggerWorkItemId: 'work_item_unknown_current',
+      sourceWatermarkAt: new Date(),
+    })
 
     const rows = await prisma.labelSummaryCurrent.findMany({ where: { generationId } })
-    expect(rows[0]?.prevalence).toBeCloseTo(0.2)
-    expect(rows[0]?.evaluatedCount).toBe(100)
+    expect(rows[0]?.evaluatedCount).toBe(0)
+    expect(rows[0]?.qualityStatus).toBe('unknown')
+    expect(rows[0]?.previousRunDelta).toBeNull()
   })
 
   it('crawl 間隔に依らず 24 時間前・7 日前の snapshot と比較する', async () => {
@@ -158,8 +180,11 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     const day = 24 * 60 * 60 * 1000
     const offsets = [0, 1 * day, 8 * day]
     const prevalences = [0.4, 0.3, 0.1]
+    const currentTriggerWorkItemId = `work_item_current_${randomUUID()}`
     await prisma.labelMetricSnapshot.createMany({
       data: offsets.map((offset, index) => ({
+        triggerWorkItemId:
+          index === 0 ? currentTriggerWorkItemId : `work_item_past_${randomUUID()}`,
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: new Date(now - offset),
@@ -174,52 +199,62 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     })
 
     const generationId = `generation-${randomUUID()}`
-    await buildLabelSummary(prisma, { generationId, sourceWatermarkAt: new Date() })
+    await buildLabelSummary(prisma, {
+      generationId,
+      triggerWorkItemId: currentTriggerWorkItemId,
+      sourceWatermarkAt: new Date(),
+    })
 
     const rows = await prisma.labelSummaryCurrent.findMany({ where: { generationId } })
     expect(rows[0]?.dayDelta).toBeCloseTo(0.1)
     expect(rows[0]?.weekDelta).toBeCloseTo(0.3)
   })
 
-  it('sourceWatermarkAt より後の snapshot は最新値として使わない', async () => {
+  it('triggerWorkItemId で指定した snapshot だけを今回の値として使う', async () => {
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
     })
 
     const watermarkAt = new Date(Date.now() - 60 * 60 * 1000)
-    await prisma.labelMetricSnapshot.createMany({
-      data: [
-        {
-          sourceCrawlRunId: `crawl-${randomUUID()}`,
-          labelDefinitionId: labelDefinition.id,
-          observedAt: new Date(watermarkAt.getTime() - 60 * 60 * 1000),
-          sourceWatermarkAt: new Date(watermarkAt.getTime() - 60 * 60 * 1000),
-          evaluatedCount: 100,
-          trueCount: 20,
-          prevalence: 0.2,
-          completeness: 'complete',
-          policyHash: 'hash',
-          analyzerVersion: '1',
-        },
-        // backlog 処理中に後続 CrawlRun が先に完了した場合を想定した、
-        // watermark より後に観測された snapshot。
-        {
-          sourceCrawlRunId: `crawl-${randomUUID()}`,
-          labelDefinitionId: labelDefinition.id,
-          observedAt: new Date(watermarkAt.getTime() + 60 * 1000),
-          sourceWatermarkAt: new Date(watermarkAt.getTime() + 60 * 1000),
-          evaluatedCount: 100,
-          trueCount: 90,
-          prevalence: 0.9,
-          completeness: 'complete',
-          policyHash: 'hash',
-          analyzerVersion: '1',
-        },
-      ],
+    await prisma.labelMetricSnapshot.create({
+      data: {
+        triggerWorkItemId: 'work_item_designated',
+        sourceCrawlRunId: `crawl-${randomUUID()}`,
+        labelDefinitionId: labelDefinition.id,
+        observedAt: new Date(watermarkAt.getTime() - 60 * 60 * 1000),
+        sourceWatermarkAt: new Date(watermarkAt.getTime() - 60 * 60 * 1000),
+        evaluatedCount: 100,
+        trueCount: 20,
+        prevalence: 0.2,
+        completeness: 'complete',
+        policyHash: 'hash',
+        analyzerVersion: '1',
+      },
+    })
+    // 別の triggerWorkItemId による、より新しい snapshot。呼び出し元が指定しない限り
+    // 対象に含まれてはならない。
+    await prisma.labelMetricSnapshot.create({
+      data: {
+        triggerWorkItemId: 'work_item_other',
+        sourceCrawlRunId: `crawl-${randomUUID()}`,
+        labelDefinitionId: labelDefinition.id,
+        observedAt: new Date(watermarkAt.getTime() + 60 * 1000),
+        sourceWatermarkAt: new Date(watermarkAt.getTime() + 60 * 1000),
+        evaluatedCount: 100,
+        trueCount: 90,
+        prevalence: 0.9,
+        completeness: 'complete',
+        policyHash: 'hash',
+        analyzerVersion: '1',
+      },
     })
 
     const generationId = `generation-${randomUUID()}`
-    await buildLabelSummary(prisma, { generationId, sourceWatermarkAt: watermarkAt })
+    await buildLabelSummary(prisma, {
+      generationId,
+      triggerWorkItemId: 'work_item_designated',
+      sourceWatermarkAt: watermarkAt,
+    })
 
     const rows = await prisma.labelSummaryCurrent.findMany({ where: { generationId } })
     expect(rows[0]?.prevalence).toBeCloseTo(0.2)
@@ -227,13 +262,17 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     expect(rows[0]?.trueCount).toBe(20)
   })
 
-  it('snapshot が存在しない LabelDefinition は行を作らない', async () => {
+  it('triggerWorkItemId に該当する snapshot が存在しなければ行を作らない', async () => {
     await prisma.labelDefinition.create({
       data: { key: `unused_label_${randomUUID()}`, description: 'snapshot なしラベル' },
     })
 
     const generationId = `generation-${randomUUID()}`
-    const result = await buildLabelSummary(prisma, { generationId, sourceWatermarkAt: new Date() })
+    const result = await buildLabelSummary(prisma, {
+      generationId,
+      triggerWorkItemId: `work_item_nonexistent_${randomUUID()}`,
+      sourceWatermarkAt: new Date(),
+    })
 
     expect(result.rowCount).toBe(0)
   })
