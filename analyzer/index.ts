@@ -12,6 +12,8 @@ import {
   processBlockReconciliation,
   processRetentionSweep,
   processPostCompletionRefresh,
+  processAccountSummaryRefresh,
+  processAccountFindingRefresh,
   enqueueDailyRetentionSweep,
   refreshReadModelFreshnessFromPolicy,
   handleWorkItemSettled,
@@ -62,6 +64,8 @@ export async function main(): Promise<void> {
     processBlockReconciliation,
     processRetentionSweep,
     processPostCompletionRefresh,
+    processAccountSummaryRefresh,
+    processAccountFindingRefresh,
     onWorkItemSettled: handleWorkItemSettled,
   }
 

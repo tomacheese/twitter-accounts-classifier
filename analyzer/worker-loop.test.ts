@@ -70,6 +70,8 @@ function makeDeps() {
     processBlockReconciliation: vi.fn().mockResolvedValue(undefined),
     processRetentionSweep: vi.fn().mockResolvedValue(undefined),
     processPostCompletionRefresh: vi.fn().mockResolvedValue(undefined),
+    processAccountSummaryRefresh: vi.fn().mockResolvedValue(undefined),
+    processAccountFindingRefresh: vi.fn().mockResolvedValue(undefined),
     onWorkItemSettled: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -265,5 +267,35 @@ describe('runWorkerLoopOnce', () => {
     await runWorkerLoopOnce(prisma, deps)
 
     expect(enqueueWorkItem).not.toHaveBeenCalled()
+  })
+
+  it('kind が account_summary_refresh のとき、triggerType が account_classification_observation なら processAccountSummaryRefresh だけを呼ぶ', async () => {
+    claimNextWorkItem.mockResolvedValue(
+      makeWorkItem({
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+      }),
+    )
+    const deps = makeDeps()
+
+    await runWorkerLoopOnce(prisma, deps)
+
+    expect(deps.processAccountSummaryRefresh).toHaveBeenCalledTimes(1)
+    expect(deps.processAccountFindingRefresh).not.toHaveBeenCalled()
+  })
+
+  it('kind が account_summary_refresh のとき、triggerType が review_finding_occurrence なら processAccountFindingRefresh だけを呼ぶ', async () => {
+    claimNextWorkItem.mockResolvedValue(
+      makeWorkItem({
+        kind: 'account_summary_refresh',
+        triggerType: 'review_finding_occurrence',
+      }),
+    )
+    const deps = makeDeps()
+
+    await runWorkerLoopOnce(prisma, deps)
+
+    expect(deps.processAccountFindingRefresh).toHaveBeenCalledTimes(1)
+    expect(deps.processAccountSummaryRefresh).not.toHaveBeenCalled()
   })
 })
