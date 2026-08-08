@@ -7,7 +7,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp -r generated dist/generated && cp -r policy dist/policy",
+    "build": "rm -rf dist && tsc -p tsconfig.json && cp -r generated dist/generated && cp policy/detection-policy.json dist/policy/detection-policy.json",
     "start": "node dist/index.js",
     "lint": "eslint .",
     "format": "prettier --check .",

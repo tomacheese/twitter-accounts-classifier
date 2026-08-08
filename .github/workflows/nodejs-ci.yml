@@ -51,19 +51,20 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Apply database migrations
         run: pnpm --filter crawler run db:migrate
-      # ロール作成用 SQL は実運用でパスワードを手動で置き換える前提のプレースホルダーを含み、
-      # \ir で同じディレクトリの sync-*.sql を相対 include するため、
-      # 置換後もそのディレクトリ内に置いた状態で実行する必要がある。
-      - name: Create roles with a CI-only test password
+      - name: Verify service role bootstrap
+        run: bash scripts/db/role-bootstrap.test.sh
+      # weekly_review は外部開発機向けの任意ロールなので、専用の手動作成経路も別途検証する。
+      - name: Create weekly review role with a CI-only test password
         run: |
-          for role in viewer analyzer weekly-review; do
-            sed "s/CHANGE_ME_[A-Z_]*_PASSWORD/ci-test-password/" \
-              "create-${role}-role.sql" > "create-${role}-role.ci.sql"
-            psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "create-${role}-role.ci.sql"
-            rm "create-${role}-role.ci.sql"
-          done
+          sed "s/CHANGE_ME_WEEKLY_REVIEW_PASSWORD/ci-test-password/" \
+            create-weekly-review-role.sql > create-weekly-review-role.ci.sql
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f create-weekly-review-role.ci.sql
+          rm create-weekly-review-role.ci.sql
         working-directory: scripts/db
-      - name: Sync and verify grants
+      - name: Sync and verify all grants
+        env:
+          VIEWER_DB_PASSWORD: ci-viewer-password
+          ANALYZER_DB_PASSWORD: ci-analyzer-password
         run: bash scripts/db/run-migration-and-sync-grants.sh
 
   db-integration-tests:
