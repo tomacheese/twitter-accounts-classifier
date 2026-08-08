@@ -137,6 +137,29 @@ async function getCurrentGenerationId(prisma: PrismaClient): Promise<string | nu
 }
 
 /**
+ * この build の watermark が、現在公開済みの watermark より新しいかを調べる。
+ * publishGeneration の単調性判定は build 完了後の transaction 内で行われるため、
+ * ここで新しくないと分かった build が前世代の generation を previous として
+ * AccountLabelChange を append すると、より新しい Crawl が先に current になった後に
+ * 古い Crawl を処理した場合、逆方向の差分を audit 履歴へ永続化してしまう。
+ * publishGeneration 側の最終判定とは別の緩い事前チェックとして、append 自体を防ぐ。
+ * @param prisma - Prisma クライアント
+ * @param sourceWatermarkAt - この build の watermark
+ * @returns 現在の watermark 以上であれば true
+ */
+async function isAtOrAfterPublishedWatermark(
+  prisma: PrismaClient,
+  sourceWatermarkAt: Date,
+): Promise<boolean> {
+  const state = await prisma.readModelState.findUnique({
+    where: { modelKey: MODEL_KEY },
+    select: { sourceWatermarkAt: true },
+  })
+  if (!state?.sourceWatermarkAt) return true
+  return sourceWatermarkAt >= state.sourceWatermarkAt
+}
+
+/**
  * Account を大量件数でも一括ロードせずカーソルページングで処理するため、
  * ページサイズを固定値ではなくオプション化してテストで小さい値へ差し替え可能にする。
  * ラベル値は sourceWatermarkAt 時点のものを AccountLabel から復元するが、
@@ -164,6 +187,7 @@ export async function buildAccountSummary(
   )
 
   const previousGenerationId = await getCurrentGenerationId(prisma)
+  const canAppendLabelChanges = await isAtOrAfterPublishedWatermark(prisma, input.sourceWatermarkAt)
 
   for (;;) {
     const accounts = await prisma.account.findMany({
@@ -275,7 +299,10 @@ export async function buildAccountSummary(
           lastChangedAt: changedAt,
         })
 
-        if (changed || (previousGenerationId !== null && isNewLabel && label.value)) {
+        if (
+          canAppendLabelChanges &&
+          (changed || (previousGenerationId !== null && isNewLabel && label.value))
+        ) {
           changeRows.push({
             accountId: account.id,
             labelDefinitionId: label.labelDefinitionId,

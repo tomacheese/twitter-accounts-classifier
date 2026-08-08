@@ -7,9 +7,11 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {
-    // 前回実行分の pointer が残ったままだと、この後の previousGenerationId 判定が
-    // 「まだ何も公開されていない」前提のテストと食い違い、意図しない changeRow が生じる。
+    // 前回実行分の pointer/state が残ったままだと、previousGenerationId や
+    // canAppendLabelChanges の判定が「まだ何も公開されていない」前提のテストと食い違い、
+    // 意図しない changeRow の有無が生じる。
     await prisma.readModelPointer.deleteMany({ where: { modelKey: 'account_summary' } })
+    await prisma.readModelState.deleteMany({ where: { modelKey: 'account_summary' } })
     await prisma.accountLabelChange.deleteMany()
     await prisma.accountClassificationCurrent.deleteMany()
     await prisma.accountSummaryCurrent.deleteMany()
@@ -382,5 +384,50 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
       where: { accountId, sourceId: sourceCrawlRunId },
     })
     expect(changes).toHaveLength(1)
+  })
+
+  it('新しい Crawl が既に current になった後に古い Crawl を処理しても AccountLabelChange を残さない', async () => {
+    const accountId = await createAccount('grace-backlog')
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: `spam_${randomUUID().slice(0, 8)}`, description: 'テスト用ラベル' },
+    })
+    const oldWatermarkAt = new Date(Date.now() - 2 * 60 * 60 * 1000)
+    const newWatermarkAt = new Date(Date.now() - 60 * 60 * 1000)
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: true,
+      confidence: 0.9,
+      reason: 'matched',
+      labeledAt: oldWatermarkAt,
+    })
+
+    // 新しい Crawl B が先に current になった状態を模す。
+    const newGenerationId = `generation-${randomUUID()}`
+    await prisma.readModelPointer.upsert({
+      where: { modelKey: 'account_summary' },
+      create: { modelKey: 'account_summary', currentGenerationId: newGenerationId },
+      update: { currentGenerationId: newGenerationId },
+    })
+    await prisma.readModelState.upsert({
+      where: { modelKey: 'account_summary' },
+      create: {
+        modelKey: 'account_summary',
+        schemaVersion: 1,
+        status: 'healthy',
+        sourceWatermarkAt: newWatermarkAt,
+      },
+      update: { sourceWatermarkAt: newWatermarkAt },
+    })
+
+    // その後、より古い watermark を持つ Crawl A の backlog 処理が走る。
+    await buildAccountSummary(prisma, {
+      generationId: `generation-${randomUUID()}`,
+      sourceWatermarkAt: oldWatermarkAt,
+      sourceCrawlRunId: `crawl-run-${randomUUID()}`,
+    })
+
+    const changes = await prisma.accountLabelChange.findMany({ where: { accountId } })
+    expect(changes).toHaveLength(0)
   })
 })
