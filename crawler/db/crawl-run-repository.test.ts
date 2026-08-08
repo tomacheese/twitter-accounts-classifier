@@ -257,6 +257,7 @@ describe('recordCrawlAccountRun', () => {
       warnings: [],
       errorMessage: null,
       appVersion: 'v1.2.3',
+      classificationStatus: 'success',
     })
 
     expect(create).toHaveBeenCalledWith({
@@ -278,6 +279,7 @@ describe('recordCrawlAccountRun', () => {
         warnings: [],
         errorMessage: null,
         appVersion: 'v1.2.3',
+        classificationStatus: 'success',
       },
     })
   })

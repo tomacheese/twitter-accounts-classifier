@@ -55,19 +55,24 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
 
     expect(observationId).not.toBeNull()
     const observation = await prisma.accountClassificationObservation.findUnique({
-      where: { id: observationId! },
+      where: { id: observationId ?? '' },
     })
     expect(observation?.accountId).toBe(account.id)
     expect(observation?.labelCount).toBe(1)
     const latest = await prisma.accountLabelLatest.findUnique({
-      where: { accountId_labelDefinitionId: { accountId: account.id, labelDefinitionId: labelDefinition.id } },
+      where: {
+        accountId_labelDefinitionId: {
+          accountId: account.id,
+          labelDefinitionId: labelDefinition.id,
+        },
+      },
     })
     expect(latest?.value).toBe(true)
     const workItem = await prisma.analysisWorkItem.findFirst({
       where: {
         kind: 'account_summary_refresh',
         triggerType: 'account_classification_observation',
-        triggerId: observationId!,
+        triggerId: observationId ?? '',
       },
     })
     expect(workItem).not.toBeNull()

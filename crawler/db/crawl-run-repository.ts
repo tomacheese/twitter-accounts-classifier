@@ -68,6 +68,7 @@ export interface RecordCrawlAccountRunParams {
    * 行を最終確定させたビルドを表す。個々の warning は `CrawlWarning.appVersion` を見る。
    */
   appVersion: string
+  classificationStatus: string
 }
 
 export const CRAWL_ACCOUNT_CHECKPOINT_PHASES = [
