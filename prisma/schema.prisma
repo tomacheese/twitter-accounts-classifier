@@ -553,6 +553,10 @@ model ReviewFindingOccurrence {
   findingId          String
   finding            ReviewFinding @relation(fields: [findingId], references: [id])
   observedAt         DateTime      @default(now())
+  // observedAt は analyzer がこの Occurrence を書き込んだ処理時刻であり、lifecycle の
+  // クールダウン判定に使う。crawl/weekly review の元データ自体の時刻とは異なるため、
+  // AccountSummary 側で sourceWatermarkAt と比較する際はこちらを使う。
+  sourceObservedAt   DateTime
   stateTransition    String
   severity           String
   sourceType         String
@@ -574,6 +578,7 @@ model ReviewFindingOccurrence {
 
   @@unique([findingId, observationKey])
   @@index([findingId, observedAt(sort: Desc), id(sort: Desc)])
+  @@index([findingId, sourceObservedAt(sort: Desc), id(sort: Desc)])
 }
 
 model FindingEvidence {

@@ -294,6 +294,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
       data: {
         findingId: finding.id,
         observedAt: firstDetectedAt,
+        sourceObservedAt: firstDetectedAt,
         stateTransition: 'active',
         severity: 'high',
         sourceType: 'label_metric',
@@ -309,6 +310,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
       data: {
         findingId: finding.id,
         observedAt: new Date(watermarkAt.getTime() + 60 * 1000),
+        sourceObservedAt: new Date(watermarkAt.getTime() + 60 * 1000),
         stateTransition: 'resolved',
         severity: 'high',
         sourceType: 'label_metric',
@@ -316,6 +318,51 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
         policyHash: 'policy-1',
         detectorVersion: 'v1',
         observationKey: 'crawl-2',
+      },
+    })
+
+    const generationId = `generation-${randomUUID()}`
+    await buildAccountSummary(prisma, { generationId, sourceWatermarkAt: watermarkAt })
+
+    const summary = await prisma.accountSummaryCurrent.findFirstOrThrow({
+      where: { generationId, accountId },
+    })
+    expect(summary.activeFindingCount).toBe(1)
+    expect(summary.highestFindingSeverity).toBe('high')
+  })
+
+  it('processing が遅れ observedAt が sourceWatermarkAt を追い越しても、sourceObservedAt で判定し漏らさない', async () => {
+    const accountId = await createAccount('henry')
+    const watermarkAt = new Date(Date.now() - 60 * 60 * 1000)
+    // 同じ crawl から生成された Occurrence でも、analyzer の処理が遅れると
+    // observedAt (処理時刻) は sourceWatermarkAt (crawl の finishedAt) より後になりうる。
+    const delayedProcessingAt = new Date(watermarkAt.getTime() + 60 * 1000)
+
+    const finding = await prisma.reviewFinding.create({
+      data: {
+        fingerprint: `fingerprint-${randomUUID()}`,
+        identityVersion: 1,
+        type: 'label_count_drop',
+        primaryScopeType: 'account',
+        primaryScopeId: accountId,
+        status: 'active',
+        currentSeverity: 'high',
+        maximumSeverity: 'high',
+        firstDetectedAt: watermarkAt,
+      },
+    })
+    await prisma.reviewFindingOccurrence.create({
+      data: {
+        findingId: finding.id,
+        observedAt: delayedProcessingAt,
+        sourceObservedAt: watermarkAt,
+        stateTransition: 'active',
+        severity: 'high',
+        sourceType: 'crawl_run',
+        sourceId: 'crawl-1',
+        policyHash: 'policy-1',
+        detectorVersion: 'v1',
+        observationKey: 'crawl-1',
       },
     })
 

@@ -140,6 +140,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAttentionItems', () => {
     await prisma.reviewFindingOccurrence.create({
       data: {
         findingId: recurringFinding.id,
+        sourceObservedAt: new Date(),
         stateTransition: 'recurring',
         severity: 'critical',
         sourceType: 'label_metric',

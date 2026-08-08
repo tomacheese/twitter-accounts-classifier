@@ -63,6 +63,12 @@ export interface IngestWeeklyReviewFindingsInput {
   structuredOutput: StructuredOutput
   /** 適用する検出ポリシー。 */
   policy: DetectionPolicy
+  /**
+   * この観測の元データ自体の時刻 (通常は対象 WeeklyAnalysisRun の finishedAt)。
+   * 省略時は呼び出し時点を使うが、これでは AccountSummary の sourceWatermarkAt との
+   * 時間軸がずれるため、呼び出し元では明示的に渡すべき。
+   */
+  sourceObservedAt?: Date
 }
 
 /**
@@ -171,6 +177,7 @@ async function ingestOneFinding(
       data: {
         findingId,
         observedAt: now,
+        sourceObservedAt: ctx.sourceObservedAt ?? now,
         stateTransition: next.status,
         severity: appliedSeverity,
         sourceType: 'weekly_analysis_run',

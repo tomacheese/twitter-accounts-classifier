@@ -111,6 +111,10 @@ export async function processFindingGeneration(
     policy,
     policyHash,
     detectorVersion: APP_VERSION,
+    // AccountSummary が使う sourceWatermarkAt (processReadModelRefresh 側) と
+    // 同じ値を使うことで、この crawl から生成された Occurrence が
+    // 同じ crawl の AccountSummary から漏れないようにする。
+    sourceObservedAt: crawlRun.finishedAt ?? crawlRun.lastHeartbeatAt,
   })
 
   await enqueueWorkItem(prisma, {
@@ -231,6 +235,9 @@ export async function processWeeklyReviewIngest(
     weeklyAnalysisRunId: weeklyAnalysisRun.id,
     structuredOutput: parsed.data,
     policy,
+    // AccountSummary が primaryScopeType: 'account' の Occurrence を watermark と
+    // 比較する際、analyzer の処理時刻ではなく元データの時刻を使えるようにする。
+    sourceObservedAt: weeklyAnalysisRun.finishedAt ?? weeklyAnalysisRun.lastHeartbeatAt,
   })
 
   const sourceWatermarkAt = new Date()

@@ -86,9 +86,12 @@ const OPEN_STATE_TRANSITIONS = new Set(['active', 'recurring', 'new_episode'])
 /**
  * ReviewFinding.status は現在値しか持たないため、そこから読むと backlog 処理中の
  * 古い watermark の generation に、その後の Finding 状態変化が混ざる。
- * ReviewFindingOccurrence は observedAt ごとの状態遷移を積み上げた履歴のため、
- * findingId ごとに watermark 以前で最新の occurrence を取り、その stateTransition から
- * watermark 時点で active だったかを復元する。
+ * ReviewFindingOccurrence は sourceObservedAt (元データ自体の時刻) ごとの状態遷移を
+ * 積み上げた履歴のため、findingId ごとに watermark 以前で最新の occurrence を取り、
+ * その stateTransition から watermark 時点で active だったかを復元する。observedAt
+ * (analyzer の処理時刻) で比較すると、同じ crawl から生成された Occurrence でも
+ * 処理が遅れて sourceWatermarkAt を追い越し、その crawl 自身の AccountSummary から
+ * 漏れてしまう。
  * @param prisma - Prisma クライアント
  * @param accountIds - 対象ページの Account ID
  * @param sourceWatermarkAt - 集計の基準時刻
@@ -109,8 +112,8 @@ async function findActiveFindingsAtWatermark(
     JOIN "ReviewFinding" f ON f.id = o."findingId"
     WHERE f."primaryScopeType" = 'account'
       AND f."primaryScopeId" IN (${Prisma.join(accountIds)})
-      AND o."observedAt" <= ${sourceWatermarkAt}
-    ORDER BY o."findingId", o."observedAt" DESC, o.id DESC
+      AND o."sourceObservedAt" <= ${sourceWatermarkAt}
+    ORDER BY o."findingId", o."sourceObservedAt" DESC, o.id DESC
   `
   return rows
     .filter((row) => OPEN_STATE_TRANSITIONS.has(row.stateTransition))

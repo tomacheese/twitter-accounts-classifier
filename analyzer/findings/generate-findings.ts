@@ -25,6 +25,13 @@ export interface GenerateFindingsForCrawlCycleInput {
   policyHash: string
   /** 検出器のバージョン。 */
   detectorVersion: string
+  /**
+   * この観測の元データ自体の時刻 (通常は対象 CrawlRun の finishedAt)。
+   * AccountSummary の sourceWatermarkAt と時間軸を揃えるために記録する。
+   * 省略時は呼び出し時点を使うが、これでは backlog 処理中の古い watermark の
+   * generation から Occurrence が漏れうるため、呼び出し元では明示的に渡すべき。
+   */
+  sourceObservedAt?: Date
 }
 
 const SEVERITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 }
@@ -195,6 +202,7 @@ async function upsertOccurrence(
     create: {
       findingId,
       observedAt: now,
+      sourceObservedAt: ctx.sourceObservedAt ?? now,
       stateTransition,
       severity: input.rule.severity,
       sourceType: input.sourceType,
