@@ -1,6 +1,11 @@
 import type { PrismaClient } from '../../generated/prisma'
 import type { ReadModelFreshnessStatus } from '../api-response'
-import { getFreshnessThresholds, reconcileFreshness, toFreshnessStatus } from '../read-model-meta'
+import {
+  getFreshnessThresholds,
+  overlayHealthWithFreshness,
+  reconcileFreshness,
+  toFreshnessStatus,
+} from '../read-model-meta'
 
 /** Attention Queue の 1 件。 */
 export interface AttentionItemView {
@@ -134,9 +139,15 @@ export async function getOverviewSnapshot(
     new Date(),
   )
 
+  const { operationalStatus, qualityStatus } = overlayHealthWithFreshness(
+    snapshot.operationalStatus,
+    snapshot.qualityStatus,
+    freshnessStatus,
+  )
+
   return {
-    operationalStatus: snapshot.operationalStatus,
-    qualityStatus: snapshot.qualityStatus,
+    operationalStatus,
+    qualityStatus,
     attention,
     latestPipeline,
     sourceDataAt: snapshot.sourceWatermarkAt,

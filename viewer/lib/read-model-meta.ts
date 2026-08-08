@@ -106,6 +106,28 @@ export async function getFreshnessThresholds(prisma: PrismaClient): Promise<Fres
   return extractFreshnessThresholds(policyVersion?.content)
 }
 
+/**
+ * OverviewSnapshot が build された時点の operationalStatus/qualityStatus は、
+ * analyzer が停止して以降 build されなくなると更新されない。
+ * 「読み取りモデル更新失敗または stale は Operational Health を critical、
+ * Classification Quality を unknown とする」という設計に合わせ、
+ * 経過時間から再評価した freshness が stale/failed の場合は上書きする。
+ * @param operationalStatus - build 時点の Operational Health
+ * @param qualityStatus - build 時点の Classification Quality
+ * @param freshnessStatus - reconcileFreshness で再評価した freshness
+ * @returns 表示に使う Operational Health / Classification Quality
+ */
+export function overlayHealthWithFreshness(
+  operationalStatus: string,
+  qualityStatus: string,
+  freshnessStatus: ReadModelFreshnessStatus,
+): { operationalStatus: string; qualityStatus: string } {
+  if (freshnessStatus === 'stale' || freshnessStatus === 'failed') {
+    return { operationalStatus: 'critical', qualityStatus: 'unknown' }
+  }
+  return { operationalStatus, qualityStatus }
+}
+
 /** ReadModelState が 1 件も無い場合に返すメタデータ。 */
 const EMPTY_META: ReadModelMeta = {
   generatedAt: new Date(0),

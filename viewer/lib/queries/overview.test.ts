@@ -75,7 +75,7 @@ describe('getOverviewSnapshot', () => {
     expect(result?.latestPipeline?.cycleId).toBe('cycle-1')
   })
 
-  it('ReadModelState が stale でも直近成功 OverviewSnapshot の内容は消さずに返す', async () => {
+  it('ReadModelState が stale でも直近成功 OverviewSnapshot の attention 内容は消さずに返す', async () => {
     const prisma = createMockPrisma({
       snapshot: baseSnapshot,
       readModelState: { ...baseReadModelState, status: 'stale' },
@@ -84,8 +84,31 @@ describe('getOverviewSnapshot', () => {
     const result = await getOverviewSnapshot(prisma)
 
     expect(result?.freshnessStatus).toBe('stale')
-    expect(result?.operationalStatus).toBe('healthy')
     expect(result?.attention).toHaveLength(1)
+  })
+
+  it('freshnessStatus が stale なら operationalStatus/qualityStatus を critical/unknown で上書きする', async () => {
+    const prisma = createMockPrisma({
+      snapshot: baseSnapshot,
+      readModelState: { ...baseReadModelState, status: 'stale' },
+    })
+
+    const result = await getOverviewSnapshot(prisma)
+
+    expect(result?.operationalStatus).toBe('critical')
+    expect(result?.qualityStatus).toBe('unknown')
+  })
+
+  it('freshnessStatus が healthy なら build 時点の operationalStatus/qualityStatus をそのまま返す', async () => {
+    const prisma = createMockPrisma({
+      snapshot: baseSnapshot,
+      readModelState: baseReadModelState,
+    })
+
+    const result = await getOverviewSnapshot(prisma)
+
+    expect(result?.operationalStatus).toBe('healthy')
+    expect(result?.qualityStatus).toBe('stable')
   })
 
   it('ReadModelState が delayed なら freshnessStatus に delayed を返す', async () => {

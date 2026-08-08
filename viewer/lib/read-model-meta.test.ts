@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getPipelineMeta, getReadModelMeta } from './read-model-meta'
+import { getPipelineMeta, getReadModelMeta, overlayHealthWithFreshness } from './read-model-meta'
 import type { PrismaClient } from '../generated/prisma'
 
 /**
@@ -141,5 +141,32 @@ describe('getPipelineMeta', () => {
 
     const meta = await getPipelineMeta(prisma)
     expect(meta.freshnessStatus).toBe('healthy')
+  })
+})
+
+describe('overlayHealthWithFreshness', () => {
+  it('freshness が stale なら operationalStatus/qualityStatus を critical/unknown にする', () => {
+    expect(overlayHealthWithFreshness('healthy', 'stable', 'stale')).toEqual({
+      operationalStatus: 'critical',
+      qualityStatus: 'unknown',
+    })
+  })
+
+  it('freshness が failed なら operationalStatus/qualityStatus を critical/unknown にする', () => {
+    expect(overlayHealthWithFreshness('attention', 'watch', 'failed')).toEqual({
+      operationalStatus: 'critical',
+      qualityStatus: 'unknown',
+    })
+  })
+
+  it('freshness が healthy/delayed なら元の値をそのまま返す', () => {
+    expect(overlayHealthWithFreshness('attention', 'watch', 'healthy')).toEqual({
+      operationalStatus: 'attention',
+      qualityStatus: 'watch',
+    })
+    expect(overlayHealthWithFreshness('attention', 'watch', 'delayed')).toEqual({
+      operationalStatus: 'attention',
+      qualityStatus: 'watch',
+    })
   })
 })

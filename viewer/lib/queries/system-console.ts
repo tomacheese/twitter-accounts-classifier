@@ -1,5 +1,9 @@
 import type { PrismaClient } from '../../generated/prisma'
-import { reconcileFreshness, toFreshnessStatus } from '../read-model-meta'
+import {
+  overlayHealthWithFreshness,
+  reconcileFreshness,
+  toFreshnessStatus,
+} from '../read-model-meta'
 import { extractFreshnessThresholds } from '../policy-freshness'
 
 /** 稼働中システムの識別情報。 */
@@ -77,8 +81,8 @@ function redactErrorSummary(errorSummary: string | null): string | null {
 
 /**
  * System コンソールの表示内容を、DB から取得可能な範囲で組み立てる。
- * Component health は Overview が保存した OverviewSnapshot の値をそのまま読み、
- * System 側では再計算しない。
+ * Component health は Overview が保存した OverviewSnapshot の値を基本とするが、
+ * overview_snapshot 自体の freshness が stale/failed の場合は上書きする。
  * generatedAt DESC ではなく ReadModelState.currentGenerationId を経由して取得する。
  * generatedAt DESC だと、Pointer 切り替えに失敗した (superseded/failed) generation の
  * 方が新しい generatedAt を持つ場合に、公開されていない snapshot を表示してしまう。
@@ -98,6 +102,17 @@ export async function getSystemConsoleData(prisma: PrismaClient): Promise<System
     : null
 
   const thresholds = extractFreshnessThresholds(latestPolicy?.content)
+  // overview_snapshot 自体が stale/failed になった場合、componentHealth が読む
+  // OverviewSnapshot.operationalStatus/qualityStatus は build 時点で固定された
+  // 古い値のままになる。readModels[] と同じ reconcileFreshness で上書きする。
+  const overviewFreshness = overviewReadModelState
+    ? reconcileFreshness(
+        toFreshnessStatus(overviewReadModelState.status),
+        overviewReadModelState.lastSuccessAt,
+        thresholds,
+        new Date(),
+      )
+    : 'unknown'
 
   return {
     identity: {
@@ -106,8 +121,11 @@ export async function getSystemConsoleData(prisma: PrismaClient): Promise<System
     },
     componentHealth: latestSnapshot
       ? {
-          operationalStatus: latestSnapshot.operationalStatus,
-          qualityStatus: latestSnapshot.qualityStatus,
+          ...overlayHealthWithFreshness(
+            latestSnapshot.operationalStatus,
+            latestSnapshot.qualityStatus,
+            overviewFreshness,
+          ),
           sourceWatermarkAt: latestSnapshot.sourceWatermarkAt,
           generatedAt: latestSnapshot.generatedAt,
         }

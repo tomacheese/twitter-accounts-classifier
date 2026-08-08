@@ -25,7 +25,7 @@ function createMockPrisma(overrides: {
 }
 
 describe('getSystemConsoleData', () => {
-  it('Component health は OverviewSnapshot の operationalStatus/qualityStatus をそのまま返す (別計算しない)', async () => {
+  it('overview_snapshot の freshness が healthy なら OverviewSnapshot の operationalStatus/qualityStatus をそのまま返す', async () => {
     const snapshot = {
       operationalStatus: 'attention',
       qualityStatus: 'watch',
@@ -42,6 +42,28 @@ describe('getSystemConsoleData', () => {
       sourceWatermarkAt: snapshot.sourceWatermarkAt,
       generatedAt: snapshot.generatedAt,
     })
+  })
+
+  it('overview_snapshot が stale なら componentHealth を critical/unknown で上書きする(analyzer 停止時)', async () => {
+    const snapshot = {
+      operationalStatus: 'healthy',
+      qualityStatus: 'stable',
+      sourceWatermarkAt: new Date('2026-08-07T00:00:00.000Z'),
+      generatedAt: new Date('2026-08-07T00:05:00.000Z'),
+    }
+    const prisma = createMockPrisma({
+      snapshot,
+      overviewReadModelState: {
+        currentGenerationId: 'generation-1',
+        status: 'healthy',
+        lastSuccessAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+    })
+
+    const data = await getSystemConsoleData(prisma)
+
+    expect(data.componentHealth?.operationalStatus).toBe('critical')
+    expect(data.componentHealth?.qualityStatus).toBe('unknown')
   })
 
   it('OverviewSnapshot が無ければ componentHealth は null', async () => {
