@@ -5,6 +5,7 @@ import {
   processLabelMetrics,
   processFindingGeneration,
   processBlockReconciliation,
+  processRetentionSweep,
 } from './worker-processors'
 
 const prisma = getPrismaClient()
@@ -155,5 +156,31 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
       where: { modelKey: 'overview_snapshot' },
     })
     expect(overviewPointer).not.toBeNull()
+  })
+
+  it('processRetentionSweep は次回分の WorkItem を即時 claim 可能な状態で enqueue しない', async () => {
+    await processRetentionSweep(prisma, {
+      id: 'work-item-4',
+      kind: 'retention_sweep',
+      triggerType: 'schedule',
+      triggerId: '2026-01-01',
+      status: 'leased',
+      priority: 0,
+      availableAt: new Date(),
+      leaseOwner: 'worker-1',
+      leaseExpiresAt: new Date(),
+      attemptCount: 1,
+      maxAttempts: 5,
+      dependencyKey: null,
+      lastErrorCode: null,
+      lastErrorSummary: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    const pending = await prisma.analysisWorkItem.findMany({
+      where: { kind: 'retention_sweep' },
+    })
+    expect(pending).toHaveLength(0)
   })
 })

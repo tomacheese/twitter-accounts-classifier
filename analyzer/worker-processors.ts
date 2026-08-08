@@ -285,8 +285,11 @@ export async function enqueueDailyRetentionSweep(prisma: PrismaClient, now: Date
 }
 
 /**
- * kind: retention_sweep の処理関数。古い履歴行を削除したうえで、
- * 翌日分の retention_sweep WorkItem を enqueue して継続させる。
+ * kind: retention_sweep の処理関数。古い履歴行を削除する。
+ * 次回分の enqueue は `main()` が毎パスの起動時に当日分を冪等に行うため、
+ * ここで翌日分を自己予約しない。`enqueueWorkItem` は `availableAt` を
+ * 指定できず即時 claim 可能な行を作るため、ここから予約すると
+ * queue が空にならないまま翌日分以降を連鎖して処理してしまう。
  * @param prisma - Prisma クライアント
  * @param workItem - `triggerType: 'schedule'` の WorkItem
  */
@@ -294,14 +297,12 @@ export async function processRetentionSweep(
   prisma: PrismaClient,
   workItem: AnalysisWorkItem,
 ): Promise<void> {
-  const now = new Date()
-  const result = await runRetentionSweep(prisma, now)
+  const result = await runRetentionSweep(prisma, new Date())
   logger.info(
     `retention sweep (${workItem.triggerId}) removed ${result.deletedAnalysisRunCount} AnalysisRun, ` +
       `${result.deletedWorkItemCount} AnalysisWorkItem, ` +
       `${result.deletedLabelMetricSnapshotCount} LabelMetricSnapshot rows`,
   )
-  await enqueueDailyRetentionSweep(prisma, new Date(now.getTime() + 24 * 60 * 60 * 1000))
 }
 
 const DEFAULT_READ_MODEL_CADENCE = 'PT1H'
