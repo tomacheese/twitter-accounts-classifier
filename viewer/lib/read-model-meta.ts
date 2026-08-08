@@ -1,5 +1,10 @@
 import type { PrismaClient } from '../generated/prisma'
 import type { ReadModelFreshnessStatus } from './api-response'
+import {
+  deriveElapsedFreshness,
+  extractFreshnessThresholds,
+  type FreshnessThresholds,
+} from './policy-freshness'
 
 /** API メタデータのうち read model 側から決まる部分。 */
 export interface ReadModelMeta {
@@ -16,21 +21,64 @@ const FRESHNESS_STATUSES = new Set<string>(['healthy', 'delayed', 'stale', 'fail
  * @param status - ReadModelState.status の生値
  * @returns 既知の freshness であればその値、そうでなければ unknown
  */
-function toFreshnessStatus(status: string): ReadModelFreshnessStatus {
+export function toFreshnessStatus(status: string): ReadModelFreshnessStatus {
   return FRESHNESS_STATUSES.has(status) ? (status as ReadModelFreshnessStatus) : 'unknown'
+}
+
+// 劣化度合いの順序。DB に保存された status と、経過時間から独立に導出した
+// freshness のうち、より劣化している側を採用するために使う。
+const DEGRADATION_ORDER: Record<ReadModelFreshnessStatus, number> = {
+  unknown: 0,
+  healthy: 0,
+  delayed: 1,
+  stale: 2,
+  failed: 3,
+}
+
+/**
+ * DB に保存された status と、lastSuccessAt からの経過時間だけで独立に判定した
+ * freshness のうち、より劣化している側を返す。
+ * analyzer プロセス自体が停止すると status を更新する主体が居なくなり、
+ * 停止直前の値が healthy のまま固定されてしまうため、読み取り時点で経過時間からも
+ * 再評価する。failed は publish が記録した確定的な失敗であり、経過時間で
+ * 上書きしない (analyzer/operational-issues/freshness.ts と同じ扱い)。
+ * @param storedStatus - ReadModelState.status から変換した freshness
+ * @param lastSuccessAt - 直近成功時刻
+ * @param thresholds - delayed/stale と判定するまでの経過時間
+ * @param now - 判定基準時刻
+ * @returns 劣化がより進んでいる側の freshness
+ */
+export function reconcileFreshness(
+  storedStatus: ReadModelFreshnessStatus,
+  lastSuccessAt: Date | null,
+  thresholds: FreshnessThresholds,
+  now: Date,
+): ReadModelFreshnessStatus {
+  if (storedStatus === 'failed') return storedStatus
+  const elapsedStatus = deriveElapsedFreshness(lastSuccessAt, thresholds, now)
+  if (!elapsedStatus) return storedStatus
+  return DEGRADATION_ORDER[elapsedStatus] > DEGRADATION_ORDER[storedStatus]
+    ? elapsedStatus
+    : storedStatus
 }
 
 /**
  * @param state - 対象の ReadModelState
+ * @param thresholds - delayed/stale と判定するまでの経過時間
+ * @param now - 判定基準時刻
  * @returns state から組み立てたメタデータ
  */
-function toMeta(state: {
-  lastSuccessAt: Date | null
-  sourceWatermarkAt: Date | null
-  currentGenerationId: string | null
-  policyHash: string | null
-  status: string
-}): ReadModelMeta {
+function toMeta(
+  state: {
+    lastSuccessAt: Date | null
+    sourceWatermarkAt: Date | null
+    currentGenerationId: string | null
+    policyHash: string | null
+    status: string
+  },
+  thresholds: FreshnessThresholds,
+  now: Date,
+): ReadModelMeta {
   return {
     // 生成時刻はリクエスト時刻ではなくデータが実際に作られた時刻を返す。
     // 前者だと read model が停止していても常に最新に見えてしまう。
@@ -38,8 +86,24 @@ function toMeta(state: {
     sourceDataAt: state.sourceWatermarkAt,
     generationId: state.currentGenerationId,
     policyHash: state.policyHash,
-    freshnessStatus: toFreshnessStatus(state.status),
+    freshnessStatus: reconcileFreshness(
+      toFreshnessStatus(state.status),
+      state.lastSuccessAt,
+      thresholds,
+      now,
+    ),
   }
+}
+
+/**
+ * @param prisma - Prisma クライアント
+ * @returns 適用中 policy から取り出した freshness しきい値。未ロードなら既定値
+ */
+async function getFreshnessThresholds(prisma: PrismaClient): Promise<FreshnessThresholds> {
+  const policyVersion = await prisma.detectionPolicyVersion.findFirst({
+    orderBy: { loadedAt: 'desc' },
+  })
+  return extractFreshnessThresholds(policyVersion?.content)
 }
 
 /** ReadModelState が 1 件も無い場合に返すメタデータ。 */
@@ -61,7 +125,9 @@ export async function getReadModelMeta(
   modelKey: string,
 ): Promise<ReadModelMeta> {
   const state = await prisma.readModelState.findUnique({ where: { modelKey } })
-  return state ? toMeta(state) : EMPTY_META
+  if (!state) return EMPTY_META
+  const thresholds = await getFreshnessThresholds(prisma)
+  return toMeta(state, thresholds, new Date())
 }
 
 /**
@@ -75,20 +141,30 @@ export async function getPipelineMeta(prisma: PrismaClient): Promise<ReadModelMe
   const states = await prisma.readModelState.findMany()
   if (states.length === 0) return EMPTY_META
 
+  const thresholds = await getFreshnessThresholds(prisma)
+  const now = new Date()
+
   let latest = states[0]
+  let worstStatus: ReadModelFreshnessStatus = 'unknown'
   for (const state of states) {
     if ((state.lastSuccessAt?.getTime() ?? 0) > (latest.lastSuccessAt?.getTime() ?? 0)) {
       latest = state
     }
+    // 1 つでも失敗・遅延していれば section 全体の鮮度もそれに引きずられる。
+    const reconciled = reconcileFreshness(
+      toFreshnessStatus(state.status),
+      state.lastSuccessAt,
+      thresholds,
+      now,
+    )
+    if (DEGRADATION_ORDER[reconciled] > DEGRADATION_ORDER[worstStatus]) {
+      worstStatus = reconciled
+    }
   }
-  // 1 つでも失敗・遅延していれば section 全体の鮮度もそれに引きずられる。
-  const worstStatus = states.some((state) => state.status === 'failed')
-    ? 'failed'
-    : states.some((state) => state.status === 'stale')
-      ? 'stale'
-      : states.some((state) => state.status === 'delayed')
-        ? 'delayed'
-        : latest.status
 
-  return { ...toMeta(latest), generationId: null, freshnessStatus: toFreshnessStatus(worstStatus) }
+  return {
+    ...toMeta(latest, thresholds, now),
+    generationId: null,
+    freshnessStatus: worstStatus,
+  }
 }

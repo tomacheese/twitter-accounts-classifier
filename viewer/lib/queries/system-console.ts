@@ -1,4 +1,6 @@
 import type { PrismaClient } from '../../generated/prisma'
+import { reconcileFreshness, toFreshnessStatus } from '../read-model-meta'
+import { extractFreshnessThresholds } from '../policy-freshness'
 
 /** 稼働中システムの識別情報。 */
 export interface SystemIdentity {
@@ -95,6 +97,8 @@ export async function getSystemConsoleData(prisma: PrismaClient): Promise<System
       })
     : null
 
+  const thresholds = extractFreshnessThresholds(latestPolicy?.content)
+
   return {
     identity: {
       applicationVersion: process.env.npm_package_version ?? 'unknown',
@@ -116,14 +120,23 @@ export async function getSystemConsoleData(prisma: PrismaClient): Promise<System
           loadedAt: latestPolicy.loadedAt,
         }
       : null,
-    readModels: readModelStates.map((state) => ({
-      modelKey: state.modelKey,
-      status: state.status,
-      schemaVersion: state.schemaVersion,
-      lastSuccessAt: state.lastSuccessAt,
-      staleAt: state.staleAt,
-      errorSummary: redactErrorSummary(state.errorSummary),
-    })),
+    readModels: readModelStates.map((state) => {
+      return {
+        modelKey: state.modelKey,
+        // analyzer プロセス自体が停止すると status を更新する主体が居なくなるため、
+        // 経過時間からも独立に再評価し、より劣化している側を返す。
+        status: reconcileFreshness(
+          toFreshnessStatus(state.status),
+          state.lastSuccessAt,
+          thresholds,
+          new Date(),
+        ),
+        schemaVersion: state.schemaVersion,
+        lastSuccessAt: state.lastSuccessAt,
+        staleAt: state.staleAt,
+        errorSummary: redactErrorSummary(state.errorSummary),
+      }
+    }),
     diagnosticsEnvVars: DIAGNOSTICS_ENV_VAR_ALLOWLIST.filter(
       (key) => process.env[key] !== undefined,
     ).map((key) => ({ key, value: process.env[key] ?? '' })),
