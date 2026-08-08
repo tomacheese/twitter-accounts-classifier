@@ -21,6 +21,7 @@ export interface OperationalIssueDetailView {
   lastDetectedAt: Date
   resolvedAt: Date | null
   sourceCycleId: string | null
+  sourceCycleKind: string | null
   sourceStageId: string | null
   occurrences: OperationalIssueOccurrenceView[]
 }
@@ -47,6 +48,13 @@ export async function getOperationalIssueDetail(
   })
   if (!issue) return null
 
+  const sourceCycle = issue.sourceCycleId
+    ? await prisma.operationCycle.findUnique({
+        where: { id: issue.sourceCycleId },
+        select: { kind: true },
+      })
+    : null
+
   return {
     issueId: issue.id,
     component: issue.component,
@@ -57,6 +65,7 @@ export async function getOperationalIssueDetail(
     lastDetectedAt: issue.lastDetectedAt,
     resolvedAt: issue.resolvedAt,
     sourceCycleId: issue.sourceCycleId,
+    sourceCycleKind: sourceCycle?.kind ?? null,
     sourceStageId: issue.sourceStageId,
     occurrences: issue.occurrences.map((occurrence) => ({
       id: occurrence.id,

@@ -15,9 +15,10 @@ const JST_FORMATTER = new Intl.DateTimeFormat('en-US', {
  * サーバー・クライアントのローカルタイムゾーンに関わらず、
  * 日付を JST (Asia/Tokyo) の `yyyy/MM/dd HH:mm:ss` 形式でフォーマットする。
  */
-export function formatDateTime(date: Date): string {
+export function formatDateTime(date: Date | string): string {
+  const value = typeof date === 'string' ? new Date(date) : date
   const parts = Object.fromEntries(
-    JST_FORMATTER.formatToParts(date).map((part) => [part.type, part.value]),
+    JST_FORMATTER.formatToParts(value).map((part) => [part.type, part.value]),
   )
   return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
 }
