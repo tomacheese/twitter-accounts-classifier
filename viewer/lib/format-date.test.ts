@@ -6,6 +6,10 @@ describe('formatDateTime', () => {
     expect(formatDateTime(new Date('2026-01-02T03:04:05Z'))).toBe('2026/01/02 12:04:05')
   })
 
+  it('formats an ISO timestamp returned by a JSON API', () => {
+    expect(formatDateTime('2026-01-02T03:04:05.000Z')).toBe('2026/01/02 12:04:05')
+  })
+
   it('rolls the date over into the next day when JST crosses midnight', () => {
     expect(formatDateTime(new Date('2026-01-02T15:30:00Z'))).toBe('2026/01/03 00:30:00')
   })
