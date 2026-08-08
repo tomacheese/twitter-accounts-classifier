@@ -23,4 +23,12 @@ describe('deriveCycleStatus', () => {
   it('未着手の Stage だけが残っていれば scheduled を返す', () => {
     expect(deriveCycleStatus(['succeeded', 'waiting', 'waiting'])).toBe('scheduled')
   })
+
+  it('起点 Stage が succeeded で後続に skipped があれば partial を返す', () => {
+    expect(deriveCycleStatus(['succeeded', 'succeeded', 'succeeded', 'skipped'])).toBe('partial')
+  })
+
+  it('起点 Stage 自体が failed で後続が skipped なら failed を返す', () => {
+    expect(deriveCycleStatus(['failed', 'skipped', 'skipped', 'skipped'])).toBe('failed')
+  })
 })

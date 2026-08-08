@@ -55,11 +55,23 @@ export async function buildOrUpdateCrawlCycle(
   ]
   for (const kind of ANALYSIS_WORK_ITEM_STAGE_KINDS) {
     const stage = await deriveWorkItemStage(prisma, kind, 'crawl_run', input.crawlRunId)
+    // processReadModelRefresh() は partial/failed CrawlRun では read model 公開を
+    // 見送って正常終了するため、WorkItem 自体は succeeded になる。この succeeded を
+    // そのまま表示すると必須後続処理が完了していないことが Operations から見えなくなるため、
+    // ここで skipped + 理由へ差し替える (WorkItem の実状態は変更しない)。
+    const isReadModelRefreshSkippedForIncompleteCrawl =
+      kind === 'read_model_refresh' && crawlRun.status !== 'success' && stage.status === 'succeeded'
     stages.push({
       stageKey: kind,
       sourceType: 'analysis_work_item',
       sourceId: crawlRun.id,
       ...stage,
+      ...(isReadModelRefreshSkippedForIncompleteCrawl
+        ? {
+            status: 'skipped' as StageStatus,
+            errorSummary: `crawl run is ${crawlRun.status}: read model refresh skipped`,
+          }
+        : {}),
     })
   }
 

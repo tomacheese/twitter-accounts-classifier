@@ -146,8 +146,13 @@ export async function buildOverviewSnapshot(
     // Stage は crawl cycle 単位の一時的な失敗、ReadModelState は経過時間で
     // 落ちる鮮度そのものであり、いずれか一方だけを見ると
     // 「Stage は succeeded だが更新が止まっている」状態を見逃す。
+    // skipped は partial な CrawlRun で必須後続処理 (read_model_refresh) が
+    // 意図的に見送られた際の明示状態であり、failed/stale と同様に必須系の未完了を示す。
     hasFailedOrStaleCoreStage:
-      coreStages.some((stage) => stage.status === 'failed' || stage.status === 'stale') ||
+      coreStages.some(
+        (stage) =>
+          stage.status === 'failed' || stage.status === 'stale' || stage.status === 'skipped',
+      ) ||
       healthRelevantStates.some((state) => state.status === 'failed' || state.status === 'stale'),
     hasUnknownCoreStage:
       coreStages.some((stage) => stage.status === 'unknown') ||

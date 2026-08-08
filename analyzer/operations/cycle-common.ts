@@ -26,6 +26,11 @@ export function deriveCycleStatus(requiredStages: StageStatus[]): CycleStatus {
   if (requiredStages.includes('failed')) {
     return requiredStages[0] === 'succeeded' ? 'partial' : 'failed'
   }
+  // 必須 Stage が例外なく正常終了して skipped になることは無い。partial な起点データで
+  // 後続処理が意図的に見送られた場合の明示状態として使うため、failed と同じ扱いにする。
+  if (requiredStages.includes('skipped')) {
+    return requiredStages[0] === 'succeeded' ? 'partial' : 'failed'
+  }
   if (requiredStages.includes('running')) return 'running'
   if (requiredStages.every((status) => status === 'succeeded')) return 'succeeded'
   if (requiredStages.includes('stale')) return 'stale'

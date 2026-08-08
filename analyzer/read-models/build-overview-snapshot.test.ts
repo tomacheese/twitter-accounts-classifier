@@ -195,6 +195,37 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
     expect(snapshot.operationalStatus).toBe('unknown')
   })
 
+  it('必須 Stage が skipped (partial CrawlRun による見送り) なら operationalStatus は critical になる', async () => {
+    const cycle = await prisma.operationCycle.create({
+      data: {
+        kind: 'crawl',
+        sourceType: 'crawl_run',
+        sourceId: `crawl-${randomUUID()}`,
+        triggeredAt: new Date(),
+        status: 'partial',
+        modelVersion: '1',
+      },
+    })
+    await prisma.operationStage.create({
+      data: {
+        cycleId: cycle.id,
+        stageKey: 'read_model_refresh',
+        sequence: 4,
+        requiredness: 'required',
+        status: 'skipped',
+        errorSummary: 'crawl run is partial: read model refresh skipped',
+      },
+    })
+
+    const result = await buildOverviewSnapshot(prisma, {
+      generationId: randomUUID(),
+      sourceWatermarkAt: new Date(),
+    })
+
+    const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
+    expect(snapshot.operationalStatus).toBe('critical')
+  })
+
   it('overview_snapshot 自身の旧 ReadModelState は build 中の判定に含めない', async () => {
     await prisma.readModelState.create({
       data: { modelKey: 'overview_snapshot', schemaVersion: 1, status: 'failed' },

@@ -71,6 +71,52 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     expect(cycle.attentionRequired).toBe(false)
   })
 
+  it('CrawlRun が partial なら read_model_refresh は skipped になり、Cycle status は succeeded にならない', async () => {
+    const crawlRun = await prisma.crawlRun.create({
+      data: {
+        id: `crawl-${randomUUID()}`,
+        startedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        finishedAt: new Date(),
+        status: 'partial',
+      },
+    })
+
+    for (const kind of ['label_metrics', 'finding_generation', 'read_model_refresh']) {
+      const workItem = await prisma.analysisWorkItem.create({
+        data: { kind, triggerType: 'crawl_run', triggerId: crawlRun.id, status: 'succeeded' },
+      })
+      await prisma.analysisRun.create({
+        data: {
+          workItemId: workItem.id,
+          attemptNumber: 1,
+          finishedAt: new Date(),
+          status: 'succeeded',
+        },
+      })
+    }
+
+    await buildOrUpdateCrawlCycle(prisma, { crawlRunId: crawlRun.id })
+
+    const cycle = await prisma.operationCycle.findUniqueOrThrow({
+      where: { sourceType_sourceId: { sourceType: 'crawl_run', sourceId: crawlRun.id } },
+    })
+    const readModelRefreshStage = await prisma.operationStage.findUniqueOrThrow({
+      where: { cycleId_stageKey: { cycleId: cycle.id, stageKey: 'read_model_refresh' } },
+    })
+    expect(readModelRefreshStage.status).toBe('skipped')
+    expect(readModelRefreshStage.errorSummary).toContain('partial')
+    expect(cycle.status).toBe('partial')
+    expect(cycle.attentionRequired).toBe(true)
+
+    // label_metrics/finding_generation は partial なデータに対しても実際に処理を
+    // 完了しているため、succeeded のまま表示してよい。
+    const labelMetricsStage = await prisma.operationStage.findUniqueOrThrow({
+      where: { cycleId_stageKey: { cycleId: cycle.id, stageKey: 'label_metrics' } },
+    })
+    expect(labelMetricsStage.status).toBe('succeeded')
+  })
+
   it('Viewer が絞り込む kind と同じ crawl を書き込む', async () => {
     const crawlRun = await prisma.crawlRun.create({
       data: {
