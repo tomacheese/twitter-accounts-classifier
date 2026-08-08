@@ -8,6 +8,7 @@ import {
   processBlockReconciliation,
   processRetentionSweep,
   handleWorkItemSettled,
+  processPostCompletionRefresh,
 } from './worker-processors'
 
 const prisma = getPrismaClient()
@@ -279,6 +280,45 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
       },
       { status: 'succeeded' },
     )
+
+    const attentionPointer = await prisma.readModelPointer.findUnique({
+      where: { modelKey: 'attention_items' },
+    })
+    const overviewPointer = await prisma.readModelPointer.findUnique({
+      where: { modelKey: 'overview_snapshot' },
+    })
+    expect(attentionPointer).not.toBeNull()
+    expect(overviewPointer).not.toBeNull()
+  })
+
+  it('processPostCompletionRefresh は元 WorkItem の終了状態を復元して Attention/Overview を publish する', async () => {
+    const originalWorkItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'read_model_refresh',
+        triggerType: 'unhandled_trigger_type',
+        triggerId: `trigger-${randomUUID()}`,
+        status: 'succeeded',
+      },
+    })
+
+    await processPostCompletionRefresh(prisma, {
+      id: `post-completion-refresh-${randomUUID()}`,
+      kind: 'post_completion_refresh',
+      triggerType: 'work_item_completion',
+      triggerId: originalWorkItem.id,
+      status: 'succeeded',
+      priority: 0,
+      availableAt: new Date(),
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      attemptCount: 1,
+      maxAttempts: 5,
+      dependencyKey: null,
+      lastErrorCode: null,
+      lastErrorSummary: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
 
     const attentionPointer = await prisma.readModelPointer.findUnique({
       where: { modelKey: 'attention_items' },

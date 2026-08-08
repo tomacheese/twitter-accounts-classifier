@@ -3,12 +3,18 @@ import {
   claimNextWorkItem,
   completeWorkItem,
   computeRetryBackoffMs,
+  enqueueWorkItem,
   finishAnalysisRun,
   startAnalysisRun,
 } from './queue/work-item-repository'
 import { Logger } from '@book000/node-utils'
 
 const logger = Logger.configure('analyzer:worker-loop')
+
+/** onWorkItemSettled 失敗時に再試行を委ねる後続 WorkItem の kind。 */
+export const POST_COMPLETION_REFRESH_KIND = 'post_completion_refresh'
+/** post_completion_refresh WorkItem が指す、完了済み元 WorkItem の triggerType。 */
+export const WORK_ITEM_COMPLETION_TRIGGER_TYPE = 'work_item_completion'
 
 const HANDLED_KINDS = [
   'label_metrics',
@@ -17,6 +23,7 @@ const HANDLED_KINDS = [
   'weekly_review_ingest',
   'block_reconciliation',
   'retention_sweep',
+  POST_COMPLETION_REFRESH_KIND,
 ] as const
 
 /**
@@ -39,6 +46,8 @@ export interface WorkerLoopDeps {
   processBlockReconciliation: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: retention_sweep の処理関数。 */
   processRetentionSweep: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
+  /** kind: post_completion_refresh の処理関数。 */
+  processPostCompletionRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /**
    * WorkItem の終了状態を確定させた後に呼ばれる後処理。
    * Cycle の再計算は WorkItem の状態が確定した後でなければ最新の Stage 状態を
@@ -87,6 +96,9 @@ async function dispatch(
     }
     case 'retention_sweep': {
       return deps.processRetentionSweep(prisma, workItem)
+    }
+    case POST_COMPLETION_REFRESH_KIND: {
+      return deps.processPostCompletionRefresh(prisma, workItem)
     }
     default: {
       throw new Error(`Unknown work item kind: ${workItem.kind}`)
@@ -152,7 +164,10 @@ export async function runWorkerLoopOnce(
   }
 
   // 後処理の失敗で attempt 自体を失敗扱いに巻き戻すと、既に確定した WorkItem の
-  // 終了状態と矛盾するため、ここでは記録に留めて loop を継続する。
+  // 終了状態と矛盾するため、ここでは記録に留めて loop を継続する。ただし WorkItem
+  // 自体は succeeded/failed/dead で確定済みのため、ここで諦めると Cycle/Attention/
+  // Overview の再計算が永久に行われなくなる。post_completion_refresh を durable な
+  // WorkItem として積み、標準の claim/retry/dead 経路に乗せて再試行させる。
   try {
     await deps.onWorkItemSettled?.(prisma, workItem, outcome)
   } catch (error) {
@@ -160,6 +175,11 @@ export async function runWorkerLoopOnce(
       `post-completion hook failed for work item ${workItem.id} (${workItem.kind})`,
       error as Error,
     )
+    await enqueueWorkItem(prisma, {
+      kind: POST_COMPLETION_REFRESH_KIND,
+      triggerType: WORK_ITEM_COMPLETION_TRIGGER_TYPE,
+      triggerId: workItem.id,
+    })
   }
 
   return true

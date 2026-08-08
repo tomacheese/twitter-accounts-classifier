@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { AnalysisWorkItem, PrismaClient } from './generated/prisma'
-import { runWorkerLoopOnce } from './worker-loop'
+import {
+  runWorkerLoopOnce,
+  POST_COMPLETION_REFRESH_KIND,
+  WORK_ITEM_COMPLETION_TRIGGER_TYPE,
+} from './worker-loop'
 
 const claimNextWorkItem = vi.fn()
 const completeWorkItem = vi.fn()
+const enqueueWorkItem = vi.fn()
 const startAnalysisRun = vi.fn()
 const finishAnalysisRun = vi.fn()
 const loggerWarn = vi.fn()
@@ -23,6 +28,7 @@ vi.mock('@book000/node-utils', () => ({
 vi.mock('./queue/work-item-repository', () => ({
   claimNextWorkItem: (...args: unknown[]): unknown => claimNextWorkItem(...args) as unknown,
   completeWorkItem: (...args: unknown[]): unknown => completeWorkItem(...args) as unknown,
+  enqueueWorkItem: (...args: unknown[]): unknown => enqueueWorkItem(...args) as unknown,
   startAnalysisRun: (...args: unknown[]): unknown => startAnalysisRun(...args) as unknown,
   finishAnalysisRun: (...args: unknown[]): unknown => finishAnalysisRun(...args) as unknown,
   computeRetryBackoffMs: (attemptCount: number): number => attemptCount * 1000,
@@ -63,6 +69,7 @@ function makeDeps() {
     processWeeklyReviewIngest: vi.fn().mockResolvedValue(undefined),
     processBlockReconciliation: vi.fn().mockResolvedValue(undefined),
     processRetentionSweep: vi.fn().mockResolvedValue(undefined),
+    processPostCompletionRefresh: vi.fn().mockResolvedValue(undefined),
     onWorkItemSettled: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -73,6 +80,7 @@ describe('runWorkerLoopOnce', () => {
   beforeEach(() => {
     claimNextWorkItem.mockReset()
     completeWorkItem.mockReset().mockResolvedValue(true)
+    enqueueWorkItem.mockReset().mockResolvedValue(undefined)
     startAnalysisRun.mockReset().mockResolvedValue('analysis-run-1')
     finishAnalysisRun.mockReset().mockResolvedValue(undefined)
     loggerWarn.mockReset()
@@ -96,6 +104,7 @@ describe('runWorkerLoopOnce', () => {
     ['weekly_review_ingest', 'processWeeklyReviewIngest'],
     ['block_reconciliation', 'processBlockReconciliation'],
     ['retention_sweep', 'processRetentionSweep'],
+    [POST_COMPLETION_REFRESH_KIND, 'processPostCompletionRefresh'],
   ] as const)('kind が %s なら %s だけを呼ぶ', async (kind, depKey) => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({ kind }))
     const deps = makeDeps()
@@ -233,5 +242,28 @@ describe('runWorkerLoopOnce', () => {
       expect.stringContaining('post-completion hook failed'),
       expect.any(Error),
     )
+  })
+
+  it('onWorkItemSettled が例外を投げたら post_completion_refresh を durable な WorkItem として積む', async () => {
+    claimNextWorkItem.mockResolvedValue(makeWorkItem({ id: 'work-item-1' }))
+    const deps = makeDeps()
+    deps.onWorkItemSettled.mockRejectedValue(new Error('hook failed'))
+
+    await runWorkerLoopOnce(prisma, deps)
+
+    expect(enqueueWorkItem).toHaveBeenCalledWith(prisma, {
+      kind: POST_COMPLETION_REFRESH_KIND,
+      triggerType: WORK_ITEM_COMPLETION_TRIGGER_TYPE,
+      triggerId: 'work-item-1',
+    })
+  })
+
+  it('onWorkItemSettled が成功すれば post_completion_refresh を積まない', async () => {
+    claimNextWorkItem.mockResolvedValue(makeWorkItem({}))
+    const deps = makeDeps()
+
+    await runWorkerLoopOnce(prisma, deps)
+
+    expect(enqueueWorkItem).not.toHaveBeenCalled()
   })
 })

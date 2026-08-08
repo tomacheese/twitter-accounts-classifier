@@ -392,3 +392,25 @@ export async function handleWorkItemSettled(
   // ここで改めて publish しないと表示だけ古い状態のまま次の refresh まで残ってしまう。
   await publishAttentionAndOverview(prisma, new Date())
 }
+
+/**
+ * kind: post_completion_refresh の処理関数。
+ * handleWorkItemSettled が例外を投げて non-durable な post-completion hook として
+ * 終わった場合の再試行を担う。元 WorkItem は既に succeeded/failed/dead で確定済みのため、
+ * その行を再読み込みして終了状態を復元し、同じ後処理をやり直す。
+ * @param prisma - Prisma クライアント
+ * @param workItem - triggerId に元 WorkItem の ID を持つ post_completion_refresh の WorkItem
+ */
+export async function processPostCompletionRefresh(
+  prisma: PrismaClient,
+  workItem: AnalysisWorkItem,
+): Promise<void> {
+  const originalWorkItem = await prisma.analysisWorkItem.findUniqueOrThrow({
+    where: { id: workItem.triggerId },
+  })
+  const outcome: WorkItemOutcome = {
+    status: originalWorkItem.status as WorkItemOutcome['status'],
+    errorSummary: originalWorkItem.lastErrorSummary ?? undefined,
+  }
+  await handleWorkItemSettled(prisma, originalWorkItem, outcome)
+}
