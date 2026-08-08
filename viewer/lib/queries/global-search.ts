@@ -83,8 +83,8 @@ async function searchAccounts(
 }
 
 /**
- * Account の screenName/displayName、Label の key、Finding の id/type、
- * Operation の cycleId/sourceId のみを検索対象とする。
+ * Account の screenName/displayName、Label の key/description (表示名)、
+ * Finding の id/type/primaryScopeId、Operation の cycleId/sourceId のみを検索対象とする。
  * Tweet 本文は個人が特定可能な実データを含みうるため、意図的に除外する。
  * `enabledEntityTypes` で無効にした type は DB を問い合わせず空配列を返す:
  * 呼び出し元 (Route Handler) が区画の feature flag に応じて渡すことで、
@@ -113,7 +113,12 @@ export async function searchAcrossEntities(
     enabled.accounts ? searchAccounts(prisma, query) : Promise.resolve([]),
     enabled.labels
       ? prisma.labelDefinition.findMany({
-          where: { key: { contains: query, mode: 'insensitive' } },
+          where: {
+            OR: [
+              { key: { contains: query, mode: 'insensitive' } },
+              { description: { contains: query, mode: 'insensitive' } },
+            ],
+          },
           take: MAX_RESULTS_PER_TYPE,
         })
       : Promise.resolve([]),
@@ -123,6 +128,7 @@ export async function searchAcrossEntities(
             OR: [
               { id: { contains: query, mode: 'insensitive' } },
               { type: { contains: query, mode: 'insensitive' } },
+              { primaryScopeId: { contains: query, mode: 'insensitive' } },
             ],
           },
           take: MAX_RESULTS_PER_TYPE,

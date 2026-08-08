@@ -92,15 +92,32 @@ describe('searchAcrossEntities', () => {
     expect(accountSummaryFindMany).not.toHaveBeenCalled()
   })
 
-  it('Label の key、Finding の id/type、Operation の cycleId/sourceId のみを参照する', async () => {
+  it('Label の key/description、Finding の id/type/primaryScopeId、Operation の cycleId/sourceId のみを参照する', async () => {
     const { prisma } = createMockPrisma()
     await searchAcrossEntities(prisma, { query: 'example' })
 
     const labelFindMany = (
       prisma as unknown as { labelDefinition: { findMany: ReturnType<typeof vi.fn> } }
     ).labelDefinition.findMany
-    const labelCall = labelFindMany.mock.calls[0][0] as { where: Record<string, unknown> }
-    expect(Object.keys(labelCall.where)).toEqual(['key'])
+    const labelCall = labelFindMany.mock.calls[0][0] as {
+      where: { OR: Record<string, unknown>[] }
+    }
+    expect(labelCall.where.OR.map((condition) => Object.keys(condition)[0])).toEqual([
+      'key',
+      'description',
+    ])
+
+    const findingFindMany = (
+      prisma as unknown as { reviewFinding: { findMany: ReturnType<typeof vi.fn> } }
+    ).reviewFinding.findMany
+    const findingCall = findingFindMany.mock.calls[0][0] as {
+      where: { OR: Record<string, unknown>[] }
+    }
+    expect(findingCall.where.OR.map((condition) => Object.keys(condition)[0])).toEqual([
+      'id',
+      'type',
+      'primaryScopeId',
+    ])
 
     const operationFindMany = (
       prisma as unknown as { operationCycle: { findMany: ReturnType<typeof vi.fn> } }
