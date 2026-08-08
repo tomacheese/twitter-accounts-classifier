@@ -27,11 +27,13 @@ async function upsertBlockAuthors(prisma: PrismaClient, result: BlockListResult)
  * 逆に再び観測された行は active へ戻す。
  * @param prisma - Prisma クライアント
  * @param blockerId - このブロック一覧の持ち主のアカウント
+ * @param crawlRunId - 新規作成する Block 行に記録する発生源の CrawlRun ID
  * @param result - 取得したブロック一覧
  */
 export async function syncBlocks(
   prisma: PrismaClient,
   blockerId: string,
+  crawlRunId: string,
   result: BlockListResult,
 ): Promise<void> {
   await upsertBlockAuthors(prisma, result)
@@ -48,6 +50,8 @@ export async function syncBlocks(
             blockedId,
             firstSeenAt: now,
             lastSeenAt: now,
+            sourceKind: 'crawl',
+            sourceId: crawlRunId,
           })),
           skipDuplicates: true,
         })

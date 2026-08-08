@@ -91,7 +91,7 @@ describe('syncBlocks', () => {
   it('upserts an Account row for every discovered author', async () => {
     const { prisma, accountUpsert } = makePrisma()
 
-    await syncBlocks(prisma, 'me', makeResult(['a', 'b'], true))
+    await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a', 'b'], true))
 
     expect(accountUpsert).toHaveBeenCalledTimes(2)
   })
@@ -99,7 +99,7 @@ describe('syncBlocks', () => {
   it('creates a Block edge for every id with blockerId fixed to the given account', async () => {
     const { prisma, blockCreateMany } = makePrisma()
 
-    await syncBlocks(prisma, 'me', makeResult(['a', 'b'], true))
+    await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a', 'b'], true))
 
     expect(blockCreateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -112,10 +112,25 @@ describe('syncBlocks', () => {
     )
   })
 
+  it('records crawl provenance on every newly created Block edge', async () => {
+    const { prisma, blockCreateMany } = makePrisma()
+
+    await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a', 'b'], true))
+
+    expect(blockCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({ sourceKind: 'crawl', sourceId: 'crawl-run-1' }),
+          expect.objectContaining({ sourceKind: 'crawl', sourceId: 'crawl-run-1' }),
+        ],
+      }),
+    )
+  })
+
   it('bumps lastSeenAt for every id with blockerId fixed to the given account', async () => {
     const { prisma, blockUpdateMany } = makePrisma()
 
-    await syncBlocks(prisma, 'me', makeResult(['a', 'b'], true))
+    await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a', 'b'], true))
 
     expect(blockUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -134,7 +149,7 @@ describe('syncBlocks', () => {
     }
     const { prisma, executeRaw, blockStateChangeCreateMany } = makePrisma([existing])
 
-    await syncBlocks(prisma, 'me', makeResult(['a'], true))
+    await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a'], true))
 
     expect(executeRaw).toHaveBeenCalledTimes(1)
     const [rawStrings, , ids, statuses, counts] = executeRaw.mock.calls[0] as [
@@ -171,7 +186,7 @@ describe('syncBlocks', () => {
     }
     const { prisma, blockFindMany } = makePrisma([existing])
 
-    await syncBlocks(prisma, 'me', makeResult(['a'], false))
+    await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a'], false))
 
     expect(staleLookupCalls(blockFindMany)).toHaveLength(0)
   })
@@ -186,7 +201,7 @@ describe('syncBlocks', () => {
     }
     const { prisma, blockFindMany, blockCreateMany } = makePrisma([existing])
 
-    await syncBlocks(prisma, 'me', makeResult([], true))
+    await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult([], true))
 
     expect(staleLookupCalls(blockFindMany)).toHaveLength(0)
     expect(blockCreateMany).not.toHaveBeenCalled()
@@ -198,7 +213,7 @@ describe('syncBlocks', () => {
       [{ id: 'block-1', status: 'resolved' }],
     )
 
-    await syncBlocks(prisma, 'me', makeResult(['a'], true))
+    await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a'], true))
 
     expect(blockUpdateMany).toHaveBeenCalledWith({
       where: { id: { in: ['block-1'] } },
@@ -223,7 +238,7 @@ describe('syncBlocks', () => {
   it('extends the transaction timeout beyond the Prisma default', async () => {
     const { prisma, $transaction } = makePrisma()
 
-    await syncBlocks(prisma, 'me', makeResult(['a'], true))
+    await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a'], true))
 
     expect($transaction).toHaveBeenCalledWith(expect.any(Function), {
       maxWait: 15_000,
