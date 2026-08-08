@@ -196,3 +196,74 @@ export async function getPipelineMeta(prisma: PrismaClient): Promise<ReadModelMe
     freshnessStatus: worstStatus,
   }
 }
+
+/** Accounts/Labels 区画の状態。 */
+export type ReadModelReadinessStatus = 'ready' | 'bootstrapping' | 'failed' | 'unavailable'
+
+/** Accounts/Labels それぞれの readiness。 */
+export interface ReadModelReadiness {
+  accounts: ReadModelReadinessStatus
+  labels: ReadModelReadinessStatus
+}
+
+/**
+ * `ReadModelBootstrap`(account_summary の bootstrap 進捗) と
+ * `ReadModelState`(label_summary の freshness・generation) を組み合わせて、
+ * Accounts/Labels それぞれの ready/bootstrapping/failed/unavailable を判定する。
+ * 「1 件以上存在すれば ready」という弱い判定にせず、bootstrap 完了・
+ * (Labels は) 全 Label 分の generation 完成を明示的に要求する。
+ * @param prisma - Prisma クライアント
+ * @returns Accounts/Labels の readiness
+ */
+export async function getReadModelReadiness(prisma: PrismaClient): Promise<ReadModelReadiness> {
+  const [
+    bootstrap,
+    accountSummaryLatestState,
+    labelSummaryState,
+    labelSummaryPointer,
+    labelDefinitionCount,
+  ] = await Promise.all([
+    prisma.readModelBootstrap.findUnique({ where: { modelKey: 'account_summary' } }),
+    prisma.readModelState.findUnique({ where: { modelKey: 'account_summary_latest' } }),
+    prisma.readModelState.findUnique({ where: { modelKey: 'label_summary' } }),
+    prisma.readModelPointer.findUnique({ where: { modelKey: 'label_summary' } }),
+    prisma.labelDefinition.count(),
+  ])
+
+  const bootstrapStatus = bootstrap?.status ?? 'pending'
+
+  let accounts: ReadModelReadinessStatus
+  if (bootstrapStatus === 'failed' || accountSummaryLatestState?.status === 'failed') {
+    accounts = 'failed'
+  } else if (bootstrapStatus === 'pending' || bootstrapStatus === 'running') {
+    accounts = 'bootstrapping'
+  } else if (bootstrapStatus === 'completed') {
+    accounts = 'ready'
+  } else {
+    accounts = 'unavailable'
+  }
+
+  let labelGenerationComplete = false
+  if (labelSummaryPointer) {
+    const generation = await prisma.readModelGeneration.findUnique({
+      where: { id: labelSummaryPointer.currentGenerationId },
+    })
+    labelGenerationComplete =
+      generation?.status === 'current' &&
+      generation.rowCount === labelDefinitionCount &&
+      labelDefinitionCount > 0
+  }
+
+  let labels: ReadModelReadinessStatus
+  if (accounts === 'failed' || labelSummaryState?.status === 'failed') {
+    labels = 'failed'
+  } else if (accounts === 'bootstrapping' || !labelGenerationComplete) {
+    labels = 'bootstrapping'
+  } else if (accounts === 'ready') {
+    labels = 'ready'
+  } else {
+    labels = 'unavailable'
+  }
+
+  return { accounts, labels }
+}
