@@ -79,7 +79,12 @@ describe('runBlockAccountCycle', () => {
 
     expect(client.createBlock).toHaveBeenNthCalledWith(1, 'spam-1')
     expect(client.createBlock).toHaveBeenNthCalledWith(2, 'spam-2')
-    expect(deps.recordSuccessfulBlock).toHaveBeenCalledWith(deps.prisma, 'blocker-1', 'spam-1')
+    expect(deps.recordSuccessfulBlock).toHaveBeenCalledWith(
+      deps.prisma,
+      'blocker-1',
+      'spam-1',
+      'account-run-1',
+    )
     expect(deps.recordSuccessfulBlock).toHaveBeenCalledTimes(1)
     expect(deps.recordBlockAction).toHaveBeenCalledWith(
       deps.prisma,
