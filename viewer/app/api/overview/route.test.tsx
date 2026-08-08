@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../../lib/prisma', () => ({ getPrismaClient: vi.fn().mockReturnValue({}) }))
+vi.mock('../../../lib/prisma', () => ({
+  getPrismaClient: vi.fn().mockReturnValue({
+    readModelState: { findUnique: vi.fn().mockResolvedValue(null) },
+  }),
+}))
 
 const getOverviewSnapshot = vi.fn()
 vi.mock('../../../lib/queries/overview', () => ({
@@ -8,6 +12,16 @@ vi.mock('../../../lib/queries/overview', () => ({
 }))
 
 describe('GET /api/overview', () => {
+  const originalEnv = process.env.VIEWER_NEW_UI_SECTIONS
+
+  beforeEach(() => {
+    process.env.VIEWER_NEW_UI_SECTIONS = 'overview'
+  })
+
+  afterEach(() => {
+    process.env.VIEWER_NEW_UI_SECTIONS = originalEnv
+  })
+
   it('OverviewSnapshot があれば内容と meta を含めて返す', async () => {
     getOverviewSnapshot.mockResolvedValue({
       operationalStatus: 'healthy',

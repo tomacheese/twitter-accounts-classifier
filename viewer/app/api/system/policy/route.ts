@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getPrismaClient } from '@/lib/prisma'
+import { guardSection } from '@/lib/api-section-guard'
 
 /**
  * Active policy の生設定を返す。System 画面では初期折りたたみとし、
@@ -7,6 +8,9 @@ import { getPrismaClient } from '@/lib/prisma'
  * @returns 最新 DetectionPolicyVersion の生設定
  */
 export async function GET(): Promise<NextResponse> {
+  const denied = guardSection('system')
+  if (denied) return denied
+
   const prisma = getPrismaClient()
   const latest = await prisma.detectionPolicyVersion.findFirst({
     orderBy: [{ loadedAt: 'desc' }],

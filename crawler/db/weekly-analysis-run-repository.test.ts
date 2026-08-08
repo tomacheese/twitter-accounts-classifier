@@ -178,6 +178,27 @@ describe('completeWeeklyAnalysisRun', () => {
     })
   })
 
+  it('persists structuredOutput so weekly_review_ingest has something to ingest', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const findUnique = vi.fn().mockResolvedValue(toRow({ status: 'success' }))
+    const upsert = vi.fn().mockResolvedValue({})
+    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, analysisWorkItem: { upsert } }
+    const prisma = {
+      $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
+    } as unknown as PrismaClient
+    const structuredOutput = { schemaVersion: 1, findings: [] }
+
+    await completeWeeklyAnalysisRun(prisma, 'run1', new Date('2026-08-05T01:00:00Z'), {
+      structuredOutput,
+    })
+
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ structuredOutput }),
+      }),
+    )
+  })
+
   it('enqueues a weekly_review_ingest AnalysisWorkItem when the run transitions to success', async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 })
     const findUnique = vi.fn().mockResolvedValue(toRow({ status: 'success' }))

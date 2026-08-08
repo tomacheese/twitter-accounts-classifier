@@ -18,7 +18,8 @@ describe('listOperationCycles', () => {
     const { prisma, findMany } = createMockPrisma({ cycles: [] })
     await listOperationCycles(prisma)
     const call = findMany.mock.calls[0][0] as { take: number }
-    expect(call.take).toBe(30)
+    // 次ページの有無を判定するため、既定件数より 1 件多く取得する。
+    expect(call.take).toBe(31)
   })
 })
 

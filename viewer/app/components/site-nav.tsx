@@ -4,6 +4,7 @@ import React, { useState } from 'react'
 import { NavLink } from './nav-link'
 import { ThemeToggle } from './theme-toggle'
 import { GlobalSearch } from './global-search'
+import type { NewUiSection } from '@/lib/feature-flags'
 
 interface NavItem {
   href: string
@@ -11,10 +12,7 @@ interface NavItem {
   badgeCount?: number
 }
 
-const LEGACY_NAV_ITEMS: NavItem[] = [
-  { href: '/', label: 'Dashboard' },
-  { href: '/accounts', label: 'Accounts' },
-  { href: '/labels', label: 'Labels' },
+const LEGACY_OPERATIONS_NAV_ITEMS: NavItem[] = [
   { href: '/weekly-runs', label: 'Weekly Runs' },
   { href: '/crawl-runs', label: 'Crawl Runs' },
   { href: '/block-runs', label: 'Block Runs' },
@@ -22,29 +20,52 @@ const LEGACY_NAV_ITEMS: NavItem[] = [
 
 /** SiteNav の props。 */
 export interface SiteNavProps {
-  /** `isNewUiSectionEnabled('overview')` が有効なら新ナビゲーション項目一式を表示する */
-  isNewNavEnabled: boolean
+  /** 有効になっている新 UI のセクション一覧 */
+  enabledSections: NewUiSection[]
   qualityReviewBadgeCount: number
   operationsBadgeCount: number
 }
 
 /**
- * 新ナビゲーション項目一式。`isNewNavEnabled` が有効な間だけ表示する。
+ * セクションごとのフラグに応じて、新旧いずれかの項目を並べる。
+ * 新 UI 全体を 1 つのフラグで切り替えると、片方の区画だけを試験公開できない。
+ * 対応する旧画面がある区画は、無効な間そちらへのリンクを残して到達不能にしない。
+ * @param enabledSections - 有効になっている新 UI のセクション一覧
  * @param badges - Quality Review / Operations の badge 件数
- * @returns 新ナビゲーション項目一覧
+ * @returns 表示するナビゲーション項目一覧
  */
-function buildNewNavItems(badges: {
-  qualityReviewBadgeCount: number
-  operationsBadgeCount: number
-}): NavItem[] {
+function buildNavItems(
+  enabledSections: NewUiSection[],
+  badges: { qualityReviewBadgeCount: number; operationsBadgeCount: number },
+): NavItem[] {
+  const isEnabled = (section: NewUiSection): boolean => enabledSections.includes(section)
+
   return [
-    { href: '/overview', label: 'Overview' },
-    { href: '/review', label: 'Quality Review', badgeCount: badges.qualityReviewBadgeCount },
+    isEnabled('overview')
+      ? { href: '/overview', label: 'Overview' }
+      : { href: '/', label: 'Dashboard' },
+    ...(isEnabled('review')
+      ? [
+          {
+            href: '/review',
+            label: 'Quality Review',
+            badgeCount: badges.qualityReviewBadgeCount,
+          },
+        ]
+      : []),
     { href: '/accounts', label: 'Accounts' },
     { href: '/labels', label: 'Labels' },
-    { href: '/operations', label: 'Operations', badgeCount: badges.operationsBadgeCount },
-    { href: '/blocks', label: 'Blocks' },
-    { href: '/system', label: 'System' },
+    ...(isEnabled('operations')
+      ? [
+          {
+            href: '/operations',
+            label: 'Operations',
+            badgeCount: badges.operationsBadgeCount,
+          },
+        ]
+      : LEGACY_OPERATIONS_NAV_ITEMS),
+    ...(isEnabled('blocks') ? [{ href: '/blocks', label: 'Blocks' }] : []),
+    ...(isEnabled('system') ? [{ href: '/system', label: 'System' }] : []),
   ]
 }
 
@@ -55,14 +76,17 @@ function buildNewNavItems(badges: {
  * @returns 描画されたナビゲーションバー
  */
 export function SiteNav({
-  isNewNavEnabled,
+  enabledSections,
   qualityReviewBadgeCount,
   operationsBadgeCount,
 }: SiteNavProps): React.ReactElement {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const navItems = isNewNavEnabled
-    ? buildNewNavItems({ qualityReviewBadgeCount, operationsBadgeCount })
-    : LEGACY_NAV_ITEMS
+  const navItems = buildNavItems(enabledSections, {
+    qualityReviewBadgeCount,
+    operationsBadgeCount,
+  })
+  // Global Search の遷移先はいずれも新 UI の画面であるため、1 つも有効でなければ出さない。
+  const isSearchEnabled = enabledSections.length > 0
 
   return (
     <nav
@@ -95,7 +119,7 @@ export function SiteNav({
           ))}
         </div>
 
-        {isNewNavEnabled && (
+        {isSearchEnabled && (
           <div className="hidden sm:block">
             <GlobalSearch />
           </div>
@@ -124,7 +148,7 @@ export function SiteNav({
               )}
             </NavLink>
           ))}
-          {isNewNavEnabled && <GlobalSearch />}
+          {isSearchEnabled && <GlobalSearch />}
           <ThemeToggle />
         </div>
       )}

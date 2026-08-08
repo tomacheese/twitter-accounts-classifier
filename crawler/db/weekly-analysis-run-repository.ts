@@ -159,6 +159,8 @@ export interface CompleteWeeklyAnalysisRunParams {
   commitSha?: string | null
   pullRequestNumber?: number | null
   pullRequestUrl?: string | null
+  /** analyzer が ReviewFinding へ取り込む構造化レビュー結果。 */
+  structuredOutput?: unknown
 }
 
 /**
@@ -177,7 +179,7 @@ export async function completeWeeklyAnalysisRun(
   finishedAt: Date,
   params: CompleteWeeklyAnalysisRunParams,
 ): Promise<WeeklyAnalysisRunMutationResult> {
-  const { sampledAccountIds, ...rest } = params
+  const { sampledAccountIds, structuredOutput, ...rest } = params
   return prisma.$transaction(async (tx) => {
     const result = await updateIfRunning(tx, id, {
       finishedAt,
@@ -187,6 +189,9 @@ export async function completeWeeklyAnalysisRun(
       ...rest,
       ...(sampledAccountIds !== undefined && {
         sampledAccountIds: sampledAccountIds as Prisma.InputJsonValue,
+      }),
+      ...(structuredOutput !== undefined && {
+        structuredOutput: structuredOutput as Prisma.InputJsonValue,
       }),
     })
     if (result.ok) {

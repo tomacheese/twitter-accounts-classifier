@@ -3,6 +3,8 @@ import { getSystemConsoleData } from '@/lib/queries/system-console'
 import { formatDateTime } from '@/lib/format-date'
 import { ErrorFallback } from '../components/error-fallback'
 import { PolicyRawViewer } from './policy-raw-viewer'
+import { notFound } from 'next/navigation'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
 // 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
@@ -13,6 +15,8 @@ export const dynamic = 'force-dynamic'
  * @returns 描画された System 画面
  */
 export default async function SystemPage(): Promise<React.ReactElement> {
+  if (!isNewUiSectionEnabled('system')) notFound()
+
   const prisma = getPrismaClient()
   try {
     const data = await getSystemConsoleData(prisma)

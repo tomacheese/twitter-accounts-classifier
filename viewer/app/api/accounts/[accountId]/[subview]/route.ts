@@ -8,6 +8,7 @@ import {
   getAccountRelations,
   getAccountTechnical,
 } from '@/lib/queries/account-subviews'
+import { guardSection } from '@/lib/api-section-guard'
 
 interface RouteParams {
   params: Promise<{ accountId: string; subview: string }>
@@ -41,6 +42,9 @@ function isSubviewKey(value: string): value is SubviewKey {
  * @returns subview のデータ。未知の subview なら 400、対象が存在しなければ 404
  */
 export async function GET(_request: Request, context: RouteParams): Promise<NextResponse> {
+  const denied = guardSection('accounts')
+  if (denied) return denied
+
   const { accountId, subview } = await context.params
   if (!isSubviewKey(subview)) {
     return NextResponse.json({ error: 'unknown subview' }, { status: 400 })

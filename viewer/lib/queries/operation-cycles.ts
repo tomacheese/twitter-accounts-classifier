@@ -1,4 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma'
+import { decodeCursor, encodeCursor } from '../pagination/keyset-cursor'
 
 /** OperationCycle の種別。 */
 export type OperationCycleKind = 'crawl' | 'weekly_review' | 'block'
@@ -21,34 +22,65 @@ export interface OperationCycleListItem {
 }
 
 const DEFAULT_LIMIT = 30
+const MAX_LIMIT = 100
+
+/** listOperationCycles の返り値。 */
+export interface ListOperationCyclesResult {
+  items: OperationCycleListItem[]
+  nextCursor: string | null
+}
 
 /**
  * @param prisma - Prisma クライアント
- * @param input - filters・limit
- * @returns 新しい順に並べた Cycle 一覧
+ * @param input - filters・cursor・limit
+ * @returns 新しい順に並べた Cycle 一覧と次ページの cursor
  */
 export async function listOperationCycles(
   prisma: PrismaClient,
-  input: { filters?: ListOperationCyclesFilters; limit?: number } = {},
-): Promise<OperationCycleListItem[]> {
+  input: { filters?: ListOperationCyclesFilters; cursor?: string; limit?: number } = {},
+): Promise<ListOperationCyclesResult> {
+  const kind = input.filters?.kind
+  const attentionRequired = input.filters?.attentionRequired ?? false
+  const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
+  const filterHash = JSON.stringify({ kind, attentionRequired })
+  const cursorValues = input.cursor ? decodeCursor(input.cursor, filterHash) : null
+
   const rows = await prisma.operationCycle.findMany({
     where: {
-      ...(input.filters?.kind ? { kind: input.filters.kind } : {}),
-      ...(input.filters?.attentionRequired ? { attentionRequired: true } : {}),
+      ...(kind ? { kind } : {}),
+      ...(attentionRequired ? { attentionRequired: true } : {}),
+      ...(cursorValues
+        ? {
+            OR: [
+              { triggeredAt: { lt: new Date(cursorValues[0]) } },
+              { triggeredAt: new Date(cursorValues[0]), id: { lt: cursorValues[1] } },
+            ],
+          }
+        : {}),
     },
     orderBy: [{ triggeredAt: 'desc' }, { id: 'desc' }],
-    take: input.limit ?? DEFAULT_LIMIT,
+    take: limit + 1,
   })
 
-  return rows.map((row) => ({
-    id: row.id,
-    kind: row.kind,
-    status: row.status,
-    attentionRequired: row.attentionRequired,
-    triggeredAt: row.triggeredAt,
-    startedAt: row.startedAt,
-    finishedAt: row.finishedAt,
-  }))
+  const hasMore = rows.length > limit
+  const page = hasMore ? rows.slice(0, limit) : rows
+  const last = page.at(-1)
+
+  return {
+    items: page.map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      status: row.status,
+      attentionRequired: row.attentionRequired,
+      triggeredAt: row.triggeredAt,
+      startedAt: row.startedAt,
+      finishedAt: row.finishedAt,
+    })),
+    nextCursor:
+      hasMore && last
+        ? encodeCursor({ sortValues: [last.triggeredAt.toISOString(), last.id], filterHash })
+        : null,
+  }
 }
 
 /** Cycle を構成する Stage 1 件。 */

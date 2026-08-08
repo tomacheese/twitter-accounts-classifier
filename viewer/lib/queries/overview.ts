@@ -124,9 +124,9 @@ export async function getOverviewSnapshot(
 
   const { attention, latestPipeline } = parsePayload(snapshot.payload)
   const freshnessStatus: ReadModelFreshnessStatus =
-    readModelState?.status === 'healthy' ||
-    readModelState?.status === 'stale' ||
-    readModelState?.status === 'failed'
+    readModelState.status === 'healthy' ||
+    readModelState.status === 'stale' ||
+    readModelState.status === 'failed'
       ? readModelState.status
       : 'unknown'
 
@@ -136,8 +136,8 @@ export async function getOverviewSnapshot(
     attention,
     latestPipeline,
     sourceDataAt: snapshot.sourceWatermarkAt,
-    generationId: readModelState?.currentGenerationId ?? null,
-    policyHash: readModelState?.policyHash ?? null,
+    generationId: readModelState.currentGenerationId,
+    policyHash: readModelState.policyHash,
     freshnessStatus,
   }
 }

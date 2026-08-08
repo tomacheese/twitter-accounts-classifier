@@ -3,6 +3,7 @@ import { getPrismaClient } from '@/lib/prisma'
 import { getBlockCycleDetail } from '@/lib/queries/operation-cycles'
 import { ErrorFallback } from '../../../components/error-fallback'
 import { OperationCycleDetail } from '../../cycle-detail-view'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
 interface BlockCycleDetailPageProps {
   params: Promise<{ cycleId: string }>
@@ -16,6 +17,8 @@ interface BlockCycleDetailPageProps {
 export default async function BlockCycleDetailPage({
   params,
 }: BlockCycleDetailPageProps): Promise<React.ReactElement> {
+  if (!isNewUiSectionEnabled('operations')) notFound()
+
   const { cycleId } = await params
   const prisma = getPrismaClient()
 

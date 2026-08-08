@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { getAccountOverview, getAccountClassification } = vi.hoisted(() => ({
   getAccountOverview: vi.fn(),
@@ -23,8 +23,15 @@ function callGet(accountId: string, subview: string) {
   })
 }
 
+const originalEnv = process.env.VIEWER_NEW_UI_SECTIONS
+
 beforeEach(() => {
   vi.clearAllMocks()
+  process.env.VIEWER_NEW_UI_SECTIONS = 'accounts'
+})
+
+afterEach(() => {
+  process.env.VIEWER_NEW_UI_SECTIONS = originalEnv
 })
 
 describe('GET /api/accounts/[accountId]/[subview]', () => {

@@ -4,6 +4,7 @@ import { getPrismaClient } from '@/lib/prisma'
 import { getOperationalIssueDetail } from '@/lib/queries/operational-issue-detail'
 import { formatDateTime } from '@/lib/format-date'
 import { ErrorFallback } from '../../../components/error-fallback'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
 interface OperationalIssueDetailPageProps {
   params: Promise<{ issueId: string }>
@@ -23,6 +24,8 @@ const KIND_TO_PATH: Record<string, string> = {
 export default async function OperationalIssueDetailPage({
   params,
 }: OperationalIssueDetailPageProps): Promise<React.ReactElement> {
+  if (!isNewUiSectionEnabled('operations')) notFound()
+
   const { issueId } = await params
   const prisma = getPrismaClient()
 

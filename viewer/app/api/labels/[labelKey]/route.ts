@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getPrismaClient } from '@/lib/prisma'
 import { getLabelDetail, type LabelDetailRangePreset } from '@/lib/queries/label-detail'
+import { guardSection } from '@/lib/api-section-guard'
 
 interface RouteParams {
   params: Promise<{ labelKey: string }>
@@ -23,6 +24,9 @@ function isRangePreset(value: string | null): value is LabelDetailRangePreset {
  * @returns Label 詳細。存在しなければ 404
  */
 export async function GET(request: NextRequest, context: RouteParams): Promise<NextResponse> {
+  const denied = guardSection('labels')
+  if (denied) return denied
+
   const { labelKey } = await context.params
   const rangeParam = request.nextUrl.searchParams.get('range')
   const range = isRangePreset(rangeParam) ? rangeParam : undefined

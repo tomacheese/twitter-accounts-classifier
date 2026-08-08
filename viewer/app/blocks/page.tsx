@@ -3,19 +3,32 @@ import { getPrismaClient } from '@/lib/prisma'
 import { listBlockRelations } from '@/lib/queries/block-relations'
 import { formatDateTime } from '@/lib/format-date'
 import { ErrorFallback } from '../components/error-fallback'
+import { CursorPagination } from '../components/cursor-pagination'
+import { notFound } from 'next/navigation'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
 // 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
 
+interface BlocksPageProps {
+  searchParams: Promise<{ cursor?: string }>
+}
+
 /**
  * Blocks 一覧画面。`status: 'active'` の Block 関係のみを表示する。
  * Block Run の実行状態は Operations が正本のため、ここでは関係の現在状態のみ扱う。
+ * @param props - `cursor` 検索パラメータ
  * @returns 描画された Blocks 一覧画面
  */
-export default async function BlocksPage(): Promise<React.ReactElement> {
+export default async function BlocksPage({
+  searchParams,
+}: BlocksPageProps): Promise<React.ReactElement> {
+  if (!isNewUiSectionEnabled('blocks')) notFound()
+
+  const params = await searchParams
   const prisma = getPrismaClient()
   try {
-    const { items } = await listBlockRelations(prisma)
+    const { items, nextCursor } = await listBlockRelations(prisma, { cursor: params.cursor })
 
     return (
       <div className="flex flex-col gap-4">
@@ -57,6 +70,7 @@ export default async function BlocksPage(): Promise<React.ReactElement> {
             </tbody>
           </table>
         )}
+        <CursorPagination basePath="/blocks" currentParams={params} nextCursor={nextCursor} />
       </div>
     )
   } catch (error) {

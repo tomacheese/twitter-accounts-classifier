@@ -6,6 +6,8 @@ import {
   type ReviewFindingStatus,
 } from '@/lib/queries/review-findings'
 import { buildApiResponseMeta } from '@/lib/api-response'
+import { getPipelineMeta } from '@/lib/read-model-meta'
+import { guardSection } from '@/lib/api-section-guard'
 
 const DEFAULT_LIMIT = 25
 const MAX_LIMIT = 100
@@ -50,6 +52,9 @@ function parseFilters(searchParams: URLSearchParams): ReviewFindingListFilters {
  * @returns Finding 一覧レスポンス
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const denied = guardSection('review')
+  if (denied) return denied
+
   const { searchParams } = request.nextUrl
   const filters = parseFilters(searchParams)
   const cursor = searchParams.get('cursor')
@@ -59,18 +64,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const prisma = getPrismaClient()
   const result = await listReviewFindings(prisma, { filters, cursor, limit })
+  const meta = await getPipelineMeta(prisma)
 
   return NextResponse.json(
     {
       items: result.items,
-      meta: buildApiResponseMeta({
-        generatedAt: new Date(),
-        sourceDataAt: null,
-        generationId: null,
-        policyHash: null,
-        freshnessStatus: 'unknown',
-        nextCursor: result.nextCursor,
-      }),
+      meta: buildApiResponseMeta({ ...meta, nextCursor: result.nextCursor }),
     },
     { headers: { 'Cache-Control': 'no-store' } },
   )

@@ -3,6 +3,7 @@ import { getPrismaClient } from '@/lib/prisma'
 import { getCrawlCycleDetail } from '@/lib/queries/operation-cycles'
 import { ErrorFallback } from '../../../components/error-fallback'
 import { OperationCycleDetail } from '../../cycle-detail-view'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
 interface CrawlCycleDetailPageProps {
   params: Promise<{ cycleId: string }>
@@ -16,6 +17,8 @@ interface CrawlCycleDetailPageProps {
 export default async function CrawlCycleDetailPage({
   params,
 }: CrawlCycleDetailPageProps): Promise<React.ReactElement> {
+  if (!isNewUiSectionEnabled('operations')) notFound()
+
   const { cycleId } = await params
   const prisma = getPrismaClient()
 

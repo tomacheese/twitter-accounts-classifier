@@ -11,6 +11,7 @@ import { listAccountSummaries, type AccountSummaryView } from '@/lib/queries/acc
 import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { LabelFilter } from '../components/label-filter'
 import { ErrorFallback } from '../components/error-fallback'
+import { CursorPagination } from '../components/cursor-pagination'
 
 interface AccountsPageProps {
   searchParams: Promise<{
@@ -19,6 +20,7 @@ interface AccountsPageProps {
     direction?: string
     page?: string
     view?: string
+    cursor?: string
   }>
 }
 
@@ -213,7 +215,7 @@ async function LegacyAccountsPage({
 /**
  * 新 Accounts 一覧画面。account_summary read model を参照する。
  * `view=recentlyChanged` (既定) は最近分類が変わった順、`view=all` は screenName 順に表示する。
- * @param props - `view` 検索パラメータ
+ * @param props - `view`/`cursor` 検索パラメータ
  * @returns アカウント一覧画面の描画結果
  */
 async function NewAccountsView({ searchParams }: AccountsPageProps): Promise<React.ReactElement> {
@@ -222,7 +224,7 @@ async function NewAccountsView({ searchParams }: AccountsPageProps): Promise<Rea
 
   const prisma = getPrismaClient()
   try {
-    const result = await listAccountSummaries(prisma, { view })
+    const result = await listAccountSummaries(prisma, { view, cursor: params.cursor })
 
     return (
       <div className="flex flex-col gap-4">
@@ -262,6 +264,11 @@ async function NewAccountsView({ searchParams }: AccountsPageProps): Promise<Rea
             </tbody>
           </table>
         )}
+        <CursorPagination
+          basePath="/accounts"
+          currentParams={params}
+          nextCursor={result.nextCursor}
+        />
       </div>
     )
   } catch (error) {

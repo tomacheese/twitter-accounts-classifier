@@ -3,6 +3,9 @@ import { getPrismaClient } from '@/lib/prisma'
 import { listOperationCycles, type OperationCycleKind } from '@/lib/queries/operation-cycles'
 import { formatDateTime } from '@/lib/format-date'
 import { ErrorFallback } from '../components/error-fallback'
+import { CursorPagination } from '../components/cursor-pagination'
+import { notFound } from 'next/navigation'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
 const KIND_TO_PATH: Record<string, string> = {
   crawl: 'crawl',
@@ -13,17 +16,19 @@ const KIND_TO_PATH: Record<string, string> = {
 const VALID_KINDS: OperationCycleKind[] = ['crawl', 'weekly_review', 'block']
 
 interface OperationsPageProps {
-  searchParams: Promise<{ kind?: string; attentionRequired?: string }>
+  searchParams: Promise<{ kind?: string; attentionRequired?: string; cursor?: string }>
 }
 
 /**
  * Operations 一覧画面。
- * @param props - `kind`/`attentionRequired` 検索パラメータ
+ * @param props - `kind`/`attentionRequired`/`cursor` 検索パラメータ
  * @returns 描画された Operations 一覧画面
  */
 export default async function OperationsPage({
   searchParams,
 }: OperationsPageProps): Promise<React.ReactElement> {
+  if (!isNewUiSectionEnabled('operations')) notFound()
+
   const params = await searchParams
   const kind = (VALID_KINDS as string[]).includes(params.kind ?? '')
     ? (params.kind as OperationCycleKind)
@@ -32,7 +37,10 @@ export default async function OperationsPage({
 
   const prisma = getPrismaClient()
   try {
-    const cycles = await listOperationCycles(prisma, { filters: { kind, attentionRequired } })
+    const { items: cycles, nextCursor } = await listOperationCycles(prisma, {
+      filters: { kind, attentionRequired },
+      cursor: params.cursor,
+    })
 
     return (
       <div className="flex flex-col gap-4">
@@ -68,6 +76,7 @@ export default async function OperationsPage({
             </tbody>
           </table>
         )}
+        <CursorPagination basePath="/operations" currentParams={params} nextCursor={nextCursor} />
       </div>
     )
   } catch (error) {

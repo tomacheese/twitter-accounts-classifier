@@ -3,6 +3,7 @@ import { getPrismaClient } from '@/lib/prisma'
 import { getReviewFindingDetail } from '@/lib/queries/review-finding-detail'
 import { formatDateTime } from '@/lib/format-date'
 import { ErrorFallback } from '../../../components/error-fallback'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
 interface FindingDetailPageProps {
   params: Promise<{ findingId: string }>
@@ -17,6 +18,8 @@ interface FindingDetailPageProps {
 export default async function FindingDetailPage({
   params,
 }: FindingDetailPageProps): Promise<React.ReactElement> {
+  if (!isNewUiSectionEnabled('review')) notFound()
+
   const { findingId } = await params
   const prisma = getPrismaClient()
 

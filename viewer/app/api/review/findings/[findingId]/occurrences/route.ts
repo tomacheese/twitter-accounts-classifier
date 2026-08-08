@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getPrismaClient } from '@/lib/prisma'
 import { getReviewFindingDetail } from '@/lib/queries/review-finding-detail'
+import { guardSection } from '@/lib/api-section-guard'
 
 interface RouteParams {
   params: Promise<{ findingId: string }>
@@ -13,6 +14,9 @@ interface RouteParams {
  * @returns Occurrence 一覧、Finding が存在しなければ 404
  */
 export async function GET(_request: Request, context: RouteParams): Promise<NextResponse> {
+  const denied = guardSection('review')
+  if (denied) return denied
+
   const { findingId } = await context.params
   const prisma = getPrismaClient()
   const detail = await getReviewFindingDetail(prisma, findingId)

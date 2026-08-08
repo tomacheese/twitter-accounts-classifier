@@ -3,6 +3,8 @@ import { getPrismaClient } from '@/lib/prisma'
 import { listReviewFindings, type ReviewFindingStatus } from '@/lib/queries/review-findings'
 import { formatDateTime } from '@/lib/format-date'
 import { ErrorFallback } from '../components/error-fallback'
+import { notFound } from 'next/navigation'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
 const PAGE_SIZE = 25
 
@@ -28,6 +30,8 @@ function toSingleValue(value: string | string[] | undefined): string | undefined
 export default async function ReviewPage({
   searchParams,
 }: ReviewPageProps): Promise<React.ReactElement> {
+  if (!isNewUiSectionEnabled('review')) notFound()
+
   const params = await searchParams
   const status = toSingleValue(params.status)
   const cursor = toSingleValue(params.cursor)

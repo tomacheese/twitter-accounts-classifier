@@ -1,5 +1,6 @@
 import { Logger } from '@book000/node-utils'
 import { parseArgs } from 'node:util'
+import { readFile } from 'node:fs/promises'
 import { PrismaClient } from '../generated/prisma'
 import {
   completeWeeklyAnalysisRun,
@@ -29,6 +30,17 @@ function reportMutationResult(result: WeeklyAnalysisRunMutationResult): void {
     logger.warn(`WeeklyAnalysisRun mutation did not apply: ${JSON.stringify(result)}`)
     process.exitCode = 1
   }
+}
+
+/**
+ * 構造化レビュー結果はコマンドライン引数に収まらない大きさになるため、
+ * JSON 文字列ではなくファイル経由で受け取る。
+ * @param filePath - structuredOutput を格納した JSON ファイルのパス
+ * @returns パース済みの structuredOutput
+ */
+async function readStructuredOutputFile(filePath: string): Promise<unknown> {
+  const content = await readFile(filePath, 'utf8')
+  return JSON.parse(content) as unknown
 }
 
 async function main(): Promise<void> {
@@ -102,11 +114,17 @@ async function main(): Promise<void> {
             'commit-sha': { type: 'string' },
             'pull-request-number': { type: 'string' },
             'pull-request-url': { type: 'string' },
+            'structured-output-file': { type: 'string' },
           },
         })
         if (!values.id) throw new Error('--id is required')
+        const structuredOutput =
+          values['structured-output-file'] === undefined
+            ? undefined
+            : await readStructuredOutputFile(values['structured-output-file'])
         reportMutationResult(
           await completeWeeklyAnalysisRun(prisma, values.id, new Date(), {
+            ...(structuredOutput !== undefined && { structuredOutput }),
             ...(values['sampled-account-ids'] !== undefined && {
               sampledAccountIds: JSON.parse(values['sampled-account-ids']) as unknown,
             }),
