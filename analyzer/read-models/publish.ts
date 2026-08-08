@@ -11,6 +11,33 @@ const RETAINED_GENERATIONS = 2
 const ANALYZER_VERSION = process.env.APPLICATION_VERSION ?? 'unknown'
 
 /**
+ * modelKey 単位で ReadModelState の行ロックを取り、行が無ければ先に作る。
+ * `SELECT ... FOR UPDATE` により、同一 modelKey への並行する publish 判定を
+ * transaction の commit まで直列化する。これが無いと、複数 worker が同時に
+ * 同じ旧 watermark を読んで両方 `isNewer=true` と判定し、後から commit した方の
+ * 古い watermark が新しい方を pointer 上で巻き戻せてしまう。
+ * @param tx - transaction 内の Prisma クライアント
+ * @param modelKey - 対象の読み取りモデル
+ * @param schemaVersion - 行が無い場合の初期値
+ * @returns ロック取得時点の sourceWatermarkAt。行が無かった場合は null
+ */
+async function lockReadModelStateRow(
+  tx: Prisma.TransactionClient,
+  modelKey: string,
+  schemaVersion: number,
+): Promise<Date | null> {
+  await tx.$executeRaw`
+    INSERT INTO "ReadModelState" ("modelKey", "schemaVersion", "status")
+    VALUES (${modelKey}, ${schemaVersion}, 'unknown')
+    ON CONFLICT ("modelKey") DO NOTHING
+  `
+  const rows = await tx.$queryRaw<{ sourceWatermarkAt: Date | null }[]>`
+    SELECT "sourceWatermarkAt" FROM "ReadModelState" WHERE "modelKey" = ${modelKey} FOR UPDATE
+  `
+  return rows[0]?.sourceWatermarkAt ?? null
+}
+
+/**
  * 公開時点で適用されている policy の content hash を得る。
  * 呼び出し元ごとに policy を読み直すと、公開の途中で入れ替わった場合に
  * ReadModelState が実際の生成条件と食い違うため、記録済みの値を参照する。
@@ -122,14 +149,12 @@ export async function publishGeneration(
     const policyHash = await getActivePolicyHash(prisma)
 
     // ANALYZER_WORKER_CONCURRENCY > 1 やバックログ処理では、新しい run の publish が
-    // 古い run の publish より先に終わりうる。watermark の単調性を transaction 内で
-    // 判定しないと、後から完了した古い run が current pointer を巻き戻してしまう。
+    // 古い run の publish より先に終わりうる。watermark の単調性判定を
+    // lockReadModelStateRow の行ロックで直列化しないと、後から完了した古い run が
+    // current pointer を巻き戻してしまう。
     const isNewerThanCurrent = await prisma.$transaction(async (tx) => {
-      const currentState = await tx.readModelState.findUnique({
-        where: { modelKey: input.modelKey },
-      })
-      const isNewer =
-        !currentState?.sourceWatermarkAt || input.sourceWatermarkAt > currentState.sourceWatermarkAt
+      const currentWatermark = await lockReadModelStateRow(tx, input.modelKey, input.schemaVersion)
+      const isNewer = !currentWatermark || input.sourceWatermarkAt > currentWatermark
 
       await tx.readModelGeneration.update({
         where: { id: generation.id },
@@ -148,24 +173,14 @@ export async function publishGeneration(
         create: { modelKey: input.modelKey, currentGenerationId: generation.id },
         update: { currentGenerationId: generation.id, switchedAt: new Date() },
       })
-      await tx.readModelState.upsert({
+      await tx.readModelState.update({
         where: { modelKey: input.modelKey },
-        create: {
-          modelKey: input.modelKey,
+        data: {
           schemaVersion: input.schemaVersion,
           status: 'healthy',
           currentGenerationId: generation.id,
           sourceWatermarkAt: input.sourceWatermarkAt,
           lastStartedAt: generation.startedAt,
-          lastSuccessAt: new Date(),
-          rowCount: result.rowCount,
-          policyHash,
-          analyzerVersion: ANALYZER_VERSION,
-        },
-        update: {
-          status: 'healthy',
-          currentGenerationId: generation.id,
-          sourceWatermarkAt: input.sourceWatermarkAt,
           lastSuccessAt: new Date(),
           rowCount: result.rowCount,
           policyHash,
@@ -193,17 +208,23 @@ export async function publishGeneration(
         where: { id: generation.id },
         data: { status: 'failed' },
       })
-      await prisma.readModelState.upsert({
-        where: { modelKey: input.modelKey },
-        create: {
-          modelKey: input.modelKey,
-          schemaVersion: input.schemaVersion,
-          status: 'failed',
-          lastStartedAt: generation.startedAt,
-          lastFailureAt: new Date(),
-          errorSummary: String(error),
-        },
-        update: { status: 'failed', lastFailureAt: new Date(), errorSummary: String(error) },
+      // この build がより新しい run の publish より遅れて失敗した場合、
+      // ReadModelState は既にその新しい run の watermark で healthy になっている。
+      // ここで無条件に failed を書くと、その新しい current model を巻き戻してしまう。
+      await prisma.$transaction(async (tx) => {
+        const currentWatermark = await lockReadModelStateRow(
+          tx,
+          input.modelKey,
+          input.schemaVersion,
+        )
+        const supersededByNewerRun =
+          currentWatermark !== null && currentWatermark >= input.sourceWatermarkAt
+        if (supersededByNewerRun) return
+
+        await tx.readModelState.update({
+          where: { modelKey: input.modelKey },
+          data: { status: 'failed', lastFailureAt: new Date(), errorSummary: String(error) },
+        })
       })
     } catch (bookkeepingError) {
       logger.error(
