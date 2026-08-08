@@ -108,4 +108,57 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAttentionItems', () => {
 
     expect(result.rowCount).toBe(0)
   })
+
+  it('同一 severity が取得上限を超えても、より新しいが recurring な Finding を候補から落とさない', async () => {
+    const oldDetectedAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    await prisma.reviewFinding.createMany({
+      data: Array.from({ length: 200 }, () => ({
+        fingerprint: `fingerprint-${randomUUID()}`,
+        identityVersion: 1,
+        type: 'label_count_drop',
+        primaryScopeType: 'label',
+        primaryScopeId: 'label-1',
+        status: 'active',
+        currentSeverity: 'critical',
+        maximumSeverity: 'critical',
+        firstDetectedAt: oldDetectedAt,
+      })),
+    })
+    const recurringFinding = await prisma.reviewFinding.create({
+      data: {
+        fingerprint: `fingerprint-${randomUUID()}`,
+        identityVersion: 1,
+        type: 'label_count_drop',
+        primaryScopeType: 'label',
+        primaryScopeId: 'label-2',
+        status: 'recurring',
+        currentSeverity: 'critical',
+        maximumSeverity: 'critical',
+        firstDetectedAt: new Date(),
+      },
+    })
+    await prisma.reviewFindingOccurrence.create({
+      data: {
+        findingId: recurringFinding.id,
+        stateTransition: 'recurring',
+        severity: 'critical',
+        sourceType: 'label_metric',
+        sourceId: 'label-2',
+        affectedCount: 90,
+        totalCount: 100,
+        policyHash: 'policy-1',
+        detectorVersion: 'v1',
+        observationKey: randomUUID(),
+      },
+    })
+
+    const generationId = `generation-${randomUUID()}`
+    await buildAttentionItems(prisma, { generationId, sourceWatermarkAt: new Date() })
+
+    const rows = await prisma.attentionItemCurrent.findMany({
+      where: { generationId },
+      orderBy: [{ priority: 'asc' }],
+    })
+    expect(rows[0]?.sourceId).toBe(recurringFinding.id)
+  })
 })

@@ -58,6 +58,66 @@ export interface BuildAttentionItemsInput {
   sourceWatermarkAt: Date
 }
 
+interface ReviewFindingCandidateRow {
+  id: string
+  type: string
+  status: string
+  currentSeverity: string
+  primaryScopeType: string
+  primaryScopeId: string
+  firstDetectedAt: Date
+  affectedCount: number | null
+  totalCount: number | null
+}
+
+/**
+ * 指定 severity の ReviewFinding 候補を、最終 comparator (recurring → affectedRatio →
+ * affectedCount → firstDetectedAt) と同じ優先順位で DB 側から取得する。
+ * この優先順位は affectedCount/totalCount という Occurrence 側の値から
+ * 都度算出する必要があり、Prisma の `orderBy` では表現できないため raw SQL を使う。
+ * アプリ側で全件取得してから並べ替えると、severity 内の件数が LIMIT を超えたときに
+ * 本来 top 8 に入るべき候補を取得段で落としてしまう。
+ * @param prisma - Prisma クライアント
+ * @param severity - 対象の severity
+ * @returns 優先順位順に並んだ候補一覧 (最大 PER_SEVERITY_FETCH_LIMIT 件)
+ */
+async function fetchReviewFindingCandidatesForSeverity(
+  prisma: PrismaClient,
+  severity: string,
+): Promise<ReviewFindingCandidateRow[]> {
+  return prisma.$queryRaw<ReviewFindingCandidateRow[]>`
+    SELECT
+      rf."id",
+      rf."type",
+      rf."status",
+      rf."currentSeverity",
+      rf."primaryScopeType",
+      rf."primaryScopeId",
+      rf."firstDetectedAt",
+      latest."affectedCount",
+      latest."totalCount"
+    FROM "ReviewFinding" rf
+    LEFT JOIN LATERAL (
+      SELECT "affectedCount", "totalCount"
+      FROM "ReviewFindingOccurrence"
+      WHERE "findingId" = rf."id"
+      ORDER BY "observedAt" DESC, "id" DESC
+      LIMIT 1
+    ) latest ON true
+    WHERE rf."status" IN ('active', 'recurring') AND rf."currentSeverity" = ${severity}
+    ORDER BY
+      (rf."status" = 'recurring') DESC,
+      CASE
+        WHEN COALESCE(latest."totalCount", 0) > 0
+          THEN latest."affectedCount"::float / latest."totalCount"
+        ELSE 0
+      END DESC,
+      COALESCE(latest."affectedCount", 0) DESC,
+      rf."firstDetectedAt" ASC
+    LIMIT ${PER_SEVERITY_FETCH_LIMIT}
+  `
+}
+
 /**
  * 指定 severity の候補だけを取得する。
  * @param prisma - Prisma クライアント
@@ -74,12 +134,7 @@ async function fetchCandidatesForSeverity(
       orderBy: [{ firstDetectedAt: 'asc' }],
       take: PER_SEVERITY_FETCH_LIMIT,
     }),
-    prisma.reviewFinding.findMany({
-      where: { status: { in: ['active', 'recurring'] }, currentSeverity: severity },
-      include: { occurrences: { orderBy: [{ observedAt: 'desc' }], take: 1 } },
-      orderBy: [{ firstDetectedAt: 'asc' }],
-      take: PER_SEVERITY_FETCH_LIMIT,
-    }),
+    fetchReviewFindingCandidatesForSeverity(prisma, severity),
   ])
 
   return [
@@ -98,9 +153,8 @@ async function fetchCandidatesForSeverity(
       detailHref: `/operations/issues/${issue.id}`,
     })),
     ...reviewFindings.map((finding): AttentionCandidate => {
-      const latestOccurrence = finding.occurrences.at(0)
-      const totalCount = latestOccurrence?.totalCount ?? 0
-      const affectedCount = latestOccurrence?.affectedCount ?? 0
+      const totalCount = finding.totalCount ?? 0
+      const affectedCount = finding.affectedCount ?? 0
       return {
         sourceType: 'review_finding',
         sourceId: finding.id,
