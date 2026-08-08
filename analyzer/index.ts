@@ -10,8 +10,10 @@ import {
   processReadModelRefresh,
   processWeeklyReviewIngest,
   processBlockReconciliation,
+  handleWorkItemSettled,
 } from './worker-processors'
 import { getWorkerConcurrency } from './config/env'
+import { DEFAULT_POLICY_PATH, loadPolicy, recordPolicyVersion } from './policy/load-policy'
 import type { PrismaClient } from './generated/prisma'
 
 const logger = Logger.configure('analyzer')
@@ -38,6 +40,10 @@ export async function main(): Promise<void> {
   logger.info('analyzer starting')
   await prisma.$connect()
 
+  // 起動時に記録しておかないと、queue が空で 1 件も処理しなかった期間の
+  // System 画面が適用中 policy 不明のままになる。
+  await recordPolicyVersion(prisma, loadPolicy(DEFAULT_POLICY_PATH))
+
   const deps: WorkerLoopDeps = {
     leaseOwner: `${hostname()}-${process.pid}-${randomUUID()}`,
     processLabelMetrics,
@@ -45,6 +51,7 @@ export async function main(): Promise<void> {
     processReadModelRefresh,
     processWeeklyReviewIngest,
     processBlockReconciliation,
+    onWorkItemSettled: handleWorkItemSettled,
   }
 
   const concurrency = getWorkerConcurrency()

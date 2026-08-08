@@ -2,10 +2,17 @@ import { describe, expect, it, vi } from 'vitest'
 
 const connect = vi.fn().mockResolvedValue(undefined)
 const runWorkerLoopOnce = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false)
+const recordPolicyVersion = vi.fn().mockResolvedValue('hash')
 
 vi.mock('./db/client', () => ({
   getPrismaClient: () => ({ $connect: connect }),
   disconnectPrisma: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('./policy/load-policy', () => ({
+  DEFAULT_POLICY_PATH: '/policy.json',
+  loadPolicy: vi.fn().mockReturnValue({ schemaVersion: 1, policyVersion: 'v1', rules: [] }),
+  recordPolicyVersion: (...args: unknown[]): unknown => recordPolicyVersion(...args),
 }))
 
 vi.mock('./worker-loop', () => ({
@@ -18,6 +25,7 @@ vi.mock('./worker-processors', () => ({
   processReadModelRefresh: vi.fn(),
   processWeeklyReviewIngest: vi.fn(),
   processBlockReconciliation: vi.fn(),
+  handleWorkItemSettled: vi.fn(),
 }))
 
 describe('main', () => {
@@ -27,5 +35,13 @@ describe('main', () => {
     await expect(main()).resolves.toBeUndefined()
     expect(connect).toHaveBeenCalledTimes(1)
     expect(runWorkerLoopOnce).toHaveBeenCalled()
+  })
+
+  it('起動時に適用中 policy を記録する', async () => {
+    const { main } = await import('./index')
+
+    await main()
+
+    expect(recordPolicyVersion).toHaveBeenCalled()
   })
 })

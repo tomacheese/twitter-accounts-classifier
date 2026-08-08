@@ -8,6 +8,23 @@ const logger = Logger.configure('analyzer:read-models:publish')
 // 読み取り途中で行を消されないようにするため。
 const RETAINED_GENERATIONS = 2
 
+const ANALYZER_VERSION = process.env.APPLICATION_VERSION ?? 'unknown'
+
+/**
+ * 公開時点で適用されている policy の content hash を得る。
+ * 呼び出し元ごとに policy を読み直すと、公開の途中で入れ替わった場合に
+ * ReadModelState が実際の生成条件と食い違うため、記録済みの値を参照する。
+ * @param prisma - Prisma クライアント
+ * @returns 最新の DetectionPolicyVersion の content hash。未記録なら null
+ */
+async function getActivePolicyHash(prisma: PrismaClient): Promise<string | null> {
+  const latest = await prisma.detectionPolicyVersion.findFirst({
+    orderBy: [{ loadedAt: 'desc' }],
+    select: { contentHash: true },
+  })
+  return latest?.contentHash ?? null
+}
+
 /**
  * generationId で世代管理されている読み取りモデルの行削除処理。
  */
@@ -102,6 +119,7 @@ export async function publishGeneration(
 
   try {
     const result = await input.build(generation.id)
+    const policyHash = await getActivePolicyHash(prisma)
 
     // ANALYZER_WORKER_CONCURRENCY > 1 やバックログ処理では、新しい run の publish が
     // 古い run の publish より先に終わりうる。watermark の単調性を transaction 内で
@@ -141,6 +159,8 @@ export async function publishGeneration(
           lastStartedAt: generation.startedAt,
           lastSuccessAt: new Date(),
           rowCount: result.rowCount,
+          policyHash,
+          analyzerVersion: ANALYZER_VERSION,
         },
         update: {
           status: 'healthy',
@@ -148,6 +168,8 @@ export async function publishGeneration(
           sourceWatermarkAt: input.sourceWatermarkAt,
           lastSuccessAt: new Date(),
           rowCount: result.rowCount,
+          policyHash,
+          analyzerVersion: ANALYZER_VERSION,
           errorCode: null,
           errorSummary: null,
         },

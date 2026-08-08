@@ -33,6 +33,37 @@ describe.skipIf(!process.env.DATABASE_URL)('publishGeneration', () => {
     expect(state.status).toBe('healthy')
   })
 
+  it('ReadModelState に適用中 policy と analyzer 版数を残す', async () => {
+    const policyVersion = `test-policy-${Date.now()}`
+    // 他のテストが記録した policy より確実に新しくして、最新行の選択を一意にする。
+    await prisma.detectionPolicyVersion.create({
+      data: {
+        policyVersion,
+        contentHash: 'content-hash-for-test',
+        schemaVersion: 1,
+        content: {},
+        loadedAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
+    })
+
+    try {
+      await publishGeneration(prisma, {
+        modelKey: 'label_summary',
+        schemaVersion: 1,
+        sourceWatermarkAt: new Date(),
+        build: () => Promise.resolve({ rowCount: 1 }),
+      })
+
+      const state = await prisma.readModelState.findUniqueOrThrow({
+        where: { modelKey: 'label_summary' },
+      })
+      expect(state.policyHash).toBe('content-hash-for-test')
+      expect(state.analyzerVersion).not.toBeNull()
+    } finally {
+      await prisma.detectionPolicyVersion.delete({ where: { policyVersion } })
+    }
+  })
+
   it('build が失敗すると Pointer を進めず、旧 generation を current のまま維持する', async () => {
     await publishGeneration(prisma, {
       modelKey: 'account_summary',
