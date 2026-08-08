@@ -24,6 +24,7 @@ const HANDLED_KINDS = [
   'block_reconciliation',
   'retention_sweep',
   'account_summary_refresh',
+  'account_summary_bootstrap',
   POST_COMPLETION_REFRESH_KIND,
 ] as const
 
@@ -53,6 +54,11 @@ export interface WorkerLoopDeps {
   processAccountSummaryRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: account_summary_refresh, triggerType: review_finding_occurrence の処理関数。 */
   processAccountFindingRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
+  /** kind: account_summary_bootstrap の処理関数。 */
+  processAccountSummaryBootstrap: (
+    prisma: PrismaClient,
+    workItem: AnalysisWorkItem,
+  ) => Promise<void>
   /**
    * WorkItem の終了状態を確定させた後に呼ばれる後処理。
    * Cycle の再計算は WorkItem の状態が確定した後でなければ最新の Stage 状態を
@@ -110,6 +116,9 @@ async function dispatch(
         return deps.processAccountFindingRefresh(prisma, workItem)
       }
       return deps.processAccountSummaryRefresh(prisma, workItem)
+    }
+    case 'account_summary_bootstrap': {
+      return deps.processAccountSummaryBootstrap(prisma, workItem)
     }
     default: {
       throw new Error(`Unknown work item kind: ${workItem.kind}`)

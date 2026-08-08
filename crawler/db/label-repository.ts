@@ -317,7 +317,9 @@ export async function recordCrawlAccountLabelsAtomic(
     const methods = params.labels.map((label) => label.method)
     const ruleVersions = params.labels.map((label) => label.ruleVersion)
 
-    const claimedRows = await tx.$queryRaw<{ labelDefinitionId: string; method: string; ruleVersion: string }[]>`
+    const claimedRows = await tx.$queryRaw<
+      { labelDefinitionId: string; method: string; ruleVersion: string }[]
+    >`
       INSERT INTO "CrawlAccountLabelRun"
         ("id", "crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion")
       SELECT * FROM UNNEST(

@@ -34,6 +34,11 @@ vi.mock('./worker-processors', () => ({
   handleWorkItemSettled: vi.fn(),
 }))
 
+vi.mock('./read-models/account-summary-bootstrap', () => ({
+  enqueueAccountSummaryBootstrapIfNeeded: vi.fn().mockResolvedValue(undefined),
+  processAccountSummaryBootstrap: vi.fn(),
+}))
+
 describe('main', () => {
   it('例外を投げずに $connect を呼び、queue が空になるまで claim して終了する', async () => {
     const { main } = await import('./index')

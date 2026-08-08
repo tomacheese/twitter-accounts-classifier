@@ -18,6 +18,10 @@ import {
   refreshReadModelFreshnessFromPolicy,
   handleWorkItemSettled,
 } from './worker-processors'
+import {
+  enqueueAccountSummaryBootstrapIfNeeded,
+  processAccountSummaryBootstrap,
+} from './read-models/account-summary-bootstrap'
 import { getWorkerConcurrency } from './config/env'
 import { DEFAULT_POLICY_PATH, loadPolicy, recordPolicyVersion } from './policy/load-policy'
 import type { PrismaClient } from './generated/prisma'
@@ -54,6 +58,8 @@ export async function main(): Promise<void> {
   // WorkItem 完了時のみだと、queue が空で何も処理しない期間は
   // 経過時間による delayed/stale への遷移を検出できない。
   await refreshReadModelFreshnessFromPolicy(prisma)
+  // winner-takes-all: 複数 worker が同時に起動しても bootstrap WorkItem は 1 件だけ enqueue される。
+  await enqueueAccountSummaryBootstrapIfNeeded(prisma)
 
   const deps: WorkerLoopDeps = {
     leaseOwner: `${hostname()}-${process.pid}-${randomUUID()}`,
@@ -66,6 +72,7 @@ export async function main(): Promise<void> {
     processPostCompletionRefresh,
     processAccountSummaryRefresh,
     processAccountFindingRefresh,
+    processAccountSummaryBootstrap,
     onWorkItemSettled: handleWorkItemSettled,
   }
 
