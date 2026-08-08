@@ -217,4 +217,78 @@ describe.skipIf(!process.env.DATABASE_URL)('ingestWeeklyReviewFindings', () => {
     expect(updated.status).toBe('recurring')
     expect(updated.recurrenceCount).toBe(1)
   })
+
+  it('同じ WeeklyAnalysisRun を retry しても Occurrence/Evidence/recurrenceCount を重複加算しない', async () => {
+    const dimensions = { label: `test_label_${randomUUID()}` }
+    const recurringPolicy: DetectionPolicy = {
+      ...policy,
+      rules: policy.rules.map((rule) => ({ ...rule, recurrenceWindow: 'P30D' })),
+    }
+
+    await ingestWeeklyReviewFindings(prisma, {
+      weeklyAnalysisRunId: `weekly-${randomUUID()}`,
+      structuredOutput: buildStructuredOutput({ dimensions }),
+      policy: recurringPolicy,
+    })
+    const created = await prisma.reviewFinding.findFirstOrThrow({
+      where: { type: 'possible_false_positive', primaryScopeId: 'account-1' },
+    })
+    await prisma.reviewFinding.update({
+      where: { id: created.id },
+      data: { status: 'resolved', resolvedAt: new Date() },
+    })
+
+    // read_model_refresh の後続処理が失敗して同じ WorkItem が retry された状況を模す。
+    const retriedWeeklyAnalysisRunId = `weekly-${randomUUID()}`
+    const structuredOutputForRetry = buildStructuredOutput({ dimensions })
+    await ingestWeeklyReviewFindings(prisma, {
+      weeklyAnalysisRunId: retriedWeeklyAnalysisRunId,
+      structuredOutput: structuredOutputForRetry,
+      policy: recurringPolicy,
+    })
+    await ingestWeeklyReviewFindings(prisma, {
+      weeklyAnalysisRunId: retriedWeeklyAnalysisRunId,
+      structuredOutput: structuredOutputForRetry,
+      policy: recurringPolicy,
+    })
+
+    const updated = await prisma.reviewFinding.findUniqueOrThrow({ where: { id: created.id } })
+    expect(updated.status).toBe('recurring')
+    expect(updated.recurrenceCount).toBe(1)
+
+    const occurrences = await prisma.reviewFindingOccurrence.findMany({
+      where: { findingId: created.id, observationKey: retriedWeeklyAnalysisRunId },
+    })
+    expect(occurrences).toHaveLength(1)
+
+    const evidences = await prisma.findingEvidence.findMany({ where: { findingId: created.id } })
+    expect(evidences).toHaveLength(2)
+  })
+
+  it('recurring な Finding に対する後続の取り込みで status を active に戻さない', async () => {
+    const dimensions = { label: `test_label_${randomUUID()}` }
+
+    await ingestWeeklyReviewFindings(prisma, {
+      weeklyAnalysisRunId: `weekly-${randomUUID()}`,
+      structuredOutput: buildStructuredOutput({ dimensions }),
+      policy,
+    })
+    const created = await prisma.reviewFinding.findFirstOrThrow({
+      where: { type: 'possible_false_positive', primaryScopeId: 'account-1' },
+    })
+    await prisma.reviewFinding.update({
+      where: { id: created.id },
+      data: { status: 'recurring', recurrenceCount: 1 },
+    })
+
+    await ingestWeeklyReviewFindings(prisma, {
+      weeklyAnalysisRunId: `weekly-${randomUUID()}`,
+      structuredOutput: buildStructuredOutput({ dimensions }),
+      policy,
+    })
+
+    const updated = await prisma.reviewFinding.findUniqueOrThrow({ where: { id: created.id } })
+    expect(updated.status).toBe('recurring')
+    expect(updated.recurrenceCount).toBe(1)
+  })
 })
