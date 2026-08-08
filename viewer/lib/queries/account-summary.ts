@@ -1,6 +1,11 @@
 import type { PrismaClient } from '../../generated/prisma'
 import type { ReadModelFreshnessStatus } from '../api-response'
 import { decodeCursor, encodeCursor } from '../pagination/keyset-cursor'
+import {
+  getReadModelMeta,
+  getReadModelReadiness,
+  type ReadModelReadinessStatus,
+} from '../read-model-meta'
 
 /** アカウント一覧の表示順を決める view。 */
 export type AccountSummaryView = 'recentlyChanged' | 'all'
@@ -37,9 +42,9 @@ export interface ListAccountSummariesResult {
   nextCursor: string | null
   generationId: string | null
   freshnessStatus: ReadModelFreshnessStatus
+  readiness: ReadModelReadinessStatus
 }
 
-const MODEL_KEY = 'account_summary'
 const DEFAULT_LIMIT = 25
 const MAX_LIMIT = 100
 
@@ -57,28 +62,6 @@ function resolveSeverityCandidates(minSeverity: string): string[] | null {
 }
 
 /**
- * ReadModelPointer が指す現在の generationId と、
- * ReadModelState が持つ鮮度を取得する。
- * AccountSummaryCurrent は generationId ごとに全件書き込まれるため、
- * pointer を介さず直接クエリすると古い generation の残骸行を返しかねない。
- * @param prisma - Prisma クライアント
- * @returns 現在の generationId と鮮度。ReadModelPointer が未生成なら generationId は null
- */
-async function getGenerationState(
-  prisma: PrismaClient,
-): Promise<{ generationId: string | null; freshnessStatus: ReadModelFreshnessStatus }> {
-  const [pointer, state] = await Promise.all([
-    prisma.readModelPointer.findUnique({ where: { modelKey: MODEL_KEY } }),
-    prisma.readModelState.findUnique({ where: { modelKey: MODEL_KEY } }),
-  ])
-  const freshnessStatus: ReadModelFreshnessStatus =
-    state?.status === 'healthy' || state?.status === 'stale' || state?.status === 'failed'
-      ? state.status
-      : 'unknown'
-  return { generationId: pointer?.currentGenerationId ?? null, freshnessStatus }
-}
-
-/**
  * `view: 'recentlyChanged'` は `lastClassificationChangedAt` 降順、
  * `view: 'all'` は `normalizedScreenName` 昇順で返す。
  * 降順側は NULLS FIRST となる索引順をそのまま使うため、
@@ -91,10 +74,17 @@ export async function listAccountSummaries(
   prisma: PrismaClient,
   input: ListAccountSummariesInput,
 ): Promise<ListAccountSummariesResult> {
-  const { generationId, freshnessStatus } = await getGenerationState(prisma)
-  if (!generationId) {
-    return { items: [], nextCursor: null, generationId: null, freshnessStatus }
+  const readiness = await getReadModelReadiness(prisma)
+  if (readiness.accounts !== 'ready') {
+    return {
+      items: [],
+      nextCursor: null,
+      generationId: null,
+      freshnessStatus: 'unknown',
+      readiness: readiness.accounts,
+    }
   }
+  const { freshnessStatus } = await getReadModelMeta(prisma, 'account_summary_latest')
 
   const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
   const labelKeys = input.filters?.labelKeys ?? []
@@ -138,9 +128,8 @@ export async function listAccountSummaries(
     }
   })()
 
-  const rows = await prisma.accountSummaryCurrent.findMany({
+  const rows = await prisma.accountSummaryLatest.findMany({
     where: {
-      generationId,
       ...(labelKeys.length > 0 ? { activeLabelKeys: { hasSome: labelKeys } } : {}),
       ...(severityCandidates ? { highestFindingSeverity: { in: severityCandidates } } : {}),
       ...cursorWhere,
@@ -167,8 +156,9 @@ export async function listAccountSummaries(
       : null
 
   return {
-    generationId,
+    generationId: null,
     freshnessStatus,
+    readiness: readiness.accounts,
     nextCursor,
     items: page.map((row) => ({
       accountId: row.accountId,
