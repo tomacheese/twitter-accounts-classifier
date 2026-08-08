@@ -1,4 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma'
+import { getReadModelReadiness, type ReadModelReadinessStatus } from '../read-model-meta'
 
 const MODEL_KEY = 'label_summary'
 
@@ -10,6 +11,12 @@ export interface LabelSummaryListItem {
   qualityStatus: string
   activeFindingCount: number
   highestFindingSeverity: string | null
+}
+
+/** listLabelSummaries の返り値。 */
+export interface ListLabelSummariesResult {
+  items: LabelSummaryListItem[]
+  readiness: ReadModelReadinessStatus
 }
 
 const QUALITY_STATUS_RANK: Record<string, number> = { degraded: 3, watch: 2, unknown: 1, stable: 0 }
@@ -27,12 +34,19 @@ async function getCurrentGenerationId(prisma: PrismaClient): Promise<string | nu
  * 初期 sort は degraded/watch → active Finding 有無 → impact (prevalence) → label name の順。
  * LabelSummaryCurrent は 1 generation あたり全 LabelDefinition 分しか無く高々数百件のため、
  * DB 側の ORDER BY ではなく取得後に JS でソートする (複合ランクを SQL CASE で組むより単純)。
+ * `readiness.labels !== 'ready'` の間は `LabelSummaryCurrent` を問い合わせず、
+ * bootstrap 未完了・generation 未完成を「0 件」ではなく明示的な readiness として返す。
  * @param prisma - Prisma クライアント
- * @returns 全ラベルの一覧
+ * @returns 全ラベルの一覧と readiness
  */
-export async function listLabelSummaries(prisma: PrismaClient): Promise<LabelSummaryListItem[]> {
+export async function listLabelSummaries(prisma: PrismaClient): Promise<ListLabelSummariesResult> {
+  const readiness = await getReadModelReadiness(prisma)
+  if (readiness.labels !== 'ready') {
+    return { items: [], readiness: readiness.labels }
+  }
+
   const generationId = await getCurrentGenerationId(prisma)
-  if (!generationId) return []
+  if (!generationId) return { items: [], readiness: readiness.labels }
 
   const rows = await prisma.labelSummaryCurrent.findMany({ where: { generationId } })
   const labelDefinitions = await prisma.labelDefinition.findMany({
@@ -49,7 +63,7 @@ export async function listLabelSummaries(prisma: PrismaClient): Promise<LabelSum
     highestFindingSeverity: row.highestFindingSeverity,
   }))
 
-  return items.toSorted((a, b) => {
+  const sortedItems = items.toSorted((a, b) => {
     const qualityDiff =
       (QUALITY_STATUS_RANK[b.qualityStatus] ?? 0) - (QUALITY_STATUS_RANK[a.qualityStatus] ?? 0)
     if (qualityDiff !== 0) return qualityDiff
@@ -59,4 +73,6 @@ export async function listLabelSummaries(prisma: PrismaClient): Promise<LabelSum
     if (prevalenceDiff !== 0) return prevalenceDiff
     return a.labelKey.localeCompare(b.labelKey)
   })
+
+  return { items: sortedItems, readiness: readiness.labels }
 }

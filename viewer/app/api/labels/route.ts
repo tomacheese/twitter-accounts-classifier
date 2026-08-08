@@ -13,11 +13,11 @@ export async function GET(): Promise<NextResponse> {
   if (denied) return denied
 
   const prisma = getPrismaClient()
-  const items = await listLabelSummaries(prisma)
+  const { items, readiness } = await listLabelSummaries(prisma)
   const meta = await getReadModelMeta(prisma, 'label_summary')
 
   return NextResponse.json(
-    { items, meta: buildApiResponseMeta(meta) },
+    { items, readiness, meta: buildApiResponseMeta(meta) },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }
