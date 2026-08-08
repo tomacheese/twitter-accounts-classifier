@@ -7,6 +7,9 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {
+    // 前回実行分の pointer が残ったままだと、この後の previousGenerationId 判定が
+    // 「まだ何も公開されていない」前提のテストと食い違い、意図しない changeRow が生じる。
+    await prisma.readModelPointer.deleteMany({ where: { modelKey: 'account_summary' } })
     await prisma.accountLabelChange.deleteMany()
     await prisma.accountClassificationCurrent.deleteMany()
     await prisma.accountSummaryCurrent.deleteMany()
@@ -265,6 +268,64 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
     })
     expect(classification.value).toBe(false)
     expect(classification.reason).toBe('no match')
+  })
+
+  it('activeFindingCount/highestFindingSeverity は現在値ではなく sourceWatermarkAt 時点の Occurrence 履歴から復元する', async () => {
+    const accountId = await createAccount('grace')
+    const firstDetectedAt = new Date(Date.now() - 2 * 60 * 60 * 1000)
+    const watermarkAt = new Date(Date.now() - 60 * 60 * 1000)
+
+    const finding = await prisma.reviewFinding.create({
+      data: {
+        fingerprint: `fingerprint-${randomUUID()}`,
+        identityVersion: 1,
+        type: 'label_count_drop',
+        primaryScopeType: 'account',
+        primaryScopeId: accountId,
+        // 現在は resolved だが、watermark 時点ではまだ active だったケースを想定する。
+        status: 'resolved',
+        currentSeverity: 'high',
+        maximumSeverity: 'high',
+        firstDetectedAt,
+      },
+    })
+    await prisma.reviewFindingOccurrence.create({
+      data: {
+        findingId: finding.id,
+        observedAt: firstDetectedAt,
+        stateTransition: 'active',
+        severity: 'high',
+        sourceType: 'label_metric',
+        sourceId: 'crawl-1',
+        policyHash: 'policy-1',
+        detectorVersion: 'v1',
+        observationKey: 'crawl-1',
+      },
+    })
+    // watermark より後に resolved した occurrence。backlog 処理中の古い generation には
+    // 反映されず、watermark 時点ではまだ active だったとみなすべき。
+    await prisma.reviewFindingOccurrence.create({
+      data: {
+        findingId: finding.id,
+        observedAt: new Date(watermarkAt.getTime() + 60 * 1000),
+        stateTransition: 'resolved',
+        severity: 'high',
+        sourceType: 'label_metric',
+        sourceId: 'crawl-2',
+        policyHash: 'policy-1',
+        detectorVersion: 'v1',
+        observationKey: 'crawl-2',
+      },
+    })
+
+    const generationId = `generation-${randomUUID()}`
+    await buildAccountSummary(prisma, { generationId, sourceWatermarkAt: watermarkAt })
+
+    const summary = await prisma.accountSummaryCurrent.findFirstOrThrow({
+      where: { generationId, accountId },
+    })
+    expect(summary.activeFindingCount).toBe(1)
+    expect(summary.highestFindingSeverity).toBe('high')
   })
 
   it('同じ CrawlRun による retry では AccountLabelChange を重複挿入しない', async () => {
