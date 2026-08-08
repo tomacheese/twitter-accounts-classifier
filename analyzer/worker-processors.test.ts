@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { randomUUID } from 'node:crypto'
 import { getPrismaClient } from './db/client'
 import {
   processLabelMetrics,
@@ -10,7 +11,14 @@ const prisma = getPrismaClient()
 
 describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
   beforeEach(async () => {
+    await prisma.operationStage.deleteMany()
+    await prisma.operationCycle.deleteMany()
+    await prisma.operationalIssueOccurrence.deleteMany()
+    await prisma.operationalIssue.deleteMany()
+    await prisma.analysisRun.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.attentionItemCurrent.deleteMany()
+    await prisma.overviewSnapshot.deleteMany()
     await prisma.blockRelationCurrent.deleteMany()
     await prisma.readModelState.deleteMany()
     await prisma.readModelPointer.deleteMany()
@@ -18,6 +26,8 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     await prisma.labelMetricSnapshot.deleteMany()
     await prisma.crawlAccountLabelRun.deleteMany()
     await prisma.crawlRun.deleteMany()
+    await prisma.blockAccountRun.deleteMany()
+    await prisma.blockRun.deleteMany()
   })
 
   it('processLabelMetrics は LabelMetricSnapshot を生成し finding_generation を enqueue する', async () => {
@@ -103,11 +113,21 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
   })
 
   it('processBlockReconciliation は block_relation の ReadModelPointer を current に切り替える', async () => {
+    const blockRun = await prisma.blockRun.create({
+      data: {
+        id: `block-${randomUUID()}`,
+        startedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        finishedAt: new Date(),
+        status: 'success',
+      },
+    })
+
     await processBlockReconciliation(prisma, {
       id: 'work-item-3',
       kind: 'block_reconciliation',
       triggerType: 'block_run',
-      triggerId: 'block-run-1',
+      triggerId: blockRun.id,
       status: 'leased',
       priority: 0,
       availableAt: new Date(),
@@ -126,5 +146,14 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
       where: { modelKey: 'block_relation' },
     })
     expect(pointer).not.toBeNull()
+
+    const attentionPointer = await prisma.readModelPointer.findUnique({
+      where: { modelKey: 'attention_items' },
+    })
+    expect(attentionPointer).not.toBeNull()
+    const overviewPointer = await prisma.readModelPointer.findUnique({
+      where: { modelKey: 'overview_snapshot' },
+    })
+    expect(overviewPointer).not.toBeNull()
   })
 })

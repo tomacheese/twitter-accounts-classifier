@@ -1,6 +1,24 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { getPrismaClient } from '../db/client'
-import { enqueueWorkItem, claimNextWorkItem, completeWorkItem } from './work-item-repository'
+import {
+  enqueueWorkItem,
+  claimNextWorkItem,
+  completeWorkItem,
+  computeRetryBackoffMs,
+  startAnalysisRun,
+  finishAnalysisRun,
+} from './work-item-repository'
+
+describe('computeRetryBackoffMs', () => {
+  it('試行回数が増えるほど待機時間が伸びる', () => {
+    expect(computeRetryBackoffMs(1)).toBeLessThan(computeRetryBackoffMs(2))
+    expect(computeRetryBackoffMs(2)).toBeLessThan(computeRetryBackoffMs(3))
+  })
+
+  it('待機時間には上限がある', () => {
+    expect(computeRetryBackoffMs(100)).toBe(computeRetryBackoffMs(1000))
+  })
+})
 
 describe.skipIf(!process.env.DATABASE_URL)('enqueueWorkItem', () => {
   const prisma = getPrismaClient()
@@ -140,5 +158,106 @@ describe.skipIf(!process.env.DATABASE_URL)('claimNextWorkItem / completeWorkItem
 
     const row = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: claimed.id } })
     expect(row.leaseOwner).toBe('worker-b')
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('failed 時の再試行 backoff', () => {
+  const prisma = getPrismaClient()
+
+  beforeEach(async () => {
+    await prisma.analysisRun.deleteMany()
+    await prisma.analysisWorkItem.deleteMany()
+  })
+
+  it('retryAvailableAt を渡すと即時の再 claim を防ぐ', async () => {
+    await enqueueWorkItem(prisma, {
+      kind: 'label_metrics',
+      triggerType: 'crawl_run',
+      triggerId: 'crawl-backoff-1',
+    })
+    const claimed = await claimNextWorkItem(prisma, {
+      kinds: ['label_metrics'],
+      leaseOwner: 'worker-a',
+      leaseDurationMs: 60_000,
+    })
+    if (!claimed) throw new Error('claim に失敗した')
+
+    await completeWorkItem(prisma, {
+      workItemId: claimed.id,
+      leaseOwner: 'worker-a',
+      status: 'failed',
+      errorSummary: 'boom',
+      retryAvailableAt: new Date(Date.now() + 60_000),
+    })
+
+    const retried = await claimNextWorkItem(prisma, {
+      kinds: ['label_metrics'],
+      leaseOwner: 'worker-b',
+      leaseDurationMs: 60_000,
+    })
+    expect(retried).toBeUndefined()
+  })
+
+  it('succeeded では retryAvailableAt を渡しても availableAt を進めない', async () => {
+    await enqueueWorkItem(prisma, {
+      kind: 'label_metrics',
+      triggerType: 'crawl_run',
+      triggerId: 'crawl-backoff-2',
+    })
+    const claimed = await claimNextWorkItem(prisma, {
+      kinds: ['label_metrics'],
+      leaseOwner: 'worker-a',
+      leaseDurationMs: 60_000,
+    })
+    if (!claimed) throw new Error('claim に失敗した')
+
+    await completeWorkItem(prisma, {
+      workItemId: claimed.id,
+      leaseOwner: 'worker-a',
+      status: 'succeeded',
+      retryAvailableAt: new Date(Date.now() + 60_000),
+    })
+
+    const row = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: claimed.id } })
+    expect(row.availableAt.getTime()).toBeLessThanOrEqual(Date.now())
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('startAnalysisRun / finishAnalysisRun', () => {
+  const prisma = getPrismaClient()
+
+  beforeEach(async () => {
+    await prisma.analysisRun.deleteMany()
+    await prisma.analysisWorkItem.deleteMany()
+  })
+
+  it('attempt の開始と終了を AnalysisRun へ記録する', async () => {
+    await enqueueWorkItem(prisma, {
+      kind: 'label_metrics',
+      triggerType: 'crawl_run',
+      triggerId: 'crawl-run-record-1',
+    })
+    const claimed = await claimNextWorkItem(prisma, {
+      kinds: ['label_metrics'],
+      leaseOwner: 'worker-a',
+      leaseDurationMs: 60_000,
+    })
+    if (!claimed) throw new Error('claim に失敗した')
+
+    const analysisRunId = await startAnalysisRun(prisma, {
+      workItemId: claimed.id,
+      attemptNumber: claimed.attemptCount,
+    })
+    await finishAnalysisRun(prisma, {
+      analysisRunId,
+      status: 'failed',
+      errorSummary: 'boom',
+    })
+
+    const run = await prisma.analysisRun.findUniqueOrThrow({ where: { id: analysisRunId } })
+    expect(run.attemptNumber).toBe(1)
+    expect(run.status).toBe('failed')
+    expect(run.errorSummary).toBe('boom')
+    expect(run.finishedAt).not.toBeNull()
   })
 })

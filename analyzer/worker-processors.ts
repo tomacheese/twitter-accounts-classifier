@@ -3,8 +3,14 @@ import type { AnalysisWorkItem, PrismaClient } from './generated/prisma'
 import { enqueueWorkItem } from './queue/work-item-repository'
 import { generateLabelMetricSnapshots } from './metrics/label-metric-snapshot'
 import { generateFindingsForCrawlCycle } from './findings/generate-findings'
-import { detectRunFailures } from './operational-issues/detect-run-failures'
+import {
+  detectAnalysisStageFailure,
+  detectRunFailures,
+} from './operational-issues/detect-run-failures'
 import { buildOrUpdateCrawlCycle } from './operations/build-crawl-cycle'
+import { buildOrUpdateWeeklyReviewCycle } from './operations/build-weekly-review-cycle'
+import { buildOrUpdateBlockCycle } from './operations/build-block-cycle'
+import type { WorkItemOutcome } from './worker-loop'
 import { publishGeneration } from './read-models/publish'
 import { buildAccountSummary } from './read-models/build-account-summary'
 import { buildLabelSummary } from './read-models/build-label-summary'
@@ -15,6 +21,9 @@ import { ingestWeeklyReviewFindings } from './weekly-review/ingest'
 import { structuredOutputSchema } from './weekly-review/structured-output-schema'
 import { loadPolicy } from './policy/load-policy'
 import { computePolicyHash } from './policy/policy-hash'
+import { Logger } from '@book000/node-utils'
+
+const logger = Logger.configure('analyzer:worker-processors')
 
 const APP_VERSION = process.env.APPLICATION_VERSION ?? 'unknown'
 // CommonJS を採用する本プロジェクトでは __dirname がモジュールの位置を得る素直な手段であり、
@@ -99,31 +108,16 @@ export async function processFindingGeneration(
 }
 
 /**
- * OperationCycle を更新し、読み取りモデル各種を原子的に再公開する。
+ * OperationalIssue と ReviewFinding の変化を Attention Queue と Overview へ波及させる。
+ * Crawl 以外の契機で発生した Finding/Issue も同じ経路で可視化するため、
+ * Weekly Review・Block 完了時からも同じ関数を呼ぶ。
  * @param prisma - Prisma クライアント
- * @param workItem - `triggerType: 'crawl_run'` の WorkItem
+ * @param sourceWatermarkAt - 集計の基準時刻
  */
-export async function processReadModelRefresh(
+async function publishAttentionAndOverview(
   prisma: PrismaClient,
-  workItem: AnalysisWorkItem,
+  sourceWatermarkAt: Date,
 ): Promise<void> {
-  const crawlRun = await prisma.crawlRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
-  const sourceWatermarkAt = crawlRun.finishedAt ?? crawlRun.lastHeartbeatAt
-
-  await buildOrUpdateCrawlCycle(prisma, { crawlRunId: crawlRun.id })
-
-  await publishGeneration(prisma, {
-    modelKey: 'account_summary',
-    schemaVersion: 1,
-    sourceWatermarkAt,
-    build: (generationId) => buildAccountSummary(prisma, { generationId, sourceWatermarkAt }),
-  })
-  await publishGeneration(prisma, {
-    modelKey: 'label_summary',
-    schemaVersion: 1,
-    sourceWatermarkAt,
-    build: (generationId) => buildLabelSummary(prisma, { generationId, sourceWatermarkAt }),
-  })
   await publishGeneration(prisma, {
     modelKey: 'attention_items',
     schemaVersion: 1,
@@ -142,6 +136,35 @@ export async function processReadModelRefresh(
 }
 
 /**
+ * 読み取りモデル各種を原子的に再公開する。
+ * OperationCycle は WorkItem の終了状態が確定した後でなければ最新の Stage 状態を
+ * 反映できないため、ここではなく handleWorkItemSettled 側で再計算する。
+ * @param prisma - Prisma クライアント
+ * @param workItem - `triggerType: 'crawl_run'` の WorkItem
+ */
+export async function processReadModelRefresh(
+  prisma: PrismaClient,
+  workItem: AnalysisWorkItem,
+): Promise<void> {
+  const crawlRun = await prisma.crawlRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
+  const sourceWatermarkAt = crawlRun.finishedAt ?? crawlRun.lastHeartbeatAt
+
+  await publishGeneration(prisma, {
+    modelKey: 'account_summary',
+    schemaVersion: 1,
+    sourceWatermarkAt,
+    build: (generationId) => buildAccountSummary(prisma, { generationId, sourceWatermarkAt }),
+  })
+  await publishGeneration(prisma, {
+    modelKey: 'label_summary',
+    schemaVersion: 1,
+    sourceWatermarkAt,
+    build: (generationId) => buildLabelSummary(prisma, { generationId, sourceWatermarkAt }),
+  })
+  await publishAttentionAndOverview(prisma, sourceWatermarkAt)
+}
+
+/**
  * WeeklyAnalysisRun の structuredOutput を検証・取り込む。
  * @param prisma - Prisma クライアント
  * @param workItem - `triggerType: 'weekly_analysis_run'` の WorkItem
@@ -153,7 +176,21 @@ export async function processWeeklyReviewIngest(
   const weeklyAnalysisRun = await prisma.weeklyAnalysisRun.findUniqueOrThrow({
     where: { id: workItem.triggerId },
   })
-  if (!weeklyAnalysisRun.structuredOutput) return
+
+  await detectRunFailures(prisma, {
+    component: 'weekly_review',
+    runId: weeklyAnalysisRun.id,
+    runStatus: weeklyAnalysisRun.status,
+    errorSummary: weeklyAnalysisRun.errorMessage,
+    now: new Date(),
+  })
+
+  // structuredOutput が無い run でも、失敗検知と Attention/Overview の更新までは
+  // 済ませてから戻る。ここで即 return すると失敗した run が可視化されない。
+  if (!weeklyAnalysisRun.structuredOutput) {
+    await publishAttentionAndOverview(prisma, new Date())
+    return
+  }
 
   const parsed = structuredOutputSchema.safeParse(weeklyAnalysisRun.structuredOutput)
   if (!parsed.success) {
@@ -176,21 +213,30 @@ export async function processWeeklyReviewIngest(
     sourceWatermarkAt,
     build: (generationId) => buildLabelSummary(prisma, { generationId, sourceWatermarkAt }),
   })
+  await publishAttentionAndOverview(prisma, sourceWatermarkAt)
 }
 
 /**
  * BlockRun 完了を契機に BlockRelationCurrent を再公開する。
  * Block 自体の論理状態遷移は crawler 側の syncBlocks で fetch のたびに確定済みのため、
- * ここでは read model の再構築のみを担う。
+ * ここでは失敗検知と read model の再構築を担う。
  * @param prisma - Prisma クライアント
  * @param workItem - `triggerType: 'block_run'` の WorkItem
  */
 export async function processBlockReconciliation(
   prisma: PrismaClient,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _workItem: AnalysisWorkItem,
+  workItem: AnalysisWorkItem,
 ): Promise<void> {
-  const sourceWatermarkAt = new Date()
+  const blockRun = await prisma.blockRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
+  const sourceWatermarkAt = blockRun.finishedAt ?? blockRun.lastHeartbeatAt
+
+  await detectRunFailures(prisma, {
+    component: 'block',
+    runId: blockRun.id,
+    runStatus: blockRun.status,
+    errorSummary: null,
+    now: new Date(),
+  })
 
   await publishGeneration(prisma, {
     modelKey: 'block_relation',
@@ -198,4 +244,45 @@ export async function processBlockReconciliation(
     sourceWatermarkAt,
     build: (generationId) => buildBlockRelationSummary(prisma, { generationId, sourceWatermarkAt }),
   })
+  await publishAttentionAndOverview(prisma, sourceWatermarkAt)
+}
+
+/**
+ * WorkItem の終了状態が確定した後に、対応する OperationCycle を再計算し、
+ * analyzer 自身の失敗を OperationalIssue へ昇格する。
+ * @param prisma - Prisma クライアント
+ * @param workItem - 終了した WorkItem
+ * @param outcome - WorkItem の終了状態
+ */
+export async function handleWorkItemSettled(
+  prisma: PrismaClient,
+  workItem: AnalysisWorkItem,
+  outcome: WorkItemOutcome,
+): Promise<void> {
+  await detectAnalysisStageFailure(prisma, {
+    kind: workItem.kind,
+    workItemId: workItem.id,
+    attemptNumber: workItem.attemptCount,
+    status: outcome.status,
+    errorSummary: outcome.errorSummary,
+    now: new Date(),
+  })
+
+  switch (workItem.triggerType) {
+    case 'crawl_run': {
+      await buildOrUpdateCrawlCycle(prisma, { crawlRunId: workItem.triggerId })
+      return
+    }
+    case 'weekly_analysis_run': {
+      await buildOrUpdateWeeklyReviewCycle(prisma, { weeklyAnalysisRunId: workItem.triggerId })
+      return
+    }
+    case 'block_run': {
+      await buildOrUpdateBlockCycle(prisma, { blockRunId: workItem.triggerId })
+      return
+    }
+    default: {
+      logger.warn(`no operation cycle builder for trigger type: ${workItem.triggerType}`)
+    }
+  }
 }

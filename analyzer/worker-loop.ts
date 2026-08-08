@@ -1,5 +1,11 @@
 import type { AnalysisWorkItem, PrismaClient } from './generated/prisma'
-import { claimNextWorkItem, completeWorkItem } from './queue/work-item-repository'
+import {
+  claimNextWorkItem,
+  completeWorkItem,
+  computeRetryBackoffMs,
+  finishAnalysisRun,
+  startAnalysisRun,
+} from './queue/work-item-repository'
 import { Logger } from '@book000/node-utils'
 
 const logger = Logger.configure('analyzer:worker-loop')
@@ -30,6 +36,22 @@ export interface WorkerLoopDeps {
   processWeeklyReviewIngest: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: block_reconciliation の処理関数。 */
   processBlockReconciliation: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
+  /**
+   * WorkItem の終了状態を確定させた後に呼ばれる後処理。
+   * Cycle の再計算は WorkItem の状態が確定した後でなければ最新の Stage 状態を
+   * 反映できないため、処理関数の内側ではなくここへ置く。
+   */
+  onWorkItemSettled?: (
+    prisma: PrismaClient,
+    workItem: AnalysisWorkItem,
+    outcome: WorkItemOutcome,
+  ) => Promise<void>
+}
+
+/** WorkItem 1 attempt の終了状態。 */
+export interface WorkItemOutcome {
+  status: 'succeeded' | 'failed' | 'dead'
+  errorSummary?: string
 }
 
 const DEFAULT_LEASE_DURATION_MS = 5 * 60 * 1000
@@ -86,32 +108,52 @@ export async function runWorkerLoopOnce(
   })
   if (!workItem) return false
 
+  const analysisRunId = await startAnalysisRun(prisma, {
+    workItemId: workItem.id,
+    attemptNumber: workItem.attemptCount,
+  })
+
+  let outcome: WorkItemOutcome
   try {
     await dispatch(prisma, workItem, deps)
-    const completed = await completeWorkItem(prisma, {
-      workItemId: workItem.id,
-      leaseOwner: deps.leaseOwner,
-      status: 'succeeded',
-    })
-    if (!completed) {
-      logger.warn(
-        `discarded succeeded result for work item ${workItem.id} (${workItem.kind}): lease lost`,
-      )
-    }
+    outcome = { status: 'succeeded' }
   } catch (error) {
     logger.error(`work item ${workItem.id} (${workItem.kind}) failed`, error as Error)
-    const status = workItem.attemptCount >= workItem.maxAttempts ? 'dead' : 'failed'
-    const completed = await completeWorkItem(prisma, {
-      workItemId: workItem.id,
-      leaseOwner: deps.leaseOwner,
-      status,
+    outcome = {
+      status: workItem.attemptCount >= workItem.maxAttempts ? 'dead' : 'failed',
       errorSummary: String(error),
-    })
-    if (!completed) {
-      logger.warn(
-        `discarded ${status} result for work item ${workItem.id} (${workItem.kind}): lease lost`,
-      )
     }
+  }
+
+  await finishAnalysisRun(prisma, {
+    analysisRunId,
+    status: outcome.status,
+    errorSummary: outcome.errorSummary,
+  })
+
+  const completed = await completeWorkItem(prisma, {
+    workItemId: workItem.id,
+    leaseOwner: deps.leaseOwner,
+    status: outcome.status,
+    errorSummary: outcome.errorSummary,
+    retryAvailableAt: new Date(Date.now() + computeRetryBackoffMs(workItem.attemptCount)),
+  })
+  if (!completed) {
+    logger.warn(
+      `discarded ${outcome.status} result for work item ${workItem.id} (${workItem.kind}): lease lost`,
+    )
+    return true
+  }
+
+  // 後処理の失敗で attempt 自体を失敗扱いに巻き戻すと、既に確定した WorkItem の
+  // 終了状態と矛盾するため、ここでは記録に留めて loop を継続する。
+  try {
+    await deps.onWorkItemSettled?.(prisma, workItem, outcome)
+  } catch (error) {
+    logger.error(
+      `post-completion hook failed for work item ${workItem.id} (${workItem.kind})`,
+      error as Error,
+    )
   }
 
   return true

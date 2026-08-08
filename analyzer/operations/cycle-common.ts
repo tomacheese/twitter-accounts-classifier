@@ -1,0 +1,238 @@
+import type { PrismaClient } from '../generated/prisma'
+
+/** OperationStage 1 件の状態。 */
+export type StageStatus =
+  'waiting' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'delayed' | 'stale' | 'unknown'
+
+/** OperationCycle 全体の状態。 */
+export type CycleStatus =
+  | 'scheduled'
+  | 'running'
+  | 'succeeded'
+  | 'partial'
+  | 'failed'
+  | 'delayed'
+  | 'stale'
+  | 'cancelled'
+  | 'unknown'
+
+/**
+ * 起点 Stage が成功していても、必須後続 Stage が failed/未完了なら partial とする。
+ * 起点成功後の後続失敗を成功として表示しないための判定を、この関数へ集約する。
+ * @param requiredStages - 先頭が起点 Stage の状態列
+ * @returns Cycle 全体の状態
+ */
+export function deriveCycleStatus(requiredStages: StageStatus[]): CycleStatus {
+  if (requiredStages.includes('failed')) {
+    return requiredStages[0] === 'succeeded' ? 'partial' : 'failed'
+  }
+  if (requiredStages.includes('running')) return 'running'
+  if (requiredStages.every((status) => status === 'succeeded')) return 'succeeded'
+  if (requiredStages.includes('stale')) return 'stale'
+  if (requiredStages.includes('delayed')) return 'delayed'
+  if (requiredStages.includes('unknown')) return 'unknown'
+  return 'scheduled'
+}
+
+/** AnalysisWorkItem から導出した Stage の状態と付随情報。 */
+export interface WorkItemStage {
+  /** Stage の状態。 */
+  status: StageStatus
+  /** これまでに消費した試行回数。 */
+  attemptCount: number
+  /** 直近の失敗のエラーコード。 */
+  errorCode: string | undefined
+  /** 直近の失敗のエラー概要。 */
+  errorSummary: string | undefined
+  /** 直近の AnalysisRun の ID。 */
+  analysisRunId: string | undefined
+  /** 直近の AnalysisRun の開始時刻。 */
+  startedAt: Date | undefined
+  /** 直近の AnalysisRun の完了時刻。 */
+  finishedAt: Date | undefined
+}
+
+/**
+ * @param workItemStatus - AnalysisWorkItem.status の値
+ * @returns 対応する Stage の状態
+ */
+function deriveWorkItemStatus(workItemStatus: string): StageStatus {
+  switch (workItemStatus) {
+    case 'queued': {
+      return 'waiting'
+    }
+    case 'leased': {
+      return 'running'
+    }
+    case 'succeeded': {
+      return 'succeeded'
+    }
+    case 'failed':
+    case 'dead': {
+      return 'failed'
+    }
+    default: {
+      return 'unknown'
+    }
+  }
+}
+
+/**
+ * 起点 Run の完了時には必ず AnalysisWorkItem が enqueue される。
+ * そのため WorkItem 自体が存在しないことは処理の欠落を意味し、
+ * waiting ではなく failed として扱って Operations 画面が見逃さないようにする。
+ * @param prisma - Prisma クライアント
+ * @param kind - AnalysisWorkItem.kind
+ * @param triggerType - AnalysisWorkItem.triggerType
+ * @param triggerId - 起点となった Run の ID
+ * @returns 対応する Stage の状態と付随情報
+ */
+export async function deriveWorkItemStage(
+  prisma: PrismaClient,
+  kind: string,
+  triggerType: string,
+  triggerId: string,
+): Promise<WorkItemStage> {
+  const workItem = await prisma.analysisWorkItem.findUnique({
+    where: { kind_triggerType_triggerId: { kind, triggerType, triggerId } },
+    include: { runs: { orderBy: { startedAt: 'desc' }, take: 1 } },
+  })
+  if (!workItem) {
+    return {
+      status: 'failed',
+      attemptCount: 0,
+      errorCode: undefined,
+      errorSummary: 'work item was never enqueued',
+      analysisRunId: undefined,
+      startedAt: undefined,
+      finishedAt: undefined,
+    }
+  }
+
+  const latestRun = workItem.runs.at(0)
+  return {
+    // AnalysisRun ではなく WorkItem.status を正本にする。
+    // AnalysisRun は attempt ごとの記録であり、dead へ落ちた WorkItem を
+    // 最新 attempt の failed としか区別できないため、queue 側の状態を優先する。
+    status: deriveWorkItemStatus(workItem.status),
+    attemptCount: workItem.attemptCount,
+    errorCode: workItem.lastErrorCode ?? undefined,
+    errorSummary: workItem.lastErrorSummary ?? undefined,
+    analysisRunId: latestRun?.id,
+    startedAt: latestRun?.startedAt,
+    finishedAt: latestRun?.finishedAt ?? undefined,
+  }
+}
+
+/** upsertCycleWithStages が受け取る Stage 1 件分の入力。 */
+export interface CycleStageInput {
+  /** Cycle 内で Stage を一意に識別するキー。 */
+  stageKey: string
+  /** Stage の状態。 */
+  status: StageStatus
+  /** Stage の正本テーブルの種別。 */
+  sourceType: string
+  /** Stage の正本レコードの ID。 */
+  sourceId: string
+  /** これまでに消費した試行回数。 */
+  attemptCount?: number
+  /** 直近の失敗のエラーコード。 */
+  errorCode?: string
+  /** 直近の失敗のエラー概要。 */
+  errorSummary?: string
+  /** 紐づく AnalysisRun の ID。 */
+  analysisRunId?: string
+  /** Stage の開始時刻。 */
+  startedAt?: Date
+  /** Stage の完了時刻。 */
+  finishedAt?: Date
+}
+
+/** upsertCycleWithStages の入力。 */
+export interface UpsertCycleWithStagesInput {
+  /** OperationCycle.kind。Viewer 側の絞り込み値と一致させる。 */
+  kind: string
+  /** 起点エンティティの種別。 */
+  sourceType: string
+  /** 起点エンティティの ID。 */
+  sourceId: string
+  /** Cycle の起動時刻。 */
+  triggeredAt: Date
+  /** 起点 Run の開始時刻。 */
+  startedAt: Date | undefined
+  /** 起点 Run の完了時刻。 */
+  finishedAt: Date | undefined
+  /** 先頭が起点 Stage となる Stage 列。 */
+  stages: CycleStageInput[]
+}
+
+/**
+ * Cycle 全体の状態を Stage 列から再計算し、Cycle と Stage をまとめて upsert する。
+ * @param prisma - Prisma クライアント
+ * @param input - Cycle のメタデータと Stage 列
+ */
+export async function upsertCycleWithStages(
+  prisma: PrismaClient,
+  input: UpsertCycleWithStagesInput,
+): Promise<void> {
+  const cycleStatus = deriveCycleStatus(input.stages.map((stage) => stage.status))
+  const attentionRequired =
+    cycleStatus === 'partial' || cycleStatus === 'failed' || cycleStatus === 'stale'
+  const currentStageKey = input.stages.find((stage) => stage.status !== 'succeeded')?.stageKey
+
+  const cycle = await prisma.operationCycle.upsert({
+    where: { sourceType_sourceId: { sourceType: input.sourceType, sourceId: input.sourceId } },
+    create: {
+      kind: input.kind,
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      triggeredAt: input.triggeredAt,
+      startedAt: input.startedAt,
+      finishedAt: input.finishedAt,
+      status: cycleStatus,
+      attentionRequired,
+      currentStageKey,
+      modelVersion: '1',
+    },
+    update: {
+      status: cycleStatus,
+      finishedAt: input.finishedAt,
+      attentionRequired,
+      currentStageKey,
+    },
+  })
+
+  let sequence = 0
+  for (const stage of input.stages) {
+    sequence++
+    const isTerminal = stage.status === 'succeeded' || stage.status === 'failed'
+    const finishedAt = stage.finishedAt ?? (isTerminal ? new Date() : undefined)
+    await prisma.operationStage.upsert({
+      where: { cycleId_stageKey: { cycleId: cycle.id, stageKey: stage.stageKey } },
+      create: {
+        cycleId: cycle.id,
+        stageKey: stage.stageKey,
+        sequence,
+        requiredness: 'required',
+        status: stage.status,
+        attemptCount: stage.attemptCount ?? 0,
+        sourceType: stage.sourceType,
+        sourceId: stage.sourceId,
+        startedAt: stage.startedAt,
+        finishedAt,
+        errorCode: stage.errorCode,
+        errorSummary: stage.errorSummary,
+        analysisRunId: stage.analysisRunId,
+      },
+      update: {
+        status: stage.status,
+        attemptCount: stage.attemptCount ?? 0,
+        startedAt: stage.startedAt,
+        finishedAt,
+        errorCode: stage.errorCode ?? null,
+        errorSummary: stage.errorSummary ?? null,
+        analysisRunId: stage.analysisRunId,
+      },
+    })
+  }
+}

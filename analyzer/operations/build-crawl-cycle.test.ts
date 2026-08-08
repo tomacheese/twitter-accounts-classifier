@@ -1,23 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { getPrismaClient } from '../db/client'
-import { buildOrUpdateCrawlCycle, deriveCycleStatus } from './build-crawl-cycle'
-
-describe('deriveCycleStatus', () => {
-  it('4 Stage すべて succeeded なら succeeded を返す', () => {
-    expect(deriveCycleStatus(['succeeded', 'succeeded', 'succeeded', 'succeeded'])).toBe(
-      'succeeded',
-    )
-  })
-
-  it('crawl が succeeded で後続に failed があれば partial を返す', () => {
-    expect(deriveCycleStatus(['succeeded', 'failed', 'succeeded', 'succeeded'])).toBe('partial')
-  })
-
-  it('crawl 自体が failed なら failed を返す', () => {
-    expect(deriveCycleStatus(['failed', 'waiting', 'waiting', 'waiting'])).toBe('failed')
-  })
-})
+import { buildOrUpdateCrawlCycle } from './build-crawl-cycle'
 
 describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
   const prisma = getPrismaClient()
@@ -85,6 +69,83 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     })
     expect(cycle.status).toBe('succeeded')
     expect(cycle.attentionRequired).toBe(false)
+  })
+
+  it('Viewer が絞り込む kind と同じ crawl を書き込む', async () => {
+    const crawlRun = await prisma.crawlRun.create({
+      data: {
+        id: `crawl-${randomUUID()}`,
+        startedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        finishedAt: new Date(),
+        status: 'success',
+      },
+    })
+
+    await buildOrUpdateCrawlCycle(prisma, { crawlRunId: crawlRun.id })
+
+    const cycle = await prisma.operationCycle.findUniqueOrThrow({
+      where: { sourceType_sourceId: { sourceType: 'crawl_run', sourceId: crawlRun.id } },
+    })
+    expect(cycle.kind).toBe('crawl')
+  })
+
+  it('WorkItem が dead なら Stage は failed になり、エラー概要を引き継ぐ', async () => {
+    const crawlRun = await prisma.crawlRun.create({
+      data: {
+        id: `crawl-${randomUUID()}`,
+        startedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        finishedAt: new Date(),
+        status: 'success',
+      },
+    })
+    await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'label_metrics',
+        triggerType: 'crawl_run',
+        triggerId: crawlRun.id,
+        status: 'dead',
+        attemptCount: 5,
+        lastErrorSummary: 'boom',
+      },
+    })
+
+    await buildOrUpdateCrawlCycle(prisma, { crawlRunId: crawlRun.id })
+
+    const cycle = await prisma.operationCycle.findUniqueOrThrow({
+      where: { sourceType_sourceId: { sourceType: 'crawl_run', sourceId: crawlRun.id } },
+    })
+    const stage = await prisma.operationStage.findUniqueOrThrow({
+      where: { cycleId_stageKey: { cycleId: cycle.id, stageKey: 'label_metrics' } },
+    })
+    expect(stage.status).toBe('failed')
+    expect(stage.errorSummary).toBe('boom')
+    expect(stage.attemptCount).toBe(5)
+    expect(cycle.status).toBe('partial')
+  })
+
+  it('WorkItem が leased なら Stage は running になる', async () => {
+    const crawlRun = await prisma.crawlRun.create({
+      data: {
+        id: `crawl-${randomUUID()}`,
+        startedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        status: 'running',
+      },
+    })
+    for (const kind of ['label_metrics', 'finding_generation', 'read_model_refresh']) {
+      await prisma.analysisWorkItem.create({
+        data: { kind, triggerType: 'crawl_run', triggerId: crawlRun.id, status: 'leased' },
+      })
+    }
+
+    await buildOrUpdateCrawlCycle(prisma, { crawlRunId: crawlRun.id })
+
+    const cycle = await prisma.operationCycle.findUniqueOrThrow({
+      where: { sourceType_sourceId: { sourceType: 'crawl_run', sourceId: crawlRun.id } },
+    })
+    expect(cycle.status).toBe('running')
   })
 
   it('再度呼び出しても Cycle・Stage が重複作成されない', async () => {

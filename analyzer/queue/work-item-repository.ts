@@ -128,6 +128,23 @@ export interface CompleteWorkItemInput {
   errorCode?: string
   /** 失敗時のエラー概要。 */
   errorSummary?: string
+  /** failed 時に次の claim を許可する時刻。 */
+  retryAvailableAt?: Date
+}
+
+const RETRY_BACKOFF_BASE_MS = 30 * 1000
+const RETRY_BACKOFF_MAX_MS = 15 * 60 * 1000
+
+/**
+ * 失敗直後に availableAt を進めないと、claim 条件を満たしたままの WorkItem を
+ * 同じ worker が即座に拾い直し、maxAttempts 分を数秒で使い切ってしまう。
+ * 一時的な障害が回復する余地を残すため、試行回数に応じて指数的に待つ。
+ * @param attemptCount - これまでに消費した試行回数
+ * @returns 次に claim 可能となるまでの待機時間 (ミリ秒)
+ */
+export function computeRetryBackoffMs(attemptCount: number): number {
+  const exponent = Math.max(0, attemptCount - 1)
+  return Math.min(RETRY_BACKOFF_BASE_MS * 2 ** exponent, RETRY_BACKOFF_MAX_MS)
 }
 
 /**
@@ -149,7 +166,69 @@ export async function completeWorkItem(
       lastErrorSummary: input.errorSummary,
       leaseOwner: null,
       leaseExpiresAt: null,
+      ...(input.status === 'failed' && input.retryAvailableAt
+        ? { availableAt: input.retryAvailableAt }
+        : {}),
     },
   })
   return result.count > 0
+}
+
+/** startAnalysisRun の入力。 */
+export interface StartAnalysisRunInput {
+  /** 対象の WorkItem ID。 */
+  workItemId: string
+  /** claim 時に確定した試行回数。 */
+  attemptNumber: number
+}
+
+/**
+ * WorkItem の 1 attempt を AnalysisRun として記録し始める。
+ * @param prisma - Prisma クライアント
+ * @param input - 対象 WorkItem と試行回数
+ * @returns 作成した AnalysisRun の ID
+ */
+export async function startAnalysisRun(
+  prisma: PrismaClient,
+  input: StartAnalysisRunInput,
+): Promise<string> {
+  const run = await prisma.analysisRun.create({
+    data: {
+      workItemId: input.workItemId,
+      attemptNumber: input.attemptNumber,
+      status: 'running',
+    },
+  })
+  return run.id
+}
+
+/** finishAnalysisRun の入力。 */
+export interface FinishAnalysisRunInput {
+  /** 対象の AnalysisRun ID。 */
+  analysisRunId: string
+  /** 記録する終了状態。 */
+  status: 'succeeded' | 'failed' | 'dead'
+  /** 失敗時のエラーコード。 */
+  errorCode?: string
+  /** 失敗時のエラー概要。 */
+  errorSummary?: string
+}
+
+/**
+ * @param prisma - Prisma クライアント
+ * @param input - 対象 AnalysisRun と記録する終了状態
+ */
+export async function finishAnalysisRun(
+  prisma: PrismaClient,
+  input: FinishAnalysisRunInput,
+): Promise<void> {
+  await prisma.analysisRun.update({
+    where: { id: input.analysisRunId },
+    data: {
+      status: input.status,
+      finishedAt: new Date(),
+      errorCode: input.errorCode,
+      errorSummary: input.errorSummary,
+    },
+  })
 }
