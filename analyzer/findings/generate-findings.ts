@@ -14,11 +14,11 @@ import { Logger } from '@book000/node-utils'
 const logger = Logger.configure('analyzer:generate-findings')
 
 /**
- * generateFindingsForCrawlCycle の入力。
+ * generateFindingsForAggregateRefresh の入力。
  */
-export interface GenerateFindingsForCrawlCycleInput {
-  /** 対象の CrawlRun ID。 */
-  crawlRunId: string
+export interface GenerateFindingsForAggregateRefreshInput {
+  /** この観測の識別子。同一 WorkItem の retry では不変。 */
+  triggerWorkItemId: string
   /** 適用する検出ポリシー。 */
   policy: DetectionPolicy
   /** 適用したポリシーの content hash。 */
@@ -60,7 +60,7 @@ const RULE_TYPES_EVALUATED_ELSEWHERE = new Set(['possible_false_positive', 'read
 async function resolveBaselineSnapshot(
   prisma: PrismaClient,
   labelDefinitionId: string,
-  current: { sourceCrawlRunId: string; observedAt: Date },
+  current: { triggerWorkItemId: string; observedAt: Date },
   baselineWindow: string | undefined,
 ): Promise<LabelMetricSnapshot | null> {
   const observedAtUpperBound =
@@ -74,7 +74,10 @@ async function resolveBaselineSnapshot(
   return prisma.labelMetricSnapshot.findFirst({
     where: {
       labelDefinitionId,
-      sourceCrawlRunId: { not: current.sourceCrawlRunId },
+      triggerWorkItemId: { not: current.triggerWorkItemId },
+      // schedule/weekly/bootstrap 起点の snapshot は sourceCrawlRunId を
+      // 持たず、crawl 起因の比較対象として扱うと母集団の性質が揃わない。
+      sourceCrawlRunId: { not: null },
       observedAt: { lt: observedAtUpperBound },
       completeness: 'complete',
     },
@@ -192,12 +195,12 @@ async function upsertOccurrence(
   findingId: string,
   stateTransition: string,
   input: ProcessObservationInput,
-  ctx: GenerateFindingsForCrawlCycleInput,
+  ctx: GenerateFindingsForAggregateRefreshInput,
   now: Date,
 ): Promise<void> {
-  // 同一 crawlRunId の再実行で Occurrence が重複しないよう、
-  // crawlRunId (= sourceId) を observationKey として使う。
-  await tx.reviewFindingOccurrence.upsert({
+  // 同一 triggerWorkItemId の retry で Occurrence が重複しないよう、
+  // triggerWorkItemId (= sourceId) を observationKey として使う。
+  const occurrence = await tx.reviewFindingOccurrence.upsert({
     where: { findingId_observationKey: { findingId, observationKey: input.sourceId } },
     create: {
       findingId,
@@ -218,6 +221,24 @@ async function upsertOccurrence(
     },
     update: {},
   })
+
+  if (input.primaryScopeType === 'account') {
+    await tx.analysisWorkItem.upsert({
+      where: {
+        kind_triggerType_triggerId: {
+          kind: 'account_summary_refresh',
+          triggerType: 'review_finding_occurrence',
+          triggerId: occurrence.id,
+        },
+      },
+      create: {
+        kind: 'account_summary_refresh',
+        triggerType: 'review_finding_occurrence',
+        triggerId: occurrence.id,
+      },
+      update: {},
+    })
+  }
 }
 
 /**
@@ -228,7 +249,7 @@ async function upsertOccurrence(
 async function processObservation(
   prisma: PrismaClient,
   input: ProcessObservationInput,
-  ctx: GenerateFindingsForCrawlCycleInput,
+  ctx: GenerateFindingsForAggregateRefreshInput,
 ): Promise<void> {
   const fingerprint = computeFingerprint(input.type, input.dimensions)
 
@@ -334,19 +355,20 @@ async function processObservation(
 }
 
 /**
- * Crawl サイクル完了を契機に Label 別 metric snapshot から検出器を実行し、
- * ReviewFinding/ReviewFindingOccurrence/DetectorEvaluation を更新する。
+ * Label aggregate の snapshot set 確定を契機に Label 別 metric snapshot から
+ * 検出器を実行し、ReviewFinding/ReviewFindingOccurrence/DetectorEvaluation を
+ * 更新する。
  * @param prisma - Prisma クライアント
- * @param input - 対象 crawl run と検出ポリシー
+ * @param input - 対象 snapshot set と検出ポリシー
  */
-export async function generateFindingsForCrawlCycle(
+export async function generateFindingsForAggregateRefresh(
   prisma: PrismaClient,
-  input: GenerateFindingsForCrawlCycleInput,
+  input: GenerateFindingsForAggregateRefreshInput,
 ): Promise<void> {
   // complete 以外は母集団が欠けた記録であり、実測値として検出器へ渡すと
   // 巡回できなかった分の減少や分析エラーを品質劣化として誤検出させる。
   const currentSnapshots = await prisma.labelMetricSnapshot.findMany({
-    where: { sourceCrawlRunId: input.crawlRunId, completeness: 'complete' },
+    where: { triggerWorkItemId: input.triggerWorkItemId, completeness: 'complete' },
   })
 
   // 同じ種別を Label 数だけ繰り返し警告しないよう、実行全体で 1 回にまとめる。
@@ -391,7 +413,7 @@ export async function generateFindingsForCrawlCycle(
             observation: result,
             rule,
             sourceType: 'crawl_run',
-            sourceId: input.crawlRunId,
+            sourceId: input.triggerWorkItemId,
           },
           input,
         )
@@ -424,7 +446,7 @@ export async function generateFindingsForCrawlCycle(
               observation: result,
               rule,
               sourceType: 'crawl_run',
-              sourceId: input.crawlRunId,
+              sourceId: input.triggerWorkItemId,
             },
             input,
           )
@@ -436,4 +458,42 @@ export async function generateFindingsForCrawlCycle(
   for (const ruleType of unimplementedRuleTypes) {
     logger.warn(`no detector implemented for enabled policy rule type: ${ruleType}`)
   }
+}
+
+/**
+ * generateFindingsForCrawlCycle の入力。
+ * Task 13 で processLabelAggregateRefresh からの呼び出しへ置き換え、
+ * この型と generateFindingsForCrawlCycle 自体を削除する。
+ */
+export interface GenerateFindingsForCrawlCycleInput {
+  /** 対象の CrawlRun ID。 */
+  crawlRunId: string
+  /** 適用する検出ポリシー。 */
+  policy: DetectionPolicy
+  /** 適用したポリシーの content hash。 */
+  policyHash: string
+  /** 検出器のバージョン。 */
+  detectorVersion: string
+  /** この観測の元データ自体の時刻。 */
+  sourceObservedAt?: Date
+}
+
+/**
+ * worker-processors.ts の未移行呼び出し元 (processFindingGeneration) 向けの
+ * 互換 shim。CrawlRun 起点の識別子を triggerWorkItemId として委譲するだけで、
+ * Task 13 で呼び出し元を processLabelAggregateRefresh へ差し替えた後に削除する。
+ * @param prisma - Prisma クライアント
+ * @param input - 対象 crawl run と検出ポリシー
+ */
+export async function generateFindingsForCrawlCycle(
+  prisma: PrismaClient,
+  input: GenerateFindingsForCrawlCycleInput,
+): Promise<void> {
+  await generateFindingsForAggregateRefresh(prisma, {
+    triggerWorkItemId: input.crawlRunId,
+    policy: input.policy,
+    policyHash: input.policyHash,
+    detectorVersion: input.detectorVersion,
+    sourceObservedAt: input.sourceObservedAt,
+  })
 }

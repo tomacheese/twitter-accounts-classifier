@@ -173,7 +173,7 @@ async function ingestOneFinding(
       findingId = created.id
     }
 
-    await tx.reviewFindingOccurrence.create({
+    const occurrence = await tx.reviewFindingOccurrence.create({
       data: {
         findingId,
         observedAt: now,
@@ -190,6 +190,24 @@ async function ingestOneFinding(
         observationKey: ctx.weeklyAnalysisRunId,
       },
     })
+
+    if (candidate.primaryScopeType === 'account') {
+      await tx.analysisWorkItem.upsert({
+        where: {
+          kind_triggerType_triggerId: {
+            kind: 'account_summary_refresh',
+            triggerType: 'review_finding_occurrence',
+            triggerId: occurrence.id,
+          },
+        },
+        create: {
+          kind: 'account_summary_refresh',
+          triggerType: 'review_finding_occurrence',
+          triggerId: occurrence.id,
+        },
+        update: {},
+      })
+    }
 
     await tx.findingEvidence.create({
       data: {

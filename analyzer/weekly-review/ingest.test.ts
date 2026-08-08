@@ -75,6 +75,7 @@ function buildStructuredOutput(
 
 describe.skipIf(!process.env.DATABASE_URL)('ingestWeeklyReviewFindings', () => {
   beforeEach(async () => {
+    await prisma.analysisWorkItem.deleteMany()
     await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
@@ -290,5 +291,32 @@ describe.skipIf(!process.env.DATABASE_URL)('ingestWeeklyReviewFindings', () => {
     const updated = await prisma.reviewFinding.findUniqueOrThrow({ where: { id: created.id } })
     expect(updated.status).toBe('recurring')
     expect(updated.recurrenceCount).toBe(1)
+  })
+
+  it('enqueues an account_summary_refresh work item when the candidate targets an account', async () => {
+    const structuredOutput = buildStructuredOutput({})
+
+    await ingestWeeklyReviewFindings(prisma, {
+      weeklyAnalysisRunId: `weekly-${randomUUID()}`,
+      structuredOutput,
+      policy,
+    })
+
+    const finding = await prisma.reviewFinding.findFirstOrThrow({
+      where: { type: 'possible_false_positive', primaryScopeId: 'account-1' },
+    })
+    const occurrence = await prisma.reviewFindingOccurrence.findFirstOrThrow({
+      where: { findingId: finding.id },
+    })
+    const workItem = await prisma.analysisWorkItem.findUnique({
+      where: {
+        kind_triggerType_triggerId: {
+          kind: 'account_summary_refresh',
+          triggerType: 'review_finding_occurrence',
+          triggerId: occurrence.id,
+        },
+      },
+    })
+    expect(workItem).not.toBeNull()
   })
 })
