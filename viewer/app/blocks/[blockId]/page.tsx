@@ -1,8 +1,10 @@
+import React from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getPrismaClient } from '@/lib/prisma'
 import { getBlockRelationDetail } from '@/lib/queries/block-relations'
 import { formatDateTime } from '@/lib/format-date'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { ErrorFallback } from '../../components/error-fallback'
 
 interface BlockDetailPageProps {
@@ -17,6 +19,8 @@ interface BlockDetailPageProps {
 export default async function BlockDetailPage({
   params,
 }: BlockDetailPageProps): Promise<React.ReactElement> {
+  if (!isNewUiSectionEnabled('blocks')) notFound()
+
   const { blockId } = await params
   const prisma = getPrismaClient()
 

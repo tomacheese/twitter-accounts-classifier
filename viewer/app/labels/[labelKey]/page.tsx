@@ -1,7 +1,9 @@
+import React from 'react'
 import { notFound } from 'next/navigation'
 import { getPrismaClient } from '@/lib/prisma'
 import { getLabelDetail, type LabelDetailRangePreset } from '@/lib/queries/label-detail'
 import { formatDateTime } from '@/lib/format-date'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { ErrorFallback } from '../../components/error-fallback'
 
 interface LabelDetailPageProps {
@@ -28,6 +30,8 @@ export default async function LabelDetailPage({
   params,
   searchParams,
 }: LabelDetailPageProps): Promise<React.ReactElement> {
+  if (!isNewUiSectionEnabled('labels')) notFound()
+
   const { labelKey } = await params
   const { range: rawRange } = await searchParams
   const range = isRangePreset(rawRange) ? rawRange : '30d'

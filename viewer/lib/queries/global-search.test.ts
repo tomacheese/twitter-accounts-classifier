@@ -123,6 +123,28 @@ describe('searchAcrossEntities', () => {
       operations: [],
     })
   })
+
+  it('enabledEntityTypes で無効にした type は DB を問い合わせず空配列になる', async () => {
+    const { prisma, accountSummaryFindMany } = createMockPrisma()
+
+    const result = await searchAcrossEntities(prisma, {
+      query: 'example',
+      enabledEntityTypes: { accounts: false, labels: false },
+    })
+
+    expect(result.accounts).toEqual([])
+    expect(result.labels).toEqual([])
+    expect(accountSummaryFindMany).not.toHaveBeenCalled()
+    const labelFindMany = (
+      prisma as unknown as { labelDefinition: { findMany: ReturnType<typeof vi.fn> } }
+    ).labelDefinition.findMany
+    expect(labelFindMany).not.toHaveBeenCalled()
+
+    const findingFindMany = (
+      prisma as unknown as { reviewFinding: { findMany: ReturnType<typeof vi.fn> } }
+    ).reviewFinding.findMany
+    expect(findingFindMany).toHaveBeenCalled()
+  })
 })
 
 describe('getNavBadgeCounts', () => {

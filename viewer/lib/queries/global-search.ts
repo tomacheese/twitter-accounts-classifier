@@ -35,6 +35,14 @@ export interface GlobalSearchResult {
   operations: GlobalSearchOperationResult[]
 }
 
+/** entity type ごとに検索対象へ含めるかどうか。省略した type は含める。 */
+export interface GlobalSearchEnabledEntityTypes {
+  accounts?: boolean
+  labels?: boolean
+  findings?: boolean
+  operations?: boolean
+}
+
 const ACCOUNT_SUMMARY_MODEL_KEY = 'account_summary'
 
 /**
@@ -78,43 +86,59 @@ async function searchAccounts(
  * Account の screenName/displayName、Label の key、Finding の id/type、
  * Operation の cycleId/sourceId のみを検索対象とする。
  * Tweet 本文は個人が特定可能な実データを含みうるため、意図的に除外する。
+ * `enabledEntityTypes` で無効にした type は DB を問い合わせず空配列を返す:
+ * 呼び出し元 (Route Handler) が区画の feature flag に応じて渡すことで、
+ * 無効な区画のみが持つ詳細ページへ横断検索からリンクしてしまうのを防ぐ。
  * @param prisma - Prisma クライアント
- * @param input - 検索クエリ文字列
+ * @param input - 検索クエリ文字列と、有効にする entity type
  * @returns entity type ごとに上限件数までの検索結果
  */
 export async function searchAcrossEntities(
   prisma: PrismaClient,
-  input: { query: string },
+  input: { query: string; enabledEntityTypes?: GlobalSearchEnabledEntityTypes },
 ): Promise<GlobalSearchResult> {
   const query = input.query.trim()
   if (!query) {
     return { accounts: [], labels: [], findings: [], operations: [] }
   }
 
+  const enabled = {
+    accounts: input.enabledEntityTypes?.accounts ?? true,
+    labels: input.enabledEntityTypes?.labels ?? true,
+    findings: input.enabledEntityTypes?.findings ?? true,
+    operations: input.enabledEntityTypes?.operations ?? true,
+  }
+
   const [accounts, labels, findings, operations] = await Promise.all([
-    searchAccounts(prisma, query),
-    prisma.labelDefinition.findMany({
-      where: { key: { contains: query, mode: 'insensitive' } },
-      take: MAX_RESULTS_PER_TYPE,
-    }),
-    prisma.reviewFinding.findMany({
-      where: {
-        OR: [
-          { id: { contains: query, mode: 'insensitive' } },
-          { type: { contains: query, mode: 'insensitive' } },
-        ],
-      },
-      take: MAX_RESULTS_PER_TYPE,
-    }),
-    prisma.operationCycle.findMany({
-      where: {
-        OR: [
-          { id: { contains: query, mode: 'insensitive' } },
-          { sourceId: { contains: query, mode: 'insensitive' } },
-        ],
-      },
-      take: MAX_RESULTS_PER_TYPE,
-    }),
+    enabled.accounts ? searchAccounts(prisma, query) : Promise.resolve([]),
+    enabled.labels
+      ? prisma.labelDefinition.findMany({
+          where: { key: { contains: query, mode: 'insensitive' } },
+          take: MAX_RESULTS_PER_TYPE,
+        })
+      : Promise.resolve([]),
+    enabled.findings
+      ? prisma.reviewFinding.findMany({
+          where: {
+            OR: [
+              { id: { contains: query, mode: 'insensitive' } },
+              { type: { contains: query, mode: 'insensitive' } },
+            ],
+          },
+          take: MAX_RESULTS_PER_TYPE,
+        })
+      : Promise.resolve([]),
+    enabled.operations
+      ? prisma.operationCycle.findMany({
+          where: {
+            OR: [
+              { id: { contains: query, mode: 'insensitive' } },
+              { sourceId: { contains: query, mode: 'insensitive' } },
+            ],
+          },
+          take: MAX_RESULTS_PER_TYPE,
+        })
+      : Promise.resolve([]),
   ])
 
   return {
