@@ -24,6 +24,7 @@ async function upsertBlockAuthors(prisma: PrismaClient, result: BlockListResult)
  * `result.reachedEnd` が true かつ `result.ids` が空でないときのみ完全同期とみなし、
  * fetch できなかった既存 `blockedId` の行を `computeBlockReconciliation` で論理的に
  * missing/resolved へ進める (空レスポンスによる誤検知を防ぐガード)。物理削除はしない。
+ * 逆に再び観測された行は active へ戻す。
  * @param prisma - Prisma クライアント
  * @param blockerId - このブロック一覧の持ち主のアカウント
  * @param result - 取得したブロック一覧
@@ -54,6 +55,41 @@ export async function syncBlocks(
           where: { blockerId, blockedId: { in: result.ids } },
           data: { lastSeenAt: now },
         })
+
+        // 一度 missing/resolved へ進んだ行は skipDuplicates の createMany では作り直されず、
+        // 再び観測されても status が戻らないため、ここで正本状態を復元する。
+        const rediscovered = await tx.block.findMany({
+          where: {
+            blockerId,
+            blockedId: { in: result.ids },
+            OR: [{ status: { not: 'active' } }, { consecutiveMissingCount: { gt: 0 } }],
+          },
+          select: { id: true, status: true },
+        })
+        if (rediscovered.length > 0) {
+          await tx.block.updateMany({
+            where: { id: { in: rediscovered.map((block) => block.id) } },
+            data: {
+              status: 'active',
+              consecutiveMissingCount: 0,
+              missingSinceAt: null,
+              resolvedAt: null,
+              lastCheckedAt: now,
+            },
+          })
+
+          const statusChanges = rediscovered.filter((block) => block.status !== 'active')
+          if (statusChanges.length > 0) {
+            await tx.blockStateChange.createMany({
+              data: statusChanges.map((block) => ({
+                blockId: block.id,
+                fromStatus: block.status,
+                toStatus: 'active',
+                changedAt: now,
+              })),
+            })
+          }
+        }
       }
 
       if (!isCompleteSync) return

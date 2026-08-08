@@ -35,11 +35,17 @@ function makePrisma(
     consecutiveMissingCount: number
     missingSinceAt: Date | null
   }[] = [],
+  rediscoveredBlocks: { id: string; status: string }[] = [],
 ) {
   const accountUpsert = vi.fn().mockResolvedValue({})
   const blockCreateMany = vi.fn().mockResolvedValue({ count: 0 })
   const blockUpdateMany = vi.fn().mockResolvedValue({ count: 0 })
-  const blockFindMany = vi.fn().mockResolvedValue(existingBlocks)
+  // 未取得の行を探す問い合わせと、再観測された行を探す問い合わせを where で区別する。
+  const blockFindMany = vi
+    .fn()
+    .mockImplementation((args: { where: { blockedId: { in?: string[] } } }) =>
+      Promise.resolve(args.where.blockedId.in ? rediscoveredBlocks : existingBlocks),
+    )
   const executeRaw = vi.fn().mockResolvedValue(0)
   const blockStateChangeCreateMany = vi.fn().mockResolvedValue({ count: 0 })
   const tx = {
@@ -69,6 +75,16 @@ function makePrisma(
     blockStateChangeCreateMany,
     $transaction,
   }
+}
+
+/**
+ * @param blockFindMany - makePrisma が返す Block.findMany のモック
+ * @returns 未取得の行を探す問い合わせだけを抜き出した呼び出し一覧
+ */
+function staleLookupCalls(blockFindMany: { mock: { calls: unknown[][] } }): unknown[][] {
+  return blockFindMany.mock.calls.filter(
+    (call) => (call[0] as { where: { blockedId: { notIn?: string[] } } }).where.blockedId.notIn,
+  )
 }
 
 describe('syncBlocks', () => {
@@ -157,7 +173,7 @@ describe('syncBlocks', () => {
 
     await syncBlocks(prisma, 'me', makeResult(['a'], false))
 
-    expect(blockFindMany).not.toHaveBeenCalled()
+    expect(staleLookupCalls(blockFindMany)).toHaveLength(0)
   })
 
   it('does not reconcile anything when reachedEnd is true but no ids were observed', async () => {
@@ -172,8 +188,36 @@ describe('syncBlocks', () => {
 
     await syncBlocks(prisma, 'me', makeResult([], true))
 
-    expect(blockFindMany).not.toHaveBeenCalled()
+    expect(staleLookupCalls(blockFindMany)).toHaveLength(0)
     expect(blockCreateMany).not.toHaveBeenCalled()
+  })
+
+  it('restores a rediscovered edge to active and records the transition', async () => {
+    const { prisma, blockUpdateMany, blockStateChangeCreateMany } = makePrisma(
+      [],
+      [{ id: 'block-1', status: 'resolved' }],
+    )
+
+    await syncBlocks(prisma, 'me', makeResult(['a'], true))
+
+    expect(blockUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['block-1'] } },
+      data: expect.objectContaining({
+        status: 'active',
+        consecutiveMissingCount: 0,
+        missingSinceAt: null,
+        resolvedAt: null,
+      }),
+    })
+    expect(blockStateChangeCreateMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          blockId: 'block-1',
+          fromStatus: 'resolved',
+          toStatus: 'active',
+        }),
+      ],
+    })
   })
 
   it('extends the transaction timeout beyond the Prisma default', async () => {
