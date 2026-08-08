@@ -119,6 +119,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
     await prisma.readModelState.deleteMany()
+    await prisma.readModelPointer.deleteMany()
   })
 
   it('active な OperationalIssue が無ければ healthy な snapshot を作る', async () => {
@@ -192,5 +193,50 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
 
     const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
     expect(snapshot.operationalStatus).toBe('unknown')
+  })
+
+  it('overview_snapshot 自身の旧 ReadModelState は build 中の判定に含めない', async () => {
+    await prisma.readModelState.create({
+      data: { modelKey: 'overview_snapshot', schemaVersion: 1, status: 'failed' },
+    })
+
+    const result = await buildOverviewSnapshot(prisma, {
+      generationId: randomUUID(),
+      sourceWatermarkAt: new Date(),
+    })
+
+    const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
+    expect(snapshot.operationalStatus).toBe('healthy')
+  })
+
+  it('block_relation の ReadModelPointer が無ければ stale な block_relation state を無視する', async () => {
+    await prisma.readModelState.create({
+      data: { modelKey: 'block_relation', schemaVersion: 1, status: 'stale' },
+    })
+
+    const result = await buildOverviewSnapshot(prisma, {
+      generationId: randomUUID(),
+      sourceWatermarkAt: new Date(),
+    })
+
+    const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
+    expect(snapshot.operationalStatus).toBe('healthy')
+  })
+
+  it('block_relation の ReadModelPointer があれば stale な block_relation state を critical に含める', async () => {
+    await prisma.readModelState.create({
+      data: { modelKey: 'block_relation', schemaVersion: 1, status: 'stale' },
+    })
+    await prisma.readModelPointer.create({
+      data: { modelKey: 'block_relation', currentGenerationId: randomUUID() },
+    })
+
+    const result = await buildOverviewSnapshot(prisma, {
+      generationId: randomUUID(),
+      sourceWatermarkAt: new Date(),
+    })
+
+    const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
+    expect(snapshot.operationalStatus).toBe('critical')
   })
 })

@@ -1,6 +1,12 @@
 import type { Prisma, PrismaClient } from '../generated/prisma'
 
 const ATTENTION_PAYLOAD_LIMIT = 8
+const MODEL_KEY = 'overview_snapshot'
+// block_relation は Block 機能を使わない環境では一度も publish されず、
+// ReadModelState 行自体が存在しない。一度でも publish された後にその環境で
+// 使われなくなった場合は state が stale のまま残るため、Pointer の有無で
+// 「この環境で実際に使われているか」を判定し、条件付き必須として扱う。
+const CORE_MODEL_KEYS = new Set(['account_summary', 'label_summary', 'attention_items'])
 
 /** Operational Health の総合状態。 */
 export type OperationalStatus = 'healthy' | 'attention' | 'critical' | 'unknown'
@@ -93,6 +99,7 @@ export async function buildOverviewSnapshot(
     watchFindingCount,
     readModelStates,
     attentionPointer,
+    blockRelationPointer,
   ] = await Promise.all([
     prisma.operationalIssue.findMany({ where: { status: 'active' } }),
     prisma.operationCycle.findFirst({
@@ -111,6 +118,7 @@ export async function buildOverviewSnapshot(
     }),
     prisma.readModelState.findMany(),
     prisma.readModelPointer.findUnique({ where: { modelKey: 'attention_items' } }),
+    prisma.readModelPointer.findUnique({ where: { modelKey: 'block_relation' } }),
   ])
 
   const coreStageKeys = new Set([
@@ -123,6 +131,16 @@ export async function buildOverviewSnapshot(
     coreStageKeys.has(stage.stageKey),
   )
 
+  // build 中の overview_snapshot 自身の旧 ReadModelState は判定に含めない。
+  // 含めると、復旧直後の最初の snapshot が自分自身の旧い stale/failed だけで
+  // critical/unknown になってしまう。block_relation は Pointer が無ければ
+  // この環境で使われていない扱いとし、必須判定から外す。
+  const healthRelevantStates = readModelStates.filter((state) => {
+    if (state.modelKey === MODEL_KEY) return false
+    if (state.modelKey === 'block_relation' && !blockRelationPointer) return false
+    return CORE_MODEL_KEYS.has(state.modelKey) || state.modelKey === 'block_relation'
+  })
+
   const operationalStatus = deriveOperationalStatus({
     hasCriticalIssue: activeIssues.some((issue) => issue.severity === 'critical'),
     // Stage は crawl cycle 単位の一時的な失敗、ReadModelState は経過時間で
@@ -130,10 +148,12 @@ export async function buildOverviewSnapshot(
     // 「Stage は succeeded だが更新が止まっている」状態を見逃す。
     hasFailedOrStaleCoreStage:
       coreStages.some((stage) => stage.status === 'failed' || stage.status === 'stale') ||
-      readModelStates.some((state) => state.status === 'failed' || state.status === 'stale'),
+      healthRelevantStates.some((state) => state.status === 'failed' || state.status === 'stale'),
     hasUnknownCoreStage:
       coreStages.some((stage) => stage.status === 'unknown') ||
-      readModelStates.some((state) => state.status === 'unknown' || state.status === 'delayed'),
+      healthRelevantStates.some(
+        (state) => state.status === 'unknown' || state.status === 'delayed',
+      ),
     hasActiveIssue: activeIssues.length > 0,
   })
 
