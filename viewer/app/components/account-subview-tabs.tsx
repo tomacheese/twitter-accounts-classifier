@@ -1,7 +1,8 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { formatDateTime } from '@/lib/format-date'
 import type {
   AccountClassificationEntryView,
@@ -22,6 +23,17 @@ export const LAZY_SUBVIEWS = [
 
 /** LAZY_SUBVIEWS のキー。 */
 export type LazySubviewKey = (typeof LAZY_SUBVIEWS)[number]['key']
+
+/** 選択中の subview を URL に反映する検索パラメータ名。 */
+export const TAB_QUERY_PARAM = 'tab'
+
+/**
+ * @param value - 検索パラメータの生の値
+ * @returns LAZY_SUBVIEWS のキーであれば true
+ */
+function isLazySubviewKey(value: string | null): value is LazySubviewKey {
+  return !!value && LAZY_SUBVIEWS.some((subview) => subview.key === value)
+}
 
 /** subview ごとのレスポンス形状。 */
 export interface SubviewDataByKey {
@@ -225,19 +237,23 @@ interface AccountSubviewTabsProps {
  * Classification/Evidence/Relations/History/Technical は初期表示に含めず、
  * タブを開いたときだけ `/api/accounts/[accountId]/[subview]` から取得する。
  * 一度取得した subview はタブを切り替えても再フェッチしないようキャッシュする。
+ * 選択中のタブは `tab` 検索パラメータに反映し、URL 単体で同じタブを再現できるようにする。
  * @param props - 対象アカウント ID
  * @returns 描画された subview タブ
  */
 export function AccountSubviewTabs({ accountId }: AccountSubviewTabsProps): React.ReactElement {
-  const [activeTab, setActiveTab] = useState<LazySubviewKey | null>(null)
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const tabFromUrl = searchParams.get(TAB_QUERY_PARAM)
+  const initialTab = isLazySubviewKey(tabFromUrl) ? tabFromUrl : null
+
+  const [activeTab, setActiveTab] = useState<LazySubviewKey | null>(initialTab)
   const [cache, setCache] = useState<Partial<SubviewDataByKey>>({})
   const [loadingTab, setLoadingTab] = useState<LazySubviewKey | null>(null)
   const [errorTab, setErrorTab] = useState<LazySubviewKey | null>(null)
 
-  const selectTab = (tab: LazySubviewKey): void => {
-    setActiveTab(tab)
-    if (tab in cache) return
-
+  const fetchTab = (tab: LazySubviewKey): void => {
     setLoadingTab(tab)
     setErrorTab(null)
     fetch(buildSubviewUrl(accountId, tab))
@@ -252,6 +268,20 @@ export function AccountSubviewTabs({ accountId }: AccountSubviewTabsProps): Reac
       .finally(() => {
         setLoadingTab((current) => (current === tab ? null : current))
       })
+  }
+
+  useEffect(() => {
+    // マウント時点の URL に有効な tab があれば、そのデータだけ取得する。
+    // タブ切り替えは selectTab が個別に処理するため、依存配列は空のままにする。
+    if (initialTab) fetchTab(initialTab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const selectTab = (tab: LazySubviewKey): void => {
+    setActiveTab(tab)
+    router.replace(`${pathname}?${TAB_QUERY_PARAM}=${tab}`, { scroll: false })
+    if (tab in cache) return
+    fetchTab(tab)
   }
 
   return (
