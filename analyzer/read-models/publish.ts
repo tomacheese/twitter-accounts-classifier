@@ -177,11 +177,26 @@ export async function publishGeneration(
 
       if (!isNewer) return false
 
+      const previousPointer = await tx.readModelPointer.findUnique({
+        where: { modelKey: input.modelKey },
+        select: { currentGenerationId: true },
+      })
+
       await tx.readModelPointer.upsert({
         where: { modelKey: input.modelKey },
         create: { modelKey: input.modelKey, currentGenerationId: generation.id },
         update: { currentGenerationId: generation.id, switchedAt: new Date() },
       })
+
+      // Pointer の切り替え前まで current だった世代は、削除されるまで
+      // status が current のまま残ると System/diagnostics で複数 current が
+      // 見えてしまう。切り替えと同じ transaction 内で retired にする。
+      if (previousPointer && previousPointer.currentGenerationId !== generation.id) {
+        await tx.readModelGeneration.updateMany({
+          where: { id: previousPointer.currentGenerationId, status: 'current' },
+          data: { status: 'retired' },
+        })
+      }
       await tx.readModelState.update({
         where: { modelKey: input.modelKey },
         data: {

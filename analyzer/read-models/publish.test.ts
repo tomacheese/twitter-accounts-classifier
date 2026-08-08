@@ -151,9 +151,7 @@ describe.skipIf(!process.env.DATABASE_URL)('publishGeneration', () => {
     })
     expect(state.sourceWatermarkAt).toEqual(newest)
 
-    // 何を current とみなすかの正本は readModelPointer.currentGenerationId であり、
-    // 過去に current だった generation の status は退避後も 'current' のまま残る
-    // (pruneSupersededGenerations が削除するまでは書き換えない) ため、
+    // 何を current とみなすかの正本は readModelPointer.currentGenerationId であるため、
     // 判定には generation.status ではなく pointer を使う。
     const pointer = await prisma.readModelPointer.findUniqueOrThrow({
       where: { modelKey: 'account_summary' },
@@ -163,6 +161,30 @@ describe.skipIf(!process.env.DATABASE_URL)('publishGeneration', () => {
     })
     expect(pointedGeneration.sourceWatermarkAt).toEqual(newest)
     expect(generationIds).toContain(pointedGeneration.id)
+  })
+
+  it('新しい generation が current になると、旧 current だった generation を retired にする', async () => {
+    const older = new Date('2026-08-08T00:00:00.000Z')
+    const newer = new Date('2026-08-08T12:00:00.000Z')
+
+    const firstGenerationId = await publishGeneration(prisma, {
+      modelKey: 'account_summary',
+      schemaVersion: 1,
+      sourceWatermarkAt: older,
+      build: () => Promise.resolve({ rowCount: 10 }),
+    })
+
+    await publishGeneration(prisma, {
+      modelKey: 'account_summary',
+      schemaVersion: 1,
+      sourceWatermarkAt: newer,
+      build: () => Promise.resolve({ rowCount: 10 }),
+    })
+
+    const firstGeneration = await prisma.readModelGeneration.findUniqueOrThrow({
+      where: { id: firstGenerationId },
+    })
+    expect(firstGeneration.status).toBe('retired')
   })
 
   it('新しい run が publish した後に古い run が失敗しても、healthy な状態を failed で巻き戻さない', async () => {
