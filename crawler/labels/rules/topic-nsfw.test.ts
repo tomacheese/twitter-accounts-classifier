@@ -112,6 +112,26 @@ describe('topicNsfwRule', () => {
     ).toBe(false)
   })
 
+  it('is false for a bio declaring it does not follow NSFW accounts', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({
+          bio: 'ゲーム実況とお絵描きが好き。トラブルを避けたいのでNSFW系はフォローしません',
+        }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('is false for a bio using the unrelated psychology term "アダルトチルドレン"', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({
+          bio: '毒親育ちのアダルトチルドレン当事者です。心理学の勉強を発信しています。',
+        }),
+      ).value,
+    ).toBe(false)
+  })
+
   it('is true for a bio that self-declares adult content without a rejection/redirect phrase', () => {
     expect(
       topicNsfwRule.evaluate(makeBundle({ bio: 'アダルトグッズのレビューを投稿しています' })).value,

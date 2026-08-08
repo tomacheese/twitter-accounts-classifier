@@ -135,6 +135,39 @@ describe('spamRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it('is false for a bio that lists multiple rejected solicitation types before a single trailing rejection word', () => {
+    const result = spamRule.evaluate(
+      makeBundle({
+        bio: '出会い系、投資、副業、高額バイトなどの怪しいアカウントからのフォローは全てブロックします',
+        followersCount: 10,
+        followingCount: 800,
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for a bio that declines solicitation using casual slang ("スルー")', () => {
+    const result = spamRule.evaluate(
+      makeBundle({
+        bio: '写真とカフェ巡りが好きな雑談アカウント。出会い系目的のフォローはスルーしています。',
+        followersCount: 10,
+        followingCount: 800,
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for a bio that declines solicitation using a half-width katakana rejection word', () => {
+    const result = spamRule.evaluate(
+      makeBundle({
+        bio: '出会い系、副業系、その他勧誘系ﾀﾞﾒｰ',
+        followersCount: 10,
+        followingCount: 800,
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
   it('is false for a low-following, high-follower official/celebrity-shaped account even with courtesy wording', () => {
     const result = spamRule.evaluate(
       makeBundle({

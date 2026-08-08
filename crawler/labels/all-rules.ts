@@ -34,6 +34,7 @@ import { topicParentingRule } from './rules/topic-parenting'
 import { topicTravelRule } from './rules/topic-travel'
 import { topicBeautyRule } from './rules/topic-beauty'
 import { topicVrchatRule } from './rules/topic-vrchat'
+import { topicPetsRule } from './rules/topic-pets'
 import { templatedReplyNetworkRule } from './rules/templated-reply-network'
 import { selfDuplicateReplyRule } from './rules/self-duplicate-reply'
 import { replyFarmingRule } from './rules/reply-farming'
@@ -81,6 +82,7 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   topicTravelRule,
   topicBeautyRule,
   topicVrchatRule,
+  topicPetsRule,
   templatedReplyNetworkRule,
   selfDuplicateReplyRule,
   replyFarmingRule,
