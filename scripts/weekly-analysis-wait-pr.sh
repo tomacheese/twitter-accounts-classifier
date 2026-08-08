@@ -14,12 +14,18 @@ if [ -z "${WEEKLY_ANALYSIS_RUN_ID:-}" ]; then
   exit 7
 fi
 
-for bin in pnpm jq; do
-  if ! command -v "$bin" >/dev/null 2>&1; then
-    echo "[weekly-analysis-wait-pr] $bin binary not found on PATH" >&2
-    exit 7
-  fi
-done
+if ! command -v jq >/dev/null 2>&1; then
+  echo "[weekly-analysis-wait-pr] jq binary not found on PATH" >&2
+  exit 7
+fi
+
+TSX_BIN="$(pwd)/crawler/node_modules/.bin/tsx"
+RUN_CLI="$(pwd)/crawler/scripts/weekly-analysis-run.ts"
+GITHUB_CLI="$(pwd)/crawler/scripts/weekly-analysis-github.ts"
+if [ ! -x "$TSX_BIN" ]; then
+  echo "[weekly-analysis-wait-pr] tsx binary not found: $TSX_BIN" >&2
+  exit 7
+fi
 
 CI_TIMEOUT_SECONDS="${WEEKLY_ANALYSIS_CI_TIMEOUT_SECONDS:-7200}"
 POLL_INTERVAL_SECONDS=30
@@ -33,7 +39,7 @@ while true; do
     exit 3
   fi
 
-  RUN_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-run.ts get --id "$WEEKLY_ANALYSIS_RUN_ID")"
+  RUN_JSON="$("$TSX_BIN" "$RUN_CLI" get --id "$WEEKLY_ANALYSIS_RUN_ID")"
   RUN_STATUS="$(printf '%s' "$RUN_JSON" | jq -r '.status // empty')"
   if [ "$RUN_STATUS" != "running" ]; then
     echo "[weekly-analysis-wait-pr] WeeklyAnalysisRun $WEEKLY_ANALYSIS_RUN_ID is no longer running (status=$RUN_STATUS)" >&2
@@ -45,7 +51,7 @@ while true; do
     exit 7
   fi
 
-  if ! STATUS_JSON="$(pnpm --filter crawler exec tsx scripts/weekly-analysis-github.ts status --pr "$PR_NUMBER")"; then
+  if ! STATUS_JSON="$("$TSX_BIN" "$GITHUB_CLI" status --pr "$PR_NUMBER")"; then
     echo "[weekly-analysis-wait-pr] failed to fetch PR #$PR_NUMBER status" >&2
     exit 7
   fi
