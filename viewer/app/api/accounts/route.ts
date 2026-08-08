@@ -44,6 +44,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         generationId: result.generationId,
         freshnessStatus: result.freshnessStatus,
         nextCursor: result.nextCursor,
+        readiness: result.readiness,
       }),
     },
     { headers: { 'Cache-Control': 'no-store' } },
