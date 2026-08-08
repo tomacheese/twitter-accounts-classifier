@@ -4,6 +4,7 @@ import { getPrismaClient } from './db/client'
 import {
   processLabelMetrics,
   processFindingGeneration,
+  processReadModelRefresh,
   processBlockReconciliation,
   processRetentionSweep,
 } from './worker-processors'
@@ -111,6 +112,76 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
       },
     })
     expect(enqueued).not.toBeNull()
+  })
+
+  it('processReadModelRefresh は success な CrawlRun の read model を current に切り替える', async () => {
+    const crawlRun = await prisma.crawlRun.create({
+      data: {
+        startedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        finishedAt: new Date(),
+        status: 'success',
+      },
+    })
+
+    await processReadModelRefresh(prisma, {
+      id: 'work-item-3',
+      kind: 'read_model_refresh',
+      triggerType: 'crawl_run',
+      triggerId: crawlRun.id,
+      status: 'leased',
+      priority: 0,
+      availableAt: new Date(),
+      leaseOwner: 'worker-1',
+      leaseExpiresAt: new Date(),
+      attemptCount: 1,
+      maxAttempts: 5,
+      dependencyKey: null,
+      lastErrorCode: null,
+      lastErrorSummary: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    const pointer = await prisma.readModelPointer.findUnique({
+      where: { modelKey: 'account_summary' },
+    })
+    expect(pointer).not.toBeNull()
+  })
+
+  it('processReadModelRefresh は partial な CrawlRun の read model 公開を見送る', async () => {
+    const crawlRun = await prisma.crawlRun.create({
+      data: {
+        startedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        finishedAt: new Date(),
+        status: 'partial',
+      },
+    })
+
+    await processReadModelRefresh(prisma, {
+      id: 'work-item-4',
+      kind: 'read_model_refresh',
+      triggerType: 'crawl_run',
+      triggerId: crawlRun.id,
+      status: 'leased',
+      priority: 0,
+      availableAt: new Date(),
+      leaseOwner: 'worker-1',
+      leaseExpiresAt: new Date(),
+      attemptCount: 1,
+      maxAttempts: 5,
+      dependencyKey: null,
+      lastErrorCode: null,
+      lastErrorSummary: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    const pointer = await prisma.readModelPointer.findUnique({
+      where: { modelKey: 'account_summary' },
+    })
+    expect(pointer).toBeNull()
   })
 
   it('processBlockReconciliation は block_relation の ReadModelPointer を current に切り替える', async () => {

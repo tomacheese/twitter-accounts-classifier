@@ -181,6 +181,52 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     expect(rows[0]?.weekDelta).toBeCloseTo(0.3)
   })
 
+  it('sourceWatermarkAt より後の snapshot は最新値として使わない', async () => {
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
+    })
+
+    const watermarkAt = new Date(Date.now() - 60 * 60 * 1000)
+    await prisma.labelMetricSnapshot.createMany({
+      data: [
+        {
+          sourceCrawlRunId: `crawl-${randomUUID()}`,
+          labelDefinitionId: labelDefinition.id,
+          observedAt: new Date(watermarkAt.getTime() - 60 * 60 * 1000),
+          sourceWatermarkAt: new Date(watermarkAt.getTime() - 60 * 60 * 1000),
+          evaluatedCount: 100,
+          trueCount: 20,
+          prevalence: 0.2,
+          completeness: 'complete',
+          policyHash: 'hash',
+          analyzerVersion: '1',
+        },
+        // backlog 処理中に後続 CrawlRun が先に完了した場合を想定した、
+        // watermark より後に観測された snapshot。
+        {
+          sourceCrawlRunId: `crawl-${randomUUID()}`,
+          labelDefinitionId: labelDefinition.id,
+          observedAt: new Date(watermarkAt.getTime() + 60 * 1000),
+          sourceWatermarkAt: new Date(watermarkAt.getTime() + 60 * 1000),
+          evaluatedCount: 100,
+          trueCount: 90,
+          prevalence: 0.9,
+          completeness: 'complete',
+          policyHash: 'hash',
+          analyzerVersion: '1',
+        },
+      ],
+    })
+
+    const generationId = `generation-${randomUUID()}`
+    await buildLabelSummary(prisma, { generationId, sourceWatermarkAt: watermarkAt })
+
+    const rows = await prisma.labelSummaryCurrent.findMany({ where: { generationId } })
+    expect(rows[0]?.prevalence).toBeCloseTo(0.2)
+    expect(rows[0]?.evaluatedCount).toBe(100)
+    expect(rows[0]?.trueCount).toBe(20)
+  })
+
   it('snapshot が存在しない LabelDefinition は行を作らない', async () => {
     await prisma.labelDefinition.create({
       data: { key: `unused_label_${randomUUID()}`, description: 'snapshot なしラベル' },

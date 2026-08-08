@@ -92,7 +92,11 @@ export async function buildLabelSummary(
     labelDefinitions.map(async (labelDefinition) => {
       const [recentSnapshots, activeFindings] = await Promise.all([
         prisma.labelMetricSnapshot.findMany({
-          where: { labelDefinitionId: labelDefinition.id, ...COMPLETED_SNAPSHOT_FILTER },
+          where: {
+            labelDefinitionId: labelDefinition.id,
+            observedAt: { lte: input.sourceWatermarkAt },
+            ...COMPLETED_SNAPSHOT_FILTER,
+          },
           orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
           take: 2,
         }),

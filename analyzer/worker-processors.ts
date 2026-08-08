@@ -160,6 +160,15 @@ export async function processReadModelRefresh(
   workItem: AnalysisWorkItem,
 ): Promise<void> {
   const crawlRun = await prisma.crawlRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
+
+  // 一部のアカウントしか巡回できなかった run の値を current として公開すると、
+  // 巡回できなかった分の変化が観測されないまま最新状態として表示されてしまう。
+  // この run の read model 公開は見送り、完全に巡回できた run の refresh に委ねる。
+  if (crawlRun.status !== 'success') {
+    logger.info(`skip read model refresh for crawl run ${crawlRun.id} (status: ${crawlRun.status})`)
+    return
+  }
+
   const sourceWatermarkAt = crawlRun.finishedAt ?? crawlRun.lastHeartbeatAt
 
   await publishGeneration(prisma, {
