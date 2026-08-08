@@ -23,6 +23,7 @@ function createMockPrisma(
           : { currentGenerationId: overrides.currentGenerationId },
     )
   const overviewSnapshotDeleteMany = vi.fn().mockResolvedValue({ count: 4 })
+  const detectorEvaluationDeleteMany = vi.fn().mockResolvedValue({ count: 5 })
   const prisma = {
     analysisRun: { deleteMany: analysisRunDeleteMany },
     analysisWorkItem: {
@@ -32,6 +33,7 @@ function createMockPrisma(
     labelMetricSnapshot: { deleteMany: labelMetricSnapshotDeleteMany },
     readModelPointer: { findUnique: readModelPointerFindUnique },
     overviewSnapshot: { deleteMany: overviewSnapshotDeleteMany },
+    detectorEvaluation: { deleteMany: detectorEvaluationDeleteMany },
   } as unknown as PrismaClient
   return {
     prisma,
@@ -41,6 +43,7 @@ function createMockPrisma(
     labelMetricSnapshotDeleteMany,
     readModelPointerFindUnique,
     overviewSnapshotDeleteMany,
+    detectorEvaluationDeleteMany,
   }
 }
 
@@ -67,45 +70,42 @@ describe('runRetentionSweep', () => {
     expect(call.where.observedAt.lt.toISOString()).toBe('2026-05-10T00:00:00.000Z')
   })
 
-  it('完了済みWorkItemを30日より前のupdatedAtで対象にする (参照中のAnalysisRunの有無は問わない)', async () => {
+  it('succeeded/deadなWorkItemを30日より前のupdatedAtで対象にする (参照中のAnalysisRunの有無は問わない)', async () => {
     const { prisma, analysisWorkItemFindMany } = createMockPrisma()
     const now = new Date('2026-08-08T00:00:00.000Z')
 
     await runRetentionSweep(prisma, now)
 
     const call = analysisWorkItemFindMany.mock.calls[0][0] as {
-      where: { status: string; updatedAt: { lt: Date } }
+      where: { status: { in: string[] }; updatedAt: { lt: Date } }
     }
-    expect(call.where.status).toBe('succeeded')
+    expect(call.where.status.in).toEqual(['succeeded', 'dead'])
     expect(call.where.updatedAt.lt.toISOString()).toBe('2026-07-09T00:00:00.000Z')
     expect(call.where).not.toHaveProperty('runs')
   })
 
-  it('削除対象WorkItemに紐づくAnalysisRunを年齢を問わず先に削除してからWorkItemを削除する', async () => {
+  it('削除対象WorkItemをAnalysisRunの年齢に関わらず削除する (AnalysisRun側はSetNullで残る)', async () => {
     const { prisma, analysisRunDeleteMany, analysisWorkItemFindMany, analysisWorkItemDeleteMany } =
       createMockPrisma({ eligibleWorkItemIds: ['work-item-1', 'work-item-2'] })
-    analysisRunDeleteMany
-      .mockResolvedValueOnce({ count: 0 }) // 180日基準の一般 sweep
-      .mockResolvedValueOnce({ count: 5 }) // WorkItem 削除に連動した cascade
+    analysisRunDeleteMany.mockResolvedValue({ count: 0 }) // 180日基準の一般 sweep のみ
     analysisWorkItemDeleteMany.mockResolvedValue({ count: 2 })
 
     const result = await runRetentionSweep(prisma, new Date('2026-08-08T00:00:00.000Z'))
 
-    expect(analysisRunDeleteMany).toHaveBeenCalledTimes(2)
-    const cascadeCall = analysisRunDeleteMany.mock.calls[1][0] as {
-      where: { workItemId: { in: string[] } }
-    }
-    expect(cascadeCall.where.workItemId.in).toEqual(['work-item-1', 'work-item-2'])
+    // AnalysisRun.workItemId は ON DELETE SET NULL のため、WorkItem 削除は
+    // AnalysisRun への追加の deleteMany 呼び出しを発生させない。
+    expect(analysisRunDeleteMany).toHaveBeenCalledTimes(1)
     const deleteCall = analysisWorkItemDeleteMany.mock.calls[0][0] as {
       where: { id: { in: string[] } }
     }
     expect(deleteCall.where.id.in).toEqual(['work-item-1', 'work-item-2'])
-    // 180日基準の AnalysisRun 削除 (count: 0) + WorkItem に連動した削除 (count: 5)。
-    expect(result.deletedAnalysisRunCount).toBe(5)
+    // 180日基準の AnalysisRun 削除 (count: 0) のみ。WorkItem 削除に連動した削除は無い。
+    expect(result.deletedAnalysisRunCount).toBe(0)
+    expect(result.deletedWorkItemCount).toBe(2)
     expect(analysisWorkItemFindMany).toHaveBeenCalledTimes(1)
   })
 
-  it('削除対象のWorkItemが無ければAnalysisRunの連動削除もWorkItem削除も行わない', async () => {
+  it('削除対象のWorkItemが無ければWorkItem削除を行わない', async () => {
     const { prisma, analysisWorkItemFindMany, analysisWorkItemDeleteMany } = createMockPrisma({
       eligibleWorkItemIds: [],
     })
@@ -142,6 +142,19 @@ describe('runRetentionSweep', () => {
     expect(overviewSnapshotDeleteMany).toHaveBeenCalledTimes(1)
   })
 
+  it('shadowのDetectorEvaluationを30日より前のevaluatedAtで削除し、production判定分は対象にしない', async () => {
+    const { prisma, detectorEvaluationDeleteMany } = createMockPrisma()
+    const now = new Date('2026-08-08T00:00:00.000Z')
+
+    await runRetentionSweep(prisma, now)
+
+    const call = detectorEvaluationDeleteMany.mock.calls[0][0] as {
+      where: { isShadow: boolean; evaluatedAt: { lt: Date } }
+    }
+    expect(call.where.isShadow).toBe(true)
+    expect(call.where.evaluatedAt.lt.toISOString()).toBe('2026-07-09T00:00:00.000Z')
+  })
+
   it('削除件数を集計して返す', async () => {
     const { prisma } = createMockPrisma({ eligibleWorkItemIds: [] })
 
@@ -152,6 +165,7 @@ describe('runRetentionSweep', () => {
       deletedWorkItemCount: 0,
       deletedLabelMetricSnapshotCount: 1,
       deletedOverviewSnapshotCount: 4,
+      deletedShadowDetectorEvaluationCount: 5,
     })
   })
 })

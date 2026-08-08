@@ -316,7 +316,8 @@ export async function processRetentionSweep(
     `retention sweep (${workItem.triggerId}) removed ${result.deletedAnalysisRunCount} AnalysisRun, ` +
       `${result.deletedWorkItemCount} AnalysisWorkItem, ` +
       `${result.deletedLabelMetricSnapshotCount} LabelMetricSnapshot, ` +
-      `${result.deletedOverviewSnapshotCount} OverviewSnapshot rows`,
+      `${result.deletedOverviewSnapshotCount} OverviewSnapshot, ` +
+      `${result.deletedShadowDetectorEvaluationCount} shadow DetectorEvaluation rows`,
   )
 }
 

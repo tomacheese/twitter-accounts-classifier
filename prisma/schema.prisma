@@ -421,11 +421,14 @@ model AnalysisWorkItem {
 }
 
 model AnalysisRun {
-  id            String           @id @default(cuid())
-  workItemId    String
-  workItem      AnalysisWorkItem @relation(fields: [workItemId], references: [id])
+  id            String            @id @default(cuid())
+  // WorkItem は 30 日、AnalysisRun は 180 日と保持期間が異なる。cascade delete だと
+  // WorkItem の retention sweep のたびに紐づく AnalysisRun も年齢を問わず消えてしまうため、
+  // nullable FK + SetNull にして WorkItem 削除後も AnalysisRun 自身の retention sweep まで残す。
+  workItemId    String?
+  workItem      AnalysisWorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
   attemptNumber Int
-  startedAt     DateTime         @default(now())
+  startedAt     DateTime          @default(now())
   finishedAt    DateTime?
   status        String
   errorCode     String?
