@@ -39,7 +39,7 @@ export function deriveOperationalStatus(input: DeriveOperationalStatusInput): Op
  * deriveQualityStatus の入力。
  */
 export interface DeriveQualityStatusInput {
-  /** 評価データ自体が unknown か。 */
+  /** 評価データ自体が unknown・failed・stale・delayed のいずれかで信頼できないか。 */
   isDataUnknown: boolean
   /** critical/high の ReviewFinding があるか。 */
   hasDegradingFinding: boolean
@@ -48,9 +48,9 @@ export interface DeriveQualityStatusInput {
 }
 
 /**
- * 評価データ自体が unknown の場合、過去の状態を引き継がず現在状態を unknown にする。
+ * 評価データ自体が信頼できない場合、過去の状態を引き継がず現在状態を unknown にする。
  * 古い評価結果を現在の品質として提示すると、
- * 未評価の状態を「問題なし」と誤読させるため。
+ * 未評価・鮮度切れの状態を「問題なし」と誤読させるため。
  * @param input - 判定に必要な各種フラグ
  * @returns Classification Quality の総合状態
  */
@@ -125,10 +125,15 @@ export async function buildOverviewSnapshot(
 
   const operationalStatus = deriveOperationalStatus({
     hasCriticalIssue: activeIssues.some((issue) => issue.severity === 'critical'),
-    hasFailedOrStaleCoreStage: coreStages.some(
-      (stage) => stage.status === 'failed' || stage.status === 'stale',
-    ),
-    hasUnknownCoreStage: coreStages.some((stage) => stage.status === 'unknown'),
+    // Stage は crawl cycle 単位の一時的な失敗、ReadModelState は経過時間で
+    // 落ちる鮮度そのものであり、いずれか一方だけを見ると
+    // 「Stage は succeeded だが更新が止まっている」状態を見逃す。
+    hasFailedOrStaleCoreStage:
+      coreStages.some((stage) => stage.status === 'failed' || stage.status === 'stale') ||
+      readModelStates.some((state) => state.status === 'failed' || state.status === 'stale'),
+    hasUnknownCoreStage:
+      coreStages.some((stage) => stage.status === 'unknown') ||
+      readModelStates.some((state) => state.status === 'unknown' || state.status === 'delayed'),
     hasActiveIssue: activeIssues.length > 0,
   })
 
@@ -136,7 +141,7 @@ export async function buildOverviewSnapshot(
     isDataUnknown: readModelStates.some(
       (state) =>
         state.modelKey === 'label_summary' &&
-        (state.status === 'failed' || state.status === 'unknown'),
+        ['failed', 'unknown', 'stale', 'delayed'].includes(state.status),
     ),
     hasDegradingFinding: criticalFindingCount > 0,
     hasWatchFinding: watchFindingCount > 0,

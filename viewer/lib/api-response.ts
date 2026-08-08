@@ -1,5 +1,5 @@
 /** read model の鮮度。ReadModelState.status に対応する。 */
-export type ReadModelFreshnessStatus = 'healthy' | 'stale' | 'failed' | 'unknown'
+export type ReadModelFreshnessStatus = 'healthy' | 'delayed' | 'stale' | 'failed' | 'unknown'
 
 /** buildApiResponseMeta の入力。 */
 export interface BuildApiResponseMetaInput {

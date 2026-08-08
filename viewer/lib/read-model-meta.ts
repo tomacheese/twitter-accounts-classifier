@@ -10,7 +10,7 @@ export interface ReadModelMeta {
   freshnessStatus: ReadModelFreshnessStatus
 }
 
-const FRESHNESS_STATUSES = new Set<string>(['healthy', 'stale', 'failed'])
+const FRESHNESS_STATUSES = new Set<string>(['healthy', 'delayed', 'stale', 'failed'])
 
 /**
  * @param status - ReadModelState.status の生値
@@ -86,7 +86,9 @@ export async function getPipelineMeta(prisma: PrismaClient): Promise<ReadModelMe
     ? 'failed'
     : states.some((state) => state.status === 'stale')
       ? 'stale'
-      : latest.status
+      : states.some((state) => state.status === 'delayed')
+        ? 'delayed'
+        : latest.status
 
   return { ...toMeta(latest), generationId: null, freshnessStatus: toFreshnessStatus(worstStatus) }
 }

@@ -311,9 +311,11 @@ const DEFAULT_READ_MODEL_STALE_AFTER = 'PT12H'
 
 /**
  * 読み取りモデルの鮮度しきい値を policy から取り出して評価する。
+ * WorkItem が完了した直後だけでなく、queue が空で何も処理しない
+ * pass でも呼ぶことで、経過時間だけで delayed/stale へ落ちるようにする。
  * @param prisma - Prisma クライアント
  */
-async function refreshReadModelFreshnessFromPolicy(prisma: PrismaClient): Promise<void> {
+export async function refreshReadModelFreshnessFromPolicy(prisma: PrismaClient): Promise<void> {
   const { policy } = getPolicy()
   const rule = policy.rules.find((entry) => entry.type === 'read_model_freshness' && entry.enabled)
   if (!rule) return

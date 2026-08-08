@@ -118,6 +118,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
     await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
+    await prisma.readModelState.deleteMany()
   })
 
   it('active な OperationalIssue が無ければ healthy な snapshot を作る', async () => {
@@ -149,5 +150,47 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
 
     const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
     expect(snapshot.operationalStatus).toBe('critical')
+  })
+
+  it('label_summary が stale なら qualityStatus を unknown にする', async () => {
+    await prisma.readModelState.create({
+      data: { modelKey: 'label_summary', schemaVersion: 1, status: 'stale' },
+    })
+
+    const result = await buildOverviewSnapshot(prisma, {
+      generationId: randomUUID(),
+      sourceWatermarkAt: new Date(),
+    })
+
+    const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
+    expect(snapshot.qualityStatus).toBe('unknown')
+  })
+
+  it('label_summary が stale なら operationalStatus も critical にする', async () => {
+    await prisma.readModelState.create({
+      data: { modelKey: 'label_summary', schemaVersion: 1, status: 'stale' },
+    })
+
+    const result = await buildOverviewSnapshot(prisma, {
+      generationId: randomUUID(),
+      sourceWatermarkAt: new Date(),
+    })
+
+    const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
+    expect(snapshot.operationalStatus).toBe('critical')
+  })
+
+  it('read model が delayed なら operationalStatus を unknown にする', async () => {
+    await prisma.readModelState.create({
+      data: { modelKey: 'account_summary', schemaVersion: 1, status: 'delayed' },
+    })
+
+    const result = await buildOverviewSnapshot(prisma, {
+      generationId: randomUUID(),
+      sourceWatermarkAt: new Date(),
+    })
+
+    const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
+    expect(snapshot.operationalStatus).toBe('unknown')
   })
 })
