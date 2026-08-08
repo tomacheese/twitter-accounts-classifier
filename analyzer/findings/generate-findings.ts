@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient, ReviewFinding } from '../generated/prisma'
+import type { LabelMetricSnapshot, Prisma, PrismaClient, ReviewFinding } from '../generated/prisma'
 import { computeFingerprint } from './fingerprint'
 import {
   applyLifecycleTransition,
@@ -28,6 +28,60 @@ export interface GenerateFindingsForCrawlCycleInput {
 }
 
 const SEVERITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 }
+
+const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1000
+
+/** LabelMetricSnapshot を入力として評価できる rule の type。 */
+const LABEL_SNAPSHOT_RULE_TYPES = new Set(['label_count_drop', 'reason_distribution_shift'])
+
+/**
+ * baselineWindow ごとに比較対象を選ぶ。
+ * 未知の値を既定の直前サイクルへ寄せると、ポリシーの記述と実際の比較対象が
+ * 黙って食い違うため、解釈できない値は例外として扱う。
+ * @param prisma - Prisma クライアント
+ * @param labelDefinitionId - 対象の LabelDefinition
+ * @param current - 今回の snapshot
+ * @param baselineWindow - policy が指定する比較ウィンドウ
+ * @returns 比較対象の snapshot (見つからなければ null)
+ */
+async function resolveBaselineSnapshot(
+  prisma: PrismaClient,
+  labelDefinitionId: string,
+  current: { sourceCrawlRunId: string; observedAt: Date },
+  baselineWindow: string | undefined,
+): Promise<LabelMetricSnapshot | null> {
+  const observedAtUpperBound =
+    baselineWindow === 'seven_day'
+      ? new Date(current.observedAt.getTime() - SEVEN_DAY_MS)
+      : current.observedAt
+  if (baselineWindow !== undefined && !['previous_cycle', 'seven_day'].includes(baselineWindow)) {
+    throw new Error(`unsupported baselineWindow: ${baselineWindow}`)
+  }
+
+  return prisma.labelMetricSnapshot.findFirst({
+    where: {
+      labelDefinitionId,
+      sourceCrawlRunId: { not: current.sourceCrawlRunId },
+      observedAt: { lt: observedAtUpperBound },
+      completeness: 'complete',
+    },
+    orderBy: [{ observedAt: 'desc' }],
+  })
+}
+
+/**
+ * active/recurring の Finding には resolutionThreshold を、まだ立っていない
+ * Finding には activationThreshold を適用する。
+ * 単一の閾値だけで判定すると、閾値付近の観測で active と resolved を往復する。
+ * @param rule - 適用する検出ルール
+ * @param status - 直前までの lifecycle 状態
+ * @returns 今回の判定に使う相対変化量の閾値
+ */
+function resolveEffectiveThreshold(rule: DetectionPolicyRule, status: string): number {
+  const isMonitoring = status === 'active' || status === 'recurring'
+  const hysteresisThreshold = isMonitoring ? rule.resolutionThreshold : rule.activationThreshold
+  return hysteresisThreshold ?? rule.relativeThreshold ?? 0
+}
 
 /**
  * @param a - 比較対象の severity
@@ -195,7 +249,14 @@ async function processObservation(
       existingFinding,
     )
     const now = new Date()
-    const next = applyLifecycleTransition(priorState, input.observation, input.rule, now)
+    const observation = {
+      ...input.observation,
+      exceeded:
+        !input.observation.isMissingOrFailed &&
+        input.observation.relativeDifference >=
+          resolveEffectiveThreshold(input.rule, priorState.status),
+    }
+    const next = applyLifecycleTransition(priorState, observation, input.rule, now)
 
     // active 化前の候補であっても、後から連続超過回数を再構築できるよう必ず保存する。
     await tx.detectorEvaluation.create({
@@ -205,7 +266,7 @@ async function processObservation(
         identityVersion: input.rule.identityVersion,
         sourceId: input.sourceId,
         isShadow: false,
-        result: input.observation as unknown as Prisma.InputJsonValue,
+        result: observation as unknown as Prisma.InputJsonValue,
         policyHash: ctx.policyHash,
       },
     })
@@ -268,28 +329,31 @@ export async function generateFindingsForCrawlCycle(
   prisma: PrismaClient,
   input: GenerateFindingsForCrawlCycleInput,
 ): Promise<void> {
-  // completeness: 'unknown' は集計自体に失敗した記録であり、
-  // 実測値として検出器へ渡すと分析エラーを品質劣化として誤検出させる。
+  // complete 以外は母集団が欠けた記録であり、実測値として検出器へ渡すと
+  // 巡回できなかった分の減少や分析エラーを品質劣化として誤検出させる。
   const currentSnapshots = await prisma.labelMetricSnapshot.findMany({
-    where: { sourceCrawlRunId: input.crawlRunId, completeness: { not: 'unknown' } },
+    where: { sourceCrawlRunId: input.crawlRunId, completeness: 'complete' },
   })
 
   // 同じ種別を Label 数だけ繰り返し警告しないよう、実行全体で 1 回にまとめる。
   const unimplementedRuleTypes = new Set<string>()
 
   for (const snapshot of currentSnapshots) {
-    const baseline = await prisma.labelMetricSnapshot.findFirst({
-      where: {
-        labelDefinitionId: snapshot.labelDefinitionId,
-        sourceCrawlRunId: { not: input.crawlRunId },
-        observedAt: { lt: snapshot.observedAt },
-        completeness: { not: 'unknown' },
-      },
-      orderBy: [{ observedAt: 'desc' }],
-    })
-
     for (const rule of input.policy.rules) {
       if (!rule.enabled) continue
+      if (!LABEL_SNAPSHOT_RULE_TYPES.has(rule.type)) {
+        // weekly_review 由来の rule は Weekly Review の取り込み経路で評価されるため、
+        // crawl サイクルで検出器が無いことは欠落ではない。
+        if (rule.detectorType !== 'weekly_review') unimplementedRuleTypes.add(rule.type)
+        continue
+      }
+
+      const baseline = await resolveBaselineSnapshot(
+        prisma,
+        snapshot.labelDefinitionId,
+        snapshot,
+        rule.baselineWindow,
+      )
 
       if (rule.type === 'label_count_drop') {
         const result = evaluateLabelCountDrop(
@@ -353,10 +417,7 @@ export async function generateFindingsForCrawlCycle(
             input,
           )
         }
-        continue
       }
-
-      unimplementedRuleTypes.add(rule.type)
     }
   }
 

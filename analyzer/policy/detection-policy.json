@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "policyVersion": "2026-08-07.0",
+  "policyVersion": "2026-08-08.0",
   "rules": [
     {
       "type": "label_count_drop",
@@ -32,7 +32,7 @@
     },
     {
       "type": "crawl_quality_degradation",
-      "enabled": true,
+      "enabled": false,
       "detectorType": "invariant",
       "identityVersion": 1,
       "severity": "critical",
@@ -44,7 +44,7 @@
     },
     {
       "type": "block_failure_spike",
-      "enabled": true,
+      "enabled": false,
       "detectorType": "comparative",
       "identityVersion": 1,
       "severity": "high",

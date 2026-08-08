@@ -36,11 +36,12 @@ export interface DetectorObservation {
  * @returns ミリ秒
  */
 function parseIsoDurationMs(duration: string): number {
-  const match = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?)?$/.exec(duration)
+  const match = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/.exec(duration)
   if (!match) throw new Error(`unsupported duration format: ${duration}`)
   const days = Number(match[1] || 0)
   const hours = Number(match[2] || 0)
-  return (days * 24 + hours) * 60 * 60 * 1000
+  const minutes = Number(match[3] || 0)
+  return ((days * 24 + hours) * 60 + minutes) * 60 * 1000
 }
 
 /**
@@ -57,6 +58,21 @@ function isWithinRecurrenceWindow(
   if (!resolvedAt || !recurrenceWindow) return false
   const windowMs = parseIsoDurationMs(recurrenceWindow)
   return now.getTime() - resolvedAt.getTime() <= windowMs
+}
+
+/**
+ * @param resolvedAt - 直近で resolved になった時刻
+ * @param cooldown - 再 activation を抑止する期間 (ISO 8601 duration)
+ * @param now - 現在時刻
+ * @returns 抑止期間内かどうか
+ */
+function isWithinCooldown(
+  resolvedAt: Date | undefined,
+  cooldown: string | undefined,
+  now: Date,
+): boolean {
+  if (!resolvedAt || !cooldown) return false
+  return now.getTime() - resolvedAt.getTime() < parseIsoDurationMs(cooldown)
 }
 
 /**
@@ -92,6 +108,12 @@ export function applyLifecycleTransition(
     const activationCount = rule.criticalImmediate ? 1 : rule.activationCount
 
     if (consecutiveExceed < activationCount) {
+      return { ...state, consecutiveExceed, consecutiveNormal: 0 }
+    }
+
+    // 解消直後の閾値付近の揺れで active と resolved を往復させないよう、
+    // cooldown の間は連続超過回数だけ数えて再 activation を保留する。
+    if (isWithinCooldown(state.resolvedAt, rule.cooldown, now)) {
       return { ...state, consecutiveExceed, consecutiveNormal: 0 }
     }
 

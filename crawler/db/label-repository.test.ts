@@ -59,7 +59,11 @@ describe('recordAccountLabelsBulk', () => {
     const queryRaw = vi.fn()
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
-    const result = await recordAccountLabelsBulk(prisma, { accountId: 'u1', labels: [] })
+    const result = await recordAccountLabelsBulk(prisma, {
+      sourceKind: 'relabel',
+      accountId: 'u1',
+      labels: [],
+    })
 
     expect(result).toEqual([])
     expect(queryRaw).not.toHaveBeenCalled()
@@ -97,6 +101,7 @@ describe('recordAccountLabelsBulk', () => {
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
     const result = await recordAccountLabelsBulk(prisma, {
+      sourceKind: 'relabel',
       accountId: 'u1',
       labels: [
         {
@@ -134,6 +139,13 @@ describe('recordAccountLabelsBulk', () => {
       ['because a', 'because b'],
       ['rule-a', 'rule-b'],
       ['1.0.0', '2.0.0'],
+      // 発生源の 3 列は AccountLabel・AccountLabelLatest の両方へ同じ値を渡す。
+      'relabel',
+      null,
+      null,
+      'relabel',
+      null,
+      null,
     ])
   })
 
@@ -173,6 +185,7 @@ describe('recordAccountLabelsBulk', () => {
       .mockImplementation(() => undefined)
 
     const result = await recordAccountLabelsBulk(prisma, {
+      sourceKind: 'relabel',
       accountId: 'u1',
       labels: [
         {
@@ -226,6 +239,7 @@ describe('recordAccountLabelsBulk', () => {
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
     const result = await recordAccountLabelsBulk(prisma, {
+      sourceKind: 'relabel',
       accountId: 'u1',
       labels: [
         {
@@ -296,5 +310,26 @@ describe('recordCrawlAccountLabel', () => {
     const sqlText = sql.join('')
     expect(sqlText).toContain('FROM "AccountLabelLatest"')
     expect(sqlText).toContain('NOT EXISTS')
+  })
+
+  it('records the crawl run and login account as the source of the label', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ latestUpserted: true }])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await recordCrawlAccountLabel(prisma, {
+      crawlRunId: 'run1',
+      username: 'viewer',
+      accountId: 'u1',
+      labelDefinitionId: 'ld1',
+      result: { value: true, confidence: 1, reason: 'because' },
+      method: 'blue_verified',
+      ruleVersion: '1.0.0',
+    })
+
+    const [sql, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    const sqlText = sql.join('')
+    expect(sqlText).toContain('"sourceKind", "sourceId", "sourceUsername"')
+    expect(values).toContain('run1')
+    expect(values).toContain('viewer')
   })
 })

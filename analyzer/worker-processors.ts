@@ -58,12 +58,22 @@ export async function processLabelMetrics(
   const crawlRun = await prisma.crawlRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
   const { policyHash } = getPolicy()
 
-  await generateLabelMetricSnapshots(prisma, {
+  const result = await generateLabelMetricSnapshots(prisma, {
     crawlRunId: crawlRun.id,
+    crawlRunStatus: crawlRun.status,
     sourceWatermarkAt: crawlRun.finishedAt ?? crawlRun.lastHeartbeatAt,
     policyHash,
     analyzerVersion: APP_VERSION,
   })
+
+  // 一部の Label だけ欠けた metric set を後続へ渡すと、検出器がその Label の
+  // 前回値と比較できないまま先へ進み、欠落が観測値の変化として残らなくなる。
+  // WorkItem を失敗させて再試行に委ね、全 Label が揃うまで公開しない。
+  if (result.failedLabelDefinitionIds.length > 0) {
+    throw new Error(
+      `label metric aggregation failed for ${result.failedLabelDefinitionIds.length}/${result.totalCount} labels: ${result.failedLabelDefinitionIds.join(', ')}`,
+    )
+  }
 
   await enqueueWorkItem(prisma, {
     kind: 'finding_generation',
