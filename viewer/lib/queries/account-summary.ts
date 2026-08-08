@@ -37,6 +37,8 @@ export interface ListAccountSummariesResult {
   nextCursor: string | null
   generationId: string | null
   freshnessStatus: ReadModelFreshnessStatus
+  isPartial: boolean
+  partialReason?: string
 }
 
 const MODEL_KEY = 'account_summary'
@@ -64,18 +66,43 @@ function resolveSeverityCandidates(minSeverity: string): string[] | null {
  * @param prisma - Prisma クライアント
  * @returns 現在の generationId と鮮度。ReadModelPointer が未生成なら generationId は null
  */
-async function getGenerationState(
-  prisma: PrismaClient,
-): Promise<{ generationId: string | null; freshnessStatus: ReadModelFreshnessStatus }> {
+async function getGenerationState(prisma: PrismaClient): Promise<{
+  generationId: string | null
+  freshnessStatus: ReadModelFreshnessStatus
+  isPartial: boolean
+  partialReason?: string
+}> {
   const [pointer, state] = await Promise.all([
     prisma.readModelPointer.findUnique({ where: { modelKey: MODEL_KEY } }),
     prisma.readModelState.findUnique({ where: { modelKey: MODEL_KEY } }),
   ])
   const freshnessStatus: ReadModelFreshnessStatus =
-    state?.status === 'healthy' || state?.status === 'stale' || state?.status === 'failed'
+    state?.status === 'healthy' ||
+    state?.status === 'delayed' ||
+    state?.status === 'stale' ||
+    state?.status === 'failed'
       ? state.status
       : 'unknown'
-  return { generationId: pointer?.currentGenerationId ?? null, freshnessStatus }
+  const generationId = pointer?.currentGenerationId ?? null
+  if (!generationId) return { generationId: null, freshnessStatus, isPartial: false }
+
+  const generation = await prisma.readModelGeneration.findUnique({
+    where: { id: generationId },
+    select: { validationSummary: true },
+  })
+  const summary = generation?.validationSummary
+  if (typeof summary !== 'object' || summary === null || Array.isArray(summary)) {
+    return { generationId, freshnessStatus, isPartial: false }
+  }
+  const record = summary as Record<string, unknown>
+  const isPartial = record.isPartial === true
+  const partialReason = typeof record.partialReason === 'string' ? record.partialReason : undefined
+  return {
+    generationId,
+    freshnessStatus,
+    isPartial,
+    ...(isPartial && partialReason ? { partialReason } : {}),
+  }
 }
 
 /**
@@ -91,9 +118,16 @@ export async function listAccountSummaries(
   prisma: PrismaClient,
   input: ListAccountSummariesInput,
 ): Promise<ListAccountSummariesResult> {
-  const { generationId, freshnessStatus } = await getGenerationState(prisma)
+  const { generationId, freshnessStatus, isPartial, partialReason } =
+    await getGenerationState(prisma)
   if (!generationId) {
-    return { items: [], nextCursor: null, generationId: null, freshnessStatus }
+    return {
+      items: [],
+      nextCursor: null,
+      generationId: null,
+      freshnessStatus,
+      isPartial: false,
+    }
   }
 
   const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
@@ -169,6 +203,8 @@ export async function listAccountSummaries(
   return {
     generationId,
     freshnessStatus,
+    isPartial,
+    ...(partialReason ? { partialReason } : {}),
     nextCursor,
     items: page.map((row) => ({
       accountId: row.accountId,

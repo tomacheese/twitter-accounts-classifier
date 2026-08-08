@@ -14,6 +14,24 @@ function createMockPrisma(overrides: { cycles?: unknown[]; cycle?: unknown }) {
 }
 
 describe('listOperationCycles', () => {
+  it('一覧に currentStageKey を含める', async () => {
+    const row = {
+      id: 'cycle-1',
+      kind: 'crawl',
+      status: 'running',
+      attentionRequired: false,
+      triggeredAt: new Date('2026-08-08T00:00:00Z'),
+      startedAt: new Date('2026-08-08T00:00:01Z'),
+      finishedAt: null,
+      currentStageKey: 'label_metrics',
+    }
+    const { prisma } = createMockPrisma({ cycles: [row] })
+
+    const result = await listOperationCycles(prisma)
+
+    expect(result.items[0]?.currentStageKey).toBe('label_metrics')
+  })
+
   it('既定で 30 件まで取得する', async () => {
     const { prisma, findMany } = createMockPrisma({ cycles: [] })
     await listOperationCycles(prisma)

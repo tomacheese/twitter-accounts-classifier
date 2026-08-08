@@ -2,13 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
 import { listAccountSummaries } from './account-summary'
 
-function createMockPrisma(overrides: { pointer?: unknown; state?: unknown; rows?: unknown[] }) {
+function createMockPrisma(overrides: {
+  pointer?: unknown
+  state?: unknown
+  generation?: unknown
+  rows?: unknown[]
+}) {
   const findUnique = vi.fn().mockResolvedValue(overrides.pointer ?? null)
   const stateFindUnique = vi.fn().mockResolvedValue(overrides.state ?? null)
+  const generationFindUnique = vi.fn().mockResolvedValue(overrides.generation ?? null)
   const findMany = vi.fn().mockResolvedValue(overrides.rows ?? [])
   const prisma = {
     readModelPointer: { findUnique },
     readModelState: { findUnique: stateFindUnique },
+    readModelGeneration: { findUnique: generationFindUnique },
     accountSummaryCurrent: { findMany },
   } as unknown as PrismaClient
   return { prisma, findUnique, findMany }
@@ -193,5 +200,38 @@ describe('listAccountSummaries', () => {
       where: { highestFindingSeverity?: unknown }
     }
     expect(call.where.highestFindingSeverity).toBeUndefined()
+  })
+
+  it('current generation の validationSummary が partial なら partial metadata を返す', async () => {
+    const { prisma } = createMockPrisma({
+      pointer: { currentGenerationId: 'generation-1' },
+      state: { status: 'healthy' },
+      generation: {
+        validationSummary: {
+          isPartial: true,
+          partialReason: 'crawl completed partially; some accounts may contain older data',
+        },
+      },
+    })
+
+    const result = await listAccountSummaries(prisma, { view: 'all' })
+
+    expect(result.isPartial).toBe(true)
+    expect(result.partialReason).toBe(
+      'crawl completed partially; some accounts may contain older data',
+    )
+  })
+
+  it('validationSummary が壊れていれば partial 扱いにしない', async () => {
+    const { prisma } = createMockPrisma({
+      pointer: { currentGenerationId: 'generation-1' },
+      state: { status: 'healthy' },
+      generation: { validationSummary: { isPartial: 'yes', partialReason: 123 } },
+    })
+
+    const result = await listAccountSummaries(prisma, { view: 'all' })
+
+    expect(result.isPartial).toBe(false)
+    expect(result.partialReason).toBeUndefined()
   })
 })

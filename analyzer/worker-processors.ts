@@ -29,6 +29,76 @@ import { Logger } from '@book000/node-utils'
 const logger = Logger.configure('analyzer:worker-processors')
 
 const APP_VERSION = process.env.APPLICATION_VERSION ?? 'unknown'
+
+export interface CrawlReadModelPublication {
+  shouldPublish: boolean
+  isPartial: boolean
+  partialReason?: string
+}
+
+/**
+ * CrawlRun の完全性を read model 公開可否と partial metadata へ変換する。
+ * partial は全件正本から snapshot を再構築できるため利用可能な世代として公開するが、
+ * 未巡回アカウントの値が古い可能性を UI へ明示できるよう partial を保持する。
+ */
+export function getCrawlReadModelPublication(runStatus: string): CrawlReadModelPublication {
+  if (runStatus === 'success') return { shouldPublish: true, isPartial: false }
+  if (runStatus === 'partial') {
+    return {
+      shouldPublish: true,
+      isPartial: true,
+      partialReason: 'crawl completed partially; some accounts may contain older data',
+    }
+  }
+  return { shouldPublish: false, isPartial: false }
+}
+
+/**
+ * account_summary がまだ一度も公開されていない環境では、最新の完了済み crawl を
+ * label_metrics から再処理して read model を bootstrap する。過去に succeeded になった
+ * WorkItem も、旧バージョンが read model 公開を見送っていた可能性があるため明示的に再キューする。
+ */
+export async function enqueueReadModelBootstrapIfMissing(prisma: PrismaClient): Promise<void> {
+  const pointer = await prisma.readModelPointer.findUnique({
+    where: { modelKey: 'account_summary' },
+  })
+  if (pointer) return
+
+  const crawlRun = await prisma.crawlRun.findFirst({
+    where: { status: { in: ['success', 'partial'] }, finishedAt: { not: null } },
+    orderBy: { finishedAt: 'desc' },
+    select: { id: true, status: true },
+  })
+  if (!crawlRun) return
+
+  const now = new Date()
+  await prisma.analysisWorkItem.upsert({
+    where: {
+      kind_triggerType_triggerId: {
+        kind: 'label_metrics',
+        triggerType: 'crawl_run',
+        triggerId: crawlRun.id,
+      },
+    },
+    create: {
+      kind: 'label_metrics',
+      triggerType: 'crawl_run',
+      triggerId: crawlRun.id,
+      priority: 100,
+    },
+    update: {
+      status: 'queued',
+      priority: 100,
+      availableAt: now,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      lastErrorCode: null,
+      lastErrorSummary: null,
+      attemptCount: 0,
+    },
+  })
+}
+
 // CommonJS を採用する本プロジェクトでは __dirname がモジュールの位置を得る素直な手段であり、
 // import.meta は tsconfig の module 設定と両立しない。
 // eslint-disable-next-line unicorn/prefer-module
@@ -165,32 +235,42 @@ export async function processReadModelRefresh(
 ): Promise<void> {
   const crawlRun = await prisma.crawlRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
 
-  // 一部のアカウントしか巡回できなかった run の値を current として公開すると、
-  // 巡回できなかった分の変化が観測されないまま最新状態として表示されてしまう。
-  // この run の read model 公開は見送り、完全に巡回できた run の refresh に委ねる。
-  if (crawlRun.status !== 'success') {
+  const publication = getCrawlReadModelPublication(crawlRun.status)
+  if (!publication.shouldPublish) {
     logger.info(`skip read model refresh for crawl run ${crawlRun.id} (status: ${crawlRun.status})`)
     return
   }
 
   const sourceWatermarkAt = crawlRun.finishedAt ?? crawlRun.lastHeartbeatAt
+  const partialValidation = publication.isPartial
+    ? {
+        isPartial: true,
+        partialReason: publication.partialReason,
+        sourceRunStatus: crawlRun.status,
+      }
+    : {}
 
   await publishGeneration(prisma, {
     modelKey: 'account_summary',
     schemaVersion: 1,
     sourceWatermarkAt,
-    build: (generationId) =>
-      buildAccountSummary(prisma, {
+    build: async (generationId) => {
+      const result = await buildAccountSummary(prisma, {
         generationId,
         sourceWatermarkAt,
         sourceCrawlRunId: crawlRun.id,
-      }),
+      })
+      return { ...result, validationSummary: partialValidation }
+    },
   })
   await publishGeneration(prisma, {
     modelKey: 'label_summary',
     schemaVersion: 1,
     sourceWatermarkAt,
-    build: (generationId) => buildLabelSummary(prisma, { generationId, sourceWatermarkAt }),
+    build: async (generationId) => {
+      const result = await buildLabelSummary(prisma, { generationId, sourceWatermarkAt })
+      return { ...result, validationSummary: partialValidation }
+    },
   })
   await publishAttentionAndOverview(prisma, sourceWatermarkAt)
 }

@@ -21,4 +21,10 @@ describe('isNewUiSectionEnabled', () => {
   it('区画名の前後の空白を無視する', () => {
     expect(isNewUiSectionEnabled('review', 'overview, review , accounts')).toBe(true)
   })
+
+  it('accounts はロールアウト完了済みのため環境変数に関係なく true', () => {
+    expect(isNewUiSectionEnabled('accounts', undefined)).toBe(true)
+    expect(isNewUiSectionEnabled('accounts', '')).toBe(true)
+    expect(isNewUiSectionEnabled('accounts', 'overview,operations')).toBe(true)
+  })
 })

@@ -31,4 +31,12 @@ describe('deriveCycleStatus', () => {
   it('起点 Stage 自体が failed で後続が skipped なら failed を返す', () => {
     expect(deriveCycleStatus(['failed', 'skipped', 'skipped', 'skipped'])).toBe('failed')
   })
+
+  it('起点 Stage が partial なら Cycle 全体も partial を返す', () => {
+    expect(deriveCycleStatus(['partial', 'succeeded', 'succeeded'])).toBe('partial')
+  })
+
+  it('起点 Stage が failed なら後続に partial があっても failed を返す', () => {
+    expect(deriveCycleStatus(['failed', 'partial'])).toBe('failed')
+  })
 })

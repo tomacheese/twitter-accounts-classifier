@@ -71,7 +71,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     expect(cycle.attentionRequired).toBe(false)
   })
 
-  it('CrawlRun が partial なら read_model_refresh は skipped になり、Cycle status は succeeded にならない', async () => {
+  it('CrawlRun が partial でも read_model_refresh は実行し、Cycle status は partial のままにする', async () => {
     const crawlRun = await prisma.crawlRun.create({
       data: {
         id: `crawl-${randomUUID()}`,
@@ -104,10 +104,15 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     const readModelRefreshStage = await prisma.operationStage.findUniqueOrThrow({
       where: { cycleId_stageKey: { cycleId: cycle.id, stageKey: 'read_model_refresh' } },
     })
-    expect(readModelRefreshStage.status).toBe('skipped')
-    expect(readModelRefreshStage.errorSummary).toContain('partial')
+    expect(readModelRefreshStage.status).toBe('succeeded')
+    expect(readModelRefreshStage.errorSummary).toBeNull()
     expect(cycle.status).toBe('partial')
     expect(cycle.attentionRequired).toBe(true)
+
+    const crawlStage = await prisma.operationStage.findUniqueOrThrow({
+      where: { cycleId_stageKey: { cycleId: cycle.id, stageKey: 'crawl' } },
+    })
+    expect(crawlStage.status).toBe('partial')
 
     // label_metrics/finding_generation は partial なデータに対しても実際に処理を
     // 完了しているため、succeeded のまま表示してよい。
