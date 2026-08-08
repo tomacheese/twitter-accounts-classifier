@@ -2,8 +2,11 @@ import type { Prisma, PrismaClient } from '../generated/prisma'
 
 const SEVERITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 }
 const MAX_ITEMS = 8
+// 深刻な順に評価する。低い severity の滞留で critical が取得段から溢れないようにするため。
+const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low']
 // 異常に active な finding/issue が積み上がっても worker が全件ロードしないための上限。
-const CANDIDATE_FETCH_LIMIT = MAX_ITEMS * 50
+// 同じ severity 内では継続期間が長いものを優先して残す。
+const PER_SEVERITY_FETCH_LIMIT = MAX_ITEMS * 25
 
 interface AttentionCandidate {
   sourceType: string
@@ -56,49 +59,44 @@ export interface BuildAttentionItemsInput {
 }
 
 /**
- * OperationalIssue (active) と ReviewFinding (active/recurring) を統合し、
- * compareCandidates の優先順位で上位 MAX_ITEMS 件だけを AttentionItemCurrent へ書く。
- * 最終順位は全候補を突き合わせないと決まらないため、
- * 取得段では CANDIDATE_FETCH_LIMIT の上限だけを課し、厳密な絞り込みはメモリ上で行う。
+ * 指定 severity の候補だけを取得する。
  * @param prisma - Prisma クライアント
- * @param input - 対象 generationId と検索基準時刻
- * @returns 作成した行数
+ * @param severity - 対象の severity
+ * @returns その severity の候補一覧
  */
-export async function buildAttentionItems(
+async function fetchCandidatesForSeverity(
   prisma: PrismaClient,
-  input: BuildAttentionItemsInput,
-): Promise<{ rowCount: number }> {
+  severity: string,
+): Promise<AttentionCandidate[]> {
   const [operationalIssues, reviewFindings] = await Promise.all([
     prisma.operationalIssue.findMany({
-      where: { status: 'active' },
+      where: { status: 'active', severity },
       orderBy: [{ firstDetectedAt: 'asc' }],
-      take: CANDIDATE_FETCH_LIMIT,
+      take: PER_SEVERITY_FETCH_LIMIT,
     }),
     prisma.reviewFinding.findMany({
-      where: { status: { in: ['active', 'recurring'] } },
+      where: { status: { in: ['active', 'recurring'] }, currentSeverity: severity },
       include: { occurrences: { orderBy: [{ observedAt: 'desc' }], take: 1 } },
       orderBy: [{ firstDetectedAt: 'asc' }],
-      take: CANDIDATE_FETCH_LIMIT,
+      take: PER_SEVERITY_FETCH_LIMIT,
     }),
   ])
 
-  const candidates: AttentionCandidate[] = [
-    ...operationalIssues.map((issue): AttentionCandidate => {
-      return {
-        sourceType: 'operational_issue',
-        sourceId: issue.id,
-        category: issue.type,
-        severity: issue.severity,
-        isRecurring: false,
-        affectedRatio: 0,
-        affectedCount: 0,
-        firstDetectedAt: issue.firstDetectedAt,
-        summary: `${issue.component}: ${issue.type}`,
-        impact: {},
-        freshness: 'current',
-        detailHref: `/operations/issues/${issue.id}`,
-      }
-    }),
+  return [
+    ...operationalIssues.map((issue): AttentionCandidate => ({
+      sourceType: 'operational_issue',
+      sourceId: issue.id,
+      category: issue.type,
+      severity: issue.severity,
+      isRecurring: false,
+      affectedRatio: 0,
+      affectedCount: 0,
+      firstDetectedAt: issue.firstDetectedAt,
+      summary: `${issue.component}: ${issue.type}`,
+      impact: {},
+      freshness: 'current',
+      detailHref: `/operations/issues/${issue.id}`,
+    })),
     ...reviewFindings.map((finding): AttentionCandidate => {
       const latestOccurrence = finding.occurrences.at(0)
       const totalCount = latestOccurrence?.totalCount ?? 0
@@ -119,6 +117,27 @@ export async function buildAttentionItems(
       }
     }),
   ]
+}
+
+/**
+ * OperationalIssue (active) と ReviewFinding (active/recurring) を統合し、
+ * compareCandidates の優先順位で上位 MAX_ITEMS 件だけを AttentionItemCurrent へ書く。
+ * compareCandidates は severity を最優先で比較するため、
+ * 深刻な severity から順に取得し MAX_ITEMS を満たした時点で打ち切れば、
+ * それより低い severity は結果に入り得ない。
+ * @param prisma - Prisma クライアント
+ * @param input - 対象 generationId と検索基準時刻
+ * @returns 作成した行数
+ */
+export async function buildAttentionItems(
+  prisma: PrismaClient,
+  input: BuildAttentionItemsInput,
+): Promise<{ rowCount: number }> {
+  const candidates: AttentionCandidate[] = []
+  for (const severity of SEVERITY_ORDER) {
+    candidates.push(...(await fetchCandidatesForSeverity(prisma, severity)))
+    if (candidates.length >= MAX_ITEMS) break
+  }
 
   const topCandidates = candidates.toSorted(compareCandidates).slice(0, MAX_ITEMS)
 

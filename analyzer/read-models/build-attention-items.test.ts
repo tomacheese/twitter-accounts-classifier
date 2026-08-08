@@ -44,6 +44,39 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAttentionItems', () => {
     expect(rows[0]?.severity).toBe('critical')
   })
 
+  it('低い severity が大量にあっても後から検出された critical を落とさない', async () => {
+    const oldDetectedAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    await prisma.operationalIssue.createMany({
+      data: Array.from({ length: 30 }, () => ({
+        component: 'crawl',
+        type: 'run_failure',
+        fingerprint: `fingerprint-${randomUUID()}`,
+        status: 'active',
+        severity: 'low',
+        firstDetectedAt: oldDetectedAt,
+      })),
+    })
+    const criticalIssue = await prisma.operationalIssue.create({
+      data: {
+        component: 'analyzer',
+        type: 'stage_failure',
+        fingerprint: `fingerprint-${randomUUID()}`,
+        status: 'active',
+        severity: 'critical',
+        firstDetectedAt: new Date(),
+      },
+    })
+
+    const generationId = `generation-${randomUUID()}`
+    await buildAttentionItems(prisma, { generationId, sourceWatermarkAt: new Date() })
+
+    const rows = await prisma.attentionItemCurrent.findMany({
+      where: { generationId },
+      orderBy: [{ priority: 'asc' }],
+    })
+    expect(rows[0]?.sourceId).toBe(criticalIssue.id)
+  })
+
   it('resolved な OperationalIssue と ReviewFinding は含まれない', async () => {
     await prisma.operationalIssue.create({
       data: {
