@@ -168,7 +168,11 @@ export async function publishGeneration(
       await tx.readModelGeneration.update({
         where: { id: generation.id },
         data: {
-          status: isNewer ? 'current' : 'superseded',
+          // 設計上の generation status は building/current/retired/failed の 4 値であり、
+          // superseded という独自状態は持たない。watermark 判定で current に採用されず
+          // 終わった build も、current だった世代が入れ替わる場合と同じ「もう current
+          // ではない完了済み世代」であるため、既存語彙の retired へ揃える。
+          status: isNewer ? 'current' : 'retired',
           completedAt: new Date(),
           rowCount: result.rowCount,
           validationSummary: (result.validationSummary ?? {}) as Prisma.InputJsonValue,

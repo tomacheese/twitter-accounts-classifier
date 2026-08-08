@@ -124,7 +124,7 @@ describe.skipIf(!process.env.DATABASE_URL)('publishGeneration', () => {
     const staleGeneration = await prisma.readModelGeneration.findUniqueOrThrow({
       where: { id: staleGenerationId },
     })
-    expect(staleGeneration.status).toBe('superseded')
+    expect(staleGeneration.status).toBe('retired')
   })
 
   it('watermark が異なる publish を並行実行しても、最終的に最新の watermark だけが current になる', async () => {
