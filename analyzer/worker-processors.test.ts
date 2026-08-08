@@ -7,6 +7,7 @@ import {
   processReadModelRefresh,
   processBlockReconciliation,
   processRetentionSweep,
+  handleWorkItemSettled,
 } from './worker-processors'
 
 const prisma = getPrismaClient()
@@ -253,5 +254,39 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
       where: { kind: 'retention_sweep' },
     })
     expect(pending).toHaveLength(0)
+  })
+
+  it('handleWorkItemSettled は Cycle 再構築後に Attention/Overview を改めて publish する', async () => {
+    await handleWorkItemSettled(
+      prisma,
+      {
+        id: 'work-item-5',
+        kind: 'read_model_refresh',
+        triggerType: 'unhandled_trigger_type',
+        triggerId: 'trigger-1',
+        status: 'succeeded',
+        priority: 0,
+        availableAt: new Date(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        attemptCount: 1,
+        maxAttempts: 5,
+        dependencyKey: null,
+        lastErrorCode: null,
+        lastErrorSummary: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      { status: 'succeeded' },
+    )
+
+    const attentionPointer = await prisma.readModelPointer.findUnique({
+      where: { modelKey: 'attention_items' },
+    })
+    const overviewPointer = await prisma.readModelPointer.findUnique({
+      where: { modelKey: 'overview_snapshot' },
+    })
+    expect(attentionPointer).not.toBeNull()
+    expect(overviewPointer).not.toBeNull()
   })
 })

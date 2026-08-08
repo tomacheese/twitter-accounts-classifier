@@ -371,18 +371,24 @@ export async function handleWorkItemSettled(
   switch (workItem.triggerType) {
     case 'crawl_run': {
       await buildOrUpdateCrawlCycle(prisma, { crawlRunId: workItem.triggerId })
-      return
+      break
     }
     case 'weekly_analysis_run': {
       await buildOrUpdateWeeklyReviewCycle(prisma, { weeklyAnalysisRunId: workItem.triggerId })
-      return
+      break
     }
     case 'block_run': {
       await buildOrUpdateBlockCycle(prisma, { blockRunId: workItem.triggerId })
-      return
+      break
     }
     default: {
       logger.warn(`no operation cycle builder for trigger type: ${workItem.triggerType}`)
     }
   }
+
+  // processReadModelRefresh 等が publish する Attention/Overview は WorkItem を
+  // succeeded/failed/dead にする前の状態で作られる。上の detectAnalysisStageFailure に
+  // よる OperationalIssue の解消や Cycle の再構築はその後に確定するため、
+  // ここで改めて publish しないと表示だけ古い状態のまま次の refresh まで残ってしまう。
+  await publishAttentionAndOverview(prisma, new Date())
 }
