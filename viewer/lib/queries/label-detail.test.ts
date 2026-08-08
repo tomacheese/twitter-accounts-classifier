@@ -74,13 +74,27 @@ describe('getLabelDetail', () => {
     expect(result?.latestAggregationFailed).toBe(true)
   })
 
-  it('集計失敗の snapshot は最新値の取得対象から除外する', async () => {
+  it('最新 snapshot が partial (一部巡回) なら成功した snapshot を返しつつ失敗を伝える', async () => {
+    const observedAt = new Date('2026-01-05T00:00:00Z')
+    const { prisma } = createMockPrisma({
+      labelDefinition,
+      latestSnapshot: { prevalence: 0.25, evaluatedCount: 400, trueCount: 100, observedAt },
+      newestCompleteness: 'partial',
+    })
+
+    const result = await getLabelDetail(prisma, 'spam')
+
+    expect(result?.latestSnapshot?.prevalence).toBe(0.25)
+    expect(result?.latestAggregationFailed).toBe(true)
+  })
+
+  it('集計失敗・partial の snapshot は最新値の取得対象から除外する', async () => {
     const { prisma, snapshotFindFirst } = createMockPrisma({ labelDefinition })
 
     await getLabelDetail(prisma, 'spam')
 
     const calls = snapshotFindFirst.mock.calls as [{ where: { completeness?: unknown } }][]
-    expect(calls[0][0].where.completeness).toEqual({ not: 'unknown' })
+    expect(calls[0][0].where.completeness).toBe('complete')
   })
 
   it('snapshot が 1 件も無ければ latestSnapshot は null になる', async () => {

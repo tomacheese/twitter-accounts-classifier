@@ -43,8 +43,8 @@ export interface LabelDetailView {
  * トレンドは `LabelMetricSnapshot` ではなく `LabelMetricDaily` から取得する。
  * 前者は crawl 単位で全件保持しており、
  * 期間 filter なしで走査すると履歴が伸びるほど遅くなるため。
- * completeness が unknown の snapshot は集計失敗の記録であり、
- * 通常値として表示すると prevalence 0 の急落に見えるため最新値には採用しない。
+ * completeness が unknown (集計失敗) と partial (一部アカウントしか巡回できていない) の
+ * snapshot はいずれも通常値として表示すると誤った変化として見えるため最新値には採用しない。
  * @param prisma - Prisma クライアント
  * @param labelKey - `LabelDefinition.key` (表示名変更の影響を受けない安定識別子)
  * @param input - 期間 preset
@@ -63,7 +63,7 @@ export async function getLabelDetail(
 
   const [latestSnapshot, newestSnapshot, dailyRows, activeFindings] = await Promise.all([
     prisma.labelMetricSnapshot.findFirst({
-      where: { labelDefinitionId: labelDefinition.id, completeness: { not: 'unknown' } },
+      where: { labelDefinitionId: labelDefinition.id, completeness: 'complete' },
       orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
     }),
     prisma.labelMetricSnapshot.findFirst({
@@ -96,7 +96,7 @@ export async function getLabelDetail(
           observedAt: latestSnapshot.observedAt,
         }
       : null,
-    latestAggregationFailed: newestSnapshot?.completeness === 'unknown',
+    latestAggregationFailed: newestSnapshot ? newestSnapshot.completeness !== 'complete' : false,
     trend: dailyRows.map((row) => ({
       date: row.date,
       prevalence: row.prevalence,
