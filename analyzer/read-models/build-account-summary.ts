@@ -332,15 +332,28 @@ export async function buildAccountSummary(
         const historyChanged =
           historyPrevious !== undefined && historyPrevious.value !== label.value
         const isNewLabelInHistory = historyPrevious === undefined
+        // value 自体は変わらず confidence/reason だけが変わった再判定も、
+        // 判定根拠の変化として履歴に残す。value の変化と衝突しないよう、
+        // historyChanged が成立するケースでは評価しない。
+        const historyMetadataChanged =
+          historyPrevious?.value === label.value &&
+          (historyPrevious.confidence !== label.confidence ||
+            historyPrevious.reason !== label.reason)
 
-        if (
-          historyChanged ||
-          (previousGenerationId !== null && isNewLabelInHistory && label.value)
-        ) {
+        let changeType: string | undefined
+        if (historyChanged) {
+          changeType = label.value ? 'added' : 'removed'
+        } else if (previousGenerationId !== null && isNewLabelInHistory && label.value) {
+          changeType = 'added'
+        } else if (historyMetadataChanged) {
+          changeType = 'updated'
+        }
+
+        if (changeType) {
           changeRows.push({
             accountId: account.id,
             labelDefinitionId: label.labelDefinitionId,
-            changeType: label.value ? 'added' : 'removed',
+            changeType,
             previousValue: historyPrevious?.value ?? null,
             newValue: label.value,
             previousConfidence: historyPrevious?.confidence ?? null,

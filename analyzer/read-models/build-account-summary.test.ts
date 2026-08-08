@@ -232,6 +232,59 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
     expect(summary.lastClassificationChangedAt?.getTime()).toBe(removedAt.getTime())
   })
 
+  it('value が変わらず confidence/reason だけ再判定された場合も AccountLabelChange に updated として記録する', async () => {
+    const accountId = await createAccount('ivy')
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: `spam_${randomUUID().slice(0, 8)}`, description: 'テスト用ラベル' },
+    })
+    const firstLabeledAt = new Date(Date.now() - 2 * 60 * 60 * 1000)
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: true,
+      confidence: 0.6,
+      reason: 'weak match',
+      labeledAt: firstLabeledAt,
+    })
+
+    const firstGenerationId = `generation-${randomUUID()}`
+    await buildAccountSummary(prisma, {
+      generationId: firstGenerationId,
+      sourceWatermarkAt: firstLabeledAt,
+    })
+    await prisma.readModelPointer.upsert({
+      where: { modelKey: 'account_summary' },
+      create: { modelKey: 'account_summary', currentGenerationId: firstGenerationId },
+      update: { currentGenerationId: firstGenerationId },
+    })
+
+    // value は true のままだが再判定で confidence/reason が変わったケース。
+    const relabeledAt = new Date()
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: true,
+      confidence: 0.95,
+      reason: 'stronger match after re-evaluation',
+      labeledAt: relabeledAt,
+    })
+    const secondGenerationId = `generation-${randomUUID()}`
+    await buildAccountSummary(prisma, {
+      generationId: secondGenerationId,
+      sourceWatermarkAt: relabeledAt,
+    })
+
+    const changes = await prisma.accountLabelChange.findMany({ where: { accountId } })
+    expect(changes).toHaveLength(1)
+    expect(changes[0]?.changeType).toBe('updated')
+    expect(changes[0]?.previousValue).toBe(true)
+    expect(changes[0]?.newValue).toBe(true)
+    expect(changes[0]?.previousConfidence).toBeCloseTo(0.6)
+    expect(changes[0]?.newConfidence).toBeCloseTo(0.95)
+    expect(changes[0]?.previousReason).toBe('weak match')
+    expect(changes[0]?.newReason).toBe('stronger match after re-evaluation')
+  })
+
   it('sourceWatermarkAt より後に付いたラベルは backlog 処理中の generation に混ぜない', async () => {
     const accountId = await createAccount('erin')
     const labelDefinition = await prisma.labelDefinition.create({
