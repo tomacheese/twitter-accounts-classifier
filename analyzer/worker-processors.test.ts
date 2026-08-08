@@ -151,7 +151,7 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     expect(pointer).not.toBeNull()
   })
 
-  it('processReadModelRefresh は partial な CrawlRun の read model 公開を見送る', async () => {
+  it('processReadModelRefresh は partial な CrawlRun を partial metadata 付きで公開する', async () => {
     const crawlRun = await prisma.crawlRun.create({
       data: {
         startedAt: new Date(),
@@ -180,10 +180,18 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
       updatedAt: new Date(),
     })
 
-    const pointer = await prisma.readModelPointer.findUnique({
+    const pointer = await prisma.readModelPointer.findUniqueOrThrow({
       where: { modelKey: 'account_summary' },
     })
-    expect(pointer).toBeNull()
+    const generation = await prisma.readModelGeneration.findUniqueOrThrow({
+      where: { id: pointer.currentGenerationId },
+    })
+    expect(generation.validationSummary).toEqual(
+      expect.objectContaining({
+        isPartial: true,
+        sourceRunStatus: 'partial',
+      }),
+    )
   })
 
   it('processBlockReconciliation は block_relation の ReadModelPointer を current に切り替える', async () => {

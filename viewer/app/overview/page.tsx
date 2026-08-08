@@ -1,4 +1,6 @@
 import React from 'react'
+import Link from 'next/link'
+import { formatDateTime } from '@/lib/format-date'
 import { getPrismaClient } from '@/lib/prisma'
 import { getOverviewSnapshot } from '@/lib/queries/overview'
 import { isNewUiSectionEnabled } from '@/lib/feature-flags'
@@ -20,6 +22,35 @@ const QUALITY_STATUS_LABEL: Record<string, string> = {
   unknown: 'Unknown',
 }
 
+const FRESHNESS_LABEL: Record<string, string> = {
+  healthy: 'Current',
+  delayed: 'Delayed',
+  stale: 'Stale',
+  failed: 'Failed',
+  unknown: 'Unknown',
+}
+
+const PIPELINE_STATUS_LABEL: Record<string, string> = {
+  scheduled: 'Scheduled',
+  running: 'Running',
+  succeeded: 'Succeeded',
+  partial: 'Partial',
+  failed: 'Failed',
+  delayed: 'Delayed',
+  stale: 'Stale',
+  unknown: 'Unknown',
+}
+
+function pipelineStageLabel(stageKey: string): string {
+  const labels: Record<string, string> = {
+    crawl: 'Crawl',
+    label_metrics: 'Label metrics',
+    finding_generation: 'Finding generation',
+    read_model_refresh: 'Read model refresh',
+  }
+  return labels[stageKey] ?? stageKey.replaceAll('_', ' ')
+}
+
 /**
  * 新 UI の Overview 画面。旧ダッシュボードとは独立した URL (`/overview`) で提供し、
  * `isNewUiSectionEnabled('overview')` が false の場合は旧ダッシュボードをそのまま表示する。
@@ -39,22 +70,33 @@ export default async function OverviewPage(): Promise<React.JSX.Element> {
 
       {snapshot ? (
         <>
-          <section aria-labelledby="operational-health-heading">
-            <h2 id="operational-health-heading" className="text-lg font-semibold">
-              Operational Health
-            </h2>
-            <p className="mt-2">
-              {OPERATIONAL_STATUS_LABEL[snapshot.operationalStatus] ?? snapshot.operationalStatus}
-            </p>
-          </section>
-
-          <section aria-labelledby="classification-quality-heading">
-            <h2 id="classification-quality-heading" className="text-lg font-semibold">
-              Classification Quality
-            </h2>
-            <p className="mt-2">
-              {QUALITY_STATUS_LABEL[snapshot.qualityStatus] ?? snapshot.qualityStatus}
-            </p>
+          <section className="grid gap-4 md:grid-cols-3" aria-label="Current status">
+            <div className="rounded-lg border bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+              <h2 id="operational-health-heading" className="font-semibold">
+                Operational health
+              </h2>
+              <p className="mt-2 text-lg">
+                {OPERATIONAL_STATUS_LABEL[snapshot.operationalStatus] ?? snapshot.operationalStatus}
+              </p>
+            </div>
+            <div className="rounded-lg border bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+              <h2 id="classification-quality-heading" className="font-semibold">
+                Classification quality
+              </h2>
+              <p className="mt-2 text-lg">
+                {QUALITY_STATUS_LABEL[snapshot.qualityStatus] ?? snapshot.qualityStatus}
+              </p>
+            </div>
+            <div className="rounded-lg border bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+              <h2 className="font-semibold">Data freshness</h2>
+              <p className="mt-2 text-lg">
+                {FRESHNESS_LABEL[snapshot.freshnessStatus] ?? snapshot.freshnessStatus}
+              </p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Source data: {snapshot.sourceDataAt ? formatDateTime(snapshot.sourceDataAt) : '—'}{' '}
+                JST
+              </p>
+            </div>
           </section>
 
           <section aria-labelledby="attention-queue-heading">
@@ -81,23 +123,39 @@ export default async function OverviewPage(): Promise<React.JSX.Element> {
               Latest Pipeline
             </h2>
             {snapshot.latestPipeline ? (
-              <ul className="mt-2 flex flex-col gap-1">
-                {snapshot.latestPipeline.stages.map((stage) => (
-                  <li key={stage.stageKey}>
-                    {stage.stageKey}: {stage.status}
-                  </li>
-                ))}
-              </ul>
+              <div className="mt-2 rounded-lg border bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p>
+                    Status:{' '}
+                    <strong>
+                      {PIPELINE_STATUS_LABEL[snapshot.latestPipeline.status] ??
+                        snapshot.latestPipeline.status}
+                    </strong>
+                  </p>
+                  <Link
+                    href={`/operations/crawl/${snapshot.latestPipeline.cycleId}`}
+                    className="text-sm text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    View cycle details
+                  </Link>
+                </div>
+                <ol className="mt-3 grid gap-2 md:grid-cols-2">
+                  {snapshot.latestPipeline.stages.map((stage) => (
+                    <li
+                      key={stage.stageKey}
+                      className="rounded border p-2 text-sm dark:border-gray-700"
+                    >
+                      <span className="font-medium">{pipelineStageLabel(stage.stageKey)}</span>:{' '}
+                      {PIPELINE_STATUS_LABEL[stage.status] ?? stage.status}
+                    </li>
+                  ))}
+                </ol>
+              </div>
             ) : (
-              <p className="mt-2">No pipeline cycle has run yet.</p>
+              <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                No crawl pipeline cycle is recorded yet. Check Operations for other recent activity.
+              </p>
             )}
-          </section>
-
-          <section aria-labelledby="data-freshness-heading">
-            <h2 id="data-freshness-heading" className="text-lg font-semibold">
-              Data Freshness
-            </h2>
-            <p className="mt-2">{snapshot.freshnessStatus}</p>
           </section>
         </>
       ) : (

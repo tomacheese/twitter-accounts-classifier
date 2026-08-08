@@ -42,7 +42,7 @@ describe('GET /api/search', () => {
     })
   })
 
-  it('新 UI を一切有効にしていなければ全 entity type を無効として渡す', async () => {
+  it('feature flag が空でも graduated 済み Accounts だけは検索対象として渡す', async () => {
     process.env.VIEWER_NEW_UI_SECTIONS = ''
 
     await GET(new Request('http://localhost/api/search?q=example'))
@@ -50,7 +50,7 @@ describe('GET /api/search', () => {
     expect(searchAcrossEntities).toHaveBeenCalledWith(expect.anything(), {
       query: 'example',
       enabledEntityTypes: {
-        accounts: false,
+        accounts: true,
         labels: false,
         findings: false,
         operations: false,

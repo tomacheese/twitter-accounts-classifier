@@ -19,6 +19,7 @@ export interface OperationCycleListItem {
   triggeredAt: Date
   startedAt: Date | null
   finishedAt: Date | null
+  currentStageKey: string | null
 }
 
 const DEFAULT_LIMIT = 30
@@ -75,6 +76,7 @@ export async function listOperationCycles(
       triggeredAt: row.triggeredAt,
       startedAt: row.startedAt,
       finishedAt: row.finishedAt,
+      currentStageKey: row.currentStageKey,
     })),
     nextCursor:
       hasMore && last

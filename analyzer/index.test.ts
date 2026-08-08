@@ -28,6 +28,7 @@ vi.mock('./worker-processors', () => ({
   processRetentionSweep: vi.fn(),
   processPostCompletionRefresh: vi.fn(),
   enqueueDailyRetentionSweep: vi.fn().mockResolvedValue(undefined),
+  enqueueReadModelBootstrapIfMissing: vi.fn().mockResolvedValue(undefined),
   refreshReadModelFreshnessFromPolicy: vi.fn().mockResolvedValue(undefined),
   handleWorkItemSettled: vi.fn(),
 }))

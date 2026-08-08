@@ -13,6 +13,7 @@ import {
   processRetentionSweep,
   processPostCompletionRefresh,
   enqueueDailyRetentionSweep,
+  enqueueReadModelBootstrapIfMissing,
   refreshReadModelFreshnessFromPolicy,
   handleWorkItemSettled,
 } from './worker-processors'
@@ -49,6 +50,7 @@ export async function main(): Promise<void> {
   await recordPolicyVersion(prisma, loadPolicy(DEFAULT_POLICY_PATH))
   // 一意制約により、同じ日付分は 2 度目以降 no-op になる。
   await enqueueDailyRetentionSweep(prisma, new Date())
+  await enqueueReadModelBootstrapIfMissing(prisma)
   // WorkItem 完了時のみだと、queue が空で何も処理しない期間は
   // 経過時間による delayed/stale への遷移を検出できない。
   await refreshReadModelFreshnessFromPolicy(prisma)
