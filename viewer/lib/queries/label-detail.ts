@@ -33,6 +33,8 @@ export interface LabelDetailView {
     trueCount: number
     observedAt: Date
   } | null
+  /** 最新の集計が失敗しており、表示中の値がそれより前の観測である場合に true。 */
+  latestAggregationFailed: boolean
   trend: LabelDetailTrendPoint[]
   activeFindings: { findingId: string; type: string; currentSeverity: string }[]
 }
@@ -41,6 +43,8 @@ export interface LabelDetailView {
  * トレンドは `LabelMetricSnapshot` ではなく `LabelMetricDaily` から取得する。
  * 前者は crawl 単位で全件保持しており、
  * 期間 filter なしで走査すると履歴が伸びるほど遅くなるため。
+ * completeness が unknown の snapshot は集計失敗の記録であり、
+ * 通常値として表示すると prevalence 0 の急落に見えるため最新値には採用しない。
  * @param prisma - Prisma クライアント
  * @param labelKey - `LabelDefinition.key` (表示名変更の影響を受けない安定識別子)
  * @param input - 期間 preset
@@ -57,10 +61,15 @@ export async function getLabelDetail(
   const range = input.range ?? '30d'
   const since = new Date(Date.now() - RANGE_TO_DAYS[range] * 24 * 60 * 60 * 1000)
 
-  const [latestSnapshot, dailyRows, activeFindings] = await Promise.all([
+  const [latestSnapshot, newestSnapshot, dailyRows, activeFindings] = await Promise.all([
+    prisma.labelMetricSnapshot.findFirst({
+      where: { labelDefinitionId: labelDefinition.id, completeness: { not: 'unknown' } },
+      orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
+    }),
     prisma.labelMetricSnapshot.findFirst({
       where: { labelDefinitionId: labelDefinition.id },
       orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
+      select: { completeness: true },
     }),
     prisma.labelMetricDaily.findMany({
       where: { labelDefinitionId: labelDefinition.id, date: { gte: since } },
@@ -87,6 +96,7 @@ export async function getLabelDetail(
           observedAt: latestSnapshot.observedAt,
         }
       : null,
+    latestAggregationFailed: newestSnapshot?.completeness === 'unknown',
     trend: dailyRows.map((row) => ({
       date: row.date,
       prevalence: row.prevalence,

@@ -57,6 +57,11 @@ export default async function LabelDetailPage({
         <h2 id="current-metrics-heading" className="text-lg font-semibold">
           Current metrics
         </h2>
+        {detail.latestAggregationFailed && (
+          <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+            The most recent aggregation failed. The values below are from an earlier observation.
+          </p>
+        )}
         {detail.latestSnapshot ? (
           <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
             <dt>Prevalence</dt>
