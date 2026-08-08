@@ -54,6 +54,8 @@ async function getActivePolicyHash(prisma: PrismaClient): Promise<string | null>
 
 /**
  * generationId で世代管理されている読み取りモデルの行削除処理。
+ * `overview_snapshot` は他モデルと異なり trend 表示用に日数単位で保持するため、
+ * ここでは扱わず `runRetentionSweep` の日数ベース retention に任せる。
  */
 const GENERATION_ROW_DELETERS: Record<
   string,
@@ -73,8 +75,6 @@ const GENERATION_ROW_DELETERS: Record<
     prisma.attentionItemCurrent.deleteMany({ where: { generationId: { in: generationIds } } }),
   block_relation: (prisma, generationIds) =>
     prisma.blockRelationCurrent.deleteMany({ where: { generationId: { in: generationIds } } }),
-  overview_snapshot: (prisma, generationIds) =>
-    prisma.overviewSnapshot.deleteMany({ where: { generationId: { in: generationIds } } }),
 }
 
 /**

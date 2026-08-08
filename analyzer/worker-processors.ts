@@ -306,7 +306,8 @@ export async function processRetentionSweep(
   logger.info(
     `retention sweep (${workItem.triggerId}) removed ${result.deletedAnalysisRunCount} AnalysisRun, ` +
       `${result.deletedWorkItemCount} AnalysisWorkItem, ` +
-      `${result.deletedLabelMetricSnapshotCount} LabelMetricSnapshot rows`,
+      `${result.deletedLabelMetricSnapshotCount} LabelMetricSnapshot, ` +
+      `${result.deletedOverviewSnapshotCount} OverviewSnapshot rows`,
   )
 }
 
