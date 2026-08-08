@@ -67,7 +67,9 @@
       "recurrenceWindow": "P7D",
       "cooldown": "PT15M",
       "delayedAfter": "PT3H",
-      "staleAfter": "PT12H"
+      "staleAfter": "PT12H",
+      "minCoverage": 0.5,
+      "maxStaleRatio": 0.3
     },
     {
       "type": "possible_false_positive",
