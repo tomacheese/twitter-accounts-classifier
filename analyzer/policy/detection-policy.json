@@ -57,6 +57,19 @@
       "cooldown": "PT15M"
     },
     {
+      "type": "read_model_freshness",
+      "enabled": true,
+      "detectorType": "invariant",
+      "identityVersion": 1,
+      "severity": "high",
+      "activationCount": 1,
+      "resolutionCount": 1,
+      "recurrenceWindow": "P7D",
+      "cooldown": "PT15M",
+      "delayedAfter": "PT3H",
+      "staleAfter": "PT12H"
+    },
+    {
       "type": "possible_false_positive",
       "enabled": true,
       "detectorType": "weekly_review",

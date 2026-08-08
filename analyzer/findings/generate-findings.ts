@@ -35,6 +35,12 @@ const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1000
 const LABEL_SNAPSHOT_RULE_TYPES = new Set(['label_count_drop', 'reason_distribution_shift'])
 
 /**
+ * crawl サイクルの検出器ループ以外で評価される rule の type。
+ * ここに無い enabled な rule は評価経路が欠けているとみなして警告する。
+ */
+const RULE_TYPES_EVALUATED_ELSEWHERE = new Set(['possible_false_positive', 'read_model_freshness'])
+
+/**
  * baselineWindow ごとに比較対象を選ぶ。
  * 未知の値を既定の直前サイクルへ寄せると、ポリシーの記述と実際の比較対象が
  * 黙って食い違うため、解釈できない値は例外として扱う。
@@ -342,9 +348,7 @@ export async function generateFindingsForCrawlCycle(
     for (const rule of input.policy.rules) {
       if (!rule.enabled) continue
       if (!LABEL_SNAPSHOT_RULE_TYPES.has(rule.type)) {
-        // weekly_review 由来の rule は Weekly Review の取り込み経路で評価されるため、
-        // crawl サイクルで検出器が無いことは欠落ではない。
-        if (rule.detectorType !== 'weekly_review') unimplementedRuleTypes.add(rule.type)
+        if (!RULE_TYPES_EVALUATED_ELSEWHERE.has(rule.type)) unimplementedRuleTypes.add(rule.type)
         continue
       }
 

@@ -35,7 +35,7 @@ export interface DetectorObservation {
  * @param duration - ISO 8601 duration 文字列
  * @returns ミリ秒
  */
-function parseIsoDurationMs(duration: string): number {
+export function parseIsoDurationMs(duration: string): number {
   const match = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/.exec(duration)
   if (!match) throw new Error(`unsupported duration format: ${duration}`)
   const days = Number(match[1] || 0)

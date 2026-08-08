@@ -7,6 +7,8 @@ import {
   detectAnalysisStageFailure,
   detectRunFailures,
 } from './operational-issues/detect-run-failures'
+import { refreshReadModelFreshness } from './operational-issues/freshness'
+import { parseIsoDurationMs } from './findings/lifecycle'
 import { buildOrUpdateCrawlCycle } from './operations/build-crawl-cycle'
 import { buildOrUpdateWeeklyReviewCycle } from './operations/build-weekly-review-cycle'
 import { buildOrUpdateBlockCycle } from './operations/build-block-cycle'
@@ -257,6 +259,28 @@ export async function processBlockReconciliation(
   await publishAttentionAndOverview(prisma, sourceWatermarkAt)
 }
 
+const DEFAULT_READ_MODEL_CADENCE = 'PT1H'
+const DEFAULT_READ_MODEL_DELAYED_AFTER = 'PT3H'
+const DEFAULT_READ_MODEL_STALE_AFTER = 'PT12H'
+
+/**
+ * 読み取りモデルの鮮度しきい値を policy から取り出して評価する。
+ * @param prisma - Prisma クライアント
+ */
+async function refreshReadModelFreshnessFromPolicy(prisma: PrismaClient): Promise<void> {
+  const { policy } = getPolicy()
+  const rule = policy.rules.find((entry) => entry.type === 'read_model_freshness' && entry.enabled)
+  if (!rule) return
+
+  const delayedAfterMs = parseIsoDurationMs(rule.delayedAfter ?? DEFAULT_READ_MODEL_DELAYED_AFTER)
+  await refreshReadModelFreshness(prisma, {
+    cadenceMs: parseIsoDurationMs(DEFAULT_READ_MODEL_CADENCE),
+    delayedAfterMs,
+    staleAfterMs: parseIsoDurationMs(rule.staleAfter ?? DEFAULT_READ_MODEL_STALE_AFTER),
+    now: new Date(),
+  })
+}
+
 /**
  * WorkItem の終了状態が確定した後に、対応する OperationCycle を再計算し、
  * analyzer 自身の失敗を OperationalIssue へ昇格する。
@@ -269,6 +293,8 @@ export async function handleWorkItemSettled(
   workItem: AnalysisWorkItem,
   outcome: WorkItemOutcome,
 ): Promise<void> {
+  await refreshReadModelFreshnessFromPolicy(prisma)
+
   await detectAnalysisStageFailure(prisma, {
     kind: workItem.kind,
     workItemId: workItem.id,
