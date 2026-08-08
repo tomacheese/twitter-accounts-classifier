@@ -19,6 +19,7 @@ const THEME_INIT_SCRIPT = `
 export const metadata: Metadata = {
   title: 'Labeling Results Viewer',
   description: 'Dashboard for Twitter account labeling results',
+  icons: { icon: '/favicon.svg' },
 }
 
 /**

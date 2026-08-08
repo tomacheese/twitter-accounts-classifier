@@ -60,7 +60,7 @@ export default async function SystemPage(): Promise<React.ReactElement> {
                 {data.activePolicy.schemaVersion}, loaded{' '}
                 {formatDateTime(data.activePolicy.loadedAt)}
               </p>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+              <p className="break-all text-sm text-gray-600 dark:text-gray-400">
                 Content hash: {data.activePolicy.contentHash}
               </p>
               <PolicyRawViewer />
@@ -115,7 +115,7 @@ export default async function SystemPage(): Promise<React.ReactElement> {
           ) : (
             <ul className="mt-2 flex flex-col gap-1 font-mono text-sm">
               {data.diagnosticsEnvVars.map((entry) => (
-                <li key={entry.key}>
+                <li key={entry.key} className="break-all">
                   {entry.key}={entry.value}
                 </li>
               ))}
