@@ -9,6 +9,7 @@ import {
   processRetentionSweep,
   handleWorkItemSettled,
   processPostCompletionRefresh,
+  processAccountSummaryRefresh,
 } from './worker-processors'
 
 const prisma = getPrismaClient()
@@ -328,5 +329,115 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     })
     expect(attentionPointer).not.toBeNull()
     expect(overviewPointer).not.toBeNull()
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () => {
+  beforeEach(async () => {
+    await prisma.accountClassificationLatest.deleteMany()
+    await prisma.accountSummaryLatest.deleteMany()
+    await prisma.accountLabelChange.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountLabel.deleteMany()
+    await prisma.accountClassificationObservation.deleteMany()
+    await prisma.analysisWorkItem.deleteMany()
+    await prisma.readModelState.deleteMany()
+    await prisma.labelDefinition.deleteMany()
+    await prisma.block.deleteMany()
+    await prisma.account.deleteMany()
+  })
+
+  it('uses Account.lastCrawledAt (not the observation time) as profileObservedAt, detects a same-count label-set change, records AccountLabelChange, and marks account_summary_latest healthy', async () => {
+    const lastCrawledAt = new Date('2026-01-03T00:00:00Z')
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_refresh',
+        screenName: 'dave',
+        displayName: 'Dave',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt,
+      },
+    })
+    const labelA = await prisma.labelDefinition.create({
+      data: { key: 'label_a', description: 'ラベルA' },
+    })
+    const labelB = await prisma.labelDefinition.create({
+      data: { key: 'label_b', description: 'ラベルB' },
+    })
+    // 直前は label_a のみ true (1 件)。今回は label_a が false、label_b が true になる
+    // (件数は 1 件のまま変わらないが、ラベルの中身は入れ替わっている)。
+    await prisma.accountLabel.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelA.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'previous reason',
+        method: 'rule',
+        ruleVersion: 'v1',
+        labeledAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    })
+    const observedAt = new Date('2026-01-02T00:00:00Z')
+    await prisma.accountLabel.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelA.id,
+        value: false,
+        confidence: 0.2,
+        reason: 'new reason a',
+        method: 'rule',
+        ruleVersion: 'v1',
+        labeledAt: observedAt,
+      },
+    })
+    await prisma.accountLabel.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelB.id,
+        value: true,
+        confidence: 0.8,
+        reason: 'new reason b',
+        method: 'rule',
+        ruleVersion: 'v1',
+        labeledAt: observedAt,
+      },
+    })
+    const observation = await prisma.accountClassificationObservation.create({
+      data: { accountId: account.id, observedAt, labelCount: 2 },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+        triggerId: observation.id,
+      },
+    })
+
+    await processAccountSummaryRefresh(prisma, workItem)
+
+    const summary = await prisma.accountSummaryLatest.findUnique({
+      where: { accountId: account.id },
+    })
+    expect(summary?.activeLabelKeys).toEqual(['label_b'])
+    expect(summary?.profileObservedAt.toISOString()).toBe(lastCrawledAt.toISOString())
+    expect(summary?.lastClassificationChangedAt?.toISOString()).toBe(observedAt.toISOString())
+
+    const changes = await prisma.accountLabelChange.findMany({
+      where: { accountId: account.id },
+      orderBy: { labelDefinitionId: 'asc' },
+    })
+    expect(changes).toHaveLength(2)
+    expect(changes.find((c) => c.labelDefinitionId === labelA.id)?.changeType).toBe('removed')
+    expect(changes.find((c) => c.labelDefinitionId === labelB.id)?.changeType).toBe('added')
+
+    const state = await prisma.readModelState.findUnique({
+      where: { modelKey: 'account_summary_latest' },
+    })
+    expect(state?.status).toBe('healthy')
+    expect(state?.sourceWatermarkAt?.toISOString()).toBe(observedAt.toISOString())
   })
 })

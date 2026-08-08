@@ -133,3 +133,65 @@ export async function upsertAccountClassificationLatest(
     WHERE "AccountClassificationLatest"."observedAt" <= EXCLUDED."observedAt"
   `
 }
+
+const ACCOUNT_SUMMARY_LATEST_MODEL_KEY = 'account_summary_latest'
+
+/**
+ * `AccountSummaryLatest`/`AccountClassificationLatest` の更新が成功した直後に呼ぶ。
+ * generation を持たないためレイアウトは `publishGeneration` と異なるが、
+ * `lastSuccessAt`/`sourceWatermarkAt`/`status: 'healthy'` を記録する点は同じであり、
+ * 経過時間からの delayed/stale 判定 (`refreshReadModelFreshness`) が
+ * 汎用的にこの行も拾えるようにする。
+ * @param prisma - Prisma クライアント
+ * @param sourceWatermarkAt - この更新が反映した観測時刻
+ */
+export async function touchAccountSummaryLatestState(
+  prisma: PrismaClient,
+  sourceWatermarkAt: Date,
+): Promise<void> {
+  await prisma.readModelState.upsert({
+    where: { modelKey: ACCOUNT_SUMMARY_LATEST_MODEL_KEY },
+    create: {
+      modelKey: ACCOUNT_SUMMARY_LATEST_MODEL_KEY,
+      schemaVersion: 1,
+      status: 'healthy',
+      sourceWatermarkAt,
+      lastSuccessAt: new Date(),
+    },
+    update: {
+      status: 'healthy',
+      sourceWatermarkAt,
+      lastSuccessAt: new Date(),
+    },
+  })
+}
+
+/**
+ * `processAccountSummaryRefresh`/`processAccountFindingRefresh`/
+ * `processAccountSummaryBootstrap` が例外を投げて終了する直前に呼ぶ。
+ * `publishGeneration` の失敗パスと同様、`status: 'failed'` は
+ * 経過時間による delayed/stale 判定で上書きされない (`refreshReadModelFreshness`
+ * 側が `status === 'failed'` の行をスキップする設計を踏襲する)。
+ * @param prisma - Prisma クライアント
+ * @param errorSummary - 記録するエラー概要
+ */
+export async function markAccountSummaryLatestFailed(
+  prisma: PrismaClient,
+  errorSummary: string,
+): Promise<void> {
+  await prisma.readModelState.upsert({
+    where: { modelKey: ACCOUNT_SUMMARY_LATEST_MODEL_KEY },
+    create: {
+      modelKey: ACCOUNT_SUMMARY_LATEST_MODEL_KEY,
+      schemaVersion: 1,
+      status: 'failed',
+      lastFailureAt: new Date(),
+      errorSummary,
+    },
+    update: {
+      status: 'failed',
+      lastFailureAt: new Date(),
+      errorSummary,
+    },
+  })
+}

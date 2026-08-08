@@ -25,6 +25,17 @@ import { structuredOutputSchema } from './weekly-review/structured-output-schema
 import { loadPolicy } from './policy/load-policy'
 import { computePolicyHash } from './policy/policy-hash'
 import { Logger } from '@book000/node-utils'
+import {
+  findActiveFindingsAtWatermarkForAccount,
+  findLabelsAtWatermarkForAccount,
+  findPreviousLabelAtWatermarkForAccount,
+} from './read-models/build-account-summary-latest-row'
+import {
+  markAccountSummaryLatestFailed,
+  touchAccountSummaryLatestState,
+  upsertAccountClassificationLatest,
+  upsertAccountSummaryLatest,
+} from './read-models/account-summary-latest'
 
 const logger = Logger.configure('analyzer:worker-processors')
 
@@ -150,6 +161,207 @@ async function publishAttentionAndOverview(
       return { rowCount: 1 }
     },
   })
+}
+
+/**
+ * @param a - 比較対象の severity (null は severity なし扱い)
+ * @param b - 比較対象の severity
+ * @returns より深刻な方の severity
+ */
+function maxAccountFindingSeverity(a: string | null, b: string): string {
+  const rank: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 }
+  if (!a) return b
+  return (rank[a] ?? 0) >= (rank[b] ?? 0) ? a : b
+}
+
+/**
+ * 2 つのラベルキー集合が要素単位で一致するか判定する。
+ * 件数だけの比較では、同じ件数のまま中身が入れ替わる変化 (A→B) を見逃すため、
+ * `lastClassificationChangedAt` の判定にはこちらを使う。
+ * @param a - 比較対象のラベルキー集合
+ * @param b - 比較対象のラベルキー集合
+ * @returns 集合として一致していれば true
+ */
+function isSameLabelKeySet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const sortedA = a.toSorted()
+  const sortedB = b.toSorted()
+  return sortedA.every((key, index) => key === sortedB[index])
+}
+
+/**
+ * author 単位の classification observation を契機に、対象 1 Account だけを
+ * `AccountSummaryLatest`/`AccountClassificationLatest` へ反映する。
+ * finding 系フィールド (activeFindingCount/highestFindingSeverity/findingObservedAt) は
+ * ここでは更新しない (現状値をそのまま渡す)。
+ * `AccountLabelChange` は `AccountLabel` 履歴上の直前行との比較 (既存の
+ * `buildAccountSummary` と同じロジック) で判定し、`AccountClassificationLatest` の
+ * 前回値には依存しない (並行更新の順序に依存させないため)。
+ * @param prisma - Prisma クライアント
+ * @param workItem - `triggerType: 'account_classification_observation'` の WorkItem
+ */
+export async function processAccountSummaryRefresh(
+  prisma: PrismaClient,
+  workItem: AnalysisWorkItem,
+): Promise<void> {
+  try {
+    const observation = await prisma.accountClassificationObservation.findUniqueOrThrow({
+      where: { id: workItem.triggerId },
+    })
+    const account = await prisma.account.findUniqueOrThrow({
+      where: { id: observation.accountId },
+    })
+    const [labels, previousLabels, existing] = await Promise.all([
+      findLabelsAtWatermarkForAccount(prisma, observation.accountId, observation.observedAt),
+      findPreviousLabelAtWatermarkForAccount(prisma, observation.accountId, observation.observedAt),
+      prisma.accountSummaryLatest.findUnique({ where: { accountId: observation.accountId } }),
+    ])
+    const previousByLabelDefinitionId = new Map(
+      previousLabels.map((label) => [label.labelDefinitionId, label]),
+    )
+    const labelDefinitions = await prisma.labelDefinition.findMany({
+      select: { id: true, key: true },
+    })
+    const labelKeyById = new Map(
+      labelDefinitions.map((definition) => [definition.id, definition.key]),
+    )
+
+    const activeLabelKeys = labels
+      .filter((label) => label.value)
+      .map((label) => labelKeyById.get(label.labelDefinitionId))
+      .filter((key): key is string => key !== undefined)
+    const changed = existing
+      ? !isSameLabelKeySet(existing.activeLabelKeys, activeLabelKeys)
+      : activeLabelKeys.length > 0
+
+    await prisma.$transaction(async (tx) => {
+      await upsertAccountSummaryLatest(tx as unknown as PrismaClient, {
+        accountId: observation.accountId,
+        normalizedScreenName: account.screenName.toLowerCase(),
+        normalizedDisplayName: account.displayName.toLowerCase(),
+        searchDocument: `${account.screenName} ${account.displayName}`.toLowerCase(),
+        // profileObservedAt には Account の実際のプロフィール取得時刻 (lastCrawledAt) を使う。
+        // classification observation の時刻を流用すると、プロフィールを再取得していない
+        // refresh でも profile が最新化されたかのように見えてしまう。
+        profileObservedAt: account.lastCrawledAt,
+        activeLabelKeys,
+        activeLabelCount: activeLabelKeys.length,
+        lastClassificationChangedAt: changed
+          ? observation.observedAt
+          : (existing?.lastClassificationChangedAt ?? null),
+        classificationObservedAt: observation.observedAt,
+        activeFindingCount: existing?.activeFindingCount ?? 0,
+        highestFindingSeverity: existing?.highestFindingSeverity ?? null,
+        findingObservedAt: existing?.findingObservedAt ?? null,
+      })
+      await upsertAccountClassificationLatest(
+        tx as unknown as PrismaClient,
+        labels.map((label) => ({
+          accountId: label.accountId,
+          labelDefinitionId: label.labelDefinitionId,
+          value: label.value,
+          confidence: label.confidence,
+          reason: label.reason,
+          method: label.method,
+          ruleVersion: label.ruleVersion,
+          observedAt: observation.observedAt,
+          sourceObservationId: observation.id,
+        })),
+      )
+
+      for (const label of labels) {
+        const previous = previousByLabelDefinitionId.get(label.labelDefinitionId)
+        let changeType: string | undefined
+        if (previous === undefined) {
+          if (label.value) changeType = 'added'
+        } else if (previous.value !== label.value) {
+          changeType = label.value ? 'added' : 'removed'
+        } else if (previous.confidence !== label.confidence || previous.reason !== label.reason) {
+          changeType = 'updated'
+        }
+        if (!changeType) continue
+
+        await (tx as unknown as PrismaClient).accountLabelChange.upsert({
+          where: {
+            accountId_labelDefinitionId_changedAt: {
+              accountId: label.accountId,
+              labelDefinitionId: label.labelDefinitionId,
+              changedAt: label.labeledAt,
+            },
+          },
+          create: {
+            accountId: label.accountId,
+            labelDefinitionId: label.labelDefinitionId,
+            changeType,
+            previousValue: previous?.value ?? null,
+            newValue: label.value,
+            previousConfidence: previous?.confidence ?? null,
+            newConfidence: label.confidence,
+            previousReason: previous?.reason ?? null,
+            newReason: label.reason,
+            sourceId: observation.crawlRunId,
+            changedAt: label.labeledAt,
+          },
+          update: {},
+        })
+      }
+    })
+
+    await touchAccountSummaryLatestState(prisma, observation.observedAt)
+  } catch (error) {
+    await markAccountSummaryLatestFailed(prisma, String(error))
+    throw error
+  }
+}
+
+/**
+ * Weekly Review の finding 取り込み・crawl 由来の finding 生成が確定させた
+ * ReviewFindingOccurrence を契機に、対象 1 Account の finding 系フィールドだけを更新する。
+ * @param prisma - Prisma クライアント
+ * @param workItem - `triggerType: 'review_finding_occurrence'` の WorkItem
+ */
+export async function processAccountFindingRefresh(
+  prisma: PrismaClient,
+  workItem: AnalysisWorkItem,
+): Promise<void> {
+  try {
+    const occurrence = await prisma.reviewFindingOccurrence.findUniqueOrThrow({
+      where: { id: workItem.triggerId },
+      include: { finding: true },
+    })
+    if (occurrence.finding.primaryScopeType !== 'account') return
+    const accountId = occurrence.finding.primaryScopeId
+    const account = await prisma.account.findUniqueOrThrow({ where: { id: accountId } })
+    const [activeFindings, existing] = await Promise.all([
+      findActiveFindingsAtWatermarkForAccount(prisma, accountId, occurrence.sourceObservedAt),
+      prisma.accountSummaryLatest.findUnique({ where: { accountId } }),
+    ])
+
+    let highestFindingSeverity: string | null = null
+    for (const finding of activeFindings) {
+      highestFindingSeverity = maxAccountFindingSeverity(highestFindingSeverity, finding.severity)
+    }
+
+    await upsertAccountSummaryLatest(prisma, {
+      accountId,
+      normalizedScreenName: existing?.normalizedScreenName ?? account.screenName.toLowerCase(),
+      normalizedDisplayName: existing?.normalizedDisplayName ?? account.displayName.toLowerCase(),
+      searchDocument:
+        existing?.searchDocument ?? `${account.screenName} ${account.displayName}`.toLowerCase(),
+      profileObservedAt: existing?.profileObservedAt ?? account.lastCrawledAt,
+      activeLabelKeys: existing?.activeLabelKeys ?? [],
+      activeLabelCount: existing?.activeLabelCount ?? 0,
+      lastClassificationChangedAt: existing?.lastClassificationChangedAt ?? null,
+      classificationObservedAt: existing?.classificationObservedAt ?? null,
+      activeFindingCount: activeFindings.length,
+      highestFindingSeverity,
+      findingObservedAt: occurrence.sourceObservedAt,
+    })
+    await touchAccountSummaryLatestState(prisma, occurrence.sourceObservedAt)
+  } catch (error) {
+    await markAccountSummaryLatestFailed(prisma, String(error))
+    throw error
+  }
 }
 
 /**
