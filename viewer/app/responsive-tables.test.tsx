@@ -6,6 +6,7 @@ describe('mobile overflow safeguards', () => {
   it('keeps tables inside the viewport on small screens', () => {
     const css = readFileSync(path.join(import.meta.dirname, 'globals.css'), 'utf8')
     expect(css).toContain('@media (max-width: 640px)')
+    expect(css).toMatch(/main[^{]*\{[\s\S]*overflow-x: clip/)
     expect(css).toMatch(/main table[\s\S]*overflow-x: auto/)
   })
 

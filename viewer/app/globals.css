@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 @media (max-width: 640px) {
+  main {
+    overflow-x: clip;
+  }
+
   main table {
     display: block;
     max-width: 100%;
