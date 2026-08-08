@@ -101,21 +101,24 @@ function parsePayload(payload: unknown): {
 }
 
 /**
- * 最新の OverviewSnapshot を取得し、
+ * 現在公開中の OverviewSnapshot を取得し、
  * ReadModelState の status を freshnessStatus として重ねる。
  * ReadModelState が stale・failed でも、直近成功した内容自体は消さずに返す。
- * 「最新」の判定には索引のある generatedAt を使う。
- * snapshot は逐次生成されるため、sourceWatermarkAt で並べ替えても順序は変わらない。
+ * generatedAt DESC ではなく ReadModelState.currentGenerationId を経由して取得することで、
+ * build 中の snapshot が INSERT 済みでも Pointer 未切り替えの間は表示しない
+ * (publishGeneration の原子的公開の保証と揃える)。
  * @param prisma - Prisma クライアント
- * @returns 表示に必要な Overview の内容。OverviewSnapshot が 1 件も無ければ null
+ * @returns 表示に必要な Overview の内容。current generation の OverviewSnapshot が無ければ null
  */
 export async function getOverviewSnapshot(
   prisma: PrismaClient,
 ): Promise<OverviewSnapshotView | null> {
-  const [snapshot, readModelState] = await Promise.all([
-    prisma.overviewSnapshot.findFirst({ orderBy: [{ generatedAt: 'desc' }] }),
-    prisma.readModelState.findUnique({ where: { modelKey: MODEL_KEY } }),
-  ])
+  const readModelState = await prisma.readModelState.findUnique({ where: { modelKey: MODEL_KEY } })
+  if (!readModelState?.currentGenerationId) return null
+
+  const snapshot = await prisma.overviewSnapshot.findUnique({
+    where: { generationId: readModelState.currentGenerationId },
+  })
 
   if (!snapshot) return null
 

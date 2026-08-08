@@ -1,6 +1,6 @@
 import type { PrismaClient } from '../generated/prisma'
 import { evaluateLabelCountDrop } from '../findings/detectors/label-count-drop'
-import { evaluateReasonDistributionShift } from '../findings/detectors/reason-distribution-shift'
+import { evaluateReasonDistributionShifts } from '../findings/detectors/reason-distribution-shift'
 import { computeFingerprint } from '../findings/fingerprint'
 import { computePolicyHash } from '../policy/policy-hash'
 import type { DetectionPolicy } from '../policy/schema'
@@ -42,8 +42,8 @@ function evaluateAllRules(
     reasonDistribution: Record<string, number>
   },
   policy: DetectionPolicy,
-): { type: string; exceeded: boolean }[] {
-  const results: { type: string; exceeded: boolean }[] = []
+): { type: string; reason?: string; exceeded: boolean }[] {
+  const results: { type: string; reason?: string; exceeded: boolean }[] = []
 
   const labelCountDropRule = policy.rules.find(
     (rule) => rule.type === 'label_count_drop' && rule.enabled,
@@ -63,17 +63,39 @@ function evaluateAllRules(
     (rule) => rule.type === 'reason_distribution_shift' && rule.enabled,
   )
   if (reasonShiftRule) {
-    const result = evaluateReasonDistributionShift(
+    const shiftResults = evaluateReasonDistributionShifts(
       { current: current.reasonDistribution, baseline: baseline.reasonDistribution },
       {
         relativeThreshold: reasonShiftRule.relativeThreshold ?? 0,
         minimumSampleSize: reasonShiftRule.minimumSampleSize ?? 0,
       },
     )
-    results.push({ type: 'reason_distribution_shift', exceeded: result.exceeded })
+    for (const result of shiftResults) {
+      results.push({
+        type: 'reason_distribution_shift',
+        reason: result.reason,
+        exceeded: result.exceeded,
+      })
+    }
   }
 
   return results
+}
+
+/**
+ * reason_distribution_shift は reason ごとに結果を持つため、type だけでなく
+ * reason も揃えて fingerprint を作らないと別 reason 同士を同一視してしまう。
+ * @param labelDefinitionId - 対象ラベル
+ * @param result - fingerprint を作る対象の判定結果
+ * @returns computeFingerprint に渡す dimensions
+ */
+function fingerprintDimensions(
+  labelDefinitionId: string,
+  result: { type: string; reason?: string },
+): Record<string, string> {
+  return result.reason
+    ? { label: labelDefinitionId, reason: result.reason }
+    : { label: labelDefinitionId }
 }
 
 /**
@@ -129,13 +151,17 @@ export async function runBacktest(prisma: PrismaClient, input: RunBacktestInput)
 
       for (const candidateResult of candidateResults) {
         const baselineResult = baselineResults.find(
-          (result) => result.type === candidateResult.type,
+          (result) =>
+            result.type === candidateResult.type && result.reason === candidateResult.reason,
         )
         if (candidateResult.exceeded && !(baselineResult?.exceeded ?? false)) {
           await prisma.policyBacktestFinding.create({
             data: {
               runId: run.id,
-              fingerprint: computeFingerprint(candidateResult.type, { label: labelDefinitionId }),
+              fingerprint: computeFingerprint(
+                candidateResult.type,
+                fingerprintDimensions(labelDefinitionId, candidateResult),
+              ),
               severity:
                 input.candidatePolicy.rules.find((rule) => rule.type === candidateResult.type)
                   ?.severity ?? 'low',
@@ -148,13 +174,17 @@ export async function runBacktest(prisma: PrismaClient, input: RunBacktestInput)
       }
       for (const baselineResult of baselineResults) {
         const candidateResult = candidateResults.find(
-          (result) => result.type === baselineResult.type,
+          (result) =>
+            result.type === baselineResult.type && result.reason === baselineResult.reason,
         )
         if (baselineResult.exceeded && !(candidateResult?.exceeded ?? false)) {
           await prisma.policyBacktestFinding.create({
             data: {
               runId: run.id,
-              fingerprint: computeFingerprint(baselineResult.type, { label: labelDefinitionId }),
+              fingerprint: computeFingerprint(
+                baselineResult.type,
+                fingerprintDimensions(labelDefinitionId, baselineResult),
+              ),
               severity:
                 input.baselinePolicy.rules.find((rule) => rule.type === baselineResult.type)
                   ?.severity ?? 'low',

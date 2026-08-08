@@ -5,7 +5,7 @@ import { getOverviewSnapshot } from './overview'
 function createMockPrisma(overrides: { snapshot?: unknown; readModelState?: unknown }) {
   return {
     overviewSnapshot: {
-      findFirst: vi.fn().mockResolvedValue(overrides.snapshot ?? null),
+      findUnique: vi.fn().mockResolvedValue(overrides.snapshot ?? null),
     },
     readModelState: {
       findUnique: vi.fn().mockResolvedValue(overrides.readModelState ?? null),
@@ -13,7 +13,14 @@ function createMockPrisma(overrides: { snapshot?: unknown; readModelState?: unkn
   } as unknown as PrismaClient
 }
 
+const baseReadModelState = {
+  status: 'healthy',
+  currentGenerationId: 'generation-1',
+  policyHash: 'hash-1',
+}
+
 const baseSnapshot = {
+  generationId: 'generation-1',
   operationalStatus: 'healthy',
   qualityStatus: 'stable',
   sourceWatermarkAt: new Date('2026-08-07T00:00:00.000Z'),
@@ -37,19 +44,20 @@ const baseSnapshot = {
 }
 
 describe('getOverviewSnapshot', () => {
-  it('OverviewSnapshot が無ければ null を返す', async () => {
+  it('ReadModelState が無ければ null を返す(current generation が特定できないため)', async () => {
     const prisma = createMockPrisma({})
+    expect(await getOverviewSnapshot(prisma)).toBeNull()
+  })
+
+  it('current generation の OverviewSnapshot が無ければ null を返す', async () => {
+    const prisma = createMockPrisma({ readModelState: baseReadModelState })
     expect(await getOverviewSnapshot(prisma)).toBeNull()
   })
 
   it('ReadModelState が healthy なら freshnessStatus に healthy を返す', async () => {
     const prisma = createMockPrisma({
       snapshot: baseSnapshot,
-      readModelState: {
-        status: 'healthy',
-        currentGenerationId: 'generation-1',
-        policyHash: 'hash-1',
-      },
+      readModelState: baseReadModelState,
     })
 
     const result = await getOverviewSnapshot(prisma)
@@ -63,11 +71,7 @@ describe('getOverviewSnapshot', () => {
   it('ReadModelState が stale でも直近成功 OverviewSnapshot の内容は消さずに返す', async () => {
     const prisma = createMockPrisma({
       snapshot: baseSnapshot,
-      readModelState: {
-        status: 'stale',
-        currentGenerationId: 'generation-1',
-        policyHash: 'hash-1',
-      },
+      readModelState: { ...baseReadModelState, status: 'stale' },
     })
 
     const result = await getOverviewSnapshot(prisma)
@@ -77,23 +81,15 @@ describe('getOverviewSnapshot', () => {
     expect(result?.attention).toHaveLength(1)
   })
 
-  it('ReadModelState が無ければ freshnessStatus は unknown になる', async () => {
-    const prisma = createMockPrisma({ snapshot: baseSnapshot })
-
-    const result = await getOverviewSnapshot(prisma)
-
-    expect(result?.freshnessStatus).toBe('unknown')
-  })
-
-  it('索引のある generatedAt で最新 snapshot を選ぶ', async () => {
-    const prisma = createMockPrisma({ snapshot: baseSnapshot })
+  it('current generation の Pointer を経由して取得する(未公開の build 中 snapshot を見せない)', async () => {
+    const prisma = createMockPrisma({ snapshot: baseSnapshot, readModelState: baseReadModelState })
 
     await getOverviewSnapshot(prisma)
 
-    const findFirst = (
-      prisma as unknown as { overviewSnapshot: { findFirst: ReturnType<typeof vi.fn> } }
-    ).overviewSnapshot.findFirst
-    expect(findFirst.mock.calls[0][0]).toEqual({ orderBy: [{ generatedAt: 'desc' }] })
+    const findUnique = (
+      prisma as unknown as { overviewSnapshot: { findUnique: ReturnType<typeof vi.fn> } }
+    ).overviewSnapshot.findUnique
+    expect(findUnique.mock.calls[0][0]).toEqual({ where: { generationId: 'generation-1' } })
   })
 
   it('payload の attention に壊れた要素があればその要素だけ捨てる', async () => {
@@ -105,6 +101,7 @@ describe('getOverviewSnapshot', () => {
           attention: [...baseSnapshot.payload.attention, { sourceType: 'operational_issue' }, null],
         },
       },
+      readModelState: baseReadModelState,
     })
 
     const result = await getOverviewSnapshot(prisma)
@@ -118,6 +115,7 @@ describe('getOverviewSnapshot', () => {
         ...baseSnapshot,
         payload: { ...baseSnapshot.payload, latestPipeline: { cycleId: 'cycle-1' } },
       },
+      readModelState: baseReadModelState,
     })
 
     const result = await getOverviewSnapshot(prisma)
@@ -134,6 +132,7 @@ describe('getOverviewSnapshot', () => {
           latestPipeline: { cycleId: 'cycle-1', status: 'succeeded', stages: 'broken' },
         },
       },
+      readModelState: baseReadModelState,
     })
 
     const result = await getOverviewSnapshot(prisma)

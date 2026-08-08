@@ -3,10 +3,11 @@ import { computeFingerprint } from './fingerprint'
 import {
   applyLifecycleTransition,
   type FindingLifecycleState,
+  type FindingLifecycleStatus,
   type DetectorObservation,
 } from './lifecycle'
 import { evaluateLabelCountDrop } from './detectors/label-count-drop'
-import { evaluateReasonDistributionShift } from './detectors/reason-distribution-shift'
+import { evaluateReasonDistributionShifts } from './detectors/reason-distribution-shift'
 import type { DetectionPolicy, DetectionPolicyRule } from '../policy/schema'
 import { Logger } from '@book000/node-utils'
 
@@ -41,19 +42,19 @@ function maxSeverity(a: string, b: string): string {
  * ReviewFinding は現在の lifecycle 状態そのものを持たないため、
  * 直近の DetectorEvaluation 列から連続回数を数え直して状態を再構築する。
  * 専用の state テーブルを増やさずに済むため。
- * @param prisma - Prisma クライアント
+ * @param tx - トランザクション内の Prisma クライアント
  * @param fingerprint - 対象の fingerprint
  * @param identityVersion - 対象の identityVersion
  * @param existingFinding - 既存の ReviewFinding (無ければ undefined)
  * @returns 直前までの lifecycle 状態
  */
 async function reconstructLifecycleState(
-  prisma: PrismaClient,
+  tx: Prisma.TransactionClient,
   fingerprint: string,
   identityVersion: number,
   existingFinding: ReviewFinding | null,
 ): Promise<FindingLifecycleState> {
-  const recent = await prisma.detectorEvaluation.findMany({
+  const recent = await tx.detectorEvaluation.findMany({
     where: { fingerprint, identityVersion, isShadow: false },
     orderBy: [{ evaluatedAt: 'desc' }],
     take: 50,
@@ -77,6 +78,9 @@ async function reconstructLifecycleState(
       : { status: 'none', consecutiveExceed, consecutiveNormal: 0 }
   }
 
+  // active/recurring はいずれも「継続監視中」の状態であり、resolutionCount に
+  // 向けて consecutiveNormal を数える必要がある点は共通のため、既存の status を
+  // そのまま引き継ぐ。'active' に丸めると recurring の表示区分が失われる。
   let consecutiveNormal = 0
   for (const evaluation of recent) {
     const result = evaluation.result as unknown as DetectorObservation
@@ -84,7 +88,11 @@ async function reconstructLifecycleState(
     if (result.exceeded) break
     consecutiveNormal++
   }
-  return { status: 'active', consecutiveExceed: 0, consecutiveNormal }
+  return {
+    status: existingFinding.status as FindingLifecycleStatus,
+    consecutiveExceed: 0,
+    consecutiveNormal,
+  }
 }
 
 interface ProcessObservationInput {
@@ -105,7 +113,7 @@ interface ProcessObservationInput {
 }
 
 /**
- * @param prisma - Prisma クライアント
+ * @param tx - トランザクション内の Prisma クライアント
  * @param findingId - 対象の ReviewFinding ID
  * @param stateTransition - この観測で生じた状態遷移
  * @param input - この観測に関する全パラメータ
@@ -113,7 +121,7 @@ interface ProcessObservationInput {
  * @param now - 観測時刻
  */
 async function upsertOccurrence(
-  prisma: PrismaClient,
+  tx: Prisma.TransactionClient,
   findingId: string,
   stateTransition: string,
   input: ProcessObservationInput,
@@ -122,7 +130,7 @@ async function upsertOccurrence(
 ): Promise<void> {
   // 同一 crawlRunId の再実行で Occurrence が重複しないよう、
   // crawlRunId (= sourceId) を observationKey として使う。
-  await prisma.reviewFindingOccurrence.upsert({
+  await tx.reviewFindingOccurrence.upsert({
     where: { findingId_observationKey: { findingId, observationKey: input.sourceId } },
     create: {
       findingId,
@@ -156,79 +164,98 @@ async function processObservation(
 ): Promise<void> {
   const fingerprint = computeFingerprint(input.type, input.dimensions)
 
-  const existingFinding = await prisma.reviewFinding.findFirst({
-    where: { fingerprint, identityVersion: input.rule.identityVersion },
-    orderBy: [{ episodeNumber: 'desc' }],
-  })
-
-  // 今回の観測を書き込む前の履歴から状態を再構築する必要があるため、
-  // DetectorEvaluation の書き込みより前に評価する。
-  const priorState = await reconstructLifecycleState(
-    prisma,
-    fingerprint,
-    input.rule.identityVersion,
-    existingFinding,
-  )
-  const now = new Date()
-  const next = applyLifecycleTransition(priorState, input.observation, input.rule, now)
-
-  // active 化前の候補であっても、後から連続超過回数を再構築できるよう必ず保存する。
-  await prisma.detectorEvaluation.create({
-    data: {
-      detectorType: input.rule.detectorType,
-      fingerprint,
-      identityVersion: input.rule.identityVersion,
-      isShadow: false,
-      result: input.observation as unknown as Prisma.InputJsonValue,
-      policyHash: ctx.policyHash,
-    },
-  })
-
-  if (next.status === 'none') return
-
-  if (existingFinding && next.status !== 'new_episode') {
-    await prisma.reviewFinding.update({
-      where: { id: existingFinding.id },
-      data: {
-        status: next.status,
-        currentSeverity: input.rule.severity,
-        maximumSeverity: maxSeverity(existingFinding.maximumSeverity, input.rule.severity),
-        lastDetectedAt: now,
-        resolvedAt: next.status === 'resolved' ? now : null,
-        recurrenceCount:
-          next.status === 'recurring'
-            ? existingFinding.recurrenceCount + 1
-            : existingFinding.recurrenceCount,
+  await prisma.$transaction(async (tx) => {
+    // WorkItem の at-least-once retry で同じ sourceId が再度渡されたとき、
+    // lifecycle 遷移を再適用すると consecutiveExceed/recurrenceCount が
+    // 二重に進んでしまう。DetectorEvaluation の一意キーで既処理を検出し、
+    // Finding 更新より前段でスキップする。
+    const existingEvaluation = await tx.detectorEvaluation.findUnique({
+      where: {
+        fingerprint_identityVersion_sourceId_isShadow: {
+          fingerprint,
+          identityVersion: input.rule.identityVersion,
+          sourceId: input.sourceId,
+          isShadow: false,
+        },
       },
     })
-    await upsertOccurrence(prisma, existingFinding.id, next.status, input, ctx, now)
-    return
-  }
+    if (existingEvaluation) return
 
-  const episodeNumber = existingFinding ? existingFinding.episodeNumber + 1 : 1
-  const created = await prisma.reviewFinding.create({
-    data: {
-      fingerprint,
-      identityVersion: input.rule.identityVersion,
-      episodeNumber,
-      type: input.type,
-      primaryScopeType: input.primaryScopeType,
-      primaryScopeId: input.primaryScopeId,
-      status: 'active',
-      currentSeverity: input.rule.severity,
-      maximumSeverity: input.rule.severity,
-      firstDetectedAt: now,
-      lastDetectedAt: now,
-      previousFindingId: existingFinding?.id,
-    },
-  })
-  if (existingFinding) {
-    await prisma.reviewFinding.update({
-      where: { id: existingFinding.id },
-      data: { supersededByFindingId: created.id },
+    const existingFinding = await tx.reviewFinding.findFirst({
+      where: { fingerprint, identityVersion: input.rule.identityVersion },
+      orderBy: [{ episodeNumber: 'desc' }],
     })
-  }
-  await upsertOccurrence(prisma, created.id, next.status, input, ctx, now)
+
+    // 今回の観測を書き込む前の履歴から状態を再構築する必要があるため、
+    // DetectorEvaluation の書き込みより前に評価する。
+    const priorState = await reconstructLifecycleState(
+      tx,
+      fingerprint,
+      input.rule.identityVersion,
+      existingFinding,
+    )
+    const now = new Date()
+    const next = applyLifecycleTransition(priorState, input.observation, input.rule, now)
+
+    // active 化前の候補であっても、後から連続超過回数を再構築できるよう必ず保存する。
+    await tx.detectorEvaluation.create({
+      data: {
+        detectorType: input.rule.detectorType,
+        fingerprint,
+        identityVersion: input.rule.identityVersion,
+        sourceId: input.sourceId,
+        isShadow: false,
+        result: input.observation as unknown as Prisma.InputJsonValue,
+        policyHash: ctx.policyHash,
+      },
+    })
+
+    if (next.status === 'none') return
+
+    if (existingFinding && next.status !== 'new_episode') {
+      await tx.reviewFinding.update({
+        where: { id: existingFinding.id },
+        data: {
+          status: next.status,
+          currentSeverity: input.rule.severity,
+          maximumSeverity: maxSeverity(existingFinding.maximumSeverity, input.rule.severity),
+          lastDetectedAt: now,
+          resolvedAt: next.status === 'resolved' ? now : null,
+          recurrenceCount:
+            next.status === 'recurring' && priorState.status !== 'recurring'
+              ? existingFinding.recurrenceCount + 1
+              : existingFinding.recurrenceCount,
+        },
+      })
+      await upsertOccurrence(tx, existingFinding.id, next.status, input, ctx, now)
+      return
+    }
+
+    const episodeNumber = existingFinding ? existingFinding.episodeNumber + 1 : 1
+    const created = await tx.reviewFinding.create({
+      data: {
+        fingerprint,
+        identityVersion: input.rule.identityVersion,
+        episodeNumber,
+        type: input.type,
+        primaryScopeType: input.primaryScopeType,
+        primaryScopeId: input.primaryScopeId,
+        status: 'active',
+        currentSeverity: input.rule.severity,
+        maximumSeverity: input.rule.severity,
+        firstDetectedAt: now,
+        lastDetectedAt: now,
+        previousFindingId: existingFinding?.id,
+      },
+    })
+    if (existingFinding) {
+      await tx.reviewFinding.update({
+        where: { id: existingFinding.id },
+        data: { supersededByFindingId: created.id },
+      })
+    }
+    await upsertOccurrence(tx, created.id, next.status, input, ctx, now)
+  })
 }
 
 /**
@@ -296,7 +323,7 @@ export async function generateFindingsForCrawlCycle(
       }
 
       if (rule.type === 'reason_distribution_shift') {
-        const result = evaluateReasonDistributionShift(
+        const results = evaluateReasonDistributionShifts(
           {
             current: snapshot.reasonDistribution as unknown as Record<string, number>,
             baseline: (baseline?.reasonDistribution ?? {}) as unknown as Record<string, number>,
@@ -306,21 +333,26 @@ export async function generateFindingsForCrawlCycle(
             minimumSampleSize: rule.minimumSampleSize ?? 0,
           },
         )
-        if (!result.reason) continue
-        await processObservation(
-          prisma,
-          {
-            type: rule.type,
-            dimensions: { label: snapshot.labelDefinitionId, reason: result.reason },
-            primaryScopeType: 'label',
-            primaryScopeId: snapshot.labelDefinitionId,
-            observation: result,
-            rule,
-            sourceType: 'crawl_run',
-            sourceId: input.crawlRunId,
-          },
-          input,
-        )
+        // reason ごとに独立した fingerprint を持つため、比較可能な reason 全件へ
+        // observation を送る。最大変化幅の reason だけに絞ると、直前まで
+        // 有効だった他 reason の Finding が二度と観測を受け取れず resolved に
+        // 遷移できなくなる。
+        for (const result of results) {
+          await processObservation(
+            prisma,
+            {
+              type: rule.type,
+              dimensions: { label: snapshot.labelDefinitionId, reason: result.reason },
+              primaryScopeType: 'label',
+              primaryScopeId: snapshot.labelDefinitionId,
+              observation: result,
+              rule,
+              sourceType: 'crawl_run',
+              sourceId: input.crawlRunId,
+            },
+            input,
+          )
+        }
         continue
       }
 

@@ -8,6 +8,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
 
   beforeEach(async () => {
     await prisma.labelSummaryCurrent.deleteMany()
+    await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
     await prisma.labelMetricSnapshot.deleteMany()

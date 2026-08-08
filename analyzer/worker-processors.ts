@@ -134,8 +134,8 @@ export async function processReadModelRefresh(
     modelKey: 'overview_snapshot',
     schemaVersion: 1,
     sourceWatermarkAt,
-    build: async () => {
-      await buildOverviewSnapshot(prisma, { sourceWatermarkAt })
+    build: async (generationId) => {
+      await buildOverviewSnapshot(prisma, { generationId, sourceWatermarkAt })
       return { rowCount: 1 }
     },
   })

@@ -626,11 +626,15 @@ model DetectorEvaluation {
   detectorType    String
   fingerprint     String
   identityVersion Int
+  // 同一観測イベント (例: 同じ CrawlRun) の at-least-once retry で
+  // DetectorEvaluation が重複しないための論理一意キー。
+  sourceId        String
   evaluatedAt     DateTime @default(now())
   isShadow        Boolean  @default(false)
   result          Json
   policyHash      String
 
+  @@unique([fingerprint, identityVersion, sourceId, isShadow])
   @@index([detectorType, fingerprint, evaluatedAt(sort: Desc)])
   @@index([isShadow, evaluatedAt(sort: Desc)])
   @@index([fingerprint, identityVersion, evaluatedAt(sort: Desc)])
@@ -823,6 +827,8 @@ model AttentionItemCurrent {
 
 model OverviewSnapshot {
   id                String   @id @default(cuid())
+  // ReadModelGeneration.id と 1:1 に対応させ、Pointer 経由の原子的公開に乗せるためのキー。
+  generationId      String   @unique
   schemaVersion     Int
   generatedAt       DateTime @default(now())
   sourceWatermarkAt DateTime

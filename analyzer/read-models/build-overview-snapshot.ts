@@ -65,6 +65,8 @@ export function deriveQualityStatus(input: DeriveQualityStatusInput): QualitySta
  * buildOverviewSnapshot の入力。
  */
 export interface BuildOverviewSnapshotInput {
+  /** publishGeneration が発行した ReadModelGeneration.id。 */
+  generationId: string
   /** 集計の基準時刻。 */
   sourceWatermarkAt: Date
   /** 紐づく AnalysisRun の ID。 */
@@ -150,6 +152,7 @@ export async function buildOverviewSnapshot(
 
   const snapshot = await prisma.overviewSnapshot.create({
     data: {
+      generationId: input.generationId,
       schemaVersion: 1,
       sourceWatermarkAt: input.sourceWatermarkAt,
       operationalStatus,

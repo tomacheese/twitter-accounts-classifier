@@ -1,13 +1,13 @@
 /**
- * reason_distribution_shift の判定結果。
+ * reason_distribution_shift の reason 1 件分の判定結果。
  */
 export interface ReasonDistributionShiftResult {
+  /** 対象の reason。 */
+  reason: string
   /** 閾値を超過したか。 */
   exceeded: boolean
   /** 母数不足などで判定不能か。 */
   isMissingOrFailed: boolean
-  /** 最も大きく変化した reason。 */
-  reason?: string
   /** 今回の観測値。 */
   observedValue: number
   /** 比較対象の baseline 値。 */
@@ -20,23 +20,22 @@ export interface ReasonDistributionShiftResult {
 }
 
 /**
- * reason ごとの現在値・baseline を比較し、最大の相対減少幅を持つ reason を選ぶ。
- * 複数の reason が同時に閾値を超えても変化幅最大のものだけを返す。
- * fingerprint を 1 件に対応させるため。
+ * reason ごとに現在値・baseline を比較する。
+ * fingerprint は reason ごとに独立した lifecycle を持つため、最大変化幅の
+ * reason だけに絞らず、比較可能な reason 全件を返す。そうしないと、直前まで
+ * 最大変化幅だった reason が別の reason に入れ替わった時点で観測が途切れ、
+ * その reason の Finding が resolved に遷移する経路を失う。
  * @param input - reason ごとの現在の分布と baseline
  * @param rule - 判定に使う閾値
- * @returns 検出結果
+ * @returns reason ごとの検出結果
  */
-export function evaluateReasonDistributionShift(
+export function evaluateReasonDistributionShifts(
   input: { current: Record<string, number>; baseline: Record<string, number> },
   rule: { relativeThreshold: number; minimumSampleSize: number },
-): ReasonDistributionShiftResult {
+): ReasonDistributionShiftResult[] {
   const reasons = new Set([...Object.keys(input.current), ...Object.keys(input.baseline)])
 
-  let best:
-    | { reason: string; currentCount: number; baselineCount: number; relativeDifference: number }
-    | undefined
-
+  const results: ReasonDistributionShiftResult[] = []
   for (const reason of reasons) {
     const currentCount = input.current[reason] ?? 0
     const baselineCount = input.baseline[reason] ?? 0
@@ -44,31 +43,18 @@ export function evaluateReasonDistributionShift(
 
     const relativeDifference =
       baselineCount === 0 ? 0 : (baselineCount - currentCount) / baselineCount
-    if (!best || relativeDifference > best.relativeDifference) {
-      best = { reason, currentCount, baselineCount, relativeDifference }
-    }
+
+    results.push({
+      reason,
+      exceeded: relativeDifference >= rule.relativeThreshold,
+      isMissingOrFailed: false,
+      observedValue: currentCount,
+      baselineValue: baselineCount,
+      relativeDifference,
+      affectedCount: currentCount,
+      totalCount: baselineCount,
+    })
   }
 
-  if (!best) {
-    return {
-      exceeded: false,
-      isMissingOrFailed: true,
-      observedValue: 0,
-      baselineValue: 0,
-      relativeDifference: 0,
-      affectedCount: 0,
-      totalCount: 0,
-    }
-  }
-
-  return {
-    exceeded: best.relativeDifference >= rule.relativeThreshold,
-    isMissingOrFailed: false,
-    reason: best.reason,
-    observedValue: best.currentCount,
-    baselineValue: best.baselineCount,
-    relativeDifference: best.relativeDifference,
-    affectedCount: best.currentCount,
-    totalCount: best.baselineCount,
-  }
+  return results
 }

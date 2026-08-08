@@ -10,6 +10,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAttentionItems', () => {
     await prisma.attentionItemCurrent.deleteMany()
     await prisma.operationalIssueOccurrence.deleteMany()
     await prisma.operationalIssue.deleteMany()
+    await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
   })

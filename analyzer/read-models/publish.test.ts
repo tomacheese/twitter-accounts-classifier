@@ -64,6 +64,38 @@ describe.skipIf(!process.env.DATABASE_URL)('publishGeneration', () => {
     expect(state.status).toBe('failed')
   })
 
+  it('watermark が現在の generation 以前なら Pointer を進めない', async () => {
+    const newer = new Date('2026-08-07T12:00:00.000Z')
+    const older = new Date('2026-08-07T00:00:00.000Z')
+
+    await publishGeneration(prisma, {
+      modelKey: 'account_summary',
+      schemaVersion: 1,
+      sourceWatermarkAt: newer,
+      build: () => Promise.resolve({ rowCount: 10 }),
+    })
+    const before = await prisma.readModelPointer.findUniqueOrThrow({
+      where: { modelKey: 'account_summary' },
+    })
+
+    const staleGenerationId = await publishGeneration(prisma, {
+      modelKey: 'account_summary',
+      schemaVersion: 1,
+      sourceWatermarkAt: older,
+      build: () => Promise.resolve({ rowCount: 5 }),
+    })
+
+    const after = await prisma.readModelPointer.findUniqueOrThrow({
+      where: { modelKey: 'account_summary' },
+    })
+    expect(after.currentGenerationId).toBe(before.currentGenerationId)
+
+    const staleGeneration = await prisma.readModelGeneration.findUniqueOrThrow({
+      where: { id: staleGenerationId },
+    })
+    expect(staleGeneration.status).toBe('superseded')
+  })
+
   it('公開のたびに不要となった世代の行と ReadModelGeneration を削除する', async () => {
     await prisma.attentionItemCurrent.deleteMany()
 
@@ -72,7 +104,9 @@ describe.skipIf(!process.env.DATABASE_URL)('publishGeneration', () => {
       const generationId = await publishGeneration(prisma, {
         modelKey: 'attention_items',
         schemaVersion: 1,
-        sourceWatermarkAt: new Date(),
+        // 単調性チェックが同一ミリ秒の new Date() 同士を「新しくない」と
+        // 誤判定しないよう、各 iteration で明確に増加させる。
+        sourceWatermarkAt: new Date(2026, 7, 7, 0, 0, index),
         build: async (id) => {
           await prisma.attentionItemCurrent.create({
             data: {

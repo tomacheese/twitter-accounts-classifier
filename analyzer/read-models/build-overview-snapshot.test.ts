@@ -115,12 +115,16 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
     await prisma.operationalIssue.deleteMany()
     await prisma.operationStage.deleteMany()
     await prisma.operationCycle.deleteMany()
+    await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
   })
 
   it('active な OperationalIssue が無ければ healthy な snapshot を作る', async () => {
-    const result = await buildOverviewSnapshot(prisma, { sourceWatermarkAt: new Date() })
+    const result = await buildOverviewSnapshot(prisma, {
+      generationId: randomUUID(),
+      sourceWatermarkAt: new Date(),
+    })
 
     const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
     expect(snapshot.operationalStatus).toBe('healthy')
@@ -138,7 +142,10 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
       },
     })
 
-    const result = await buildOverviewSnapshot(prisma, { sourceWatermarkAt: new Date() })
+    const result = await buildOverviewSnapshot(prisma, {
+      generationId: randomUUID(),
+      sourceWatermarkAt: new Date(),
+    })
 
     const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
     expect(snapshot.operationalStatus).toBe('critical')

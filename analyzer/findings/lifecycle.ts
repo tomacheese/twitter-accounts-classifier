@@ -79,7 +79,11 @@ export function applyLifecycleTransition(
     return { ...state }
   }
 
-  if (state.status === 'none' || state.status === 'resolved' || state.status === 'recurring') {
+  // 'recurring' はこの再活性化ゲートの対象に含めない。すでに一度ゲートを
+  // 通過して継続監視に入っている状態であり、ここに含めると通常監視のはずの
+  // 観測のたびに activationCount を数え直してしまい、resolutionCount へ
+  // 到達する経路が失われる。
+  if (state.status === 'none' || state.status === 'resolved') {
     if (!observation.exceeded) {
       return { ...state, consecutiveExceed: 0 }
     }
@@ -91,7 +95,7 @@ export function applyLifecycleTransition(
       return { ...state, consecutiveExceed, consecutiveNormal: 0 }
     }
 
-    if (state.status === 'resolved' || state.status === 'recurring') {
+    if (state.status === 'resolved') {
       const withinWindow = isWithinRecurrenceWindow(state.resolvedAt, rule.recurrenceWindow, now)
       return {
         status: withinWindow ? 'recurring' : 'new_episode',

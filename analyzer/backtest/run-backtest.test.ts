@@ -72,6 +72,7 @@ describe.skipIf(!process.env.DATABASE_URL)('runBacktest', () => {
   beforeEach(async () => {
     await prisma.policyBacktestFinding.deleteMany()
     await prisma.policyBacktestRun.deleteMany()
+    await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
     await prisma.labelMetricSnapshot.deleteMany()

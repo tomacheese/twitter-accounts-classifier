@@ -8,6 +8,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
 
   beforeEach(async () => {
     await prisma.accountSummaryCurrent.deleteMany()
+    await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
     await prisma.accountLabelLatest.deleteMany()

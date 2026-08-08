@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '../generated/prisma'
 import { evaluateLabelCountDrop } from '../findings/detectors/label-count-drop'
-import { evaluateReasonDistributionShift } from '../findings/detectors/reason-distribution-shift'
+import { evaluateReasonDistributionShifts } from '../findings/detectors/reason-distribution-shift'
 import { computeFingerprint } from '../findings/fingerprint'
 import type { DetectionPolicy } from '../policy/schema'
 
@@ -64,6 +64,7 @@ export async function evaluateShadow(
             detectorType: rule.detectorType,
             fingerprint: computeFingerprint(rule.type, { label: snapshot.labelDefinitionId }),
             identityVersion: rule.identityVersion,
+            sourceId: input.crawlRunId,
             isShadow: true,
             result: result as unknown as Prisma.InputJsonValue,
             policyHash: input.policyHash,
@@ -73,7 +74,7 @@ export async function evaluateShadow(
       }
 
       if (rule.type === 'reason_distribution_shift') {
-        const result = evaluateReasonDistributionShift(
+        const results = evaluateReasonDistributionShifts(
           {
             current: snapshot.reasonDistribution as unknown as Record<string, number>,
             baseline: (baseline?.reasonDistribution ?? {}) as unknown as Record<string, number>,
@@ -83,19 +84,22 @@ export async function evaluateShadow(
             minimumSampleSize: rule.minimumSampleSize ?? 0,
           },
         )
-        await prisma.detectorEvaluation.create({
-          data: {
-            detectorType: rule.detectorType,
-            fingerprint: computeFingerprint(rule.type, {
-              label: snapshot.labelDefinitionId,
-              reason: result.reason ?? '',
-            }),
-            identityVersion: rule.identityVersion,
-            isShadow: true,
-            result: result as unknown as Prisma.InputJsonValue,
-            policyHash: input.policyHash,
-          },
-        })
+        for (const result of results) {
+          await prisma.detectorEvaluation.create({
+            data: {
+              detectorType: rule.detectorType,
+              fingerprint: computeFingerprint(rule.type, {
+                label: snapshot.labelDefinitionId,
+                reason: result.reason,
+              }),
+              identityVersion: rule.identityVersion,
+              sourceId: input.crawlRunId,
+              isShadow: true,
+              result: result as unknown as Prisma.InputJsonValue,
+              policyHash: input.policyHash,
+            },
+          })
+        }
       }
     }
   }

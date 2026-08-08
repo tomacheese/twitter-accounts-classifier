@@ -10,7 +10,6 @@ const RETAINED_GENERATIONS = 2
 
 /**
  * generationId で世代管理されている読み取りモデルの行削除処理。
- * OverviewSnapshot は generationId を持たないため、この表ではなく generatedAt で刈り込む。
  */
 const GENERATION_ROW_DELETERS: Record<
   string,
@@ -24,23 +23,8 @@ const GENERATION_ROW_DELETERS: Record<
     prisma.attentionItemCurrent.deleteMany({ where: { generationId: { in: generationIds } } }),
   block_relation: (prisma, generationIds) =>
     prisma.blockRelationCurrent.deleteMany({ where: { generationId: { in: generationIds } } }),
-}
-
-/**
- * OverviewSnapshot は generationId を持たないため、新しい順に RETAINED_GENERATIONS 件だけ残す。
- * @param prisma - Prisma クライアント
- */
-async function pruneOverviewSnapshots(prisma: PrismaClient): Promise<void> {
-  const obsolete = await prisma.overviewSnapshot.findMany({
-    orderBy: [{ generatedAt: 'desc' }],
-    skip: RETAINED_GENERATIONS,
-    select: { id: true },
-  })
-  if (obsolete.length === 0) return
-
-  await prisma.overviewSnapshot.deleteMany({
-    where: { id: { in: obsolete.map((snapshot) => snapshot.id) } },
-  })
+  overview_snapshot: (prisma, generationIds) =>
+    prisma.overviewSnapshot.deleteMany({ where: { generationId: { in: generationIds } } }),
 }
 
 /**
@@ -55,8 +39,6 @@ async function pruneSupersededGenerations(
   modelKey: string,
   currentGenerationId: string,
 ): Promise<void> {
-  if (modelKey === 'overview_snapshot') await pruneOverviewSnapshots(prisma)
-
   const obsolete = await prisma.readModelGeneration.findMany({
     where: { modelKey, id: { not: currentGenerationId } },
     orderBy: [{ startedAt: 'desc' }],
@@ -115,22 +97,34 @@ export async function publishGeneration(
   try {
     const result = await input.build(generation.id)
 
-    await prisma.$transaction([
-      prisma.readModelGeneration.update({
+    // ANALYZER_WORKER_CONCURRENCY > 1 やバックログ処理では、新しい run の publish が
+    // 古い run の publish より先に終わりうる。watermark の単調性を transaction 内で
+    // 判定しないと、後から完了した古い run が current pointer を巻き戻してしまう。
+    const isNewerThanCurrent = await prisma.$transaction(async (tx) => {
+      const currentState = await tx.readModelState.findUnique({
+        where: { modelKey: input.modelKey },
+      })
+      const isNewer =
+        !currentState?.sourceWatermarkAt || input.sourceWatermarkAt > currentState.sourceWatermarkAt
+
+      await tx.readModelGeneration.update({
         where: { id: generation.id },
         data: {
-          status: 'current',
+          status: isNewer ? 'current' : 'superseded',
           completedAt: new Date(),
           rowCount: result.rowCount,
           validationSummary: (result.validationSummary ?? {}) as Prisma.InputJsonValue,
         },
-      }),
-      prisma.readModelPointer.upsert({
+      })
+
+      if (!isNewer) return false
+
+      await tx.readModelPointer.upsert({
         where: { modelKey: input.modelKey },
         create: { modelKey: input.modelKey, currentGenerationId: generation.id },
         update: { currentGenerationId: generation.id, switchedAt: new Date() },
-      }),
-      prisma.readModelState.upsert({
+      })
+      await tx.readModelState.upsert({
         where: { modelKey: input.modelKey },
         create: {
           modelKey: input.modelKey,
@@ -151,13 +145,16 @@ export async function publishGeneration(
           errorCode: null,
           errorSummary: null,
         },
-      }),
-    ])
+      })
+      return true
+    })
 
-    try {
-      await pruneSupersededGenerations(prisma, input.modelKey, generation.id)
-    } catch (error) {
-      logger.error(`failed to prune superseded generations for ${input.modelKey}`, error as Error)
+    if (isNewerThanCurrent) {
+      try {
+        await pruneSupersededGenerations(prisma, input.modelKey, generation.id)
+      } catch (error) {
+        logger.error(`failed to prune superseded generations for ${input.modelKey}`, error as Error)
+      }
     }
 
     return generation.id
