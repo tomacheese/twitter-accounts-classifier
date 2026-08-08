@@ -12,6 +12,7 @@ COPY prisma ./prisma
 COPY analyzer ./analyzer
 RUN pnpm --filter analyzer run db:generate
 RUN pnpm --filter analyzer run build
+RUN test -f /app/analyzer/dist/policy/detection-policy.json
 
 FROM node:24-bookworm-slim
 

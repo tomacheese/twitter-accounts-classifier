@@ -52,6 +52,8 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
+      VIEWER_DB_PASSWORD: ${VIEWER_DB_PASSWORD:?VIEWER_DB_PASSWORD must be set in .env}
+      ANALYZER_DB_PASSWORD: ${ANALYZER_DB_PASSWORD:?ANALYZER_DB_PASSWORD must be set in .env}
     entrypoint:
       [
         "sh",
