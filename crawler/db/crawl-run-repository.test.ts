@@ -193,7 +193,7 @@ describe('finishCrawlRun', () => {
     })
   })
 
-  it('enqueues a label_metrics AnalysisWorkItem for the finished run', async () => {
+  it('enqueues a label_aggregate_refresh AnalysisWorkItem for the finished run', async () => {
     const update = vi.fn().mockResolvedValue({})
     const upsert = vi.fn().mockResolvedValue({})
     const tx = { crawlRun: { update }, analysisWorkItem: { upsert } }
@@ -207,7 +207,7 @@ describe('finishCrawlRun', () => {
       expect.objectContaining({
         where: {
           kind_triggerType_triggerId: {
-            kind: 'label_metrics',
+            kind: 'label_aggregate_refresh',
             triggerType: 'crawl_run',
             triggerId: 'run1',
           },

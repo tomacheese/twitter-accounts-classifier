@@ -134,9 +134,9 @@ export async function finishCrawlRun(
       data: { finishedAt, status, currentUsername: null, currentAccountStartedAt: null },
     })
     // failed で終わった run でも、途中まで取得できたデータの指標更新には価値があるため
-    // 常に enqueue する。完全性の記録は label_metrics 側の責務とする。
+    // 常に enqueue する。完全性の記録は label_aggregate_refresh 側の責務とする。
     await enqueueWorkItem(tx, {
-      kind: 'label_metrics',
+      kind: 'label_aggregate_refresh',
       triggerType: 'crawl_run',
       triggerId: id,
     })
