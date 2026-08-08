@@ -1,4 +1,5 @@
 import type { PrismaClient } from '../generated/prisma'
+import { rollUpLabelMetricDaily } from './build-label-metric-daily'
 
 const SEVERITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 }
 
@@ -65,7 +66,8 @@ async function findSnapshotAtOrBefore(
 
 /**
  * LabelDefinition ごとに最新の LabelMetricSnapshot と、直近の日次・週次比較用 snapshot、
- * 対応する ReviewFinding の active/recurring 件数を集約して LabelSummaryCurrent を構築する。
+ * 対応する ReviewFinding の active/recurring 件数を集約して LabelSummaryCurrent を構築し、
+ * Label 詳細のトレンドが参照する LabelMetricDaily も併せて更新する。
  * completeness が unknown の snapshot は集計自体に失敗した記録であり、
  * prevalence を 0 とみなすと誤った下落として伝播するため対象から除く。
  * Label ごとの読み取りは互いに独立しているため並行実行し、
@@ -78,6 +80,8 @@ export async function buildLabelSummary(
   prisma: PrismaClient,
   input: BuildLabelSummaryInput,
 ): Promise<{ rowCount: number }> {
+  await rollUpLabelMetricDaily(prisma, { now: input.sourceWatermarkAt })
+
   const labelDefinitions = await prisma.labelDefinition.findMany({ select: { id: true } })
 
   const rows = await Promise.all(
@@ -122,7 +126,9 @@ export async function buildLabelSummary(
 
       const prevalence = computePrevalence(latest.evaluatedCount, latest.trueCount)
       const deltaFrom = (snapshot: ComparableSnapshot | null | undefined): number | null =>
-        snapshot ? prevalence - computePrevalence(snapshot.evaluatedCount, snapshot.trueCount) : null
+        snapshot
+          ? prevalence - computePrevalence(snapshot.evaluatedCount, snapshot.trueCount)
+          : null
 
       return {
         generationId: input.generationId,
