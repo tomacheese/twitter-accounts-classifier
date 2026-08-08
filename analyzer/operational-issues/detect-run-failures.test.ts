@@ -131,4 +131,62 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
     })
     expect(occurrences).toHaveLength(2)
   })
+
+  it('transient failure の後に同じ WorkItem が成功すると active な issue を resolved にする', async () => {
+    const workItemId = `work-item-${randomUUID()}`
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'read_model_refresh',
+      workItemId,
+      attemptNumber: 1,
+      status: 'failed',
+      errorSummary: 'boom',
+      now: new Date(),
+    })
+    const issueAfterFailure = await prisma.operationalIssue.findFirstOrThrow()
+    expect(issueAfterFailure.status).toBe('active')
+
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'read_model_refresh',
+      workItemId,
+      attemptNumber: 2,
+      status: 'succeeded',
+      errorSummary: undefined,
+      now: new Date(),
+    })
+
+    const issueAfterSuccess = await prisma.operationalIssue.findUniqueOrThrow({
+      where: { id: issueAfterFailure.id },
+    })
+    expect(issueAfterSuccess.status).toBe('resolved')
+    expect(issueAfterSuccess.resolvedAt).not.toBeNull()
+  })
+
+  it('成功通知を retry しても resolution の Occurrence を重複作成しない', async () => {
+    const workItemId = `work-item-${randomUUID()}`
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'read_model_refresh',
+      workItemId,
+      attemptNumber: 1,
+      status: 'failed',
+      errorSummary: 'boom',
+      now: new Date(),
+    })
+    const issue = await prisma.operationalIssue.findFirstOrThrow()
+
+    for (let i = 0; i < 2; i++) {
+      await detectAnalysisStageFailure(prisma, {
+        kind: 'read_model_refresh',
+        workItemId,
+        attemptNumber: 2,
+        status: 'succeeded',
+        errorSummary: undefined,
+        now: new Date(),
+      })
+    }
+
+    const occurrences = await prisma.operationalIssueOccurrence.findMany({
+      where: { issueId: issue.id, stateTransition: 'resolved' },
+    })
+    expect(occurrences).toHaveLength(1)
+  })
 })

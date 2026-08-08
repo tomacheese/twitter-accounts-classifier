@@ -95,8 +95,54 @@ export interface DetectAnalysisStageFailureInput {
 }
 
 /**
+ * 同じ WorkItem の transient failure から作られた active な OperationalIssue を、
+ * retry の成功で解消する。fingerprint は component + workItemId で固定されており、
+ * detectRunFailures が作った issue と同一のものを指す。
+ * @param prisma - Prisma クライアント
+ * @param fingerprint - 対象 OperationalIssue の fingerprint
+ * @param workItemId - 解消の契機となった WorkItem の ID
+ * @param attemptNumber - 解消の契機となった試行番号
+ * @param now - 判定の基準時刻
+ */
+async function resolveIssueOnSuccess(
+  prisma: PrismaClient,
+  fingerprint: string,
+  workItemId: string,
+  attemptNumber: number,
+  now: Date,
+): Promise<void> {
+  const issue = await prisma.operationalIssue.findUnique({ where: { fingerprint } })
+  if (!issue || issue.status === 'resolved') return
+
+  await prisma.operationalIssue.update({
+    where: { id: issue.id },
+    data: { status: 'resolved', resolvedAt: now },
+  })
+  await prisma.operationalIssueOccurrence.upsert({
+    where: {
+      issueId_observationKey: {
+        issueId: issue.id,
+        observationKey: `${workItemId}:${attemptNumber}:resolved`,
+      },
+    },
+    create: {
+      issueId: issue.id,
+      observedAt: now,
+      stateTransition: 'resolved',
+      severity: issue.severity,
+      sourceType: issue.component,
+      sourceId: workItemId,
+      observationKey: `${workItemId}:${attemptNumber}:resolved`,
+    },
+    update: {},
+  })
+}
+
+/**
  * analyzer 自身の stage 失敗も Operations 画面から見えるよう OperationalIssue に昇格する。
  * 再試行余地の残る failed と、再試行が尽きた dead を severity で区別する。
+ * transient failure の後に同じ WorkItem が成功した場合は、
+ * 残り続けると Attention/Overview に解消済みの障害が居座るため、issue を resolved にする。
  * @param prisma - Prisma クライアント
  * @param input - 失敗した WorkItem の情報
  */
@@ -104,10 +150,22 @@ export async function detectAnalysisStageFailure(
   prisma: PrismaClient,
   input: DetectAnalysisStageFailureInput,
 ): Promise<void> {
-  if (input.status === 'succeeded') return
+  const component = `analyzer:${input.kind}`
+
+  if (input.status === 'succeeded') {
+    const fingerprint = computeFingerprint('run_failure', { component, runId: input.workItemId })
+    await resolveIssueOnSuccess(
+      prisma,
+      fingerprint,
+      input.workItemId,
+      input.attemptNumber,
+      input.now,
+    )
+    return
+  }
 
   await detectRunFailures(prisma, {
-    component: `analyzer:${input.kind}`,
+    component,
     runId: input.workItemId,
     runStatus: input.status,
     errorSummary: input.errorSummary ?? null,
