@@ -77,15 +77,23 @@ function redactErrorSummary(errorSummary: string | null): string | null {
  * System コンソールの表示内容を、DB から取得可能な範囲で組み立てる。
  * Component health は Overview が保存した OverviewSnapshot の値をそのまま読み、
  * System 側では再計算しない。
+ * generatedAt DESC ではなく ReadModelState.currentGenerationId を経由して取得する。
+ * generatedAt DESC だと、Pointer 切り替えに失敗した (superseded/failed) generation の
+ * 方が新しい generatedAt を持つ場合に、公開されていない snapshot を表示してしまう。
  * @param prisma - Prisma クライアント
  * @returns System コンソール表示用データ
  */
 export async function getSystemConsoleData(prisma: PrismaClient): Promise<SystemConsoleData> {
-  const [latestSnapshot, latestPolicy, readModelStates] = await Promise.all([
-    prisma.overviewSnapshot.findFirst({ orderBy: [{ generatedAt: 'desc' }] }),
+  const [overviewReadModelState, latestPolicy, readModelStates] = await Promise.all([
+    prisma.readModelState.findUnique({ where: { modelKey: 'overview_snapshot' } }),
     prisma.detectionPolicyVersion.findFirst({ orderBy: [{ loadedAt: 'desc' }] }),
     prisma.readModelState.findMany(),
   ])
+  const latestSnapshot = overviewReadModelState?.currentGenerationId
+    ? await prisma.overviewSnapshot.findUnique({
+        where: { generationId: overviewReadModelState.currentGenerationId },
+      })
+    : null
 
   return {
     identity: {

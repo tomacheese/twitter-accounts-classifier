@@ -125,6 +125,7 @@ export async function getOverviewSnapshot(
   const { attention, latestPipeline } = parsePayload(snapshot.payload)
   const freshnessStatus: ReadModelFreshnessStatus =
     readModelState.status === 'healthy' ||
+    readModelState.status === 'delayed' ||
     readModelState.status === 'stale' ||
     readModelState.status === 'failed'
       ? readModelState.status

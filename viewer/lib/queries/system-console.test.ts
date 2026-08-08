@@ -6,11 +6,21 @@ function createMockPrisma(overrides: {
   snapshot?: unknown
   policy?: unknown
   readModelStates?: unknown[]
+  overviewReadModelState?: unknown
 }) {
+  // snapshot を渡すテストは、それが current generation として公開されている状態を
+  // 前提にするため、明示指定が無ければ generationId で対応する ReadModelState を補う。
+  const overviewReadModelState =
+    overrides.overviewReadModelState ??
+    (overrides.snapshot ? { currentGenerationId: 'generation-1' } : null)
+
   return {
-    overviewSnapshot: { findFirst: vi.fn().mockResolvedValue(overrides.snapshot ?? null) },
+    overviewSnapshot: { findUnique: vi.fn().mockResolvedValue(overrides.snapshot ?? null) },
     detectionPolicyVersion: { findFirst: vi.fn().mockResolvedValue(overrides.policy ?? null) },
-    readModelState: { findMany: vi.fn().mockResolvedValue(overrides.readModelStates ?? []) },
+    readModelState: {
+      findUnique: vi.fn().mockResolvedValue(overviewReadModelState),
+      findMany: vi.fn().mockResolvedValue(overrides.readModelStates ?? []),
+    },
   } as unknown as PrismaClient
 }
 
@@ -37,6 +47,31 @@ describe('getSystemConsoleData', () => {
   it('OverviewSnapshot が無ければ componentHealth は null', async () => {
     const prisma = createMockPrisma({})
     const data = await getSystemConsoleData(prisma)
+    expect(data.componentHealth).toBeNull()
+  })
+
+  it('current generation の Pointer を経由して取得する(generatedAt が新しい superseded snapshot を見せない)', async () => {
+    const prisma = createMockPrisma({
+      overviewReadModelState: { currentGenerationId: 'generation-1' },
+    })
+
+    await getSystemConsoleData(prisma)
+
+    const findUnique = (
+      prisma as unknown as { overviewSnapshot: { findUnique: ReturnType<typeof vi.fn> } }
+    ).overviewSnapshot.findUnique
+    expect(findUnique.mock.calls[0][0]).toEqual({ where: { generationId: 'generation-1' } })
+  })
+
+  it('ReadModelState が無ければ overviewSnapshot を問い合わせず componentHealth は null', async () => {
+    const prisma = createMockPrisma({ overviewReadModelState: null })
+
+    const data = await getSystemConsoleData(prisma)
+
+    const findUnique = (
+      prisma as unknown as { overviewSnapshot: { findUnique: ReturnType<typeof vi.fn> } }
+    ).overviewSnapshot.findUnique
+    expect(findUnique).not.toHaveBeenCalled()
     expect(data.componentHealth).toBeNull()
   })
 

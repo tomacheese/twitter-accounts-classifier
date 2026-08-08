@@ -81,6 +81,17 @@ describe('getOverviewSnapshot', () => {
     expect(result?.attention).toHaveLength(1)
   })
 
+  it('ReadModelState が delayed なら freshnessStatus に delayed を返す', async () => {
+    const prisma = createMockPrisma({
+      snapshot: baseSnapshot,
+      readModelState: { ...baseReadModelState, status: 'delayed' },
+    })
+
+    const result = await getOverviewSnapshot(prisma)
+
+    expect(result?.freshnessStatus).toBe('delayed')
+  })
+
   it('current generation の Pointer を経由して取得する(未公開の build 中 snapshot を見せない)', async () => {
     const prisma = createMockPrisma({ snapshot: baseSnapshot, readModelState: baseReadModelState })
 
