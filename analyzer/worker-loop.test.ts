@@ -62,6 +62,7 @@ function makeDeps() {
     processReadModelRefresh: vi.fn().mockResolvedValue(undefined),
     processWeeklyReviewIngest: vi.fn().mockResolvedValue(undefined),
     processBlockReconciliation: vi.fn().mockResolvedValue(undefined),
+    processRetentionSweep: vi.fn().mockResolvedValue(undefined),
     onWorkItemSettled: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -94,6 +95,7 @@ describe('runWorkerLoopOnce', () => {
     ['read_model_refresh', 'processReadModelRefresh'],
     ['weekly_review_ingest', 'processWeeklyReviewIngest'],
     ['block_reconciliation', 'processBlockReconciliation'],
+    ['retention_sweep', 'processRetentionSweep'],
   ] as const)('kind が %s なら %s だけを呼ぶ', async (kind, depKey) => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({ kind }))
     const deps = makeDeps()

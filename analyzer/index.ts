@@ -10,6 +10,8 @@ import {
   processReadModelRefresh,
   processWeeklyReviewIngest,
   processBlockReconciliation,
+  processRetentionSweep,
+  enqueueDailyRetentionSweep,
   handleWorkItemSettled,
 } from './worker-processors'
 import { getWorkerConcurrency } from './config/env'
@@ -43,6 +45,8 @@ export async function main(): Promise<void> {
   // 起動時に記録しておかないと、queue が空で 1 件も処理しなかった期間の
   // System 画面が適用中 policy 不明のままになる。
   await recordPolicyVersion(prisma, loadPolicy(DEFAULT_POLICY_PATH))
+  // 一意制約により、同じ日付分は 2 度目以降 no-op になる。
+  await enqueueDailyRetentionSweep(prisma, new Date())
 
   const deps: WorkerLoopDeps = {
     leaseOwner: `${hostname()}-${process.pid}-${randomUUID()}`,
@@ -51,6 +55,7 @@ export async function main(): Promise<void> {
     processReadModelRefresh,
     processWeeklyReviewIngest,
     processBlockReconciliation,
+    processRetentionSweep,
     onWorkItemSettled: handleWorkItemSettled,
   }
 

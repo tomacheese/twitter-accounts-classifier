@@ -16,6 +16,7 @@ const HANDLED_KINDS = [
   'read_model_refresh',
   'weekly_review_ingest',
   'block_reconciliation',
+  'retention_sweep',
 ] as const
 
 /**
@@ -36,6 +37,8 @@ export interface WorkerLoopDeps {
   processWeeklyReviewIngest: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: block_reconciliation の処理関数。 */
   processBlockReconciliation: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
+  /** kind: retention_sweep の処理関数。 */
+  processRetentionSweep: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /**
    * WorkItem の終了状態を確定させた後に呼ばれる後処理。
    * Cycle の再計算は WorkItem の状態が確定した後でなければ最新の Stage 状態を
@@ -81,6 +84,9 @@ async function dispatch(
     }
     case 'block_reconciliation': {
       return deps.processBlockReconciliation(prisma, workItem)
+    }
+    case 'retention_sweep': {
+      return deps.processRetentionSweep(prisma, workItem)
     }
     default: {
       throw new Error(`Unknown work item kind: ${workItem.kind}`)

@@ -20,6 +20,7 @@ import { buildAttentionItems } from './read-models/build-attention-items'
 import { buildOverviewSnapshot } from './read-models/build-overview-snapshot'
 import { buildBlockRelationSummary } from './read-models/build-block-relation-summary'
 import { ingestWeeklyReviewFindings } from './weekly-review/ingest'
+import { runRetentionSweep } from './retention/sweep'
 import { structuredOutputSchema } from './weekly-review/structured-output-schema'
 import { loadPolicy } from './policy/load-policy'
 import { computePolicyHash } from './policy/policy-hash'
@@ -257,6 +258,50 @@ export async function processBlockReconciliation(
     build: (generationId) => buildBlockRelationSummary(prisma, { generationId, sourceWatermarkAt }),
   })
   await publishAttentionAndOverview(prisma, sourceWatermarkAt)
+}
+
+const RETENTION_SWEEP_TRIGGER_TYPE = 'schedule'
+
+/**
+ * @param now - 基準時刻
+ * @returns YYYY-MM-DD 形式の日付文字列
+ */
+function toDateKey(now: Date): string {
+  return now.toISOString().slice(0, 10)
+}
+
+/**
+ * 起動ごとに毎回呼んでも、同じ日付の WorkItem は enqueueWorkItem の一意制約で
+ * 1 度しか作られない。日付が変わった分だけ新しい WorkItem が積まれる。
+ * @param prisma - Prisma クライアント
+ * @param now - 基準時刻
+ */
+export async function enqueueDailyRetentionSweep(prisma: PrismaClient, now: Date): Promise<void> {
+  await enqueueWorkItem(prisma, {
+    kind: 'retention_sweep',
+    triggerType: RETENTION_SWEEP_TRIGGER_TYPE,
+    triggerId: toDateKey(now),
+  })
+}
+
+/**
+ * kind: retention_sweep の処理関数。古い履歴行を削除したうえで、
+ * 翌日分の retention_sweep WorkItem を enqueue して継続させる。
+ * @param prisma - Prisma クライアント
+ * @param workItem - `triggerType: 'schedule'` の WorkItem
+ */
+export async function processRetentionSweep(
+  prisma: PrismaClient,
+  workItem: AnalysisWorkItem,
+): Promise<void> {
+  const now = new Date()
+  const result = await runRetentionSweep(prisma, now)
+  logger.info(
+    `retention sweep (${workItem.triggerId}) removed ${result.deletedAnalysisRunCount} AnalysisRun, ` +
+      `${result.deletedWorkItemCount} AnalysisWorkItem, ` +
+      `${result.deletedLabelMetricSnapshotCount} LabelMetricSnapshot rows`,
+  )
+  await enqueueDailyRetentionSweep(prisma, new Date(now.getTime() + 24 * 60 * 60 * 1000))
 }
 
 const DEFAULT_READ_MODEL_CADENCE = 'PT1H'
