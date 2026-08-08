@@ -13,21 +13,52 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
     await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
+    await prisma.accountLabel.deleteMany()
     await prisma.accountLabelLatest.deleteMany()
     await prisma.blockStateChange.deleteMany()
     await prisma.block.deleteMany()
     await prisma.account.deleteMany()
   })
 
-  // 他のテストファイルは AccountLabelLatest を消さずに Account/LabelDefinition を消すため、
+  // 他のテストファイルは AccountLabel/AccountLabelLatest を消さずに Account/LabelDefinition を消すため、
   // このファイルで作った紐づけを残すと相手側の後始末が外部キーで失敗する。
   afterAll(async () => {
     await prisma.accountLabelChange.deleteMany()
     await prisma.accountClassificationCurrent.deleteMany()
     await prisma.accountSummaryCurrent.deleteMany()
+    await prisma.accountLabel.deleteMany()
     await prisma.accountLabelLatest.deleteMany()
     await prisma.account.deleteMany()
   })
+
+  /**
+   * buildAccountSummary は AccountLabelLatest ではなく AccountLabel の履歴から
+   * sourceWatermarkAt 時点の値を復元するため、テストのラベル付けはこちらへ作成する。
+   * @param params - 作成するラベル履歴行のパラメータ
+   * @returns 作成した AccountLabel の id
+   */
+  async function createAccountLabel(params: {
+    accountId: string
+    labelDefinitionId: string
+    value: boolean
+    confidence: number
+    reason: string
+    labeledAt: Date
+  }): Promise<string> {
+    const row = await prisma.accountLabel.create({
+      data: {
+        accountId: params.accountId,
+        labelDefinitionId: params.labelDefinitionId,
+        value: params.value,
+        confidence: params.confidence,
+        reason: params.reason,
+        method: 'rule',
+        ruleVersion: 'v1',
+        labeledAt: params.labeledAt,
+      },
+    })
+    return row.id
+  }
 
   /**
    * @param screenName - 作成する Account の screenName
@@ -99,17 +130,13 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: labelKey, description: 'テスト用ラベル' },
     })
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 1,
-        reason: 'test',
-        method: 'rule',
-        ruleVersion: 'v1',
-        labeledAt: new Date(),
-      },
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: true,
+      confidence: 1,
+      reason: 'test',
+      labeledAt: new Date(),
     })
 
     const generationId = `generation-${randomUUID()}`
@@ -127,17 +154,13 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: `bot_${randomUUID().slice(0, 8)}`, description: 'テスト用ラベル' },
     })
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId,
-        labelDefinitionId: labelDefinition.id,
-        value: false,
-        confidence: 0.4,
-        reason: 'no match',
-        method: 'rule',
-        ruleVersion: 'v1',
-        labeledAt: new Date(),
-      },
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: false,
+      confidence: 0.4,
+      reason: 'no match',
+      labeledAt: new Date(),
     })
 
     const generationId = `generation-${randomUUID()}`
@@ -157,17 +180,13 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
       data: { key: `spam_${randomUUID().slice(0, 8)}`, description: 'テスト用ラベル' },
     })
     const labeledAt = new Date(Date.now() - 60 * 60 * 1000)
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.9,
-        reason: 'matched',
-        method: 'rule',
-        ruleVersion: 'v1',
-        labeledAt,
-      },
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: true,
+      confidence: 0.9,
+      reason: 'matched',
+      labeledAt,
     })
 
     const firstGenerationId = `generation-${randomUUID()}`
@@ -181,14 +200,15 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
       update: { currentGenerationId: firstGenerationId },
     })
 
-    await prisma.accountLabelLatest.update({
-      where: {
-        accountId_labelDefinitionId: { accountId, labelDefinitionId: labelDefinition.id },
-      },
-      data: { value: false, reason: 'no longer matched', labeledAt: new Date() },
-    })
-
     const removedAt = new Date()
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: false,
+      confidence: 0.9,
+      reason: 'no longer matched',
+      labeledAt: removedAt,
+    })
     const secondGenerationId = `generation-${randomUUID()}`
     await buildAccountSummary(prisma, {
       generationId: secondGenerationId,
@@ -206,5 +226,44 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
     })
     expect(summary.activeLabelKeys).toEqual([])
     expect(summary.lastClassificationChangedAt?.getTime()).toBe(removedAt.getTime())
+  })
+
+  it('sourceWatermarkAt より後に付いたラベルは backlog 処理中の generation に混ぜない', async () => {
+    const accountId = await createAccount('erin')
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: `spam_${randomUUID().slice(0, 8)}`, description: 'テスト用ラベル' },
+    })
+    const watermarkAt = new Date(Date.now() - 60 * 60 * 1000)
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: false,
+      confidence: 0.3,
+      reason: 'no match',
+      labeledAt: new Date(watermarkAt.getTime() - 60 * 60 * 1000),
+    })
+    // watermark より後に付いた値。backlog 処理中の古い generation には反映されないはず。
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: true,
+      confidence: 0.9,
+      reason: 'matched after watermark',
+      labeledAt: new Date(watermarkAt.getTime() + 60 * 1000),
+    })
+
+    const generationId = `generation-${randomUUID()}`
+    await buildAccountSummary(prisma, { generationId, sourceWatermarkAt: watermarkAt })
+
+    const summary = await prisma.accountSummaryCurrent.findFirstOrThrow({
+      where: { generationId, accountId },
+    })
+    expect(summary.activeLabelKeys).toEqual([])
+
+    const classification = await prisma.accountClassificationCurrent.findFirstOrThrow({
+      where: { generationId, accountId, labelDefinitionId: labelDefinition.id },
+    })
+    expect(classification.value).toBe(false)
+    expect(classification.reason).toBe('no match')
   })
 })
