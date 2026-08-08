@@ -14,14 +14,15 @@ if [ -z "${WEEKLY_ANALYSIS_RUN_ID:-}" ]; then
   exit 1
 fi
 
-PNPM_BIN="$(command -v pnpm || true)"
-if [ -z "$PNPM_BIN" ]; then
-  echo "[weekly-analysis-heartbeat] pnpm binary not found on PATH" >&2
+TSX_BIN="$(pwd)/crawler/node_modules/.bin/tsx"
+RUN_CLI="$(pwd)/crawler/scripts/weekly-analysis-run.ts"
+if [ ! -x "$TSX_BIN" ]; then
+  echo "[weekly-analysis-heartbeat] tsx binary not found: $TSX_BIN" >&2
   exit 1
 fi
 
 set +e
-"$PNPM_BIN" --filter crawler exec tsx scripts/weekly-analysis-run.ts heartbeat \
+"$TSX_BIN" "$RUN_CLI" heartbeat \
   --id "$WEEKLY_ANALYSIS_RUN_ID" --phase "$PHASE"
 STATUS=$?
 set -e

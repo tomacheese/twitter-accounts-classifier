@@ -12,7 +12,7 @@ fail() {
 
 make_case_repo() {
   local case_dir="$1"
-  mkdir -p "$case_dir/repo/scripts" "$case_dir/home/.local/share/mise/shims"
+  mkdir -p "$case_dir/repo/scripts" "$case_dir/repo/crawler/node_modules/.bin" "$case_dir/home/.local/share/mise/shims"
   cp "$REPO_ROOT/scripts/weekly-analyze.sh" "$case_dir/repo/scripts/weekly-analyze.sh"
   cp "$REPO_ROOT/scripts/weekly-analyze-runtime.sh" "$case_dir/repo/scripts/weekly-analyze-runtime.sh"
   chmod +x "$case_dir/repo/scripts/weekly-analyze.sh"
@@ -64,6 +64,12 @@ cat > "$STALE_SHIMS/pnpm" <<'SCRIPT'
 #!/bin/sh
 case "$*" in
   'install --frozen-lockfile') exit 0 ;;
+  *) printf '%s\n' 'pnpm wrapper must not be used for weekly-analysis JSON commands' >&2; exit 99 ;;
+esac
+SCRIPT
+cat > "$STALE_CASE/repo/crawler/node_modules/.bin/tsx" <<'SCRIPT'
+#!/bin/sh
+case "$*" in
   *'weekly-analysis-run.ts create'*) printf '%s\n' '{"id":"run1"}' ;;
   *'weekly-analysis-run.ts list-running'*) printf '%s\n' '[]' ;;
   *'weekly-analysis-run.ts timeout'*) touch "$TIMEOUT_MARKER"; printf '%s\n' '{"ok":true}' ;;
@@ -100,7 +106,7 @@ if [ "${1:-}" = has-session ]; then
 fi
 exit 0
 SCRIPT
-chmod +x "$STALE_SHIMS/claude" "$STALE_SHIMS/pnpm" "$STALE_SHIMS/git" "$STALE_SHIMS/tmux"
+chmod +x "$STALE_SHIMS/claude" "$STALE_SHIMS/pnpm" "$STALE_SHIMS/git" "$STALE_SHIMS/tmux" "$STALE_CASE/repo/crawler/node_modules/.bin/tsx"
 set +e
 timeout 6s env HOME="$STALE_CASE/home" PATH="$STALE_SHIMS:/usr/local/bin:/usr/bin:/bin" \
   /bin/sh "$STALE_CASE/repo/scripts/weekly-analyze.sh"
