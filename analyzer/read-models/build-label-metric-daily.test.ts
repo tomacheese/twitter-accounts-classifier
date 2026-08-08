@@ -23,6 +23,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     await prisma.labelMetricSnapshot.createMany({
       data: [
         {
+          triggerWorkItemId: `work_item_${randomUUID()}`,
           sourceCrawlRunId: `crawl-${randomUUID()}`,
           labelDefinitionId: labelDefinition.id,
           observedAt: earlier,
@@ -35,6 +36,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
           analyzerVersion: '1',
         },
         {
+          triggerWorkItemId: `work_item_${randomUUID()}`,
           sourceCrawlRunId: `crawl-${randomUUID()}`,
           labelDefinitionId: labelDefinition.id,
           observedAt: later,
@@ -67,6 +69,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     const now = new Date()
     await prisma.labelMetricSnapshot.create({
       data: {
+        triggerWorkItemId: `work_item_${randomUUID()}`,
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: now,
@@ -94,6 +97,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     const now = new Date()
     await prisma.labelMetricSnapshot.create({
       data: {
+        triggerWorkItemId: `work_item_${randomUUID()}`,
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: now,
@@ -122,6 +126,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     const future = new Date(now.getTime() + 60 * 60 * 1000)
     await prisma.labelMetricSnapshot.create({
       data: {
+        triggerWorkItemId: `work_item_${randomUUID()}`,
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: future,
@@ -148,11 +153,14 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
       data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
     })
 
-    const older = new Date()
+    // 固定の正午時刻を使う。実行時刻を基準にすると 1 時間差の older/newer が
+    // UTC 日付をまたぎ、日次バケットが分かれてテストが不安定になるため。
+    const older = new Date('2026-01-15T12:00:00Z')
     const newer = new Date(older.getTime() + 60 * 60 * 1000)
     await prisma.labelMetricSnapshot.createMany({
       data: [
         {
+          triggerWorkItemId: `work_item_${randomUUID()}`,
           sourceCrawlRunId: `crawl-${randomUUID()}`,
           labelDefinitionId: labelDefinition.id,
           observedAt: older,
@@ -165,6 +173,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
           analyzerVersion: '1',
         },
         {
+          triggerWorkItemId: `work_item_${randomUUID()}`,
           sourceCrawlRunId: `crawl-${randomUUID()}`,
           labelDefinitionId: labelDefinition.id,
           observedAt: newer,
@@ -202,6 +211,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     const now = new Date()
     await prisma.labelMetricSnapshot.create({
       data: {
+        triggerWorkItemId: `work_item_${randomUUID()}`,
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: now,

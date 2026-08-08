@@ -17,8 +17,7 @@ export const POST_COMPLETION_REFRESH_KIND = 'post_completion_refresh'
 export const WORK_ITEM_COMPLETION_TRIGGER_TYPE = 'work_item_completion'
 
 const HANDLED_KINDS = [
-  'label_metrics',
-  'finding_generation',
+  'label_aggregate_refresh',
   'read_model_refresh',
   'weekly_review_ingest',
   'block_reconciliation',
@@ -36,12 +35,10 @@ export interface WorkerLoopDeps {
   leaseOwner: string
   /** lease の有効期間 (ミリ秒)。 */
   leaseDurationMs?: number
-  /** kind: label_metrics の処理関数。 */
-  processLabelMetrics: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
-  /** kind: finding_generation の処理関数。 */
-  processFindingGeneration: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: read_model_refresh の処理関数。 */
   processReadModelRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
+  /** kind: label_aggregate_refresh の処理関数。 */
+  processLabelAggregateRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: weekly_review_ingest の処理関数。 */
   processWeeklyReviewIngest: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: block_reconciliation の処理関数。 */
@@ -90,14 +87,11 @@ async function dispatch(
   deps: WorkerLoopDeps,
 ): Promise<void> {
   switch (workItem.kind) {
-    case 'label_metrics': {
-      return deps.processLabelMetrics(prisma, workItem)
-    }
-    case 'finding_generation': {
-      return deps.processFindingGeneration(prisma, workItem)
-    }
     case 'read_model_refresh': {
       return deps.processReadModelRefresh(prisma, workItem)
+    }
+    case 'label_aggregate_refresh': {
+      return deps.processLabelAggregateRefresh(prisma, workItem)
     }
     case 'weekly_review_ingest': {
       return deps.processWeeklyReviewIngest(prisma, workItem)

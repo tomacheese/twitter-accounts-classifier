@@ -15,6 +15,7 @@ async function seedSnapshots(labelDefinitionId: string): Promise<void> {
   const crawlRunB = `crawl-${randomUUID()}`
   await prisma.labelMetricSnapshot.create({
     data: {
+      triggerWorkItemId: crawlRunA,
       sourceCrawlRunId: crawlRunA,
       labelDefinitionId,
       observedAt: new Date('2026-08-01T00:00:00Z'),
@@ -29,6 +30,7 @@ async function seedSnapshots(labelDefinitionId: string): Promise<void> {
   })
   await prisma.labelMetricSnapshot.create({
     data: {
+      triggerWorkItemId: crawlRunB,
       sourceCrawlRunId: crawlRunB,
       labelDefinitionId,
       observedAt: new Date('2026-08-02T00:00:00Z'),

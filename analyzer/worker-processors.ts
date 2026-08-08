@@ -1,8 +1,9 @@
 import path from 'node:path'
 import type { AnalysisWorkItem, PrismaClient } from './generated/prisma'
 import { enqueueWorkItem } from './queue/work-item-repository'
-import { generateLabelMetricSnapshots } from './metrics/label-metric-snapshot'
-import { generateFindingsForCrawlCycle } from './findings/generate-findings'
+import { buildLabelAggregateSnapshotSet } from './metrics/label-metric-snapshot'
+import { generateFindingsForAggregateRefresh } from './findings/generate-findings'
+import { runLabelFindingsSerialized } from './findings/serialize-label-findings'
 import {
   detectAnalysisStageFailure,
   detectRunFailures,
@@ -14,7 +15,6 @@ import { buildOrUpdateWeeklyReviewCycle } from './operations/build-weekly-review
 import { buildOrUpdateBlockCycle } from './operations/build-block-cycle'
 import type { WorkItemOutcome } from './worker-loop'
 import { publishGeneration } from './read-models/publish'
-import { buildAccountSummary } from './read-models/build-account-summary'
 import { buildLabelSummary } from './read-models/build-label-summary'
 import { buildAttentionItems } from './read-models/build-attention-items'
 import { buildOverviewSnapshot } from './read-models/build-overview-snapshot'
@@ -58,81 +58,6 @@ function getPolicy(): { policy: ReturnType<typeof loadPolicy>; policyHash: strin
     cachedPolicyHash = computePolicyHash(cachedPolicy)
   }
   return { policy: cachedPolicy, policyHash: cachedPolicyHash }
-}
-
-/**
- * LabelMetricSnapshot を生成し、後続の finding_generation を enqueue する。
- * @param prisma - Prisma クライアント
- * @param workItem - `triggerType: 'crawl_run'` の WorkItem
- */
-export async function processLabelMetrics(
-  prisma: PrismaClient,
-  workItem: AnalysisWorkItem,
-): Promise<void> {
-  const crawlRun = await prisma.crawlRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
-  const { policyHash } = getPolicy()
-
-  const result = await generateLabelMetricSnapshots(prisma, {
-    crawlRunId: crawlRun.id,
-    crawlRunStatus: crawlRun.status,
-    sourceWatermarkAt: crawlRun.finishedAt ?? crawlRun.lastHeartbeatAt,
-    policyHash,
-    analyzerVersion: APP_VERSION,
-  })
-
-  // 一部の Label だけ欠けた metric set を後続へ渡すと、検出器がその Label の
-  // 前回値と比較できないまま先へ進み、欠落が観測値の変化として残らなくなる。
-  // WorkItem を失敗させて再試行に委ね、全 Label が揃うまで公開しない。
-  if (result.failedLabelDefinitionIds.length > 0) {
-    throw new Error(
-      `label metric aggregation failed for ${result.failedLabelDefinitionIds.length}/${result.totalCount} labels: ${result.failedLabelDefinitionIds.join(', ')}`,
-    )
-  }
-
-  await enqueueWorkItem(prisma, {
-    kind: 'finding_generation',
-    triggerType: 'crawl_run',
-    triggerId: crawlRun.id,
-  })
-}
-
-/**
- * ReviewFinding と OperationalIssue (run_failure) を評価し、
- * 後続の read_model_refresh を enqueue する。
- * @param prisma - Prisma クライアント
- * @param workItem - `triggerType: 'crawl_run'` の WorkItem
- */
-export async function processFindingGeneration(
-  prisma: PrismaClient,
-  workItem: AnalysisWorkItem,
-): Promise<void> {
-  const crawlRun = await prisma.crawlRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
-  const { policy, policyHash } = getPolicy()
-
-  await detectRunFailures(prisma, {
-    component: 'crawl',
-    runId: crawlRun.id,
-    runStatus: crawlRun.status,
-    errorSummary: null,
-    now: new Date(),
-  })
-
-  await generateFindingsForCrawlCycle(prisma, {
-    crawlRunId: crawlRun.id,
-    policy,
-    policyHash,
-    detectorVersion: APP_VERSION,
-    // AccountSummary が使う sourceWatermarkAt (processReadModelRefresh 側) と
-    // 同じ値を使うことで、この crawl から生成された Occurrence が
-    // 同じ crawl の AccountSummary から漏れないようにする。
-    sourceObservedAt: crawlRun.finishedAt ?? crawlRun.lastHeartbeatAt,
-  })
-
-  await enqueueWorkItem(prisma, {
-    kind: 'read_model_refresh',
-    triggerType: 'crawl_run',
-    triggerId: crawlRun.id,
-  })
 }
 
 /**
@@ -364,6 +289,10 @@ export async function processAccountFindingRefresh(
   }
 }
 
+const DEFAULT_READ_MODEL_CADENCE = 'PT1H'
+const DEFAULT_READ_MODEL_DELAYED_AFTER = 'PT3H'
+const DEFAULT_READ_MODEL_STALE_AFTER = 'PT12H'
+
 /**
  * 読み取りモデル各種を原子的に再公開する。
  * OperationCycle は WorkItem の終了状態が確定した後でなければ最新の Stage 状態を
@@ -376,42 +305,91 @@ export async function processReadModelRefresh(
   workItem: AnalysisWorkItem,
 ): Promise<void> {
   const crawlRun = await prisma.crawlRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
+  const sourceWatermarkAt = crawlRun.finishedAt ?? crawlRun.lastHeartbeatAt
+  await publishAttentionAndOverview(prisma, sourceWatermarkAt)
+}
 
-  // 一部のアカウントしか巡回できなかった run の値を current として公開すると、
-  // 巡回できなかった分の変化が観測されないまま最新状態として表示されてしまう。
-  // この run の read model 公開は見送り、完全に巡回できた run の refresh に委ねる。
-  if (crawlRun.status !== 'success') {
-    logger.info(`skip read model refresh for crawl run ${crawlRun.id} (status: ${crawlRun.status})`)
-    return
+const DEFAULT_MIN_COVERAGE = 0.5
+const DEFAULT_MAX_STALE_RATIO = 0.3
+
+/**
+ * `LabelMetricSnapshot` の snapshot set 確定 → (triggerType: crawl_run のみ) Finding 評価 →
+ * `LabelSummaryCurrent` publish、の順で Label aggregate を再構築する。
+ * @param prisma - Prisma クライアント
+ * @param workItem - `kind: 'label_aggregate_refresh'` の WorkItem
+ */
+export async function processLabelAggregateRefresh(
+  prisma: PrismaClient,
+  workItem: AnalysisWorkItem,
+): Promise<void> {
+  const { policy, policyHash } = getPolicy()
+  const freshnessRule = policy.rules.find((rule) => rule.type === 'read_model_freshness')
+  const thresholds = {
+    minCoverage: freshnessRule?.minCoverage ?? DEFAULT_MIN_COVERAGE,
+    maxStaleRatio: freshnessRule?.maxStaleRatio ?? DEFAULT_MAX_STALE_RATIO,
+  }
+  // refreshReadModelFreshnessFromPolicy (本ファイル内) と同じ policy ルール・
+  // 同じ既定値・同じ parseIsoDurationMs を使い、freshness のしきい値を
+  // current/delayed/stale 判定と completeness 判定とで食い違わせない。
+  const freshnessThresholdsMs = {
+    delayedAfterMs: parseIsoDurationMs(
+      freshnessRule?.delayedAfter ?? DEFAULT_READ_MODEL_DELAYED_AFTER,
+    ),
+    staleAfterMs: parseIsoDurationMs(freshnessRule?.staleAfter ?? DEFAULT_READ_MODEL_STALE_AFTER),
   }
 
-  const sourceWatermarkAt = crawlRun.finishedAt ?? crawlRun.lastHeartbeatAt
-
-  await publishGeneration(prisma, {
-    modelKey: 'account_summary',
-    schemaVersion: 1,
-    sourceWatermarkAt,
-    build: (generationId) =>
-      buildAccountSummary(prisma, {
-        generationId,
-        sourceWatermarkAt,
-        sourceCrawlRunId: crawlRun.id,
-      }),
+  const sourceCrawlRunId = workItem.triggerType === 'crawl_run' ? workItem.triggerId : undefined
+  const { snapshotAt } = await buildLabelAggregateSnapshotSet(prisma, {
+    triggerWorkItemId: workItem.id,
+    sourceCrawlRunId,
+    policyHash,
+    analyzerVersion: APP_VERSION,
+    thresholds,
+    freshnessThresholdsMs,
   })
+
+  if (workItem.triggerType === 'crawl_run') {
+    await runLabelFindingsSerialized(prisma, {
+      snapshotAt,
+      run: (tx) =>
+        generateFindingsForAggregateRefresh(tx as unknown as PrismaClient, {
+          triggerWorkItemId: workItem.id,
+          policy,
+          policyHash,
+          detectorVersion: APP_VERSION,
+          sourceObservedAt: snapshotAt,
+        }),
+    })
+  }
+
   await publishGeneration(prisma, {
     modelKey: 'label_summary',
     schemaVersion: 1,
-    sourceWatermarkAt,
-    // Task 13 で processLabelAggregateRefresh からの呼び出しへ差し替えるまでの
-    // 暫定値。この経路は既に旧 snapshot 生成が壊れているため実行時には到達しない。
+    sourceWatermarkAt: snapshotAt,
     build: (generationId) =>
       buildLabelSummary(prisma, {
         generationId,
-        triggerWorkItemId: crawlRun.id,
-        sourceWatermarkAt,
+        triggerWorkItemId: workItem.id,
+        sourceWatermarkAt: snapshotAt,
       }),
   })
-  await publishAttentionAndOverview(prisma, sourceWatermarkAt)
+  await publishAttentionAndOverview(prisma, snapshotAt)
+}
+
+/**
+ * 起動ごとに毎回呼んでも、同じ時間 bucket の WorkItem は一意制約で 1 度しか作られない。
+ * @param prisma - Prisma クライアント
+ * @param now - 基準時刻
+ */
+export async function enqueueHourlyLabelAggregateRefresh(
+  prisma: PrismaClient,
+  now: Date,
+): Promise<void> {
+  await enqueueWorkItem(prisma, {
+    kind: 'label_aggregate_refresh',
+    triggerType: 'schedule',
+    triggerId: now.toISOString().slice(0, 13),
+  })
 }
 
 /**
@@ -459,21 +437,12 @@ export async function processWeeklyReviewIngest(
     sourceObservedAt: weeklyAnalysisRun.finishedAt ?? weeklyAnalysisRun.lastHeartbeatAt,
   })
 
-  const sourceWatermarkAt = new Date()
-  await publishGeneration(prisma, {
-    modelKey: 'label_summary',
-    schemaVersion: 1,
-    sourceWatermarkAt,
-    // Task 13 で processLabelAggregateRefresh からの呼び出しへ差し替えるまでの
-    // 暫定値。この経路は既に旧 snapshot 生成が壊れているため実行時には到達しない。
-    build: (generationId) =>
-      buildLabelSummary(prisma, {
-        generationId,
-        triggerWorkItemId: weeklyAnalysisRun.id,
-        sourceWatermarkAt,
-      }),
+  await enqueueWorkItem(prisma, {
+    kind: 'label_aggregate_refresh',
+    triggerType: 'weekly_analysis_run',
+    triggerId: weeklyAnalysisRun.id,
   })
-  await publishAttentionAndOverview(prisma, sourceWatermarkAt)
+  await publishAttentionAndOverview(prisma, new Date())
 }
 
 /**
@@ -553,10 +522,6 @@ export async function processRetentionSweep(
       `${result.deletedShadowDetectorEvaluationCount} shadow DetectorEvaluation rows`,
   )
 }
-
-const DEFAULT_READ_MODEL_CADENCE = 'PT1H'
-const DEFAULT_READ_MODEL_DELAYED_AFTER = 'PT3H'
-const DEFAULT_READ_MODEL_STALE_AFTER = 'PT12H'
 
 /**
  * 読み取りモデルの鮮度しきい値を policy から取り出して評価する。

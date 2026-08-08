@@ -39,6 +39,7 @@ describe.skipIf(!process.env.DATABASE_URL)('evaluateShadow', () => {
 
     await prisma.labelMetricSnapshot.create({
       data: {
+        triggerWorkItemId: crawlRunId,
         sourceCrawlRunId: crawlRunId,
         labelDefinitionId,
         observedAt: new Date(),

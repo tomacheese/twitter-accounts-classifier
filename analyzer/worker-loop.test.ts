@@ -41,7 +41,7 @@ vi.mock('./queue/work-item-repository', () => ({
 function makeWorkItem(overrides: Partial<AnalysisWorkItem>): AnalysisWorkItem {
   return {
     id: 'work-item-1',
-    kind: 'label_metrics',
+    kind: 'label_aggregate_refresh',
     triggerType: 'crawl_run',
     triggerId: 'crawl-1',
     status: 'leased',
@@ -63,9 +63,8 @@ function makeWorkItem(overrides: Partial<AnalysisWorkItem>): AnalysisWorkItem {
 function makeDeps() {
   return {
     leaseOwner: 'worker-1',
-    processLabelMetrics: vi.fn().mockResolvedValue(undefined),
-    processFindingGeneration: vi.fn().mockResolvedValue(undefined),
     processReadModelRefresh: vi.fn().mockResolvedValue(undefined),
+    processLabelAggregateRefresh: vi.fn().mockResolvedValue(undefined),
     processWeeklyReviewIngest: vi.fn().mockResolvedValue(undefined),
     processBlockReconciliation: vi.fn().mockResolvedValue(undefined),
     processRetentionSweep: vi.fn().mockResolvedValue(undefined),
@@ -97,12 +96,11 @@ describe('runWorkerLoopOnce', () => {
     const result = await runWorkerLoopOnce(prisma, deps)
 
     expect(result).toBe(false)
-    expect(deps.processLabelMetrics).not.toHaveBeenCalled()
+    expect(deps.processLabelAggregateRefresh).not.toHaveBeenCalled()
   })
 
   it.each([
-    ['label_metrics', 'processLabelMetrics'],
-    ['finding_generation', 'processFindingGeneration'],
+    ['label_aggregate_refresh', 'processLabelAggregateRefresh'],
     ['read_model_refresh', 'processReadModelRefresh'],
     ['weekly_review_ingest', 'processWeeklyReviewIngest'],
     ['block_reconciliation', 'processBlockReconciliation'],
@@ -125,7 +123,7 @@ describe('runWorkerLoopOnce', () => {
   it('処理が例外を投げ、attemptCount が maxAttempts 未満なら failed で記録する', async () => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({ attemptCount: 1, maxAttempts: 5 }))
     const deps = makeDeps()
-    deps.processLabelMetrics.mockRejectedValue(new Error('boom'))
+    deps.processLabelAggregateRefresh.mockRejectedValue(new Error('boom'))
 
     await runWorkerLoopOnce(prisma, deps)
 
@@ -138,7 +136,7 @@ describe('runWorkerLoopOnce', () => {
   it('処理が例外を投げ、attemptCount が maxAttempts 以上なら dead で記録する', async () => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({ attemptCount: 5, maxAttempts: 5 }))
     const deps = makeDeps()
-    deps.processLabelMetrics.mockRejectedValue(new Error('boom'))
+    deps.processLabelAggregateRefresh.mockRejectedValue(new Error('boom'))
 
     await runWorkerLoopOnce(prisma, deps)
 
@@ -152,7 +150,7 @@ describe('runWorkerLoopOnce', () => {
     const error = new Error('boom')
     claimNextWorkItem.mockResolvedValue(makeWorkItem({}))
     const deps = makeDeps()
-    deps.processLabelMetrics.mockRejectedValue(error)
+    deps.processLabelAggregateRefresh.mockRejectedValue(error)
 
     await runWorkerLoopOnce(prisma, deps)
 
@@ -188,7 +186,7 @@ describe('runWorkerLoopOnce', () => {
   it('失敗した attempt も AnalysisRun へ failed として記録する', async () => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({ attemptCount: 1, maxAttempts: 5 }))
     const deps = makeDeps()
-    deps.processLabelMetrics.mockRejectedValue(new Error('boom'))
+    deps.processLabelAggregateRefresh.mockRejectedValue(new Error('boom'))
 
     await runWorkerLoopOnce(prisma, deps)
 
@@ -201,7 +199,7 @@ describe('runWorkerLoopOnce', () => {
   it('再試行の待機時刻を completeWorkItem へ渡す', async () => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({ attemptCount: 2, maxAttempts: 5 }))
     const deps = makeDeps()
-    deps.processLabelMetrics.mockRejectedValue(new Error('boom'))
+    deps.processLabelAggregateRefresh.mockRejectedValue(new Error('boom'))
 
     await runWorkerLoopOnce(prisma, deps)
 

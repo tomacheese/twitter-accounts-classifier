@@ -20,9 +20,8 @@ vi.mock('./worker-loop', () => ({
 }))
 
 vi.mock('./worker-processors', () => ({
-  processLabelMetrics: vi.fn(),
-  processFindingGeneration: vi.fn(),
   processReadModelRefresh: vi.fn(),
+  processLabelAggregateRefresh: vi.fn(),
   processWeeklyReviewIngest: vi.fn(),
   processBlockReconciliation: vi.fn(),
   processRetentionSweep: vi.fn(),
@@ -30,6 +29,7 @@ vi.mock('./worker-processors', () => ({
   processAccountSummaryRefresh: vi.fn(),
   processAccountFindingRefresh: vi.fn(),
   enqueueDailyRetentionSweep: vi.fn().mockResolvedValue(undefined),
+  enqueueHourlyLabelAggregateRefresh: vi.fn().mockResolvedValue(undefined),
   refreshReadModelFreshnessFromPolicy: vi.fn().mockResolvedValue(undefined),
   handleWorkItemSettled: vi.fn(),
 }))
