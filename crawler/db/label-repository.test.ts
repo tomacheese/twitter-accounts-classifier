@@ -207,7 +207,7 @@ describe('recordAccountLabelsBulk', () => {
     expect(warn).toHaveBeenCalledTimes(1)
   })
 
-  it('omits a label from the returned history when its value and ruleVersion are unchanged from the previous latest', async () => {
+  it('omits a label from the returned history when its value, ruleVersion, confidence, and reason are all unchanged from the previous latest', async () => {
     const queryRaw = vi.fn().mockResolvedValue([
       {
         id: 'mock-id',
@@ -262,7 +262,8 @@ describe('recordAccountLabelsBulk', () => {
     const [sql] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
     const sqlText = sql.join('')
     expect(sqlText).toContain('LEFT JOIN "AccountLabelLatest"')
-    expect(sqlText).toContain('IS DISTINCT FROM')
+    expect(sqlText).toContain('al."confidence" IS DISTINCT FROM')
+    expect(sqlText).toContain('al."reason" IS DISTINCT FROM')
   })
 })
 
@@ -292,7 +293,7 @@ describe('recordCrawlAccountLabel', () => {
     expect(sqlText).toContain('WHERE EXISTS (SELECT 1 FROM claimed)')
   })
 
-  it('includes a guard against re-inserting history when the previous latest value and ruleVersion are unchanged', async () => {
+  it('includes a guard against re-inserting history when the previous latest value, ruleVersion, confidence, and reason are all unchanged', async () => {
     const queryRaw = vi.fn().mockResolvedValue([{ historyInserted: false, latestUpserted: true }])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
@@ -310,6 +311,8 @@ describe('recordCrawlAccountLabel', () => {
     const sqlText = sql.join('')
     expect(sqlText).toContain('FROM "AccountLabelLatest"')
     expect(sqlText).toContain('NOT EXISTS')
+    expect(sqlText).toContain('"confidence" = ')
+    expect(sqlText).toContain('"reason" = ')
   })
 
   it('records the crawl run and login account as the source of the label', async () => {

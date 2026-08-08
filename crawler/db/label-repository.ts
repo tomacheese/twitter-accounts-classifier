@@ -130,6 +130,8 @@ export async function recordAccountLabelsBulk(
       WHERE al."accountId" IS NULL
          OR al."value" IS DISTINCT FROM ir."value"
          OR al."ruleVersion" IS DISTINCT FROM ir."ruleVersion"
+         OR al."confidence" IS DISTINCT FROM ir."confidence"
+         OR al."reason" IS DISTINCT FROM ir."reason"
     ),
     inserted_history AS (
       INSERT INTO "AccountLabel"
@@ -187,7 +189,8 @@ export async function recordAccountLabelsBulk(
 
 /**
  * crawl 中のラベル評価結果を記録する。
- * `AccountLabelLatest` の直前の値・ruleVersion と一致しない場合のみ `AccountLabel` に履歴を追記し、
+ * `AccountLabelLatest` の直前の value・ruleVersion・confidence・reason のいずれかと
+ * 一致しない場合のみ `AccountLabel` に履歴を追記し、
  * dashboard/アカウント一覧の各クエリが読む `AccountLabelLatest` の該当行は毎回 upsert する
  * (テーブルの設計意図は prisma/schema.prisma の AccountLabelLatest コメントを参照)。
  * 両方の書き込みは SQL 側の `now()` を共有するため、
@@ -228,7 +231,7 @@ export async function recordCrawlAccountLabel(
       RETURNING "id"
     ),
     previous_latest AS (
-      SELECT "value", "ruleVersion"
+      SELECT "value", "ruleVersion", "confidence", "reason"
       FROM "AccountLabelLatest"
       WHERE "accountId" = ${params.accountId} AND "labelDefinitionId" = ${params.labelDefinitionId}
     ),
@@ -241,6 +244,7 @@ export async function recordCrawlAccountLabel(
         AND NOT EXISTS (
           SELECT 1 FROM previous_latest
           WHERE "value" = ${params.result.value} AND "ruleVersion" = ${params.ruleVersion}
+            AND "confidence" = ${params.result.confidence} AND "reason" = ${params.result.reason}
         )
       RETURNING "id"
     ),
