@@ -762,7 +762,13 @@ model AccountLabelChange {
   sourceId           String?
   changedAt          DateTime @default(now())
 
-  @@unique([sourceId, accountId, labelDefinitionId])
+  // changedAt には集計 build の watermark ではなく、変化の原因になった
+  // AccountLabel 行自身の labeledAt を入れる。同じ変化イベントは
+  // ANALYZER_WORKER_CONCURRENCY > 1 で並行 build しても常に同じ labeledAt
+  // を指すため、sourceId (どの build が記録したか) ではなく変化イベント自体の
+  // 同一性で重複排除できる。sourceId は NULL 同士が重複と判定されない
+  // (Postgres の仕様) ため、この一意制約には使えない。
+  @@unique([accountId, labelDefinitionId, changedAt])
   @@index([accountId, changedAt(sort: Desc)])
   @@index([labelDefinitionId, changedAt(sort: Desc), id(sort: Desc)])
 }

@@ -7,9 +7,8 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {
-    // 前回実行分の pointer/state が残ったままだと、previousGenerationId や
-    // canAppendLabelChanges の判定が「まだ何も公開されていない」前提のテストと食い違い、
-    // 意図しない changeRow の有無が生じる。
+    // 前回実行分の pointer/state が残ったままだと、previousGenerationId の判定が
+    // 「まだ何も公開されていない」前提のテストと食い違い、意図しない changeRow の有無が生じる。
     await prisma.readModelPointer.deleteMany({ where: { modelKey: 'account_summary' } })
     await prisma.readModelState.deleteMany({ where: { modelKey: 'account_summary' } })
     await prisma.accountLabelChange.deleteMany()
@@ -386,48 +385,80 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
     expect(changes).toHaveLength(1)
   })
 
-  it('新しい Crawl が既に current になった後に古い Crawl を処理しても AccountLabelChange を残さない', async () => {
-    const accountId = await createAccount('grace-backlog')
+  it('ANALYZER_WORKER_CONCURRENCY > 1 で古い Crawl A と新しい Crawl B が同じ前世代から並行 build しても、両方の変化を正しい向きで記録する', async () => {
+    const accountId = await createAccount('grace-concurrent')
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: `spam_${randomUUID().slice(0, 8)}`, description: 'テスト用ラベル' },
     })
-    const oldWatermarkAt = new Date(Date.now() - 2 * 60 * 60 * 1000)
-    const newWatermarkAt = new Date(Date.now() - 60 * 60 * 1000)
+    const initialAt = new Date(Date.now() - 3 * 60 * 60 * 1000)
+    const addedAt = new Date(Date.now() - 2 * 60 * 60 * 1000)
+    const removedAt = new Date(Date.now() - 60 * 60 * 1000)
+    // C: 最初は false。A: addedAt で true になる。B: removedAt でさらに false に戻る。
+    // A・B どちらも前世代 (C) からの並行 build を想定し、
+    // previousGenerationId が指す generation のスナップショットではなく
+    // AccountLabel 履歴上の直前値との比較だけで変化を組み立てられることを確認する。
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: false,
+      confidence: 0.9,
+      reason: 'no match',
+      labeledAt: initialAt,
+    })
     await createAccountLabel({
       accountId,
       labelDefinitionId: labelDefinition.id,
       value: true,
       confidence: 0.9,
       reason: 'matched',
-      labeledAt: oldWatermarkAt,
+      labeledAt: addedAt,
+    })
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: false,
+      confidence: 0.9,
+      reason: 'no longer matched',
+      labeledAt: removedAt,
     })
 
-    // 新しい Crawl B が先に current になった状態を模す。
-    const newGenerationId = `generation-${randomUUID()}`
+    const baseGenerationId = `generation-${randomUUID()}`
+    await buildAccountSummary(prisma, {
+      generationId: baseGenerationId,
+      sourceWatermarkAt: initialAt,
+    })
     await prisma.readModelPointer.upsert({
       where: { modelKey: 'account_summary' },
-      create: { modelKey: 'account_summary', currentGenerationId: newGenerationId },
-      update: { currentGenerationId: newGenerationId },
-    })
-    await prisma.readModelState.upsert({
-      where: { modelKey: 'account_summary' },
-      create: {
-        modelKey: 'account_summary',
-        schemaVersion: 1,
-        status: 'healthy',
-        sourceWatermarkAt: newWatermarkAt,
-      },
-      update: { sourceWatermarkAt: newWatermarkAt },
+      create: { modelKey: 'account_summary', currentGenerationId: baseGenerationId },
+      update: { currentGenerationId: baseGenerationId },
     })
 
-    // その後、より古い watermark を持つ Crawl A の backlog 処理が走る。
+    // A (古い watermark) と B (新しい watermark) を、どちらも同じ前世代 (baseGenerationId)
+    // が current のまま並行 build する。commit 順が入れ替わっても結果が変わらないことを、
+    // 呼び出し順を反転させたケースと合わせて確認する。
     await buildAccountSummary(prisma, {
       generationId: `generation-${randomUUID()}`,
-      sourceWatermarkAt: oldWatermarkAt,
-      sourceCrawlRunId: `crawl-run-${randomUUID()}`,
+      sourceWatermarkAt: removedAt,
+      sourceCrawlRunId: `crawl-run-b-${randomUUID()}`,
+    })
+    await buildAccountSummary(prisma, {
+      generationId: `generation-${randomUUID()}`,
+      sourceWatermarkAt: addedAt,
+      sourceCrawlRunId: `crawl-run-a-${randomUUID()}`,
     })
 
-    const changes = await prisma.accountLabelChange.findMany({ where: { accountId } })
-    expect(changes).toHaveLength(0)
+    const changes = await prisma.accountLabelChange.findMany({
+      where: { accountId },
+      orderBy: { changedAt: 'asc' },
+    })
+    expect(changes).toHaveLength(2)
+    expect(changes[0]?.changeType).toBe('added')
+    expect(changes[0]?.previousValue).toBe(false)
+    expect(changes[0]?.newValue).toBe(true)
+    expect(changes[0]?.changedAt.getTime()).toBe(addedAt.getTime())
+    expect(changes[1]?.changeType).toBe('removed')
+    expect(changes[1]?.previousValue).toBe(true)
+    expect(changes[1]?.newValue).toBe(false)
+    expect(changes[1]?.changedAt.getTime()).toBe(removedAt.getTime())
   })
 })

@@ -39,6 +39,41 @@ async function findLabelsAtWatermark(
   `
 }
 
+/**
+ * AccountLabel は値・confidence・reason・ruleVersion のいずれかが変わった回にしか
+ * 行を積まないため、ある account+label の直前の行は必ずその変化の「変化前の値」を表す。
+ * ANALYZER_WORKER_CONCURRENCY > 1 の並行 build は、この直前行との比較だけで
+ * 変化イベントの内容 (previousValue/newValue と、その原因になった labeledAt) を
+ * 一意に復元できる。generation のスナップショット同士を比較する方式と異なり、
+ * 「どの世代が current になっているか」に依存しないため、
+ * 新旧 build が異なる順序で commit してもイベントの向きが逆転しない。
+ * @param prisma - Prisma クライアント
+ * @param accountIds - 対象ページの Account ID
+ * @param sourceWatermarkAt - 集計の基準時刻
+ * @returns account+label ごとの直前のラベル値。履歴がまだ無ければ含まれない
+ */
+async function findPreviousLabelsAtWatermark(
+  prisma: PrismaClient,
+  accountIds: string[],
+  sourceWatermarkAt: Date,
+): Promise<LabelAtWatermark[]> {
+  if (accountIds.length === 0) return []
+  return prisma.$queryRaw<LabelAtWatermark[]>`
+    SELECT "accountId", "labelDefinitionId", "value", "confidence", "reason", "labeledAt"
+    FROM (
+      SELECT "accountId", "labelDefinitionId", "value", "confidence", "reason", "labeledAt",
+        ROW_NUMBER() OVER (
+          PARTITION BY "accountId", "labelDefinitionId"
+          ORDER BY "labeledAt" DESC, "id" DESC
+        ) AS rn
+      FROM "AccountLabel"
+      WHERE "accountId" IN (${Prisma.join(accountIds)})
+        AND "labeledAt" <= ${sourceWatermarkAt}
+    ) ranked
+    WHERE rn = 2
+  `
+}
+
 /** watermark 時点で active だった Finding 1 件。 */
 interface ActiveFindingAtWatermark {
   primaryScopeId: string
@@ -90,11 +125,7 @@ export interface BuildAccountSummaryInput {
   generationId: string
   /** 集計の基準時刻。 */
   sourceWatermarkAt: Date
-  /**
-   * この build の契機となった CrawlRun 等の ID。
-   * publishGeneration は retry ごとに新しい generationId を発行するため、
-   * AccountLabelChange の重複挿入防止にはこの安定した ID を使う。
-   */
+  /** この build の契機となった CrawlRun 等の ID。AccountLabelChange の由来として記録するのみで、重複挿入防止には使わない (accountId+labelDefinitionId+changedAt の一意制約に委ねる)。 */
   sourceCrawlRunId?: string
   /** 1 ページあたりの Account 取得件数。 */
   pageSize?: number
@@ -137,35 +168,14 @@ async function getCurrentGenerationId(prisma: PrismaClient): Promise<string | nu
 }
 
 /**
- * この build の watermark が、現在公開済みの watermark より新しいかを調べる。
- * publishGeneration の単調性判定は build 完了後の transaction 内で行われるため、
- * ここで新しくないと分かった build が前世代の generation を previous として
- * AccountLabelChange を append すると、より新しい Crawl が先に current になった後に
- * 古い Crawl を処理した場合、逆方向の差分を audit 履歴へ永続化してしまう。
- * publishGeneration 側の最終判定とは別の緩い事前チェックとして、append 自体を防ぐ。
- * @param prisma - Prisma クライアント
- * @param sourceWatermarkAt - この build の watermark
- * @returns 現在の watermark 以上であれば true
- */
-async function isAtOrAfterPublishedWatermark(
-  prisma: PrismaClient,
-  sourceWatermarkAt: Date,
-): Promise<boolean> {
-  const state = await prisma.readModelState.findUnique({
-    where: { modelKey: MODEL_KEY },
-    select: { sourceWatermarkAt: true },
-  })
-  if (!state?.sourceWatermarkAt) return true
-  return sourceWatermarkAt >= state.sourceWatermarkAt
-}
-
-/**
  * Account を大量件数でも一括ロードせずカーソルページングで処理するため、
  * ページサイズを固定値ではなくオプション化してテストで小さい値へ差し替え可能にする。
- * ラベル値は sourceWatermarkAt 時点のものを AccountLabel から復元するが、
- * 変更時刻自体は前世代の AccountClassificationCurrent との差分から判定する
- * (AccountLabel.labeledAt は値が変わった回にしか積まれず、それ自体は変更時刻と一致するため)。
- * これにより true から false への解除も lastClassificationChangedAt に反映される。
+ * ラベル値は sourceWatermarkAt 時点のものを AccountLabel から復元する。
+ * lastClassificationChangedAt (true から false への解除も含む) は前世代の
+ * AccountClassificationCurrent との差分から判定するが、AccountLabelChange は
+ * AccountLabel 履歴上の直前値との比較だけで組み立てる。前世代の generation に依存すると、
+ * ANALYZER_WORKER_CONCURRENCY > 1 で同じ前世代から並行 build した場合に、
+ * 片方が見た「変更前」がもう片方の「変更後」と食い違い、変化の一部が記録されずに失われうる。
  * @param prisma - Prisma クライアント
  * @param input - 対象 generationId と検索基準時刻
  * @returns 作成した行数
@@ -187,7 +197,6 @@ export async function buildAccountSummary(
   )
 
   const previousGenerationId = await getCurrentGenerationId(prisma)
-  const canAppendLabelChanges = await isAtOrAfterPublishedWatermark(prisma, input.sourceWatermarkAt)
 
   for (;;) {
     const accounts = await prisma.account.findMany({
@@ -200,30 +209,36 @@ export async function buildAccountSummary(
 
     const accountIds = accounts.map((account) => account.id)
 
-    const [latestLabels, activeFindings, previousClassifications, previousSummaries] =
-      await Promise.all([
-        findLabelsAtWatermark(prisma, accountIds, input.sourceWatermarkAt),
-        findActiveFindingsAtWatermark(prisma, accountIds, input.sourceWatermarkAt),
-        previousGenerationId
-          ? prisma.accountClassificationCurrent.findMany({
-              where: { generationId: previousGenerationId, accountId: { in: accountIds } },
-              select: {
-                accountId: true,
-                labelDefinitionId: true,
-                value: true,
-                confidence: true,
-                reason: true,
-                lastChangedAt: true,
-              },
-            })
-          : Promise.resolve([]),
-        previousGenerationId
-          ? prisma.accountSummaryCurrent.findMany({
-              where: { generationId: previousGenerationId, accountId: { in: accountIds } },
-              select: { accountId: true, lastClassificationChangedAt: true },
-            })
-          : Promise.resolve([]),
-      ])
+    const [
+      latestLabels,
+      previousLabels,
+      activeFindings,
+      previousClassifications,
+      previousSummaries,
+    ] = await Promise.all([
+      findLabelsAtWatermark(prisma, accountIds, input.sourceWatermarkAt),
+      findPreviousLabelsAtWatermark(prisma, accountIds, input.sourceWatermarkAt),
+      findActiveFindingsAtWatermark(prisma, accountIds, input.sourceWatermarkAt),
+      previousGenerationId
+        ? prisma.accountClassificationCurrent.findMany({
+            where: { generationId: previousGenerationId, accountId: { in: accountIds } },
+            select: {
+              accountId: true,
+              labelDefinitionId: true,
+              value: true,
+              confidence: true,
+              reason: true,
+              lastChangedAt: true,
+            },
+          })
+        : Promise.resolve([]),
+      previousGenerationId
+        ? prisma.accountSummaryCurrent.findMany({
+            where: { generationId: previousGenerationId, accountId: { in: accountIds } },
+            select: { accountId: true, lastClassificationChangedAt: true },
+          })
+        : Promise.resolve([]),
+    ])
 
     const previousByKey = new Map<string, PreviousClassification>(
       previousClassifications.map((row) => [
@@ -233,6 +248,12 @@ export async function buildAccountSummary(
     )
     const previousChangedAtByAccount = new Map(
       previousSummaries.map((row) => [row.accountId, row.lastClassificationChangedAt]),
+    )
+    const previousLabelByKey = new Map<string, LabelAtWatermark>(
+      previousLabels.map((label) => [
+        classificationKey(label.accountId, label.labelDefinitionId),
+        label,
+      ]),
     )
 
     const labelsByAccount = new Map<string, (typeof latestLabels)[number][]>()
@@ -284,7 +305,6 @@ export async function buildAccountSummary(
       for (const label of labels) {
         const previous = previousByKey.get(classificationKey(account.id, label.labelDefinitionId))
         const changed = previous !== undefined && previous.value !== label.value
-        const isNewLabel = previous === undefined
         const changedAt = changed
           ? input.sourceWatermarkAt
           : (previous?.lastChangedAt ?? label.labeledAt)
@@ -299,22 +319,36 @@ export async function buildAccountSummary(
           lastChangedAt: changedAt,
         })
 
+        // AccountLabelChange は、この build が current になるかどうかとは独立に、
+        // AccountLabel 履歴上の直前値との比較だけで組み立てる (previousByKey/changed は
+        // AccountClassificationCurrent の前世代スナップショットから来ており、
+        // 並行 build 同士で「どちらが先に current になったか」に依存するため使わない)。
+        const historyPrevious = previousLabelByKey.get(
+          classificationKey(account.id, label.labelDefinitionId),
+        )
+        const historyChanged =
+          historyPrevious !== undefined && historyPrevious.value !== label.value
+        const isNewLabelInHistory = historyPrevious === undefined
+
         if (
-          canAppendLabelChanges &&
-          (changed || (previousGenerationId !== null && isNewLabel && label.value))
+          historyChanged ||
+          (previousGenerationId !== null && isNewLabelInHistory && label.value)
         ) {
           changeRows.push({
             accountId: account.id,
             labelDefinitionId: label.labelDefinitionId,
             changeType: label.value ? 'added' : 'removed',
-            previousValue: previous?.value ?? null,
+            previousValue: historyPrevious?.value ?? null,
             newValue: label.value,
-            previousConfidence: previous?.confidence ?? null,
+            previousConfidence: historyPrevious?.confidence ?? null,
             newConfidence: label.confidence,
-            previousReason: previous?.reason ?? null,
+            previousReason: historyPrevious?.reason ?? null,
             newReason: label.reason,
             sourceId: input.sourceCrawlRunId ?? null,
-            changedAt: input.sourceWatermarkAt,
+            // 変化の原因になった AccountLabel 行自身の labeledAt を使う。
+            // build の watermark ではなく変化イベント自体を一意制約のキーにすることで、
+            // 並行 build が同じ変化イベントを検出しても安全に重複を弾ける。
+            changedAt: label.labeledAt,
           })
         }
 
@@ -348,8 +382,9 @@ export async function buildAccountSummary(
       await prisma.accountClassificationCurrent.createMany({ data: classificationRows })
     }
     if (changeRows.length > 0) {
-      // sourceId + accountId + labelDefinitionId の一意制約により、
-      // 同じ CrawlRun からの retry で同じ差分を再挿入しない。
+      // accountId + labelDefinitionId + changedAt の一意制約により、
+      // 同じ変化イベントを複数 build (retry や ANALYZER_WORKER_CONCURRENCY > 1 の並行 build)
+      // が検出しても再挿入しない。
       await prisma.accountLabelChange.createMany({ data: changeRows, skipDuplicates: true })
     }
 
