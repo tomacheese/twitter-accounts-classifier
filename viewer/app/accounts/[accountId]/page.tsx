@@ -7,6 +7,7 @@ import { getAccountDetail } from '@/lib/queries/account-detail'
 import { getAccountOverview } from '@/lib/queries/account-subviews'
 import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { AccountLabels } from '../../components/account-labels'
+import { AccountSubviewTabs } from '../../components/account-subview-tabs'
 import { ErrorFallback } from '../../components/error-fallback'
 
 const RECENT_TWEET_COUNT = 20
@@ -287,6 +288,8 @@ async function NewAccountDetailView({
           </dd>
         </dl>
       </section>
+
+      <AccountSubviewTabs accountId={accountId} />
     </div>
   )
 }
