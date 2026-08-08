@@ -701,6 +701,10 @@ model LabelMetricDaily {
   prevalence         Float
   confidenceBuckets  Json     @default("{}")
   reasonDistribution Json     @default("{}")
+  // この行の値が採用された元 LabelMetricSnapshot.observedAt。
+  // 遅延して実行された backlog 分の build が、それより新しい observedAt を
+  // 採用済みの行を古い値へ巻き戻すのを防ぐ判定にのみ使う。
+  sourceObservedAt DateTime
 
   @@unique([date, labelDefinitionId])
   @@index([labelDefinitionId, date(sort: Desc)])

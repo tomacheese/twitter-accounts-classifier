@@ -143,6 +143,57 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     expect(await prisma.labelMetricDaily.count()).toBe(0)
   })
 
+  it('古い observedAt の backlog build は、既に採用済みの新しい observedAt の値を巻き戻さない', async () => {
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
+    })
+
+    const older = new Date()
+    const newer = new Date(older.getTime() + 60 * 60 * 1000)
+    await prisma.labelMetricSnapshot.createMany({
+      data: [
+        {
+          sourceCrawlRunId: `crawl-${randomUUID()}`,
+          labelDefinitionId: labelDefinition.id,
+          observedAt: older,
+          sourceWatermarkAt: older,
+          evaluatedCount: 100,
+          trueCount: 10,
+          prevalence: 0.1,
+          completeness: 'complete',
+          policyHash: 'hash',
+          analyzerVersion: '1',
+        },
+        {
+          sourceCrawlRunId: `crawl-${randomUUID()}`,
+          labelDefinitionId: labelDefinition.id,
+          observedAt: newer,
+          sourceWatermarkAt: newer,
+          evaluatedCount: 120,
+          trueCount: 60,
+          prevalence: 0.5,
+          completeness: 'complete',
+          policyHash: 'hash',
+          analyzerVersion: '1',
+        },
+      ],
+    })
+
+    // 先行 worker が新しい observedAt まで含めて build し、日次値を確定させる。
+    await rollUpLabelMetricDaily(prisma, { now: newer })
+
+    // その後、古い observedAt までしか見えていない backlog 分の build が
+    // 遅れて実行される。この再計算で確定済みの新しい値を巻き戻してはならない。
+    await rollUpLabelMetricDaily(prisma, { now: older })
+
+    const rows = await prisma.labelMetricDaily.findMany({
+      where: { labelDefinitionId: labelDefinition.id },
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.evaluatedCount).toBe(120)
+    expect(rows[0]?.prevalence).toBeCloseTo(0.5)
+  })
+
   it('再実行しても同じ日の行は重複せず更新される', async () => {
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
