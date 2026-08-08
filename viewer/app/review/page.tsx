@@ -6,6 +6,8 @@ import { ErrorFallback } from '../components/error-fallback'
 import { notFound } from 'next/navigation'
 import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
+export const dynamic = 'force-dynamic'
+
 const PAGE_SIZE = 25
 
 interface ReviewPageProps {

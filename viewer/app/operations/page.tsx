@@ -7,6 +7,8 @@ import { CursorPagination } from '../components/cursor-pagination'
 import { notFound } from 'next/navigation'
 import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
+export const dynamic = 'force-dynamic'
+
 const KIND_TO_PATH: Record<string, string> = {
   crawl: 'crawl',
   weekly_review: 'review',
