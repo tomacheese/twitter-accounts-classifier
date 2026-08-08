@@ -126,6 +126,46 @@ nothing this skill does needs to survive locally beyond opening the PR in step 9
    この手順で行うのはサンプルしたアカウント ID (`sampledAccountIds`) と、何を・なぜ変更したか (手順5 で見送った機微トピック候補を含む) の `findings` サマリを日本語でまとめ、手順11 に引き渡す準備だけである。
    完了・失敗・タイムアウトとしての確定は手順11 でまとめて行う。
    `findings` はビューア WebUI の Weekly Runs ページに表示されるため、必ず日本語で書く。
+
+   あわせて、analyzer が ReviewFinding へ取り込む構造化結果を JSON ファイルへ書き出す。
+   `findings` の日本語サマリは人間が読むためのもので、Attention Queue や Review 画面に
+   出るのはこの構造化結果の方であるため、両方を必ず用意する。
+   書き出し先は worktree の外 (例: `$CLAUDE_JOB_DIR/tmp/weekly-structured-output.json`、
+   未設定なら `/tmp`) とし、リポジトリへコミットしない。形式は次のとおり。
+
+   ```json
+   {
+     "schemaVersion": 1,
+     "promptVersion": "weekly-crawl-review/1",
+     "specVersion": "1",
+     "modelIdentity": "<使用したモデル ID>",
+     "toolIdentity": "claude-code",
+     "repositoryCommit": "<git rev-parse HEAD の結果>",
+     "targetFrom": "<レビュー対象期間の開始 (ISO 8601)>",
+     "targetTo": "<レビュー対象期間の終了 (ISO 8601)>",
+     "sourceRunId": "<$WEEKLY_ANALYSIS_RUN_ID>",
+     "findings": [
+       {
+         "type": "possible_false_positive",
+         "dimensions": { "label": "<LabelDefinition の id>", "rule": "<ルール key>" },
+         "primaryScopeType": "label",
+         "primaryScopeId": "<LabelDefinition の id>",
+         "confidence": 0.8,
+         "sampleCount": 12,
+         "sampleReference": ["<Account の id>"],
+         "evidenceReference": "<判断根拠を 1 行で>",
+         "structuredMeasurement": { "falsePositiveCount": 5, "checkedCount": 12 },
+         "suggestedSeverity": "medium"
+       }
+     ]
+   }
+   ```
+
+   `type` は `analyzer/policy/detection-policy.json` に存在する enabled な rule の
+   `type` と一致していなければ取り込み時に無視される。誤検出候補が 1 件も無かった場合は
+   `findings` を空配列にする (ファイル自体は必ず出力する)。
+   `sampleReference` にスクリーンネームや表示名など実在アカウントを特定できる値を
+   入れないこと。`Account` の id のみを使う。
 9. **Open a PR and enable auto-merge.** Once branch protection with a required
    `Node CI / Check finished Node CI` status check is enabled on `master` (enabling branch
    protection itself is a separate, user-side operational task and is not performed by
@@ -163,6 +203,10 @@ nothing this skill does needs to survive locally beyond opening the PR in step 9
     ここまでのどの経路をたどった場合でも、必ず `complete`・`fail`・`timeout` のいずれかを一度だけ呼んで `WeeklyAnalysisRun` を終端状態にする。
     手順2 (クロスチェック) で変更不要と判断した「no_changes」の場合は、PR を作らず `scripts/weekly-analysis-run.ts complete --id "$WEEKLY_ANALYSIS_RUN_ID" --findings "<変更不要の理由>"` を直接呼ぶ。
     それ以外の場合は、手順9 で控えた PR 番号・URL を `--pull-request-number`・`--pull-request-url` に渡し、手順8 で用意した `sampledAccountIds`・`findings` と併せて `complete` を呼ぶ。
+    いずれの経路でも、手順8 で書き出した構造化結果のパスを
+    `--structured-output-file <パス>` として `complete` に渡す。これを渡さないと
+    `weekly_review_ingest` が取り込む内容を持たず、レビュー結果が ReviewFinding に
+    反映されないまま実行だけが成功として終わる。
     その後、**手順0 で worktree を自分で作成していた場合に限り**、worktree の後片付けを行う。
     `scripts/weekly-analyze.sh` が用意した worktree で実行していた場合はこの後片付けを一切行わない (その worktree の削除はスーパーバイザー側の責務であり、セッション終了後に自動で行われる)。
     1. Move back out of the worktree to the primary checkout first — a worktree cannot

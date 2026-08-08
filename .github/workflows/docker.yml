@@ -90,7 +90,8 @@ jobs:
         [
           { imageName: "tomacheese/twitter-accounts-classifier-crawler", context: ".", file: "crawler/Dockerfile", packageName: "twitter-accounts-classifier-crawler" },
           { imageName: "tomacheese/twitter-accounts-classifier-viewer", context: ".", file: "viewer/Dockerfile", packageName: "twitter-accounts-classifier-viewer" },
-          { imageName: "tomacheese/twitter-accounts-classifier-blocker", context: ".", file: "blocker/Dockerfile", packageName: "twitter-accounts-classifier-blocker" }
+          { imageName: "tomacheese/twitter-accounts-classifier-blocker", context: ".", file: "blocker/Dockerfile", packageName: "twitter-accounts-classifier-blocker" },
+          { imageName: "tomacheese/twitter-accounts-classifier-analyzer", context: ".", file: "analyzer/Dockerfile", packageName: "twitter-accounts-classifier-analyzer" }
         ]
       allow-unsafe-pr-checkout: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository }}
     secrets:

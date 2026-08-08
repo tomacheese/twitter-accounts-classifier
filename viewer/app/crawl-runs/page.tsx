@@ -1,9 +1,11 @@
 import Link from 'next/link'
+import { permanentRedirect } from 'next/navigation'
 import { isCurrentAccountStale } from '@/lib/crawl-run-progress'
 import { formatDateTime } from '@/lib/format-date'
 import { formatDuration } from '@/lib/format-duration'
 import { getPrismaClient } from '@/lib/prisma'
 import { getAllCrawlRuns } from '@/lib/queries/crawl-runs'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { ErrorFallback } from '../components/error-fallback'
 import { StatusBadge } from '../components/status-badge'
 
@@ -16,6 +18,10 @@ export const dynamic = 'force-dynamic'
  * @returns クロール実行履歴ページの描画結果
  */
 export default async function CrawlRunsPage(): Promise<React.ReactElement> {
+  if (isNewUiSectionEnabled('operations')) {
+    permanentRedirect('/operations?kind=crawl')
+  }
+
   let runs: Awaited<ReturnType<typeof getAllCrawlRuns>>
   try {
     runs = await getAllCrawlRuns(getPrismaClient())

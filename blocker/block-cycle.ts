@@ -94,7 +94,7 @@ async function attemptBlock(
   }
 
   try {
-    await deps.recordSuccessfulBlock(deps.prisma, blockerId, candidate.accountId)
+    await deps.recordSuccessfulBlock(deps.prisma, blockerId, candidate.accountId, blockAccountRunId)
     await deps.recordBlockAction(deps.prisma, {
       blockAccountRunId,
       blockerId,

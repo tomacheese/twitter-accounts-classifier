@@ -1,5 +1,6 @@
 import { Logger } from '@book000/node-utils'
 import type { Prisma, PrismaClient, WeeklyAnalysisRun } from '../generated/prisma'
+import { enqueueWorkItem } from './analysis-work-item-repository'
 
 const logger = Logger.configure('weekly-analysis-run-repository')
 
@@ -92,7 +93,7 @@ export async function createWeeklyAnalysisRun(
  * @returns 該当する実行。存在しなければ `null`
  */
 export async function getWeeklyAnalysisRun(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   id: string,
 ): Promise<WeeklyAnalysisRunRecord | null> {
   const run = await prisma.weeklyAnalysisRun.findUnique({ where: { id } })
@@ -114,7 +115,7 @@ export async function listRunningWeeklyAnalysisRuns(
 }
 
 async function updateIfRunning(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   id: string,
   data: Parameters<PrismaClient['weeklyAnalysisRun']['update']>[0]['data'],
 ): Promise<WeeklyAnalysisRunMutationResult> {
@@ -158,6 +159,8 @@ export interface CompleteWeeklyAnalysisRunParams {
   commitSha?: string | null
   pullRequestNumber?: number | null
   pullRequestUrl?: string | null
+  /** analyzer が ReviewFinding へ取り込む構造化レビュー結果。 */
+  structuredOutput?: unknown
 }
 
 /**
@@ -176,16 +179,29 @@ export async function completeWeeklyAnalysisRun(
   finishedAt: Date,
   params: CompleteWeeklyAnalysisRunParams,
 ): Promise<WeeklyAnalysisRunMutationResult> {
-  const { sampledAccountIds, ...rest } = params
-  return updateIfRunning(prisma, id, {
-    finishedAt,
-    status: 'success',
-    currentPhase: null,
-    errorMessage: null,
-    ...rest,
-    ...(sampledAccountIds !== undefined && {
-      sampledAccountIds: sampledAccountIds as Prisma.InputJsonValue,
-    }),
+  const { sampledAccountIds, structuredOutput, ...rest } = params
+  return prisma.$transaction(async (tx) => {
+    const result = await updateIfRunning(tx, id, {
+      finishedAt,
+      status: 'success',
+      currentPhase: null,
+      errorMessage: null,
+      ...rest,
+      ...(sampledAccountIds !== undefined && {
+        sampledAccountIds: sampledAccountIds as Prisma.InputJsonValue,
+      }),
+      ...(structuredOutput !== undefined && {
+        structuredOutput: structuredOutput as Prisma.InputJsonValue,
+      }),
+    })
+    if (result.ok) {
+      await enqueueWorkItem(tx, {
+        kind: 'weekly_review_ingest',
+        triggerType: 'weekly_analysis_run',
+        triggerId: id,
+      })
+    }
+    return result
   })
 }
 

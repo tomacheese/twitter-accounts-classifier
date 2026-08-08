@@ -1,8 +1,10 @@
 import Link from 'next/link'
+import { permanentRedirect } from 'next/navigation'
 import { formatDateTime } from '@/lib/format-date'
 import { getPrismaClient } from '@/lib/prisma'
 import { getAllBlockRuns } from '@/lib/queries/block-runs'
 import { listBlocks } from '@/lib/queries/blocks'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { ErrorFallback } from '../components/error-fallback'
 import { StatusBadge } from '../components/status-badge'
 
@@ -30,6 +32,10 @@ export default async function BlockRunsPage({
 }: {
   searchParams: Promise<{ blocksPage?: string }>
 }): Promise<React.ReactElement> {
+  if (isNewUiSectionEnabled('operations')) {
+    permanentRedirect('/operations?kind=block')
+  }
+
   const params = await searchParams
   const blocksPage = Math.max(1, Math.trunc(Number(params.blocksPage)) || 1)
 

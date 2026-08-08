@@ -24,7 +24,7 @@ FROM node:24-bookworm-slim
 ARG APPLICATION_VERSION=unknown
 ENV APPLICATION_VERSION=$APPLICATION_VERSION
 
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 WORKDIR /app
@@ -40,6 +40,7 @@ COPY --from=build /app/crawler ./crawler
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=build /app/pnpm-lock.yaml ./pnpm-lock.yaml
+COPY scripts ./scripts
 
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x entrypoint.sh

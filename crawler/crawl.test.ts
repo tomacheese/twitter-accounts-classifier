@@ -1221,7 +1221,7 @@ describe('runCrawlCycle', () => {
     await runCrawlCycle(deps)
 
     expect(getBlocks).toHaveBeenCalledWith({ cursor: undefined, count: 200 })
-    expect(deps.syncBlocks).toHaveBeenCalledWith('viewer1', {
+    expect(deps.syncBlocks).toHaveBeenCalledWith('viewer1', 'run1', {
       ids: [],
       authors: [],
       reachedEnd: true,

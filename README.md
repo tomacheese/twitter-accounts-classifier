@@ -21,8 +21,9 @@ Twitter をクロールしてツイート・アカウント情報を収集し、
 
 1. `.env.example` を `.env` にコピーし、値を埋める。
 2. `data/config.json` を用意する (`email`/`username`/`password`/`otp_secret` を含むアカウント配列)。
-3. `docker compose up -d --build` で起動する。
-4. 初回起動時に Prisma のマイグレーション・ラベル定義のシードが自動実行される。
+3. 初回のみ、Postgres に `viewer`/`analyzer` ロールを作成する。`compose.yaml` の `migrate` サービスは既存ロールへの権限同期・検証だけを毎回自動実行し、ロール自体の作成は行わないため、これを飛ばすと `migrate` サービスがロール不在で失敗する。`scripts/db/create-viewer-role.sql`・`scripts/db/create-analyzer-role.sql` 内の `CHANGE_ME_*_PASSWORD` を `.env` の `VIEWER_DB_PASSWORD`/`ANALYZER_DB_PASSWORD` と同じ値に置き換えたうえで、Prisma migration を実行するテーブル所有者ロール (`crawler`) で1度だけ実行する。
+4. `docker compose up -d --build` で起動する。
+5. 初回起動時に Prisma のマイグレーション・ラベル定義のシードが自動実行される。
 
 ## アクセス
 

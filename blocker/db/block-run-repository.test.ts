@@ -10,7 +10,7 @@ import {
 } from './block-run-repository'
 
 function fakePrisma() {
-  return {
+  const prisma = {
     blockRun: {
       create: vi.fn().mockResolvedValue({ id: 'run-1' }),
       update: vi.fn().mockResolvedValue({}),
@@ -24,6 +24,13 @@ function fakePrisma() {
       create: vi.fn().mockResolvedValue({}),
       count: vi.fn().mockResolvedValue(0),
     },
+    analysisWorkItem: {
+      upsert: vi.fn().mockResolvedValue({}),
+    },
+  }
+  return {
+    ...prisma,
+    $transaction: vi.fn((fn: (tx: typeof prisma) => Promise<unknown>) => fn(prisma)),
   }
 }
 
@@ -97,6 +104,24 @@ describe('finishBlockRun', () => {
       where: { id: 'run-1' },
       data: { finishedAt, status: 'completed' },
     })
+  })
+
+  it('enqueues a block_reconciliation AnalysisWorkItem for the finished run', async () => {
+    const prisma = fakePrisma()
+
+    await finishBlockRun(prisma as never, 'run-1', new Date('2026-08-04T01:00:00Z'), 'failed')
+
+    expect(prisma.analysisWorkItem.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          kind_triggerType_triggerId: {
+            kind: 'block_reconciliation',
+            triggerType: 'block_run',
+            triggerId: 'run-1',
+          },
+        },
+      }),
+    )
   })
 })
 

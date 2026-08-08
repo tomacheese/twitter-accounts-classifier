@@ -53,7 +53,11 @@ services:
     environment:
       DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
     entrypoint:
-      ["sh", "-c", "cd /app/crawler && pnpm exec prisma migrate deploy --schema=../prisma/schema.prisma"]
+      [
+        "sh",
+        "-c",
+        "cd /app/crawler && pnpm exec prisma migrate deploy --schema=../prisma/schema.prisma && cd /app && bash scripts/db/run-migration-and-sync-grants.sh",
+      ]
     logging: *default-logging
 
   crawler:
@@ -91,13 +95,16 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
+      # viewer は読み取り専用の viewer ロール (scripts/db/create-viewer-role.sql) で接続する。
+      # crawler ロールで接続すると、DB 側で強制している SELECT のみの制約が意味を持たなくなる。
+      DATABASE_URL: postgresql://viewer:${VIEWER_DB_PASSWORD:?VIEWER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
       # Docker sets HOSTNAME to the container ID by default; Next.js's
       # standalone server.js binds to that literal value instead of all
       # interfaces — override it so the server (and the healthcheck's
       # localhost probe) works.
       HOSTNAME: "0.0.0.0"
       GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
+      VIEWER_NEW_UI_SECTIONS: ${VIEWER_NEW_UI_SECTIONS:-}
     ports:
       - "3000:3000"
     healthcheck:
@@ -146,4 +153,24 @@ services:
       # からの相対パスになる。そのためバインドマウント先は /app/blocker/data とする必要がある
       # (/app/data ではない)。
       - ./data:/app/blocker/data
+    logging: *default-logging
+
+  analyzer:
+    build:
+      context: .
+      dockerfile: analyzer/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      # crawler/blocker/viewer と異なり、analyzer は正本テーブルへ SELECT のみ・
+      # 分析/運用テーブルへ書き込み可能な allowlist 権限の analyzer ロールで接続する
+      # (scripts/db/create-analyzer-role.sql 参照)。
+      DATABASE_URL: postgresql://analyzer:${ANALYZER_DB_PASSWORD:?ANALYZER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
+      ANALYZER_WORKER_CONCURRENCY: ${ANALYZER_WORKER_CONCURRENCY:-1}
+      ANALYZER_POLL_INTERVAL_SECONDS: ${ANALYZER_POLL_INTERVAL_SECONDS:-10}
+      GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
     logging: *default-logging

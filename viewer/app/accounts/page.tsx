@@ -7,8 +7,22 @@ import {
   type AccountSortField,
   type SortDirection,
 } from '@/lib/queries/accounts'
+import { listAccountSummaries, type AccountSummaryView } from '@/lib/queries/account-summary'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { LabelFilter } from '../components/label-filter'
 import { ErrorFallback } from '../components/error-fallback'
+import { CursorPagination } from '../components/cursor-pagination'
+
+interface AccountsPageProps {
+  searchParams: Promise<{
+    label?: string | string[]
+    sort?: string
+    direction?: string
+    page?: string
+    view?: string
+    cursor?: string
+  }>
+}
 
 const PAGE_SIZE = 20
 const SORT_FIELDS: AccountSortField[] = ['followersCount', 'tweetCount', 'lastCrawledAt']
@@ -69,19 +83,14 @@ function buildPageHref(
 }
 
 /**
+ * 旧 Accounts 一覧画面。`isNewUiSectionEnabled('accounts')` が無効な間はこちらを表示する。
+ * 新実装は {@link NewAccountsView} を参照。
  * @param props - `label` (繰り返し指定可能)・`sort`・`direction`・`page` の各検索パラメータ
  * @returns アカウント一覧ページの描画結果
  */
-export default async function AccountsPage({
+async function LegacyAccountsPage({
   searchParams,
-}: {
-  searchParams: Promise<{
-    label?: string | string[]
-    sort?: string
-    direction?: string
-    page?: string
-  }>
-}): Promise<React.ReactElement> {
+}: AccountsPageProps): Promise<React.ReactElement> {
   const params = await searchParams
   const labelKeys = params.label
     ? Array.isArray(params.label)
@@ -201,4 +210,78 @@ export default async function AccountsPage({
       </div>
     </div>
   )
+}
+
+/**
+ * 新 Accounts 一覧画面。account_summary read model を参照する。
+ * `view=recentlyChanged` (既定) は最近分類が変わった順、`view=all` は screenName 順に表示する。
+ * @param props - `view`/`cursor` 検索パラメータ
+ * @returns アカウント一覧画面の描画結果
+ */
+async function NewAccountsView({ searchParams }: AccountsPageProps): Promise<React.ReactElement> {
+  const params = await searchParams
+  const view: AccountSummaryView = params.view === 'all' ? 'all' : 'recentlyChanged'
+
+  const prisma = getPrismaClient()
+  try {
+    const result = await listAccountSummaries(prisma, { view, cursor: params.cursor })
+
+    return (
+      <div className="flex flex-col gap-4">
+        <h1 className="text-2xl font-semibold">Accounts</h1>
+        {result.items.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">No accounts to show yet.</p>
+        ) : (
+          <table className="w-full border-collapse text-left text-sm">
+            <thead className="bg-gray-100 dark:bg-gray-700">
+              <tr>
+                <th className="p-3">Screen name</th>
+                <th className="p-3">Display name</th>
+                <th className="p-3">Labels</th>
+                <th className="p-3">Findings</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.items.map((item) => (
+                <tr key={item.accountId} className="border-t dark:border-gray-700">
+                  <td className="p-3">
+                    <Link
+                      href={`/accounts/${item.accountId}`}
+                      className="text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      @{item.normalizedScreenName}
+                    </Link>
+                  </td>
+                  <td className="p-3">{item.normalizedDisplayName}</td>
+                  <td className="p-3">{item.activeLabelKeys.join(', ') || '—'}</td>
+                  <td className="p-3">
+                    {item.activeFindingCount > 0
+                      ? `${item.activeFindingCount} (${item.highestFindingSeverity ?? 'unknown'})`
+                      : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <CursorPagination
+          basePath="/accounts"
+          currentParams={params}
+          nextCursor={result.nextCursor}
+        />
+      </div>
+    )
+  } catch (error) {
+    console.error('Failed to load account summaries:', error)
+    return <ErrorFallback message="Failed to load the account list." />
+  }
+}
+
+/**
+ * `isNewUiSectionEnabled('accounts')` に応じて新旧いずれかの Accounts 一覧画面を表示する。
+ * @param props - Next.js の searchParams
+ * @returns 表示すべき Accounts 一覧画面
+ */
+export default function AccountsPage(props: AccountsPageProps): Promise<React.ReactElement> {
+  return isNewUiSectionEnabled('accounts') ? NewAccountsView(props) : LegacyAccountsPage(props)
 }

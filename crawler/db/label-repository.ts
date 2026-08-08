@@ -67,6 +67,12 @@ export interface RecordAccountLabelsBulkParams {
     method: string
     ruleVersion: string
   }[]
+  /** どの処理がこの行を書いたか (crawl・relabel など)。 */
+  sourceKind: string
+  /** 発生源となった run の ID。 */
+  sourceId?: string
+  /** 発生源となったログインアカウント。 */
+  sourceUsername?: string
 }
 
 interface RecordAccountLabelsBulkRow {
@@ -124,23 +130,26 @@ export async function recordAccountLabelsBulk(
       WHERE al."accountId" IS NULL
          OR al."value" IS DISTINCT FROM ir."value"
          OR al."ruleVersion" IS DISTINCT FROM ir."ruleVersion"
+         OR al."confidence" IS DISTINCT FROM ir."confidence"
+         OR al."reason" IS DISTINCT FROM ir."reason"
     ),
     inserted_history AS (
       INSERT INTO "AccountLabel"
-        ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt")
-      SELECT ti.*, shared_now."labeledAt"
+        ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
+      SELECT ti.*, shared_now."labeledAt", ${params.sourceKind}, ${params.sourceId ?? null}, ${params.sourceUsername ?? null}
       FROM to_insert ti
       CROSS JOIN shared_now
       RETURNING *
     ),
     upserted_latest AS (
-      INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt")
-      SELECT ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion", shared_now."labeledAt"
+      INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
+      SELECT ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion", shared_now."labeledAt", ${params.sourceKind}, ${params.sourceId ?? null}, ${params.sourceUsername ?? null}
       FROM input_rows ir
       CROSS JOIN shared_now
       ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
       SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
-          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "labeledAt" = EXCLUDED."labeledAt"
+          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "labeledAt" = EXCLUDED."labeledAt",
+          "sourceKind" = EXCLUDED."sourceKind", "sourceId" = EXCLUDED."sourceId", "sourceUsername" = EXCLUDED."sourceUsername"
       WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
       RETURNING "accountId", "labelDefinitionId"
     )
@@ -165,7 +174,13 @@ export async function recordAccountLabelsBulk(
       )
     }
     if (historyInserted && labeledAt) {
-      history.push({ ...rest, labeledAt })
+      history.push({
+        ...rest,
+        labeledAt,
+        sourceKind: params.sourceKind,
+        sourceId: params.sourceId ?? null,
+        sourceUsername: params.sourceUsername ?? null,
+      })
     }
   }
 
@@ -174,7 +189,8 @@ export async function recordAccountLabelsBulk(
 
 /**
  * crawl 中のラベル評価結果を記録する。
- * `AccountLabelLatest` の直前の値・ruleVersion と一致しない場合のみ `AccountLabel` に履歴を追記し、
+ * `AccountLabelLatest` の直前の value・ruleVersion・confidence・reason のいずれかと
+ * 一致しない場合のみ `AccountLabel` に履歴を追記し、
  * dashboard/アカウント一覧の各クエリが読む `AccountLabelLatest` の該当行は毎回 upsert する
  * (テーブルの設計意図は prisma/schema.prisma の AccountLabelLatest コメントを参照)。
  * 両方の書き込みは SQL 側の `now()` を共有するため、
@@ -215,31 +231,33 @@ export async function recordCrawlAccountLabel(
       RETURNING "id"
     ),
     previous_latest AS (
-      SELECT "value", "ruleVersion"
+      SELECT "value", "ruleVersion", "confidence", "reason"
       FROM "AccountLabelLatest"
       WHERE "accountId" = ${params.accountId} AND "labelDefinitionId" = ${params.labelDefinitionId}
     ),
     inserted_history AS (
       INSERT INTO "AccountLabel"
-        ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt")
-      SELECT ${id}, ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, ${params.result.confidence}, ${params.result.reason}, ${params.method}, ${params.ruleVersion}, "labeledAt"
+        ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
+      SELECT ${id}, ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, ${params.result.confidence}, ${params.result.reason}, ${params.method}, ${params.ruleVersion}, "labeledAt", 'crawl', ${params.crawlRunId}, ${params.username}
       FROM shared_now
       WHERE EXISTS (SELECT 1 FROM claimed)
         AND NOT EXISTS (
           SELECT 1 FROM previous_latest
           WHERE "value" = ${params.result.value} AND "ruleVersion" = ${params.ruleVersion}
+            AND "confidence" = ${params.result.confidence} AND "reason" = ${params.result.reason}
         )
       RETURNING "id"
     ),
     upserted_latest AS (
       INSERT INTO "AccountLabelLatest"
-        ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt")
-      SELECT ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, ${params.result.confidence}, ${params.result.reason}, ${params.method}, ${params.ruleVersion}, "labeledAt"
+        ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
+      SELECT ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, ${params.result.confidence}, ${params.result.reason}, ${params.method}, ${params.ruleVersion}, "labeledAt", 'crawl', ${params.crawlRunId}, ${params.username}
       FROM shared_now
       WHERE EXISTS (SELECT 1 FROM claimed)
       ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
       SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
-          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "labeledAt" = EXCLUDED."labeledAt"
+          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "labeledAt" = EXCLUDED."labeledAt",
+          "sourceKind" = EXCLUDED."sourceKind", "sourceId" = EXCLUDED."sourceId", "sourceUsername" = EXCLUDED."sourceUsername"
       WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
       RETURNING "accountId"
     )

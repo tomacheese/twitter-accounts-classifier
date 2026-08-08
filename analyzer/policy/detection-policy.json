@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "policyVersion": "2026-08-08.0",
+  "rules": [
+    {
+      "type": "label_count_drop",
+      "enabled": true,
+      "detectorType": "comparative",
+      "identityVersion": 1,
+      "severity": "high",
+      "minimumSampleSize": 50,
+      "relativeThreshold": 0.3,
+      "baselineWindow": "previous_cycle",
+      "activationCount": 2,
+      "resolutionCount": 2,
+      "recurrenceWindow": "P30D",
+      "cooldown": "PT1H"
+    },
+    {
+      "type": "reason_distribution_shift",
+      "enabled": true,
+      "detectorType": "comparative",
+      "identityVersion": 1,
+      "severity": "medium",
+      "minimumSampleSize": 50,
+      "relativeThreshold": 0.4,
+      "baselineWindow": "seven_day",
+      "activationCount": 2,
+      "resolutionCount": 2,
+      "recurrenceWindow": "P30D",
+      "cooldown": "PT1H"
+    },
+    {
+      "type": "crawl_quality_degradation",
+      "enabled": false,
+      "detectorType": "invariant",
+      "identityVersion": 1,
+      "severity": "critical",
+      "activationCount": 1,
+      "resolutionCount": 1,
+      "criticalImmediate": true,
+      "recurrenceWindow": "P7D",
+      "cooldown": "PT15M"
+    },
+    {
+      "type": "block_failure_spike",
+      "enabled": false,
+      "detectorType": "comparative",
+      "identityVersion": 1,
+      "severity": "high",
+      "minimumSampleSize": 10,
+      "relativeThreshold": 0.5,
+      "baselineWindow": "previous_cycle",
+      "activationCount": 1,
+      "resolutionCount": 1,
+      "recurrenceWindow": "P7D",
+      "cooldown": "PT15M"
+    },
+    {
+      "type": "read_model_freshness",
+      "enabled": true,
+      "detectorType": "invariant",
+      "identityVersion": 1,
+      "severity": "high",
+      "activationCount": 1,
+      "resolutionCount": 1,
+      "recurrenceWindow": "P7D",
+      "cooldown": "PT15M",
+      "delayedAfter": "PT3H",
+      "staleAfter": "PT12H"
+    },
+    {
+      "type": "possible_false_positive",
+      "enabled": true,
+      "detectorType": "weekly_review",
+      "identityVersion": 1,
+      "severity": "medium",
+      "activationCount": 1,
+      "resolutionCount": 2,
+      "criticalImmediate": false,
+      "recurrenceWindow": "P30D",
+      "cooldown": "P1D",
+      "maxWeeklyReviewSeverityWithoutCorroboration": "medium"
+    }
+  ]
+}

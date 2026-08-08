@@ -342,6 +342,7 @@ export async function runRelabelBackfill(
           if (labelsToPersist.length > 0) {
             await recordAccountLabelsBulk(prisma, {
               accountId: account.id,
+              sourceKind: 'relabel',
               labels: labelsToPersist.map(({ labelDefinitionId, method, ruleVersion, result }) => ({
                 labelDefinitionId,
                 method,

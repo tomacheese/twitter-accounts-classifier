@@ -4,24 +4,31 @@ import Image from 'next/image'
 import { formatDateTime } from '@/lib/format-date'
 import { getPrismaClient } from '@/lib/prisma'
 import { getAccountDetail } from '@/lib/queries/account-detail'
+import { getAccountOverview } from '@/lib/queries/account-subviews'
+import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { AccountLabels } from '../../components/account-labels'
+import { AccountSubviewTabs } from '../../components/account-subview-tabs'
 import { ErrorFallback } from '../../components/error-fallback'
 
 const RECENT_TWEET_COUNT = 20
 
+interface AccountDetailPageProps {
+  params: Promise<{ accountId: string }>
+}
+
 /**
- * @param props - ルートの `id` パスパラメータ
+ * 旧 Account 詳細画面。`isNewUiSectionEnabled('accounts')` が無効な間はこちらを表示する。
+ * 新実装は {@link NewAccountDetailView} を参照。
+ * @param props - ルートの `accountId` パスパラメータ
  * @returns アカウント詳細ページの描画結果
  */
-export default async function AccountDetailPage({
+async function LegacyAccountDetailPage({
   params,
-}: {
-  params: Promise<{ id: string }>
-}): Promise<React.ReactElement> {
-  const { id } = await params
+}: AccountDetailPageProps): Promise<React.ReactElement> {
+  const { accountId } = await params
   let detail: Awaited<ReturnType<typeof getAccountDetail>>
   try {
-    detail = await getAccountDetail(getPrismaClient(), id, RECENT_TWEET_COUNT)
+    detail = await getAccountDetail(getPrismaClient(), accountId, RECENT_TWEET_COUNT)
   } catch (error) {
     // error.message には SQL 接続情報などドライバー由来の詳細が含まれうるため、
     // 詳細はサーバー側のログにのみ残し、クライアントには一般的なメッセージだけを返す。
@@ -227,4 +234,75 @@ export default async function AccountDetailPage({
       </section>
     </div>
   )
+}
+
+/**
+ * 新 Account 詳細画面。初期表示は overview subview のみを Server Component で描画し、
+ * 残りは `/api/accounts/[accountId]/[subview]` から遅延取得する。
+ * @param props - Next.js の dynamic route params
+ * @returns 描画された Account 詳細画面
+ */
+async function NewAccountDetailView({
+  params,
+}: AccountDetailPageProps): Promise<React.ReactElement> {
+  const { accountId } = await params
+  const prisma = getPrismaClient()
+
+  const overview = await (async () => {
+    try {
+      return await getAccountOverview(prisma, accountId)
+    } catch (error) {
+      console.error('Failed to load the account overview:', error)
+      return undefined
+    }
+  })()
+
+  if (overview === undefined) {
+    return <ErrorFallback message="Failed to load the account overview." />
+  }
+  if (!overview) notFound()
+
+  return (
+    <div className="flex flex-col gap-6">
+      <h1 className="text-2xl font-semibold">@{overview.screenName}</h1>
+      <p className="text-sm text-gray-600 dark:text-gray-400">{overview.displayName}</p>
+
+      <section aria-labelledby="overview-heading">
+        <h2 id="overview-heading" className="text-lg font-semibold">
+          Overview
+        </h2>
+        <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
+          <dt>Followers</dt>
+          <dd>{overview.followersCount.toLocaleString()}</dd>
+          <dt>Following</dt>
+          <dd>{overview.followingCount.toLocaleString()}</dd>
+          <dt>Blue verified</dt>
+          <dd>{overview.isBlueVerified ? 'Yes' : 'No'}</dd>
+          <dt>Active labels</dt>
+          <dd>{overview.activeLabelKeys.join(', ') || '—'}</dd>
+          <dt>Active findings</dt>
+          <dd>
+            {overview.activeFindingCount > 0
+              ? `${overview.activeFindingCount} (${overview.highestFindingSeverity ?? 'unknown'})`
+              : '—'}
+          </dd>
+        </dl>
+      </section>
+
+      <AccountSubviewTabs accountId={accountId} />
+    </div>
+  )
+}
+
+/**
+ * `isNewUiSectionEnabled('accounts')` に応じて新旧いずれかの Account 詳細画面を表示する。
+ * @param props - Next.js の dynamic route params
+ * @returns 表示すべき Account 詳細画面
+ */
+export default function AccountDetailPage(
+  props: AccountDetailPageProps,
+): Promise<React.ReactElement> {
+  return isNewUiSectionEnabled('accounts')
+    ? NewAccountDetailView(props)
+    : LegacyAccountDetailPage(props)
 }

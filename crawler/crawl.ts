@@ -137,7 +137,7 @@ export interface CrawlDependencies {
   replaceLabelingFollowSample: (accountId: string, result: FollowListResult) => Promise<void>
   syncFollowing: (followerId: string, result: FollowListResult) => Promise<void>
   syncFollowers: (followeeId: string, result: FollowListResult) => Promise<void>
-  syncBlocks: (blockerId: string, result: BlockListResult) => Promise<void>
+  syncBlocks: (blockerId: string, crawlRunId: string, result: BlockListResult) => Promise<void>
   startOrResumeCrawlRun: (startedAt: Date) => Promise<CrawlRunStartResult>
   finishCrawlRun: (id: string, finishedAt: Date, status: string) => Promise<void>
   setCurrentAccount: (crawlRunId: string, username: string, startedAt: Date) => Promise<void>
@@ -666,6 +666,7 @@ async function syncBlocksPhase(
   account: AppConfig['accounts'][number],
   client: CrawlOpenApiClient,
   blockerId: string | null,
+  crawlRunId: string,
 ): Promise<BlocksCheckpointData> {
   if (!blockerId) return { synced: false, warnings: [] }
   try {
@@ -673,7 +674,7 @@ async function syncBlocksPhase(
       () => fetchBlocks(client.getBlocksApi(), deps.limits.blockEdgesPerAccount),
       retryOptions(deps),
     )
-    await deps.syncBlocks(blockerId, blocks)
+    await deps.syncBlocks(blockerId, crawlRunId, blocks)
     return { synced: true, warnings: [] }
   } catch (error) {
     const message = `Failed to sync blocked users for ${account.username}`
@@ -1058,6 +1059,7 @@ async function runAccountCycle(
               account,
               openApiContext.client,
               following?.userId ?? null,
+              crawlRunId,
             )
             await deps.completeCrawlAccountCheckpoint({
               crawlRunId,
@@ -1287,7 +1289,8 @@ async function main(): Promise<void> {
       replaceLabelingFollowSampleRecord(prisma, accountId, result),
     syncFollowing: (followerId, result) => syncFollowingEdges(prisma, followerId, result),
     syncFollowers: (followeeId, result) => syncFollowersEdges(prisma, followeeId, result),
-    syncBlocks: (blockerId, result) => syncBlocksEdges(prisma, blockerId, result),
+    syncBlocks: (blockerId, crawlRunId, result) =>
+      syncBlocksEdges(prisma, blockerId, crawlRunId, result),
     startOrResumeCrawlRun: (startedAt) =>
       startOrResumeCrawlRunRecord(prisma, startedAt, staleThresholdMs),
     finishCrawlRun: (id, finishedAt, status) =>
