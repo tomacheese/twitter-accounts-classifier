@@ -116,4 +116,30 @@ describe('getPipelineMeta', () => {
     const meta = await getPipelineMeta(prisma)
     expect(meta.freshnessStatus).toBe('stale')
   })
+
+  it('全ての read model が healthy なら unknown ではなく healthy を返す', async () => {
+    const prisma = createMockPrisma({
+      readModelStates: [
+        {
+          modelKey: 'account_summary',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-1',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+        {
+          modelKey: 'label_summary',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-2',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+      ],
+    })
+
+    const meta = await getPipelineMeta(prisma)
+    expect(meta.freshnessStatus).toBe('healthy')
+  })
 })

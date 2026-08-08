@@ -99,7 +99,7 @@ function toMeta(
  * @param prisma - Prisma クライアント
  * @returns 適用中 policy から取り出した freshness しきい値。未ロードなら既定値
  */
-async function getFreshnessThresholds(prisma: PrismaClient): Promise<FreshnessThresholds> {
+export async function getFreshnessThresholds(prisma: PrismaClient): Promise<FreshnessThresholds> {
   const policyVersion = await prisma.detectionPolicyVersion.findFirst({
     orderBy: { loadedAt: 'desc' },
   })
@@ -145,7 +145,11 @@ export async function getPipelineMeta(prisma: PrismaClient): Promise<ReadModelMe
   const now = new Date()
 
   let latest = states[0]
-  let worstStatus: ReadModelFreshnessStatus = 'unknown'
+  // unknown と healthy は DEGRADATION_ORDER 上どちらも 0 のため、'unknown' 初期値に
+  // 対して > 比較するだけでは全 state が healthy でも初期値から更新されない。
+  // 実在する範囲外の順位から始めて必ず 1 回目で上書きされるようにする。
+  let worstStatus: ReadModelFreshnessStatus = 'healthy'
+  let worstOrder = -1
   for (const state of states) {
     if ((state.lastSuccessAt?.getTime() ?? 0) > (latest.lastSuccessAt?.getTime() ?? 0)) {
       latest = state
@@ -157,7 +161,9 @@ export async function getPipelineMeta(prisma: PrismaClient): Promise<ReadModelMe
       thresholds,
       now,
     )
-    if (DEGRADATION_ORDER[reconciled] > DEGRADATION_ORDER[worstStatus]) {
+    const order = DEGRADATION_ORDER[reconciled]
+    if (order > worstOrder) {
+      worstOrder = order
       worstStatus = reconciled
     }
   }

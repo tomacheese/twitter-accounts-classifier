@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../../generated/prisma'
 import type { ReadModelFreshnessStatus } from '../api-response'
+import { getFreshnessThresholds, reconcileFreshness, toFreshnessStatus } from '../read-model-meta'
 
 /** Attention Queue の 1 件。 */
 export interface AttentionItemView {
@@ -123,13 +124,15 @@ export async function getOverviewSnapshot(
   if (!snapshot) return null
 
   const { attention, latestPipeline } = parsePayload(snapshot.payload)
-  const freshnessStatus: ReadModelFreshnessStatus =
-    readModelState.status === 'healthy' ||
-    readModelState.status === 'delayed' ||
-    readModelState.status === 'stale' ||
-    readModelState.status === 'failed'
-      ? readModelState.status
-      : 'unknown'
+  // status を直接 map するだけだと analyzer 停止で DB の status が固定された後も
+  // 経過時間で stale に落とせない。共通の read-model-meta と同じ再評価を通す。
+  const thresholds = await getFreshnessThresholds(prisma)
+  const freshnessStatus: ReadModelFreshnessStatus = reconcileFreshness(
+    toFreshnessStatus(readModelState.status),
+    readModelState.lastSuccessAt,
+    thresholds,
+    new Date(),
+  )
 
   return {
     operationalStatus: snapshot.operationalStatus,

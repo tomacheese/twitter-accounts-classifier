@@ -2,13 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
 import { getOverviewSnapshot } from './overview'
 
-function createMockPrisma(overrides: { snapshot?: unknown; readModelState?: unknown }) {
+function createMockPrisma(overrides: {
+  snapshot?: unknown
+  readModelState?: unknown
+  policyVersion?: unknown
+}) {
   return {
     overviewSnapshot: {
       findUnique: vi.fn().mockResolvedValue(overrides.snapshot ?? null),
     },
     readModelState: {
       findUnique: vi.fn().mockResolvedValue(overrides.readModelState ?? null),
+    },
+    detectionPolicyVersion: {
+      findFirst: vi.fn().mockResolvedValue(overrides.policyVersion ?? null),
     },
   } as unknown as PrismaClient
 }
@@ -90,6 +97,24 @@ describe('getOverviewSnapshot', () => {
     const result = await getOverviewSnapshot(prisma)
 
     expect(result?.freshnessStatus).toBe('delayed')
+  })
+
+  it('DB上の status が healthy のままでも lastSuccessAt からの経過時間で stale に落とす(analyzer 停止時)', async () => {
+    const now = new Date('2026-08-08T00:00:00.000Z')
+    vi.useFakeTimers().setSystemTime(now)
+    const prisma = createMockPrisma({
+      snapshot: baseSnapshot,
+      readModelState: {
+        ...baseReadModelState,
+        status: 'healthy',
+        lastSuccessAt: new Date('2026-08-07T10:00:00.000Z'),
+      },
+    })
+
+    const result = await getOverviewSnapshot(prisma)
+
+    expect(result?.freshnessStatus).toBe('stale')
+    vi.useRealTimers()
   })
 
   it('current generation の Pointer を経由して取得する(未公開の build 中 snapshot を見せない)', async () => {
