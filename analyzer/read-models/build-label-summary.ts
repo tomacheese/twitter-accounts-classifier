@@ -24,8 +24,11 @@ function computePrevalence(evaluatedCount: number, trueCount: number): number {
   return evaluatedCount === 0 ? 0 : trueCount / evaluatedCount
 }
 
+// generateFindingsForCrawlCycle も completeness: 'complete' の snapshot だけを評価対象にしている。
+// ここで partial も許すと、Finding は更新されないまま LabelSummary と watermark だけが
+// 不完全な値で進み、qualityStatus が実際には検出できていない状態を normal と表示しうる。
 /** 集計に成功した snapshot だけを対象にする where 条件。 */
-const COMPLETED_SNAPSHOT_FILTER = { completeness: { not: 'unknown' } } as const
+const COMPLETED_SNAPSHOT_FILTER = { completeness: 'complete' } as const
 
 /**
  * buildLabelSummary の入力。
@@ -68,8 +71,9 @@ async function findSnapshotAtOrBefore(
  * LabelDefinition ごとに最新の LabelMetricSnapshot と、直近の日次・週次比較用 snapshot、
  * 対応する ReviewFinding の active/recurring 件数を集約して LabelSummaryCurrent を構築し、
  * Label 詳細のトレンドが参照する LabelMetricDaily も併せて更新する。
- * completeness が unknown の snapshot は集計自体に失敗した記録であり、
- * prevalence を 0 とみなすと誤った下落として伝播するため対象から除く。
+ * completeness が complete でない snapshot (unknown・partial) は Label 単位の
+ * 集計が完全ではない記録であり、prevalence をそのまま採用すると誤った変化として
+ * 伝播するため対象から除く。
  * Label ごとの読み取りは互いに独立しているため並行実行し、
  * 書き込みは 1 回の createMany にまとめて往復回数を Label 数に比例させない。
  * @param prisma - Prisma クライアント

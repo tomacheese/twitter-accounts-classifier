@@ -106,6 +106,49 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     expect(rows[0]?.evaluatedCount).toBe(100)
   })
 
+  it('completeness が partial の snapshot は最新値としても比較対象としても使わない', async () => {
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
+    })
+
+    const now = Date.now()
+    await prisma.labelMetricSnapshot.createMany({
+      data: [
+        {
+          sourceCrawlRunId: `crawl-${randomUUID()}`,
+          labelDefinitionId: labelDefinition.id,
+          observedAt: new Date(now),
+          sourceWatermarkAt: new Date(now),
+          evaluatedCount: 40,
+          trueCount: 30,
+          prevalence: 0.75,
+          completeness: 'partial',
+          policyHash: 'hash',
+          analyzerVersion: '1',
+        },
+        {
+          sourceCrawlRunId: `crawl-${randomUUID()}`,
+          labelDefinitionId: labelDefinition.id,
+          observedAt: new Date(now - 60 * 60 * 1000),
+          sourceWatermarkAt: new Date(now - 60 * 60 * 1000),
+          evaluatedCount: 100,
+          trueCount: 20,
+          prevalence: 0.2,
+          completeness: 'complete',
+          policyHash: 'hash',
+          analyzerVersion: '1',
+        },
+      ],
+    })
+
+    const generationId = `generation-${randomUUID()}`
+    await buildLabelSummary(prisma, { generationId, sourceWatermarkAt: new Date() })
+
+    const rows = await prisma.labelSummaryCurrent.findMany({ where: { generationId } })
+    expect(rows[0]?.prevalence).toBeCloseTo(0.2)
+    expect(rows[0]?.evaluatedCount).toBe(100)
+  })
+
   it('crawl 間隔に依らず 24 時間前・7 日前の snapshot と比較する', async () => {
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },

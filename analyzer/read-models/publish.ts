@@ -80,17 +80,26 @@ const GENERATION_ROW_DELETERS: Record<
 /**
  * Pointer 切り替え後に不要となった世代の行と ReadModelGeneration を削除する。
  * 削除に失敗しても公開自体は成立しているため、例外は呼び出し元へ伝播させない。
+ * 呼び出し元 (publishGeneration) が自分の generationId を渡すのではなく、
+ * ここで Pointer を読み直す。並行 publish では自分の transaction が commit した後、
+ * 別の publish が先に更に新しい generation へ Pointer を切り替えている場合があり、
+ * 古い generationId を保護対象として渡すと、その後の current generation を
+ * 誤って削除してしまう。
  * @param prisma - Prisma クライアント
  * @param modelKey - 対象の読み取りモデル
- * @param currentGenerationId - 現在 Pointer が指している generationId
  */
-async function pruneSupersededGenerations(
-  prisma: PrismaClient,
-  modelKey: string,
-  currentGenerationId: string,
-): Promise<void> {
+async function pruneSupersededGenerations(prisma: PrismaClient, modelKey: string): Promise<void> {
+  const pointer = await prisma.readModelPointer.findUnique({
+    where: { modelKey },
+    select: { currentGenerationId: true },
+  })
+  if (!pointer) return
+
   const obsolete = await prisma.readModelGeneration.findMany({
-    where: { modelKey, id: { not: currentGenerationId } },
+    // 同一 modelKey への並行 publish が居ると、まだ build 中の generation も
+    // startedAt の並びに混ざる。terminal 状態でない行を削除すると、
+    // その publish 自身の後続 update が対象行を失って失敗するため対象から外す。
+    where: { modelKey, id: { not: pointer.currentGenerationId }, status: { not: 'building' } },
     orderBy: [{ startedAt: 'desc' }],
     skip: RETAINED_GENERATIONS - 1,
     select: { id: true },
@@ -194,7 +203,7 @@ export async function publishGeneration(
 
     if (isNewerThanCurrent) {
       try {
-        await pruneSupersededGenerations(prisma, input.modelKey, generation.id)
+        await pruneSupersededGenerations(prisma, input.modelKey)
       } catch (error) {
         logger.error(`failed to prune superseded generations for ${input.modelKey}`, error as Error)
       }
