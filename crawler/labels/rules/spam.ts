@@ -21,14 +21,19 @@ const SOLICITATION_PATTERN = new RegExp(
 // 一致箇所の直後の短い範囲を走査し、拒否マーカーがあれば勧誘とはみなさない。
 // 実際の bio は丁寧・カジュアル・記号のみなど様々な距離・語調で拒否を書くため、
 // 範囲は広めに、語彙も幅広く取っている。
-const REJECTION_WINDOW_LENGTH = 30
+// 拒否対象を複数列挙してから最後にまとめて拒否語を置く bio が多いため、
+// window は列挙 1〜2 個分を見込める長さを確保している。
+const REJECTION_WINDOW_LENGTH = 60
 const REJECTION_PATTERN =
-  /お断り|お断わり|御断り|NG|ダメ|禁止|お控え|ご遠慮|しないで|通報|ブロック|要らん|要りません|要らない|いりません|いらない|不要|結構です|興味(が)?(あり|有り)?ません|対応(は)?していません|🆖|❌|✗/i
+  /お断り|お断わり|御断り|NG|ダメ|禁止|お控え|ご遠慮|しないで|通報|ブロック|スルー|無視|要らん|要りません|要らない|いりません|いらない|不要|結構です|興味(が)?(あり|有り)?ません|対応(は)?していません|🆖|❌|✗/i
 
 function isRejectedSolicitation(bio: string): boolean {
-  const match = SOLICITATION_PATTERN.exec(bio)
+  // 半角カタカナ・全角英数字などの表記ゆれを吸収するため、
+  // 判定前に正規化する (例: 半角の「ﾀﾞﾒ」は全角「ダメ」の NG 語彙に一致しない)。
+  const normalized = bio.normalize('NFKC')
+  const match = SOLICITATION_PATTERN.exec(normalized)
   if (match === null) return false
-  const afterMatch = bio.slice(
+  const afterMatch = normalized.slice(
     match.index + match[0].length,
     match.index + match[0].length + REJECTION_WINDOW_LENGTH,
   )
@@ -53,7 +58,7 @@ export const spamRule: LabelRule = {
   key: 'spam',
   description:
     'プロフィールで出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある',
-  version: '1.4.0',
+  version: '1.5.0',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
     const hasSolicitation =
