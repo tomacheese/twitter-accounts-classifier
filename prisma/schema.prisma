@@ -740,6 +740,11 @@ model AccountClassificationCurrent {
   @@index([generationId, labelDefinitionId, value, accountId])
 }
 
+// sourceId (CrawlRun.id) を account_summary build の再試行冪等キーとして使う。
+// generationId は publishGeneration が retry ごとに新しく発行するため使えないが、
+// 同じ CrawlRun による retry では sourceId が変わらず一致する。
+// sourceId が null の行 (直接呼び出しや legacy データ) は Postgres の仕様上
+// NULL 同士が重複と判定されないため、この場合は冪等性の保証対象外になる。
 model AccountLabelChange {
   id                 String   @id @default(cuid())
   accountId          String
@@ -754,6 +759,7 @@ model AccountLabelChange {
   sourceId           String?
   changedAt          DateTime @default(now())
 
+  @@unique([sourceId, accountId, labelDefinitionId])
   @@index([accountId, changedAt(sort: Desc)])
   @@index([labelDefinitionId, changedAt(sort: Desc), id(sort: Desc)])
 }

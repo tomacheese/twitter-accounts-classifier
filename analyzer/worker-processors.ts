@@ -166,7 +166,12 @@ export async function processReadModelRefresh(
     modelKey: 'account_summary',
     schemaVersion: 1,
     sourceWatermarkAt,
-    build: (generationId) => buildAccountSummary(prisma, { generationId, sourceWatermarkAt }),
+    build: (generationId) =>
+      buildAccountSummary(prisma, {
+        generationId,
+        sourceWatermarkAt,
+        sourceCrawlRunId: crawlRun.id,
+      }),
   })
   await publishGeneration(prisma, {
     modelKey: 'label_summary',

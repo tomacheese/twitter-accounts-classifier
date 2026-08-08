@@ -266,4 +266,60 @@ describe.skipIf(!process.env.DATABASE_URL)('buildAccountSummary', () => {
     expect(classification.value).toBe(false)
     expect(classification.reason).toBe('no match')
   })
+
+  it('同じ CrawlRun による retry では AccountLabelChange を重複挿入しない', async () => {
+    const accountId = await createAccount('frank')
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: `spam_${randomUUID().slice(0, 8)}`, description: 'テスト用ラベル' },
+    })
+    const labeledAt = new Date(Date.now() - 60 * 60 * 1000)
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: true,
+      confidence: 0.9,
+      reason: 'matched',
+      labeledAt,
+    })
+
+    const firstGenerationId = `generation-${randomUUID()}`
+    await buildAccountSummary(prisma, {
+      generationId: firstGenerationId,
+      sourceWatermarkAt: labeledAt,
+    })
+    await prisma.readModelPointer.upsert({
+      where: { modelKey: 'account_summary' },
+      create: { modelKey: 'account_summary', currentGenerationId: firstGenerationId },
+      update: { currentGenerationId: firstGenerationId },
+    })
+
+    const removedAt = new Date()
+    await createAccountLabel({
+      accountId,
+      labelDefinitionId: labelDefinition.id,
+      value: false,
+      confidence: 0.9,
+      reason: 'no longer matched',
+      labeledAt: removedAt,
+    })
+
+    const sourceCrawlRunId = `crawl-run-${randomUUID()}`
+    // pointer を切り替えずに 2 回 build する。generation publish が
+    // pointer 切り替え前に失敗し、同じ CrawlRun で retry された状況を模す。
+    await buildAccountSummary(prisma, {
+      generationId: `generation-${randomUUID()}`,
+      sourceWatermarkAt: removedAt,
+      sourceCrawlRunId,
+    })
+    await buildAccountSummary(prisma, {
+      generationId: `generation-${randomUUID()}`,
+      sourceWatermarkAt: removedAt,
+      sourceCrawlRunId,
+    })
+
+    const changes = await prisma.accountLabelChange.findMany({
+      where: { accountId, sourceId: sourceCrawlRunId },
+    })
+    expect(changes).toHaveLength(1)
+  })
 })
