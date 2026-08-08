@@ -6,6 +6,25 @@ import type { GlobalSearchResult } from '@/lib/queries/global-search'
 
 const DEBOUNCE_MS = 300
 
+/**
+ * Operations 詳細ページの route は kind ごとに異なる (crawl/review/block) ため、
+ * OperationCycle.kind の値からその接頭辞へ変換する。
+ */
+const OPERATION_KIND_TO_PATH: Record<string, string> = {
+  crawl: 'crawl',
+  weekly_review: 'review',
+  block: 'block',
+}
+
+/**
+ * @param cycleId - 対象 OperationCycle の ID
+ * @param kind - OperationCycle.kind
+ * @returns Operations 詳細ページの URL
+ */
+export function buildOperationCycleHref(cycleId: string, kind: string): string {
+  return `/operations/${OPERATION_KIND_TO_PATH[kind] ?? kind}/${cycleId}`
+}
+
 /** 検索結果ドロップダウンが取りうる表示状態。 */
 export type GlobalSearchDisplayState = 'loading' | 'error' | 'empty' | 'results'
 
@@ -127,7 +146,10 @@ export function GlobalSearch(): React.ReactElement {
               ))}
               {result.operations.map((operation) => (
                 <li key={`operation-${operation.id}`}>
-                  <Link href="/operations" className="hover:underline">
+                  <Link
+                    href={buildOperationCycleHref(operation.id, operation.kind)}
+                    className="hover:underline"
+                  >
                     Operation: {operation.id} ({operation.kind})
                   </Link>
                 </li>

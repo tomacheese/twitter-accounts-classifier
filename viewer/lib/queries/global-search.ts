@@ -39,7 +39,9 @@ const ACCOUNT_SUMMARY_MODEL_KEY = 'account_summary'
 
 /**
  * アカウント検索は Account 本体ではなく read model の AccountSummaryCurrent を引く。
- * normalizedDisplayName には pg_trgm の GIN 索引があり、部分一致を索引で辿れる。
+ * normalizedDisplayName は pg_trgm の GIN 索引を使う contains、
+ * normalizedScreenName は通常の btree 索引を使う startsWith で絞り込む。
+ * screenName にも contains を使うと索引を使わない全表スキャンになるため区別している。
  * @param prisma - Prisma クライアント
  * @param query - 検索クエリ文字列
  * @returns 上限件数までのアカウント検索結果
@@ -58,7 +60,8 @@ async function searchAccounts(
       generationId: pointer.currentGenerationId,
       OR: [
         { normalizedDisplayName: { contains: query, mode: 'insensitive' } },
-        { normalizedScreenName: { contains: query, mode: 'insensitive' } },
+        { normalizedScreenName: { startsWith: query, mode: 'insensitive' } },
+        { accountId: query },
       ],
     },
     take: MAX_RESULTS_PER_TYPE,
@@ -73,7 +76,7 @@ async function searchAccounts(
 
 /**
  * Account の screenName/displayName、Label の key、Finding の id/type、
- * Operation の cycleId のみを検索対象とする。
+ * Operation の cycleId/sourceId のみを検索対象とする。
  * Tweet 本文は個人が特定可能な実データを含みうるため、意図的に除外する。
  * @param prisma - Prisma クライアント
  * @param input - 検索クエリ文字列
@@ -104,7 +107,12 @@ export async function searchAcrossEntities(
       take: MAX_RESULTS_PER_TYPE,
     }),
     prisma.operationCycle.findMany({
-      where: { id: { contains: query, mode: 'insensitive' } },
+      where: {
+        OR: [
+          { id: { contains: query, mode: 'insensitive' } },
+          { sourceId: { contains: query, mode: 'insensitive' } },
+        ],
+      },
       take: MAX_RESULTS_PER_TYPE,
     }),
   ])

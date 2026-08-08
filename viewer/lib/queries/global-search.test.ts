@@ -57,7 +57,30 @@ describe('searchAcrossEntities', () => {
     expect(call.where.OR.map((condition) => Object.keys(condition)[0])).toEqual([
       'normalizedDisplayName',
       'normalizedScreenName',
+      'accountId',
     ])
+  })
+
+  it('screenName は btree 索引を使える startsWith で、displayName は trigram 索引を使える contains で絞り込む', async () => {
+    const { prisma, accountSummaryFindMany } = createMockPrisma()
+    await searchAcrossEntities(prisma, { query: 'example' })
+
+    const call = accountSummaryFindMany.mock.calls[0][0] as {
+      where: { OR: Record<string, { contains?: string; startsWith?: string }>[] }
+    }
+    const [displayNameCondition, screenNameCondition] = call.where.OR
+    expect(displayNameCondition.normalizedDisplayName.contains).toBe('example')
+    expect(screenNameCondition.normalizedScreenName.startsWith).toBe('example')
+  })
+
+  it('accountId の完全一致でもアカウントを検索できる', async () => {
+    const { prisma, accountSummaryFindMany } = createMockPrisma()
+    await searchAcrossEntities(prisma, { query: 'account-1' })
+
+    const call = accountSummaryFindMany.mock.calls[0][0] as {
+      where: { OR: Record<string, unknown>[] }
+    }
+    expect(call.where.OR[2]).toEqual({ accountId: 'account-1' })
   })
 
   it('ReadModelPointer が無ければアカウント検索結果は空になる', async () => {
@@ -69,7 +92,7 @@ describe('searchAcrossEntities', () => {
     expect(accountSummaryFindMany).not.toHaveBeenCalled()
   })
 
-  it('Label の key、Finding の id/type、Operation の cycleId のみを参照する', async () => {
+  it('Label の key、Finding の id/type、Operation の cycleId/sourceId のみを参照する', async () => {
     const { prisma } = createMockPrisma()
     await searchAcrossEntities(prisma, { query: 'example' })
 
@@ -78,6 +101,17 @@ describe('searchAcrossEntities', () => {
     ).labelDefinition.findMany
     const labelCall = labelFindMany.mock.calls[0][0] as { where: Record<string, unknown> }
     expect(Object.keys(labelCall.where)).toEqual(['key'])
+
+    const operationFindMany = (
+      prisma as unknown as { operationCycle: { findMany: ReturnType<typeof vi.fn> } }
+    ).operationCycle.findMany
+    const operationCall = operationFindMany.mock.calls[0][0] as {
+      where: { OR: Record<string, unknown>[] }
+    }
+    expect(operationCall.where.OR.map((condition) => Object.keys(condition)[0])).toEqual([
+      'id',
+      'sourceId',
+    ])
   })
 
   it('空文字クエリは全カテゴリ空配列を返す', async () => {

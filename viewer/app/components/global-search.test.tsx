@@ -1,7 +1,7 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { GlobalSearch, resolveDisplayState } from './global-search'
+import { GlobalSearch, buildOperationCycleHref, resolveDisplayState } from './global-search'
 
 describe('GlobalSearch', () => {
   it('renders an accessible search input', () => {
@@ -14,6 +14,14 @@ describe('GlobalSearch', () => {
     const html = renderToStaticMarkup(<GlobalSearch />)
     expect(html).not.toContain('No results.')
     expect(html).not.toContain('Searching...')
+  })
+})
+
+describe('buildOperationCycleHref', () => {
+  it('kindに応じてOperations詳細ページのpathを切り替える', () => {
+    expect(buildOperationCycleHref('cycle-1', 'crawl')).toBe('/operations/crawl/cycle-1')
+    expect(buildOperationCycleHref('cycle-2', 'weekly_review')).toBe('/operations/review/cycle-2')
+    expect(buildOperationCycleHref('cycle-3', 'block')).toBe('/operations/block/cycle-3')
   })
 })
 
