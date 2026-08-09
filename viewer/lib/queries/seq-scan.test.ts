@@ -99,6 +99,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
             labelDefinitionId: `label-${gid}-${index}`,
             evaluatedCount: 100,
             trueCount: 10,
+            populationCount: 100,
+            coverage: 1,
             prevalence: 0.1,
             activeFindingCount: 0,
             qualityStatus: 'stable',

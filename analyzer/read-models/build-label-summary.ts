@@ -157,6 +157,8 @@ export async function buildLabelSummary(
         latestSnapshotId: current.id,
         evaluatedCount: current.evaluatedCount,
         trueCount: current.trueCount,
+        populationCount: current.populationCount,
+        coverage: current.coverage,
         prevalence,
         previousRunDelta,
         dayDelta,

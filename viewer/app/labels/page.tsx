@@ -1,6 +1,7 @@
 import React from 'react'
 import Link from 'next/link'
 import { formatDateTime } from '@/lib/format-date'
+import { formatPercentage } from '@/lib/format-percentage'
 import { getPrismaClient } from '@/lib/prisma'
 import { getLabelAggregateSnapshot } from '@/lib/queries/dashboard'
 import { listLabelSummaries } from '@/lib/queries/label-summary'
@@ -61,10 +62,9 @@ async function LegacyLabelsPage(): Promise<React.ReactElement> {
             </thead>
             <tbody>
               {entries.map((entry) => {
-                const percentage =
-                  entry.totalAccounts === 0
-                    ? 0
-                    : Math.round((entry.trueCount / entry.totalAccounts) * 100)
+                const percentage = formatPercentage(
+                  entry.totalAccounts === 0 ? 0 : entry.trueCount / entry.totalAccounts,
+                )
                 return (
                   <tr key={entry.labelKey} className="border-t align-top dark:border-gray-700">
                     <td className="p-3 font-mono">{entry.labelKey}</td>
@@ -74,7 +74,7 @@ async function LegacyLabelsPage(): Promise<React.ReactElement> {
                         href={`/accounts?label=${encodeURIComponent(entry.labelKey)}`}
                         className="text-blue-600 hover:underline dark:text-blue-400"
                       >
-                        {entry.trueCount}/{entry.totalAccounts} ({percentage}%)
+                        {entry.trueCount}/{entry.totalAccounts} ({percentage})
                       </Link>
                     </td>
                   </tr>
@@ -116,6 +116,9 @@ async function NewLabelsView(): Promise<React.ReactElement> {
             <thead className="bg-gray-100 dark:bg-gray-700">
               <tr>
                 <th className="p-3">Key</th>
+                <th className="p-3">True count</th>
+                <th className="p-3">Evaluated count</th>
+                <th className="p-3">Coverage</th>
                 <th className="p-3">Prevalence</th>
                 <th className="p-3">Quality</th>
                 <th className="p-3">Findings</th>
@@ -132,7 +135,17 @@ async function NewLabelsView(): Promise<React.ReactElement> {
                       {item.labelKey}
                     </Link>
                   </td>
-                  <td className="p-3">{(item.prevalence * 100).toFixed(1)}%</td>
+                  <td className="p-3">{item.trueCount}</td>
+                  <td className="p-3">{item.evaluatedCount}</td>
+                  <td className="p-3">
+                    {formatPercentage(item.coverage)}
+                    {item.qualityStatus === 'unknown' && (
+                      <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                        low coverage
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-3">{formatPercentage(item.prevalence)}</td>
                   <td className="p-3">{item.qualityStatus}</td>
                   <td className="p-3">
                     {item.activeFindingCount > 0

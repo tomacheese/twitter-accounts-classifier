@@ -69,6 +69,41 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     expect(rows[0]?.qualityStatus).toBe('attention')
   })
 
+  it('LabelMetricSnapshot の populationCount/coverage を LabelSummaryCurrent へコピーする', async () => {
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
+    })
+    const triggerWorkItemId = `work_item_${randomUUID()}`
+
+    await prisma.labelMetricSnapshot.create({
+      data: {
+        triggerWorkItemId,
+        labelDefinitionId: labelDefinition.id,
+        observedAt: new Date(),
+        sourceWatermarkAt: new Date(),
+        evaluatedCount: 80,
+        trueCount: 8,
+        populationCount: 100,
+        coverage: 0.8,
+        prevalence: 0.1,
+        completeness: 'complete',
+        policyHash: 'hash',
+        analyzerVersion: '1',
+      },
+    })
+
+    const generationId = `generation-${randomUUID()}`
+    await buildLabelSummary(prisma, {
+      generationId,
+      triggerWorkItemId,
+      sourceWatermarkAt: new Date(),
+    })
+
+    const rows = await prisma.labelSummaryCurrent.findMany({ where: { generationId } })
+    expect(rows[0]?.populationCount).toBe(100)
+    expect(rows[0]?.coverage).toBeCloseTo(0.8)
+  })
+
   it('builds from the current triggerWorkItemId snapshot set without falling back to an old complete snapshot', async () => {
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: `test_summary_label_${randomUUID()}`, description: 'ラベル' },

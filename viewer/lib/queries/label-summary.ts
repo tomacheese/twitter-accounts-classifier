@@ -7,6 +7,10 @@ const MODEL_KEY = 'label_summary'
 export interface LabelSummaryListItem {
   labelDefinitionId: string
   labelKey: string
+  evaluatedCount: number
+  trueCount: number
+  populationCount: number
+  coverage: number
   prevalence: number
   qualityStatus: string
   activeFindingCount: number
@@ -57,6 +61,10 @@ export async function listLabelSummaries(prisma: PrismaClient): Promise<ListLabe
   const items: LabelSummaryListItem[] = rows.map((row) => ({
     labelDefinitionId: row.labelDefinitionId,
     labelKey: keyById.get(row.labelDefinitionId) ?? row.labelDefinitionId,
+    evaluatedCount: row.evaluatedCount,
+    trueCount: row.trueCount,
+    populationCount: row.populationCount,
+    coverage: row.coverage,
     prevalence: row.prevalence,
     qualityStatus: row.qualityStatus,
     activeFindingCount: row.activeFindingCount,
