@@ -49,6 +49,14 @@ describe('topicCryptoRule', () => {
     ).toBe(false)
   })
 
+  it('is false for an illustrator bio that rejects unauthorized NFT-ification, not declaring interest', () => {
+    expect(
+      topicCryptoRule.evaluate(
+        makeBundle({ bio: 'イラスト垢です。🚫NFT/AI学習🚫 無断転載もお断り' }),
+      ).value,
+    ).toBe(false)
+  })
+
   it('bio・ツイートにキーワードを含まず、フォローグラフシグナルがしきい値を満たす場合は value: true・confidence: 0.5 になる', () => {
     const bundle = {
       ...makeBundle({}),

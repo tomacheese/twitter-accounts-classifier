@@ -147,4 +147,12 @@ describe('topicNsfwRule', () => {
       topicNsfwRule.evaluate(makeBundle({ bio: 'アダルトグッズのレビューを投稿しています' })).value,
     ).toBe(true)
   })
+
+  it('is false for a fighting-game bio whose Master Rank number happens to contain "R18"', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({ bio: '格ゲー勢。最高ランクMR1823で燃え尽きました。フォローはご自由に' }),
+      ).value,
+    ).toBe(false)
+  })
 })

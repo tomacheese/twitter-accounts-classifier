@@ -14,11 +14,11 @@ export const selfDuplicateReplyRule: LabelRule = {
     '同一内容(URL/メンションを除去した上で比較)を単独ツイートとしても @リプライとしても繰り返し投稿している。インプレッション稼ぎ(「インプレゾンビ」)行為の特徴',
   version: '1.1.0',
   evaluate(bundle) {
-    // A reply whose parent is one of this account's own tweets within the bundle is thread
-    // narration (the author continuing their own post), not a reply hijacked under someone
-    // else's viral tweet - the pattern this rule targets. Excluding those avoids flagging
-    // ordinary corporate/personal accounts that repeat a tagline across a self-thread. A
-    // parent tweet outside the bundle's recent window is treated as unknown and not excluded.
+    // リプライ先が自分自身の直近ツイートである場合、それは他者のバズ投稿に相乗りした
+    // リプライではなく、自分の投稿を続けるスレッド内の連投にすぎない。
+    // これを除外しないと、定型の宣伝文句をスレッド内で繰り返すだけの
+    // 通常の法人・個人アカウントを誤検知してしまう。
+    // リプライ先が直近ツイートの範囲外にある場合は判定不能として除外しない。
     const ownTweetIds = new Set(bundle.recentTweets.map((t) => t.id))
     const groups = new Map<string, { hasStandalone: boolean; hasReply: boolean }>()
     for (const tweet of bundle.recentTweets) {
