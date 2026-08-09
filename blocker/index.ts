@@ -24,6 +24,12 @@ import {
 } from './db/block-run-repository'
 import { selectBlockCandidates } from './db/candidate-repository'
 import { recordSuccessfulBlock } from './db/block-repository'
+import {
+  findOrCreateOutboxEntry,
+  markOutboxRemoteSucceeded,
+  markOutboxLocalPersisted,
+  markOutboxRemoteFailed,
+} from './db/outbox-repository'
 import { runBlockAccountCycle } from './block-cycle'
 import { notifyDiscord, type AccountRunSummary } from './discord-notifier'
 import { initMonitoring, captureException } from './monitoring/sentry'
@@ -73,6 +79,10 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
           startBlockAccountRun,
           finishBlockAccountRun,
           recordBlockAction,
+          findOrCreateOutboxEntry,
+          markOutboxRemoteSucceeded,
+          markOutboxLocalPersisted,
+          markOutboxRemoteFailed,
           prisma: deps.prisma,
           limits: loadBlockLimits(),
         },

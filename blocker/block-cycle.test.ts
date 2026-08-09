@@ -1,6 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import { runBlockAccountCycle } from './block-cycle'
+import { runBlockAccountCycle, attemptBlock } from './block-cycle'
 import type { BlockerAccountConfig } from './config/load-config'
+
+function createMockClient() {
+  return {
+    client: {
+      getUserApi: vi.fn().mockReturnValue({
+        getUserByScreenName: vi.fn().mockResolvedValue({ data: { user: { restId: 'blocker-1' } } }),
+      }),
+    },
+    createBlock: vi.fn().mockResolvedValue(undefined),
+  }
+}
 
 function baseAccount(): Extract<BlockerAccountConfig, { blockEnabled: true }> {
   return {
@@ -31,6 +42,12 @@ function fakeDeps(overrides: Partial<Record<string, unknown>> = {}) {
     startBlockAccountRun: vi.fn().mockResolvedValue({ id: 'account-run-1' }),
     finishBlockAccountRun: vi.fn().mockResolvedValue(undefined),
     recordBlockAction: vi.fn().mockResolvedValue(undefined),
+    findOrCreateOutboxEntry: vi
+      .fn()
+      .mockResolvedValue({ id: 'outbox-1', status: 'pending_remote' }),
+    markOutboxRemoteSucceeded: vi.fn().mockResolvedValue(undefined),
+    markOutboxLocalPersisted: vi.fn().mockResolvedValue(undefined),
+    markOutboxRemoteFailed: vi.fn().mockResolvedValue(undefined),
     prisma: {},
     limits: { intervalSeconds: 21_600, actionDelayMs: 0, maxPerAccountPerRun: 50 },
     sleepImpl: vi.fn().mockResolvedValue(undefined),
@@ -127,5 +144,69 @@ describe('runBlockAccountCycle', () => {
 
     expect(deps.selectBlockCandidates).not.toHaveBeenCalled()
     expect(summary).toEqual({ username: 'alice', blockedCount: 0, failedCount: 0, failed: true })
+  })
+})
+
+describe('attemptBlock', () => {
+  it('createBlock 実行前に outbox entry を pending_remote で作成する', async () => {
+    const deps = fakeDeps()
+    const callOrder: string[] = []
+    vi.mocked(deps.findOrCreateOutboxEntry).mockImplementation(async () => {
+      callOrder.push('outbox_created')
+      return { id: 'outbox-1', status: 'pending_remote' }
+    })
+    const client = createMockClient()
+    vi.mocked(client.createBlock).mockImplementation(async () => {
+      callOrder.push('remote_block_called')
+    })
+
+    await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
+      accountId: 'blocked-1',
+      labelDefinitionId: 'label-1',
+      confidence: 0.9,
+    })
+
+    expect(callOrder).toEqual(['outbox_created', 'remote_block_called'])
+  })
+
+  it('createBlock 失敗時は outbox entry を remote_failed にする', async () => {
+    const deps = fakeDeps()
+    vi.mocked(deps.findOrCreateOutboxEntry).mockResolvedValue({
+      id: 'outbox-1',
+      status: 'pending_remote',
+    })
+    const client = createMockClient()
+    vi.mocked(client.createBlock).mockRejectedValue(new Error('boom'))
+
+    await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
+      accountId: 'blocked-1',
+      labelDefinitionId: 'label-1',
+      confidence: 0.9,
+    })
+
+    expect(deps.markOutboxRemoteFailed).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
+  })
+
+  it('createBlock 成功時は outbox entry を remote_succeeded → local_persisted の順に進める', async () => {
+    const deps = fakeDeps()
+    vi.mocked(deps.findOrCreateOutboxEntry).mockResolvedValue({
+      id: 'outbox-1',
+      status: 'pending_remote',
+    })
+    const client = createMockClient()
+
+    const succeeded = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
+      accountId: 'blocked-1',
+      labelDefinitionId: 'label-1',
+      confidence: 0.9,
+    })
+
+    expect(succeeded).toBe(true)
+    expect(deps.markOutboxRemoteSucceeded).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
+    expect(deps.recordBlockAction).toHaveBeenCalledWith(
+      deps.prisma,
+      expect.objectContaining({ outboxEntryId: 'outbox-1', result: 'success' }),
+    )
+    expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
   })
 })

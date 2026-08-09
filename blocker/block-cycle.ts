@@ -10,6 +10,12 @@ import {
   finishBlockAccountRun,
   recordBlockAction,
 } from './db/block-run-repository'
+import {
+  findOrCreateOutboxEntry,
+  markOutboxRemoteSucceeded,
+  markOutboxLocalPersisted,
+  markOutboxRemoteFailed,
+} from './db/outbox-repository'
 import { captureException } from './monitoring/sentry'
 import type { AccountRunSummary } from './discord-notifier'
 
@@ -28,6 +34,10 @@ export interface BlockAccountCycleDependencies {
   startBlockAccountRun: typeof startBlockAccountRun
   finishBlockAccountRun: typeof finishBlockAccountRun
   recordBlockAction: typeof recordBlockAction
+  findOrCreateOutboxEntry: typeof findOrCreateOutboxEntry
+  markOutboxRemoteSucceeded: typeof markOutboxRemoteSucceeded
+  markOutboxLocalPersisted: typeof markOutboxLocalPersisted
+  markOutboxRemoteFailed: typeof markOutboxRemoteFailed
   prisma: PrismaClient
   limits: BlockLimits
   sleepImpl?: (ms: number) => Promise<void>
@@ -55,6 +65,9 @@ async function resolveOwnAccountId(
 }
 
 /**
+ * outbox entry を `createBlock` (remote) の前に確定させることで、Twitter 側の block が
+ * 成立した直後に DB 障害が起きても「成立したかどうか不明」な状態を残さず、
+ * reconciliation が Twitter 側の実態から補修できるようにする。
  * 1 件の失敗が残りの候補の処理を止めないよう、この関数自身は例外を投げない。
  * Twitter 側への `createBlock` とその後の `BlockAction` 記録を別々の try で囲む: 記録側の
  * DB エラーを `createBlock` の失敗と同じ `catch` にまとめると、実際にはブロックが成立した
@@ -66,13 +79,21 @@ async function resolveOwnAccountId(
  * @param candidate - ブロック対象と根拠ラベル・確信度
  * @returns ブロックに成功したかどうか
  */
-async function attemptBlock(
+export async function attemptBlock(
   client: OpenApiClientContext,
   deps: BlockAccountCycleDependencies,
   blockAccountRunId: string,
   blockerId: string,
   candidate: BlockCandidate,
 ): Promise<boolean> {
+  const outboxEntry = await deps.findOrCreateOutboxEntry(deps.prisma, {
+    blockAccountRunId,
+    blockerId,
+    blockedId: candidate.accountId,
+    labelDefinitionId: candidate.labelDefinitionId,
+    confidence: candidate.confidence,
+  })
+
   try {
     await withTwitterRetry(() => client.createBlock(candidate.accountId))
   } catch (error) {
@@ -81,6 +102,7 @@ async function attemptBlock(
       error as Error,
     )
     captureException(error, { blockerId, blockedId: candidate.accountId })
+    await deps.markOutboxRemoteFailed(deps.prisma, outboxEntry.id)
     await deps.recordBlockAction(deps.prisma, {
       blockAccountRunId,
       blockerId,
@@ -89,9 +111,12 @@ async function attemptBlock(
       confidence: candidate.confidence,
       result: 'failure',
       errorMessage: error instanceof Error ? error.message : String(error),
+      outboxEntryId: outboxEntry.id,
     })
     return false
   }
+
+  await deps.markOutboxRemoteSucceeded(deps.prisma, outboxEntry.id)
 
   try {
     await deps.recordSuccessfulBlock(deps.prisma, blockerId, candidate.accountId, blockAccountRunId)
@@ -103,7 +128,9 @@ async function attemptBlock(
       confidence: candidate.confidence,
       result: 'success',
       errorMessage: null,
+      outboxEntryId: outboxEntry.id,
     })
+    await deps.markOutboxLocalPersisted(deps.prisma, outboxEntry.id)
   } catch (error) {
     logger.error(
       `Blocked account ${candidate.accountId} but failed to record it for ${blockerId}`,
