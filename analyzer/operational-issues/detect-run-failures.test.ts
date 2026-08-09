@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterAll } from 'vitest'
 import { getPrismaClient } from '../db/client'
 import {
   detectAnalysisStageFailure,
@@ -258,7 +258,7 @@ describe.skipIf(!process.env.DATABASE_URL)('detectStalledBlockOutboxEntries', ()
   const prisma = getPrismaClient()
   const staleCreatedAt = new Date(Date.now() - 60 * 60 * 1000)
 
-  beforeEach(async () => {
+  async function resetDb(): Promise<void> {
     await prisma.blockOutboxEntry.deleteMany()
     await prisma.blockAccountRun.deleteMany()
     await prisma.blockRun.deleteMany()
@@ -266,7 +266,10 @@ describe.skipIf(!process.env.DATABASE_URL)('detectStalledBlockOutboxEntries', ()
     await prisma.labelDefinition.deleteMany()
     await prisma.operationalIssueOccurrence.deleteMany()
     await prisma.operationalIssue.deleteMany()
-  })
+  }
+
+  beforeEach(resetDb)
+  afterAll(resetDb)
 
   /**
    * @param count - 作成する停滞済み (createdAt が古い) outbox entry の件数
