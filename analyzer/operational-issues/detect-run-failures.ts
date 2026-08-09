@@ -22,9 +22,12 @@ export interface DetectRunFailuresInput {
 }
 
 const FAILED_STATUSES = new Set(['failed', 'timeout', 'dead'])
+const RECOVERED_STATUSES = new Set(['success', 'succeeded', 'completed', 'partial'])
 
 /**
  * Run 単位で一意な fingerprint の OperationalIssue を upsert する。
+ * 同じ component の後続 run が正常または partial で終わった場合は、過去の active な
+ * run_failure を解消し、現在も継続中の障害として Attention に残さない。
  * observationKey の既定値に runId を使うため、同一 run を複数回処理しても
  * Occurrence が重複しない。
  * @param prisma - Prisma クライアント
@@ -34,6 +37,37 @@ export async function detectRunFailures(
   prisma: PrismaClient,
   input: DetectRunFailuresInput,
 ): Promise<void> {
+  if (RECOVERED_STATUSES.has(input.runStatus)) {
+    const issues = await prisma.operationalIssue.findMany({
+      where: { component: input.component, type: 'run_failure', status: 'active' },
+    })
+    for (const issue of issues) {
+      await prisma.operationalIssue.update({
+        where: { id: issue.id },
+        data: { status: 'resolved', resolvedAt: input.now },
+      })
+      await prisma.operationalIssueOccurrence.upsert({
+        where: {
+          issueId_observationKey: {
+            issueId: issue.id,
+            observationKey: `${input.runId}:resolved`,
+          },
+        },
+        create: {
+          issueId: issue.id,
+          observedAt: input.now,
+          stateTransition: 'resolved',
+          severity: issue.severity,
+          sourceType: input.component,
+          sourceId: input.runId,
+          observationKey: `${input.runId}:resolved`,
+        },
+        update: {},
+      })
+    }
+    return
+  }
+
   if (!FAILED_STATUSES.has(input.runStatus)) return
 
   const severity = input.severity ?? 'high'
