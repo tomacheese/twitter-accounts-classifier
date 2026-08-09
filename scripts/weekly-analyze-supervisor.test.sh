@@ -127,4 +127,61 @@ if grep -Fq -- 'DATABASE_URL=postgresql://' "$TMUX_ARGS"; then
   fail 'tmux invocation exposed the weekly-review DATABASE_URL value in process arguments'
 fi
 
+SUCCESS_CASE="$TMP_ROOT/success"
+make_case_repo "$SUCCESS_CASE"
+SUCCESS_SHIMS="$SUCCESS_CASE/home/.local/share/mise/shims"
+export SUCCESS_TMUX_COUNT="$SUCCESS_CASE/tmux-count"
+cat > "$SUCCESS_SHIMS/claude" <<'SCRIPT'
+#!/bin/sh
+if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then
+  printf '%s\n' '{"loggedIn":true}'
+fi
+SCRIPT
+cat > "$SUCCESS_SHIMS/pnpm" <<'SCRIPT'
+#!/bin/sh
+[ "$*" = 'install --frozen-lockfile' ] && exit 0
+exit 99
+SCRIPT
+cat > "$SUCCESS_CASE/repo/crawler/node_modules/.bin/tsx" <<'SCRIPT'
+#!/bin/sh
+case "$*" in
+  *'weekly-analysis-run.ts create'*) printf '%s\n' '{"id":"run1"}' ;;
+  *'weekly-analysis-run.ts list-running'*) printf '%s\n' '[]' ;;
+  *'weekly-analysis-run.ts get'*) printf '%s\n' '{"id":"run1","status":"success"}' ;;
+  *) printf '%s\n' '{}' ;;
+esac
+SCRIPT
+cat > "$SUCCESS_SHIMS/tmux" <<'SCRIPT'
+#!/bin/sh
+if [ "${1:-}" = has-session ]; then
+  count=0
+  [ -f "$SUCCESS_TMUX_COUNT" ] && count="$(cat "$SUCCESS_TMUX_COUNT")"
+  count=$((count + 1))
+  printf '%s' "$count" > "$SUCCESS_TMUX_COUNT"
+  [ "$count" -eq 1 ]
+  exit $?
+fi
+exit 0
+SCRIPT
+chmod +x "$SUCCESS_SHIMS/claude" "$SUCCESS_SHIMS/pnpm" "$SUCCESS_SHIMS/tmux" \
+  "$SUCCESS_CASE/repo/crawler/node_modules/.bin/tsx"
+(
+  cd "$SUCCESS_CASE/repo"
+  git init -q -b master
+  git config user.name test
+  git config user.email test@example.invalid
+  mkdir -p "$SUCCESS_CASE/hooks"
+  git config core.hooksPath "$SUCCESS_CASE/hooks"
+  git add scripts
+  git commit -q -m init
+)
+set +e
+timeout 6s env HOME="$SUCCESS_CASE/home" PATH="$SUCCESS_SHIMS:/usr/local/bin:/usr/bin:/bin" \
+  /bin/sh "$SUCCESS_CASE/repo/scripts/weekly-analyze.sh"
+SUCCESS_STATUS=$?
+set -e
+[ "$SUCCESS_STATUS" -eq 0 ] || fail "successful supervisor cleanup failed (status=$SUCCESS_STATUS)"
+grep -q 'pruning diagnostics older than retention window' "$SUCCESS_CASE/repo/logs/weekly-analyze.log" || \
+  fail 'successful supervisor did not reach diagnostics cleanup after removing its worktree'
+
 echo '[weekly-analyze-supervisor.test] ok'
