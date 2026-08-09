@@ -27,12 +27,21 @@ export interface GlobalSearchOperationResult {
   kind: string
 }
 
+/** entity type ごとの処理時間 (ミリ秒)。 */
+export interface GlobalSearchTimingMs {
+  accounts: number
+  labels: number
+  findings: number
+  operations: number
+}
+
 /** entity type ごとにまとめた横断検索の結果。 */
 export interface GlobalSearchResult {
   accounts: GlobalSearchAccountResult[]
   labels: GlobalSearchLabelResult[]
   findings: GlobalSearchFindingResult[]
   operations: GlobalSearchOperationResult[]
+  timingMs: GlobalSearchTimingMs
 }
 
 /** entity type ごとに検索対象へ含めるかどうか。省略した type は含める。 */
@@ -94,6 +103,16 @@ async function searchAccounts(
 }
 
 /**
+ * @param fn - 計測対象の非同期処理
+ * @returns 結果と処理時間 (ミリ秒)
+ */
+async function withTiming<T>(fn: () => Promise<T>): Promise<{ result: T; ms: number }> {
+  const start = performance.now()
+  const result = await fn()
+  return { result, ms: performance.now() - start }
+}
+
+/**
  * Account の screenName/displayName、Label の key/description (表示名)、
  * Finding の id/type/primaryScopeId、Operation の cycleId/sourceId のみを検索対象とする。
  * Tweet 本文は個人が特定可能な実データを含みうるため、意図的に除外する。
@@ -110,7 +129,13 @@ export async function searchAcrossEntities(
 ): Promise<GlobalSearchResult> {
   const query = input.query.trim()
   if (!query) {
-    return { accounts: [], labels: [], findings: [], operations: [] }
+    return {
+      accounts: [],
+      labels: [],
+      findings: [],
+      operations: [],
+      timingMs: { accounts: 0, labels: 0, findings: 0, operations: 0 },
+    }
   }
 
   const enabled = {
@@ -120,49 +145,66 @@ export async function searchAcrossEntities(
     operations: input.enabledEntityTypes?.operations ?? true,
   }
 
-  const [accounts, labels, findings, operations] = await Promise.all([
-    enabled.accounts ? searchAccounts(prisma, query) : Promise.resolve([]),
-    enabled.labels
-      ? prisma.labelDefinition.findMany({
-          where: {
-            OR: [
-              { key: { contains: query, mode: 'insensitive' } },
-              { description: { contains: query, mode: 'insensitive' } },
-            ],
-          },
-          take: MAX_RESULTS_PER_TYPE,
-        })
-      : Promise.resolve([]),
-    enabled.findings
-      ? prisma.reviewFinding.findMany({
-          where: {
-            OR: [
-              { id: { contains: query, mode: 'insensitive' } },
-              { type: { contains: query, mode: 'insensitive' } },
-              { primaryScopeId: { contains: query, mode: 'insensitive' } },
-            ],
-          },
-          take: MAX_RESULTS_PER_TYPE,
-        })
-      : Promise.resolve([]),
-    enabled.operations
-      ? prisma.operationCycle.findMany({
-          where: {
-            OR: [
-              { id: { contains: query, mode: 'insensitive' } },
-              { sourceId: { contains: query, mode: 'insensitive' } },
-            ],
-          },
-          take: MAX_RESULTS_PER_TYPE,
-        })
-      : Promise.resolve([]),
+  const [accountsTiming, labelsTiming, findingsTiming, operationsTiming] = await Promise.all([
+    withTiming(() => (enabled.accounts ? searchAccounts(prisma, query) : Promise.resolve([]))),
+    withTiming(() =>
+      enabled.labels
+        ? prisma.labelDefinition.findMany({
+            where: {
+              OR: [
+                { key: { contains: query, mode: 'insensitive' } },
+                { description: { contains: query, mode: 'insensitive' } },
+              ],
+            },
+            take: MAX_RESULTS_PER_TYPE,
+          })
+        : Promise.resolve([]),
+    ),
+    withTiming(() =>
+      enabled.findings
+        ? prisma.reviewFinding.findMany({
+            where: {
+              OR: [
+                { id: { contains: query, mode: 'insensitive' } },
+                { type: { contains: query, mode: 'insensitive' } },
+                { primaryScopeId: { contains: query, mode: 'insensitive' } },
+              ],
+            },
+            take: MAX_RESULTS_PER_TYPE,
+          })
+        : Promise.resolve([]),
+    ),
+    withTiming(() =>
+      enabled.operations
+        ? prisma.operationCycle.findMany({
+            where: {
+              OR: [
+                { id: { contains: query, mode: 'insensitive' } },
+                { sourceId: { contains: query, mode: 'insensitive' } },
+              ],
+            },
+            take: MAX_RESULTS_PER_TYPE,
+          })
+        : Promise.resolve([]),
+    ),
   ])
+
+  const { result: accounts, ms: accountsMs } = accountsTiming
+  const { result: labels, ms: labelsMs } = labelsTiming
+  const { result: findings, ms: findingsMs } = findingsTiming
+  const { result: operations, ms: operationsMs } = operationsTiming
 
   return {
     accounts,
     labels: labels.map((label) => ({ id: label.id, key: label.key })),
     findings: findings.map((finding) => ({ id: finding.id, type: finding.type })),
     operations: operations.map((cycle) => ({ id: cycle.id, kind: cycle.kind })),
+    timingMs: {
+      accounts: accountsMs,
+      labels: labelsMs,
+      findings: findingsMs,
+      operations: operationsMs,
+    },
   }
 }
 

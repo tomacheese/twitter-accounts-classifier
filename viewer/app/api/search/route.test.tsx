@@ -18,6 +18,7 @@ beforeEach(() => {
     labels: [],
     findings: [],
     operations: [],
+    timingMs: { accounts: 0, labels: 0, findings: 0, operations: 0 },
   })
 })
 
@@ -56,5 +57,13 @@ describe('GET /api/search', () => {
         operations: false,
       },
     })
+  })
+
+  it('レスポンスに entity type ごとの timingMs を含む', async () => {
+    const request = new Request('http://localhost/api/search?q=alice')
+    const response = await GET(request)
+    const body = (await response.json()) as { timingMs: Record<string, number> }
+    expect(body.timingMs).toHaveProperty('accounts')
+    expect(body.timingMs.accounts).toBeGreaterThanOrEqual(0)
   })
 })

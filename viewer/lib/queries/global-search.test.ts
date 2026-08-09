@@ -157,7 +157,18 @@ describe('searchAcrossEntities', () => {
       labels: [],
       findings: [],
       operations: [],
+      timingMs: { accounts: 0, labels: 0, findings: 0, operations: 0 },
     })
+  })
+
+  it('entity type ごとの処理時間を timingMs に含める', async () => {
+    const { prisma } = createMockPrisma()
+    const result = await searchAcrossEntities(prisma, { query: 'example' })
+
+    expect(result.timingMs.accounts).toBeGreaterThanOrEqual(0)
+    expect(result.timingMs.labels).toBeGreaterThanOrEqual(0)
+    expect(result.timingMs.findings).toBeGreaterThanOrEqual(0)
+    expect(result.timingMs.operations).toBeGreaterThanOrEqual(0)
   })
 
   it('enabledEntityTypes で無効にした type は DB を問い合わせず空配列になる', async () => {

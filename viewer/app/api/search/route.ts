@@ -22,5 +22,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     },
   })
 
+  console.info('Global search completed:', { query, timingMs: result.timingMs })
+
   return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } })
 }
