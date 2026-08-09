@@ -1,5 +1,6 @@
 import type { AnalysisWorkItem, PrismaClient } from './generated/prisma'
 import {
+  deadLetterExhaustedWorkItem,
   claimNextWorkItem,
   completeWorkItem,
   renewWorkItemLease,
@@ -125,6 +126,28 @@ async function dispatch(
   }
 }
 
+
+async function runPostCompletionHook(
+  prisma: PrismaClient,
+  deps: WorkerLoopDeps,
+  workItem: AnalysisWorkItem,
+  outcome: WorkItemOutcome,
+): Promise<void> {
+  try {
+    await deps.onWorkItemSettled?.(prisma, workItem, outcome)
+  } catch (error) {
+    logger.error(
+      `post-completion hook failed for work item ${workItem.id} (${workItem.kind})`,
+      error as Error,
+    )
+    await enqueueWorkItem(prisma, {
+      kind: POST_COMPLETION_REFRESH_KIND,
+      triggerType: WORK_ITEM_COMPLETION_TRIGGER_TYPE,
+      triggerId: workItem.id,
+    })
+  }
+}
+
 /**
  * WorkItem を 1 件 claim し、kind に応じた処理関数を呼び分けて結果を記録する。
  * 処理が例外を投げても worker プロセス自体は落とさない。
@@ -138,6 +161,17 @@ export async function runWorkerLoopOnce(
   prisma: PrismaClient,
   deps: WorkerLoopDeps,
 ): Promise<boolean> {
+  const exhaustedWorkItem = await deadLetterExhaustedWorkItem(prisma, {
+    kinds: [...HANDLED_KINDS],
+  })
+  if (exhaustedWorkItem) {
+    await runPostCompletionHook(prisma, deps, exhaustedWorkItem, {
+      status: 'dead',
+      errorSummary: exhaustedWorkItem.lastErrorSummary ?? undefined,
+    })
+    return true
+  }
+
   const workItem = await claimNextWorkItem(prisma, {
     kinds: [...HANDLED_KINDS],
     leaseOwner: deps.leaseOwner,
@@ -215,24 +249,9 @@ export async function runWorkerLoopOnce(
     return true
   }
 
-  // 後処理の失敗で attempt 自体を失敗扱いに巻き戻すと、既に確定した WorkItem の
-  // 終了状態と矛盾するため、ここでは記録に留めて loop を継続する。ただし WorkItem
-  // 自体は succeeded/failed/dead で確定済みのため、ここで諦めると Cycle/Attention/
-  // Overview の再計算が永久に行われなくなる。post_completion_refresh を durable な
-  // WorkItem として積み、標準の claim/retry/dead 経路に乗せて再試行させる。
-  try {
-    await deps.onWorkItemSettled?.(prisma, workItem, outcome)
-  } catch (error) {
-    logger.error(
-      `post-completion hook failed for work item ${workItem.id} (${workItem.kind})`,
-      error as Error,
-    )
-    await enqueueWorkItem(prisma, {
-      kind: POST_COMPLETION_REFRESH_KIND,
-      triggerType: WORK_ITEM_COMPLETION_TRIGGER_TYPE,
-      triggerId: workItem.id,
-    })
-  }
+  // 後処理の失敗で attempt 自体を失敗扱いに巻き戻さず、durable な
+  // post_completion_refresh へ委ねる。
+  await runPostCompletionHook(prisma, deps, workItem, outcome)
 
   return true
 }
