@@ -36,6 +36,7 @@ export interface RecordBlockActionParams {
   confidence: number
   result: string
   errorMessage: string | null
+  outboxEntryId: string
 }
 
 /**
@@ -161,7 +162,8 @@ export async function finishBlockAccountRun(
 }
 
 /**
- * 1 回のブロック試行の結果を `BlockAction` として記録する。
+ * 同一 outboxEntryId に対して複数回呼ばれても (reconciliation による補修を含む)、
+ * 重複した BlockAction 行を作らないよう outboxEntryId を一意キーとした upsert にする。
  * @param prisma - Prisma クライアント
  * @param params - 1 回のブロック試行の記録
  */
@@ -169,7 +171,11 @@ export async function recordBlockAction(
   prisma: PrismaClient,
   params: RecordBlockActionParams,
 ): Promise<void> {
-  await prisma.blockAction.create({ data: params })
+  await prisma.blockAction.upsert({
+    where: { outboxEntryId: params.outboxEntryId },
+    create: params,
+    update: { result: params.result, errorMessage: params.errorMessage },
+  })
 }
 
 /**
