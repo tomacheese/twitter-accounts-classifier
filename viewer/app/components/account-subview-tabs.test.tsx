@@ -81,9 +81,9 @@ describe('AccountSubviewTabs', () => {
 })
 
 describe('ClassificationView', () => {
-  it('Active → Recently changed (7日以内) → Remaining false の順に表示する', () => {
+  it('Active → Recently changed (7 日以内) → Remaining false の順に表示する', () => {
     const now = new Date('2026-08-09T00:00:00.000Z')
-    vi.setSystemTime(now)
+    vi.useFakeTimers().setSystemTime(now)
     const RECENTLY_CHANGED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
     const entries: AccountClassificationEntryView[] = [
       {
@@ -118,6 +118,50 @@ describe('ClassificationView', () => {
     // Remaining false (old_false) は <details> で折り畳まれているため既定では閉じている
     const oldFalseText = screen.getByText(/old_false/)
     expect(oldFalseText.closest('details')?.hasAttribute('open')).toBe(false)
+  })
+
+  it('各群内では lastChangedAt の降順（新しいものが先）に並べる', () => {
+    const now = new Date('2026-08-09T00:00:00.000Z')
+    vi.useFakeTimers().setSystemTime(now)
+    const entries: AccountClassificationEntryView[] = [
+      {
+        labelKey: 'active_older',
+        value: true,
+        confidence: 0.9,
+        reason: 'x',
+        lastChangedAt: new Date(now.getTime() - 5000),
+      },
+      {
+        labelKey: 'active_newer',
+        value: true,
+        confidence: 0.9,
+        reason: 'x',
+        lastChangedAt: new Date(now.getTime() - 1000),
+      },
+      {
+        labelKey: 'recent_older',
+        value: false,
+        confidence: 0.5,
+        reason: 'x',
+        lastChangedAt: new Date(now.getTime() - 4000),
+      },
+      {
+        labelKey: 'recent_newer',
+        value: false,
+        confidence: 0.5,
+        reason: 'x',
+        lastChangedAt: new Date(now.getTime() - 2000),
+      },
+    ]
+
+    render(<ClassificationView entries={entries} />)
+    vi.useRealTimers()
+
+    const items = screen.getAllByRole('listitem').map((el) => el.textContent)
+    expect(items[0]).toContain('active_newer')
+    expect(items[1]).toContain('active_older')
+    expect(items[2]).toContain('recent_newer')
+    expect(items[3]).toContain('recent_older')
   })
 })
 

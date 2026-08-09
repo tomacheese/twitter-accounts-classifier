@@ -61,12 +61,11 @@ function EmptyState({ message }: { message: string }): React.ReactElement {
   return <p className="text-sm text-gray-500 dark:text-gray-400">{message}</p>
 }
 
-/** false のまま変化していないラベルを「直近の変化」として扱う期間。 */
 const RECENTLY_CHANGED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 /**
  * @param entries - Classification subview のデータ
- * @returns Active/Recently changed/Remaining false の3群
+ * @returns Active/Recently changed/Remaining false の 3 群
  */
 function groupClassificationEntries(entries: AccountClassificationEntryView[]): {
   active: AccountClassificationEntryView[]
@@ -90,7 +89,7 @@ function groupClassificationEntries(entries: AccountClassificationEntryView[]): 
 }
 
 /**
- * @param props - 表示する1件分の分類結果
+ * @param props - 表示する 1 件分の分類結果
  * @returns 描画結果
  */
 function ClassificationEntryItem({
@@ -113,7 +112,7 @@ function ClassificationEntryItem({
 
 /**
  * @param entries - Classification subview のデータ
- * @returns 描画結果。true のラベルと直近7日以内に変化した false のラベルを常に表示し、
+ * @returns 描画結果。true のラベルと直近 7 日以内に変化した false のラベルを常に表示し、
  * それより古い false のラベルは折り畳む
  */
 export function ClassificationView({
