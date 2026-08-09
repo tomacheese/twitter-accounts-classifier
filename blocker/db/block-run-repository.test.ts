@@ -19,6 +19,8 @@ function fakePrisma() {
     blockAccountRun: {
       create: vi.fn().mockResolvedValue({ id: 'account-run-1' }),
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      findMany: vi.fn().mockResolvedValue([]),
     },
     blockAction: {
       create: vi.fn().mockResolvedValue({}),
@@ -41,7 +43,7 @@ describe('startOrResumeBlockRun', () => {
 
     const result = await startOrResumeBlockRun(prisma as never, startedAt, 3_600_000)
 
-    expect(result.id).toBe('run-1')
+    expect(result).toEqual({ id: 'run-1', completedUsernames: [] })
     expect(prisma.blockRun.create).toHaveBeenCalledWith({
       data: {
         startedAt,
@@ -60,10 +62,36 @@ describe('startOrResumeBlockRun', () => {
       lastHeartbeatAt: new Date('2026-08-03T23:59:00Z'),
     })
 
+    prisma.blockAccountRun.findMany.mockResolvedValue([
+      { username: 'alice' },
+      { username: 'alice' },
+      { username: 'bob' },
+    ])
+
     const result = await startOrResumeBlockRun(prisma as never, startedAt, 3_600_000)
 
-    expect(result.id).toBe('existing-run')
+    expect(result).toEqual({ id: 'existing-run', completedUsernames: ['alice', 'bob'] })
     expect(prisma.blockRun.create).not.toHaveBeenCalled()
+    expect(prisma.blockRun.update).toHaveBeenCalledWith({
+      where: { id: 'existing-run' },
+      data: {
+        lastHeartbeatAt: startedAt,
+        staleAfterAt: new Date(startedAt.getTime() + 3_600_000),
+      },
+    })
+    expect(prisma.blockAccountRun.updateMany).toHaveBeenCalledWith({
+      where: { blockRunId: 'existing-run', status: 'running' },
+      data: {
+        status: 'failed',
+        finishedAt: startedAt,
+        errorMessage: 'blocker restarted before account run completed',
+      },
+    })
+    expect(prisma.blockAccountRun.findMany).toHaveBeenCalledWith({
+      where: { blockRunId: 'existing-run', status: 'completed' },
+      select: { username: true },
+      distinct: ['username'],
+    })
   })
 
   it('finalizes a stale running BlockRun as failed and creates a new one', async () => {
@@ -89,7 +117,7 @@ describe('startOrResumeBlockRun', () => {
         staleAfterAt: new Date(startedAt.getTime() + 3_600_000),
       },
     })
-    expect(result.id).toBe('run-1')
+    expect(result).toEqual({ id: 'run-1', completedUsernames: [] })
   })
 })
 
