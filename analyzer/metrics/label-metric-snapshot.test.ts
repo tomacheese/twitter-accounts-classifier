@@ -23,6 +23,39 @@ describe('deriveCompletenessFromCoverage', () => {
   })
 })
 
+describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
+  it('aggregates all label definitions with one classification query', async () => {
+    const snapshotAt = new Date('2026-08-09T00:00:00Z')
+    const queryRaw = vi.fn((strings: TemplateStringsArray) => {
+      const sql = strings.join('?')
+      if (sql.includes('SELECT now() AS now')) return Promise.resolve([{ now: snapshotAt }])
+      if (sql.includes('COUNT(DISTINCT')) return Promise.resolve([{ count: 1n }])
+      return Promise.resolve([])
+    })
+    const fakeTx = {
+      $queryRaw: queryRaw,
+      labelMetricSnapshot: { upsert: vi.fn(() => Promise.resolve({})) },
+    }
+    const fakePrisma = {
+      labelDefinition: {
+        findMany: vi.fn(() => Promise.resolve([{ id: 'label-a' }, { id: 'label-b' }])),
+      },
+      labelMetricSnapshot: { count: vi.fn(() => Promise.resolve(0)) },
+      $transaction: vi.fn((callback: (tx: typeof fakeTx) => Promise<Date>) => callback(fakeTx)),
+    }
+
+    await buildLabelAggregateSnapshotSet(fakePrisma as never, {
+      triggerWorkItemId: 'work_item_single_scan',
+      policyHash: 'hash',
+      analyzerVersion: 'test',
+      thresholds: { minCoverage: 0, maxStaleRatio: 1 },
+      freshnessThresholdsMs: { delayedAfterMs: 1, staleAfterMs: 2 },
+    })
+
+    expect(queryRaw).toHaveBeenCalledTimes(3)
+  })
+})
+
 describe('buildLabelAggregateSnapshotSet transaction options', () => {
   it('allows production-scale label aggregation to run longer than Prisma default timeout', async () => {
     const transaction = vi.fn(() => Promise.resolve(new Date('2026-08-09T00:00:00Z')))
