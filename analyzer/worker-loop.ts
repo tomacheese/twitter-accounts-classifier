@@ -2,6 +2,7 @@ import type { AnalysisWorkItem, PrismaClient } from './generated/prisma'
 import {
   claimNextWorkItem,
   completeWorkItem,
+  renewWorkItemLease,
   computeRetryBackoffMs,
   enqueueWorkItem,
   finishAnalysisRun,
@@ -35,6 +36,8 @@ export interface WorkerLoopDeps {
   leaseOwner: string
   /** lease の有効期間 (ミリ秒)。 */
   leaseDurationMs?: number
+  /** lease 更新間隔 (ミリ秒)。テストや特殊運用向け。既定は leaseDurationMs の 1/3。 */
+  leaseRenewIntervalMs?: number
   /** kind: read_model_refresh の処理関数。 */
   processReadModelRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: label_aggregate_refresh の処理関数。 */
@@ -145,6 +148,36 @@ export async function runWorkerLoopOnce(
     attemptNumber: workItem.attemptCount,
   })
 
+  const leaseDurationMs = deps.leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS
+  const leaseRenewIntervalMs =
+    deps.leaseRenewIntervalMs ?? Math.max(1000, Math.floor(leaseDurationMs / 3))
+  let renewalPromise: Promise<void> | undefined
+  const leaseRenewTimer = setInterval(() => {
+    if (renewalPromise) return
+    renewalPromise = renewWorkItemLease(prisma, {
+      workItemId: workItem.id,
+      leaseOwner: deps.leaseOwner,
+      leaseDurationMs,
+    })
+      .then((renewed) => {
+        if (!renewed) {
+          logger.warn(
+            `failed to renew lease for work item ${workItem.id} (${workItem.kind}): lease lost`,
+          )
+        }
+      })
+      .catch((error: unknown) => {
+        logger.error(
+          `lease renewal failed for work item ${workItem.id} (${workItem.kind})`,
+          error as Error,
+        )
+      })
+      .finally(() => {
+        renewalPromise = undefined
+      })
+  }, leaseRenewIntervalMs)
+  leaseRenewTimer.unref()
+
   let outcome: WorkItemOutcome
   try {
     await dispatch(prisma, workItem, deps)
@@ -155,6 +188,9 @@ export async function runWorkerLoopOnce(
       status: workItem.attemptCount >= workItem.maxAttempts ? 'dead' : 'failed',
       errorSummary: String(error),
     }
+  } finally {
+    clearInterval(leaseRenewTimer)
+    await renewalPromise
   }
 
   await finishAnalysisRun(prisma, {

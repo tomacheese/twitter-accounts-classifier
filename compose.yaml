@@ -8,6 +8,9 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    # PostgreSQL の parallel query は dynamic shared memory を /dev/shm に確保する。
+    # 64MB の Docker 既定値では crawler と analyzer の同時集計で枯渇するため拡張する。
+    shm_size: 512mb
     # 本番機のホスト RAM 15GB は Postgres・crawler・viewer で共有しており、
     # postgres:17-alpine の既定値 (shared_buffers=128MB、work_mem=4MB) は小さすぎるため調整する。
     # ストレージは HDD のため、random_page_cost は既定値の 4 から変更しない。

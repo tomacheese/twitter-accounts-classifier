@@ -14,6 +14,7 @@ import {
   type WeeklyAnalysisRunMutationResult,
 } from '../db/weekly-analysis-run-repository'
 import { getWeeklyAnalysisStaleThresholdSeconds } from '../config/env'
+import { retryWeeklyAnalysisComplete } from './weekly-analysis-complete-retry'
 
 const logger = Logger.configure('weekly-analysis-run')
 
@@ -118,25 +119,36 @@ async function main(): Promise<void> {
           },
         })
         if (!values.id) throw new Error('--id is required')
+        const id = values.id
         const structuredOutput =
           values['structured-output-file'] === undefined
             ? undefined
             : await readStructuredOutputFile(values['structured-output-file'])
-        reportMutationResult(
-          await completeWeeklyAnalysisRun(prisma, values.id, new Date(), {
-            ...(structuredOutput !== undefined && { structuredOutput }),
-            ...(values['sampled-account-ids'] !== undefined && {
-              sampledAccountIds: JSON.parse(values['sampled-account-ids']) as unknown,
-            }),
-            ...(values.findings !== undefined && { findings: values.findings }),
-            ...(values['commit-sha'] !== undefined && { commitSha: values['commit-sha'] }),
-            ...(values['pull-request-number'] !== undefined && {
-              pullRequestNumber: Number(values['pull-request-number']),
-            }),
-            ...(values['pull-request-url'] !== undefined && {
-              pullRequestUrl: values['pull-request-url'],
-            }),
+        const completeParams = {
+          ...(structuredOutput !== undefined && { structuredOutput }),
+          ...(values['sampled-account-ids'] !== undefined && {
+            sampledAccountIds: JSON.parse(values['sampled-account-ids']) as unknown,
           }),
+          ...(values.findings !== undefined && { findings: values.findings }),
+          ...(values['commit-sha'] !== undefined && { commitSha: values['commit-sha'] }),
+          ...(values['pull-request-number'] !== undefined && {
+            pullRequestNumber: Number(values['pull-request-number']),
+          }),
+          ...(values['pull-request-url'] !== undefined && {
+            pullRequestUrl: values['pull-request-url'],
+          }),
+        }
+        reportMutationResult(
+          await retryWeeklyAnalysisComplete(
+            () => completeWeeklyAnalysisRun(prisma, id, new Date(), completeParams),
+            {
+              onRetry(nextAttempt, maxAttempts) {
+                logger.warn(
+                  `WeeklyAnalysisRun complete hit a transient database/deployment error; retrying attempt ${nextAttempt}/${maxAttempts}`,
+                )
+              },
+            },
+          ),
         )
         return
       }

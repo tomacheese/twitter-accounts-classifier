@@ -8,6 +8,7 @@ import {
 
 const claimNextWorkItem = vi.fn()
 const completeWorkItem = vi.fn()
+const renewWorkItemLease = vi.fn()
 const enqueueWorkItem = vi.fn()
 const startAnalysisRun = vi.fn()
 const finishAnalysisRun = vi.fn()
@@ -28,6 +29,7 @@ vi.mock('@book000/node-utils', () => ({
 vi.mock('./queue/work-item-repository', () => ({
   claimNextWorkItem: (...args: unknown[]): unknown => claimNextWorkItem(...args) as unknown,
   completeWorkItem: (...args: unknown[]): unknown => completeWorkItem(...args) as unknown,
+  renewWorkItemLease: (...args: unknown[]): unknown => renewWorkItemLease(...args) as unknown,
   enqueueWorkItem: (...args: unknown[]): unknown => enqueueWorkItem(...args) as unknown,
   startAnalysisRun: (...args: unknown[]): unknown => startAnalysisRun(...args) as unknown,
   finishAnalysisRun: (...args: unknown[]): unknown => finishAnalysisRun(...args) as unknown,
@@ -82,6 +84,7 @@ describe('runWorkerLoopOnce', () => {
   beforeEach(() => {
     claimNextWorkItem.mockReset()
     completeWorkItem.mockReset().mockResolvedValue(true)
+    renewWorkItemLease.mockReset().mockResolvedValue(true)
     enqueueWorkItem.mockReset().mockResolvedValue(undefined)
     startAnalysisRun.mockReset().mockResolvedValue('analysis-run-1')
     finishAnalysisRun.mockReset().mockResolvedValue(undefined)
@@ -155,6 +158,36 @@ describe('runWorkerLoopOnce', () => {
     await runWorkerLoopOnce(prisma, deps)
 
     expect(loggerError).toHaveBeenCalledWith(expect.stringContaining('work-item-1'), error)
+  })
+
+  it('長時間処理中は lease を期限前に更新する', async () => {
+    claimNextWorkItem.mockResolvedValue(makeWorkItem({}))
+    const deps = makeDeps()
+    let resolveProcessing: (() => void) | undefined
+    deps.processLabelAggregateRefresh.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveProcessing = resolve
+        }),
+    )
+
+    const running = runWorkerLoopOnce(prisma, {
+      ...deps,
+      leaseDurationMs: 100,
+      leaseRenewIntervalMs: 5,
+    })
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(renewWorkItemLease).toHaveBeenCalledWith(prisma, {
+        workItemId: 'work-item-1',
+        leaseOwner: 'worker-1',
+        leaseDurationMs: 100,
+      })
+    } finally {
+      resolveProcessing?.()
+      await running
+    }
   })
 
   it('lease を失って完了を記録できなかった場合に警告を出す', async () => {
