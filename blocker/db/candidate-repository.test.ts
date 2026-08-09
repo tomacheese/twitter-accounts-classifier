@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { randomUUID } from 'node:crypto'
 import { selectBlockCandidates } from './candidate-repository'
+import { getPrismaClient } from './client'
 
 function fakePrismaReturning(rows: unknown[]) {
   return {
@@ -87,5 +89,119 @@ describe('selectBlockCandidates SQL shape', () => {
     expect(sql).toContain('"BlockAction"')
     expect(sql).toContain('"Follow"')
     expect(sql).toContain(`ba."result" = 'success'`)
+  })
+
+  it('未解決 outbox entry がある候補を BlockOutboxEntry への NOT EXISTS で除外する', async () => {
+    const prisma = fakePrismaReturning([])
+
+    await selectBlockCandidates(
+      prisma as never,
+      'blocker-1',
+      { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+      50,
+    )
+
+    const [strings] = prisma.$queryRaw.mock.calls[0]
+    const sql = (strings as readonly string[]).join('')
+    expect(sql).toContain('"BlockOutboxEntry"')
+    expect(sql).toContain(`oe."status" IN ('pending_remote', 'remote_succeeded')`)
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integration)', () => {
+  const prisma = getPrismaClient()
+
+  beforeEach(async () => {
+    await prisma.blockOutboxEntry.deleteMany()
+    await prisma.blockAction.deleteMany()
+    await prisma.blockAccountRun.deleteMany()
+    await prisma.blockRun.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountLabel.deleteMany()
+    await prisma.account.deleteMany()
+    await prisma.labelDefinition.deleteMany()
+  })
+
+  it('未解決 outbox entry がある候補を除外する', async () => {
+    const blockerId = `blocker-${randomUUID()}`
+    const blockedId = `blocked-${randomUUID()}`
+    await prisma.account.create({
+      data: {
+        id: blockerId,
+        screenName: 'alice',
+        displayName: 'Alice',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    await prisma.account.create({
+      data: {
+        id: blockedId,
+        screenName: 'bob',
+        displayName: 'Bob',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'spam', description: '架空のテスト用ラベル' },
+    })
+    await prisma.accountLabel.create({
+      data: {
+        accountId: blockedId,
+        labelDefinitionId: labelDefinition.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'test',
+        method: 'rule',
+        ruleVersion: 'v1',
+      },
+    })
+    await prisma.accountLabelLatest.create({
+      data: {
+        accountId: blockedId,
+        labelDefinitionId: labelDefinition.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'test',
+        method: 'rule',
+        ruleVersion: 'v1',
+        labeledAt: new Date(),
+      },
+    })
+    const blockRun = await prisma.blockRun.create({
+      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
+    })
+    const accountRun = await prisma.blockAccountRun.create({
+      data: {
+        blockRunId: blockRun.id,
+        username: 'alice',
+        startedAt: new Date(),
+        status: 'running',
+      },
+    })
+    await prisma.blockOutboxEntry.create({
+      data: {
+        blockAccountRunId: accountRun.id,
+        blockerId,
+        blockedId,
+        labelDefinitionId: labelDefinition.id,
+        confidence: 0.9,
+        status: 'pending_remote',
+      },
+    })
+
+    const candidates = await selectBlockCandidates(
+      prisma,
+      blockerId,
+      { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+      10,
+    )
+
+    expect(candidates.map((candidate) => candidate.accountId)).not.toContain(blockedId)
   })
 })
