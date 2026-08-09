@@ -132,6 +132,16 @@ describe('topicNsfwRule', () => {
     ).toBe(false)
   })
 
+  it('is false for a bio declining NSFW content using "拒否"', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({
+          bio: 'イラスト垢です。NSFWは拒否します。フォローはご自由に。',
+        }),
+      ).value,
+    ).toBe(false)
+  })
+
   it('is true for a bio that self-declares adult content without a rejection/redirect phrase', () => {
     expect(
       topicNsfwRule.evaluate(makeBundle({ bio: 'アダルトグッズのレビューを投稿しています' })).value,

@@ -168,6 +168,17 @@ describe('spamRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it('is false for a bio that declines solicitation using "拒否"', () => {
+    const result = spamRule.evaluate(
+      makeBundle({
+        bio: '副業紹介やDMでの勧誘は拒否します。写真と旅行が好きな平日休みの会社員です。',
+        followersCount: 10,
+        followingCount: 800,
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
   it('is false for a low-following, high-follower official/celebrity-shaped account even with courtesy wording', () => {
     const result = spamRule.evaluate(
       makeBundle({

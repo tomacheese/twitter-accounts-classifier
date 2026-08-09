@@ -1,0 +1,26 @@
+import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
+import type { LabelRule } from '../types'
+
+// 「筋肉痛」のような無関係な複合語まで拾わないよう、
+// 単独の「筋肉」ではなく訓練・活動としての愛好を明示する複合語のみを対象とする。
+const FITNESS_PATTERN =
+  /筋トレ|フィットネス|ボディメイク|ジム通い|パーソナルトレーニング|自重トレ|\b(?:fitness|workout|gym\s*rat)\b/i
+
+export const topicFitnessRule: LabelRule = {
+  key: 'topic_fitness',
+  description: 'プロフィールで筋トレ・ジム通いなどのフィットネスを中心的な関心事として挙げている',
+  version: '1.0.0',
+  evaluate(bundle) {
+    const { bio } = bundle.account
+    const keywordMatch = bio !== null && FITNESS_PATTERN.test(bio)
+    const followGraphMatch = hasFollowGraphTopicSignal(
+      bundle.followGraphLabelSignals?.topic_fitness,
+    )
+    const value = keywordMatch || followGraphMatch
+    return {
+      value,
+      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
+      reason: `bio fitness-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
+    }
+  },
+}
