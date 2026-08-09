@@ -78,17 +78,24 @@ describe('findOrCreateOutboxEntry', () => {
     } as never)
 
     const result = await findOrCreateOutboxEntry(prisma as never, {
-      blockAccountRunId: 'bar-1',
+      blockAccountRunId: 'bar-2',
       blockerId: 'blocker-1',
       blockedId: 'blocked-1',
-      labelDefinitionId: 'label-1',
-      confidence: 0.9,
+      labelDefinitionId: 'label-2',
+      confidence: 0.5,
     })
 
     expect(result).toEqual({ id: 'outbox-old', status: 'pending_remote' })
     expect(prisma.blockOutboxEntry.update).toHaveBeenCalledWith({
       where: { id: 'outbox-old' },
-      data: { status: 'pending_remote', remoteSucceededAt: null, localPersistedAt: null },
+      data: {
+        status: 'pending_remote',
+        remoteSucceededAt: null,
+        localPersistedAt: null,
+        blockAccountRunId: 'bar-2',
+        labelDefinitionId: 'label-2',
+        confidence: 0.5,
+      },
     })
     expect(prisma.blockOutboxEntry.create).not.toHaveBeenCalled()
   })
@@ -114,6 +121,32 @@ describe('markOutboxRemoteSucceeded/markOutboxLocalPersisted/markOutboxRemoteFai
     expect(prisma.blockOutboxEntry.update).toHaveBeenCalledWith({
       where: { id: 'outbox-1' },
       data: expect.objectContaining({ status: 'local_persisted' }),
+    })
+    expect(prisma.blockOutboxEntry.update).not.toHaveBeenCalledWith({
+      where: { id: 'outbox-1' },
+      data: expect.objectContaining({ reconciledAt: expect.anything() }),
+    })
+  })
+
+  it('reconciled=true の場合は remote_succeeded と同時に reconciledAt も記録する', async () => {
+    const prisma = createMockPrismaClient()
+
+    await markOutboxRemoteSucceeded(prisma as never, 'outbox-1', true)
+
+    expect(prisma.blockOutboxEntry.update).toHaveBeenCalledWith({
+      where: { id: 'outbox-1' },
+      data: expect.objectContaining({ status: 'remote_succeeded', reconciledAt: expect.any(Date) }),
+    })
+  })
+
+  it('reconciled=true の場合は local_persisted と同時に reconciledAt も記録する', async () => {
+    const prisma = createMockPrismaClient()
+
+    await markOutboxLocalPersisted(prisma as never, 'outbox-1', true)
+
+    expect(prisma.blockOutboxEntry.update).toHaveBeenCalledWith({
+      where: { id: 'outbox-1' },
+      data: expect.objectContaining({ status: 'local_persisted', reconciledAt: expect.any(Date) }),
     })
   })
 

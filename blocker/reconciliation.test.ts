@@ -47,7 +47,7 @@ describe('reconcileOutboxEntries', () => {
       deps.prisma,
       expect.objectContaining({ outboxEntryId: 'outbox-1', result: 'success' }),
     )
-    expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
+    expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-1', true)
   })
 
   it('Block/BlockAction が既に存在する remote_succeeded entry は補完せず local_persisted にのみ進める', async () => {
@@ -70,7 +70,7 @@ describe('reconcileOutboxEntries', () => {
 
     expect(deps.recordSuccessfulBlock).not.toHaveBeenCalled()
     expect(deps.recordBlockAction).not.toHaveBeenCalled()
-    expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
+    expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-1', true)
   })
 
   it('pending_remote のまま停滞し実際は未実施の entry は remote_failed にして次回の再選定に委ねる', async () => {
@@ -112,7 +112,7 @@ describe('reconcileOutboxEntries', () => {
 
     await reconcileOutboxEntries(deps as never, deps.prisma as never)
 
-    expect(deps.markOutboxRemoteSucceeded).toHaveBeenCalledWith(deps.prisma, 'outbox-3')
+    expect(deps.markOutboxRemoteSucceeded).toHaveBeenCalledWith(deps.prisma, 'outbox-3', true)
   })
 
   it('停滞 entry が複数あれば順に処理する', async () => {
@@ -140,7 +140,7 @@ describe('reconcileOutboxEntries', () => {
 
     await reconcileOutboxEntries(deps as never, deps.prisma as never)
 
-    expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
+    expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-1', true)
     expect(deps.isRemotelyBlocked).toHaveBeenCalledWith(deps.client, 'blocked-2')
   })
 
@@ -171,6 +171,6 @@ describe('reconcileOutboxEntries', () => {
     await reconcileOutboxEntries(deps as never, deps.prisma as never)
 
     expect(deps.markOutboxLocalPersisted).toHaveBeenCalledTimes(1)
-    expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-2')
+    expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-2', true)
   })
 })

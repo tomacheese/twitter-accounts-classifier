@@ -65,7 +65,7 @@ async function reconcileRemoteSucceeded(
       outboxEntryId: entry.id,
     })
   }
-  await deps.markOutboxLocalPersisted(deps.prisma, entry.id)
+  await deps.markOutboxLocalPersisted(deps.prisma, entry.id, true)
 }
 
 /**
@@ -81,7 +81,7 @@ async function reconcilePendingRemote(
 ): Promise<void> {
   const isBlocked = await deps.isRemotelyBlocked(deps.client, entry.blockedId)
   await (isBlocked
-    ? deps.markOutboxRemoteSucceeded(deps.prisma, entry.id)
+    ? deps.markOutboxRemoteSucceeded(deps.prisma, entry.id, true)
     : deps.markOutboxRemoteFailed(deps.prisma, entry.id))
 }
 

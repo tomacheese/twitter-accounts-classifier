@@ -32,6 +32,9 @@ describe('GET /api/overview', () => {
       generationId: 'generation-1',
       policyHash: 'hash-1',
       freshnessStatus: 'healthy',
+      coreFreshnessStatus: 'delayed',
+      corePerModel: [],
+      coreFreshnessDivergesFromSnapshot: true,
     })
 
     const { GET } = await import('./route')
@@ -39,11 +42,15 @@ describe('GET /api/overview', () => {
     const body = (await response.json()) as {
       operationalStatus: string
       meta: { freshnessStatus: string }
+      coreFreshnessStatus: string
+      coreFreshnessDivergesFromSnapshot: boolean
     }
 
     expect(response.headers.get('Cache-Control')).toBe('no-store')
     expect(body.operationalStatus).toBe('healthy')
     expect(body.meta.freshnessStatus).toBe('healthy')
+    expect(body.coreFreshnessStatus).toBe('delayed')
+    expect(body.coreFreshnessDivergesFromSnapshot).toBe(true)
   })
 
   it('OverviewSnapshot が無ければ unknown 状態のレスポンスを返す', async () => {

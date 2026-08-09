@@ -8,6 +8,11 @@ export async function register() {
 
     const { getPrismaClient } = await import('./lib/prisma')
     const { upsertComponentBuildIdentity } = await import('./lib/build-identity')
-    await upsertComponentBuildIdentity(getPrismaClient(), 'viewer')
+    try {
+      await upsertComponentBuildIdentity(getPrismaClient(), 'viewer')
+    } catch (error) {
+      // build identity 記録は起動時の付随処理であり、DB 不調時に viewer 本体の起動まで止める必要はない。
+      console.error('Failed to record the viewer build identity:', error)
+    }
   }
 }

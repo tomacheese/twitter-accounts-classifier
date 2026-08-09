@@ -59,6 +59,8 @@ describe('BlockCycleDetailPage', () => {
     expect(html).toContain('1 action(s)')
     expect(html).toContain('account-2')
     expect(html).toContain('test_label')
+    expect(html).toContain('0.90')
+    expect(html).toContain('Local persisted')
     expect(getBlockAccountRunsWithActions).toHaveBeenCalledWith(expect.anything(), 'block-run-1')
   })
 
@@ -87,5 +89,42 @@ describe('BlockCycleDetailPage', () => {
     expect(html).toContain('Show more')
     expect(html).toContain('account_19')
     expect(html).not.toContain('account_20')
+  })
+
+  it('outbox status ごとに異なる色クラスのバッジを表示する', async () => {
+    process.env.VIEWER_NEW_UI_SECTIONS = 'operations'
+    vi.mocked(getBlockCycleDetail).mockResolvedValue(baseDetail)
+    vi.mocked(getBlockAccountRunsWithActions).mockResolvedValue([
+      {
+        id: 'bar-1',
+        username: 'alice',
+        candidatesCount: 2,
+        blockedCount: 0,
+        failedCount: 1,
+        status: 'partial',
+        actions: [
+          {
+            id: 'ba-1',
+            blockedId: 'account-2',
+            labelKey: 'test_label',
+            confidence: 0.5,
+            result: 'failure',
+            errorMessage: 'remote error',
+            outboxStatus: 'remote_failed',
+          },
+        ],
+      },
+    ])
+
+    const html = renderToStaticMarkup(
+      await BlockCycleDetailPage({
+        params: Promise.resolve({ cycleId: 'cycle-1' }),
+        searchParams: Promise.resolve({}),
+      }),
+    )
+
+    expect(html).toContain('Remote failed')
+    expect(html).toContain('bg-red-100')
+    expect(html).not.toContain('bg-green-100')
   })
 })

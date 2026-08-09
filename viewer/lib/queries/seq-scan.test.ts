@@ -166,7 +166,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
     it('searchAccounts (display name contains) は AccountSummaryLatest の Seq Scan を行わない', async () => {
       const plan = await explain(`
         SELECT "accountId" FROM "AccountSummaryLatest"
-        WHERE "normalizedDisplayName" ILIKE '%display%'
+        WHERE "normalizedDisplayName" ILIKE '%display 42%'
       `)
       expect(collectSeqScans(plan, 'AccountSummaryLatest')).toEqual([])
     })

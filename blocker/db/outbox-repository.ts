@@ -38,7 +38,14 @@ export async function findOrCreateOutboxEntry(
 
     const reset = await prisma.blockOutboxEntry.update({
       where: { id: existing.id },
-      data: { status: 'pending_remote', remoteSucceededAt: null, localPersistedAt: null },
+      data: {
+        status: 'pending_remote',
+        remoteSucceededAt: null,
+        localPersistedAt: null,
+        blockAccountRunId: input.blockAccountRunId,
+        labelDefinitionId: input.labelDefinitionId,
+        confidence: input.confidence,
+      },
     })
     return { id: reset.id, status: reset.status }
   }
@@ -59,28 +66,40 @@ export async function findOrCreateOutboxEntry(
 /**
  * @param prisma - Prisma クライアント
  * @param outboxEntryId - 対象 entry の ID
+ * @param reconciled - reconciliation 経由の解消なら true。`reconciledAt` に記録し、attemptBlock の通常経路と区別できるようにする
  */
 export async function markOutboxRemoteSucceeded(
   prisma: PrismaClient,
   outboxEntryId: string,
+  reconciled = false,
 ): Promise<void> {
   await prisma.blockOutboxEntry.update({
     where: { id: outboxEntryId },
-    data: { status: 'remote_succeeded', remoteSucceededAt: new Date() },
+    data: {
+      status: 'remote_succeeded',
+      remoteSucceededAt: new Date(),
+      ...(reconciled ? { reconciledAt: new Date() } : {}),
+    },
   })
 }
 
 /**
  * @param prisma - Prisma クライアント
  * @param outboxEntryId - 対象 entry の ID
+ * @param reconciled - reconciliation 経由の解消なら true。`reconciledAt` に記録し、attemptBlock の通常経路と区別できるようにする
  */
 export async function markOutboxLocalPersisted(
   prisma: PrismaClient,
   outboxEntryId: string,
+  reconciled = false,
 ): Promise<void> {
   await prisma.blockOutboxEntry.update({
     where: { id: outboxEntryId },
-    data: { status: 'local_persisted', localPersistedAt: new Date() },
+    data: {
+      status: 'local_persisted',
+      localPersistedAt: new Date(),
+      ...(reconciled ? { reconciledAt: new Date() } : {}),
+    },
   })
 }
 

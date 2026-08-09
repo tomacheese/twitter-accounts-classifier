@@ -19,6 +19,42 @@ interface BlockCycleDetailPageProps {
 
 const ACCOUNT_RUNS_PAGE_SIZE = 20
 
+/** BlockOutboxEntry.status ごとの表示ラベルと色クラス。 */
+const OUTBOX_STATUS_LABEL: Record<string, { label: string; className: string }> = {
+  pending_remote: {
+    label: 'Pending remote',
+    className: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
+  },
+  remote_succeeded: {
+    label: 'Remote succeeded',
+    className: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+  },
+  local_persisted: {
+    label: 'Local persisted',
+    className: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+  },
+  remote_failed: {
+    label: 'Remote failed',
+    className: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+  },
+}
+
+/**
+ * `StatusBadge` は BlockOutboxEntry.status を知らず未知値の灰色ピルへ落ちるため、
+ * 成功・失敗が同色になってしまう。
+ * この画面専用のラベル・色マップで区別する。
+ * @param status - BlockOutboxEntry.status の生の値
+ * @returns 表示用のラベルと色クラス
+ */
+function outboxStatusBadge(status: string): { label: string; className: string } {
+  return (
+    OUTBOX_STATUS_LABEL[status] ?? {
+      label: status,
+      className: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
+    }
+  )
+}
+
 /**
  * @param value - searchParams.shown の生の値
  * @returns 表示する account 数。指定が無い、または不正な値なら既定件数
@@ -56,12 +92,20 @@ function ActionsCell({ actions }: { actions: BlockAccountRunView['actions'] }): 
             <tr key={action.id} className="border-t dark:border-gray-700">
               <td className="p-1">{action.blockedId}</td>
               <td className="p-1">{action.labelKey}</td>
-              <td className="p-1">{action.confidence}</td>
+              <td className="p-1">{action.confidence.toFixed(2)}</td>
               <td className="p-1">
                 <StatusBadge status={action.result} />
               </td>
               <td className="p-1">
-                {action.outboxStatus ? <StatusBadge status={action.outboxStatus} /> : '—'}
+                {action.outboxStatus ? (
+                  <span
+                    className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${outboxStatusBadge(action.outboxStatus).className}`}
+                  >
+                    {outboxStatusBadge(action.outboxStatus).label}
+                  </span>
+                ) : (
+                  '—'
+                )}
               </td>
               <td className="p-1">{action.errorMessage ?? '—'}</td>
             </tr>
