@@ -40,7 +40,6 @@ export interface AccountSummaryListItem {
 export interface ListAccountSummariesResult {
   items: AccountSummaryListItem[]
   nextCursor: string | null
-  generationId: string | null
   freshnessStatus: ReadModelFreshnessStatus
   readiness: ReadModelReadinessStatus
 }
@@ -79,7 +78,6 @@ export async function listAccountSummaries(
     return {
       items: [],
       nextCursor: null,
-      generationId: null,
       freshnessStatus: 'unknown',
       readiness: readiness.accounts,
     }
@@ -156,7 +154,6 @@ export async function listAccountSummaries(
       : null
 
   return {
-    generationId: null,
     freshnessStatus,
     readiness: readiness.accounts,
     nextCursor,

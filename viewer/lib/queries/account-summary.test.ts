@@ -51,7 +51,6 @@ describe('listAccountSummaries', () => {
     const result = await listAccountSummaries(prisma, { view: 'all' })
     expect(result.items).toEqual([])
     expect(result.readiness).toBe('bootstrapping')
-    expect(result.generationId).toBeNull()
     expect(result.nextCursor).toBeNull()
   })
 

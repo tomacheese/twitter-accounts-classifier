@@ -41,7 +41,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       items: result.items,
       meta: buildApiResponseMeta({
         ...meta,
-        generationId: result.generationId,
         freshnessStatus: result.freshnessStatus,
         nextCursor: result.nextCursor,
         readiness: result.readiness,

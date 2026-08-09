@@ -17,7 +17,7 @@ export async function GET(): Promise<NextResponse> {
   const meta = await getReadModelMeta(prisma, 'label_summary')
 
   return NextResponse.json(
-    { items, readiness, meta: buildApiResponseMeta(meta) },
+    { items, meta: buildApiResponseMeta({ ...meta, readiness }) },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }

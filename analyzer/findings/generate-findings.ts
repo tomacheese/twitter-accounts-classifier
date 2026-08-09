@@ -156,9 +156,9 @@ async function reconstructLifecycleState(
       : { status: 'none', consecutiveExceed, consecutiveNormal: 0 }
   }
 
-  // active/recurring はいずれも「継続監視中」の状態であり、resolutionCount に
-  // 向けて consecutiveNormal を数える必要がある点は共通のため、既存の status を
-  // そのまま引き継ぐ。'active' に丸めると recurring の表示区分が失われる。
+  // active/recurring はいずれも継続監視中の状態で、consecutiveNormal の数え方も共通のため、
+  // 既存の status をそのまま引き継ぐ。
+  // 'active' に丸めると recurring の表示区分が失われる。
   let consecutiveNormal = 0
   for (const evaluation of recent) {
     const result = evaluation.result as unknown as DetectorObservation
@@ -361,9 +361,8 @@ async function processObservation(
     await upsertOccurrence(tx, created.id, next.status, input, ctx, now)
   }
 
-  // Prisma.TransactionClient には $transaction 自体が無いため、既にトランザクション
-  // 内で呼ばれている場合はネストせずそのまま run を実行し、そうでなければここで
-  // トランザクションを開く。
+  // Prisma.TransactionClient には $transaction 自体が無い。
+  // 既にトランザクション内なら run をそのまま実行し、そうでなければここで開く。
   await ('$transaction' in prisma ? prisma.$transaction(run) : run(prisma))
 }
 

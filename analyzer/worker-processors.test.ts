@@ -513,9 +513,9 @@ describe.skipIf(!process.env.DATABASE_URL)('processLabelAggregateRefresh', () =>
     const summaryAfterSchedule = await prisma.labelSummaryCurrent.findMany()
     expect(summaryAfterSchedule.length).toBeGreaterThan(0)
 
-    // buildLabelAggregateSnapshotSet が必須の freshnessThresholdsMs を実際に
-    // 受け取って動作したことを、currentCount/delayedCount/staleCount が
-    // evaluatedCount に一致する (集計が空でない) ことで確認する。
+    // buildLabelAggregateSnapshotSet が必須の freshnessThresholdsMs を実際に受け取って
+    // 動作したことを、currentCount/delayedCount/staleCount が evaluatedCount に一致する
+    // (集計が空でない) ことで確認する。
     const snapshot = await prisma.labelMetricSnapshot.findFirstOrThrow({
       where: { triggerWorkItemId: scheduleWorkItem.id },
     })

@@ -56,10 +56,19 @@ export async function runLabelFindingsSerialized(
   } catch (error) {
     // input.run が投げた例外は上のトランザクション自体を rollback させるため、
     // 同じトランザクション内では failed を記録できない。別トランザクションで記録する。
+    // 初回実行の失敗では INSERT ... ON CONFLICT DO NOTHING も rollback され行自体が
+    // 存在しないため、update ではなく upsert で確実に failed を記録する。
     try {
-      await prisma.readModelState.update({
+      await prisma.readModelState.upsert({
         where: { modelKey: MODEL_KEY },
-        data: { status: 'failed', lastFailureAt: new Date(), errorSummary: String(error) },
+        update: { status: 'failed', lastFailureAt: new Date(), errorSummary: String(error) },
+        create: {
+          modelKey: MODEL_KEY,
+          schemaVersion: 1,
+          status: 'failed',
+          lastFailureAt: new Date(),
+          errorSummary: String(error),
+        },
       })
     } catch (bookkeepingError) {
       logger.error(`failed to record label_findings failure`, bookkeepingError as Error)

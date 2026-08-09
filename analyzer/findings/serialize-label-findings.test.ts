@@ -57,4 +57,19 @@ describe.skipIf(!process.env.DATABASE_URL)('runLabelFindingsSerialized', () => {
     )
     expect(state.status).toBe('healthy')
   })
+
+  it('records failed status even when this is the first-ever run (no pre-existing row)', async () => {
+    const run = vi.fn().mockRejectedValue(new Error('boom'))
+
+    await expect(
+      runLabelFindingsSerialized(prisma, {
+        snapshotAt: new Date('2026-08-05T00:00:00Z'),
+        run,
+      }),
+    ).rejects.toThrow('boom')
+
+    const state = await prisma.readModelState.findUniqueOrThrow({ where: { modelKey: MODEL_KEY } })
+    expect(state.status).toBe('failed')
+    expect(state.errorSummary).toContain('boom')
+  })
 })

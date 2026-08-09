@@ -321,9 +321,9 @@ export async function processLabelAggregateRefresh(
     minCoverage: freshnessRule?.minCoverage ?? DEFAULT_MIN_COVERAGE,
     maxStaleRatio: freshnessRule?.maxStaleRatio ?? DEFAULT_MAX_STALE_RATIO,
   }
-  // refreshReadModelFreshnessFromPolicy (本ファイル内) と同じ policy ルール・
-  // 同じ既定値・同じ parseIsoDurationMs を使い、freshness のしきい値を
-  // current/delayed/stale 判定と completeness 判定とで食い違わせない。
+  // refreshReadModelFreshnessFromPolicy (本ファイル内) と同じ policy ルール・既定値・
+  // parseIsoDurationMs を使い、current/delayed/stale 判定と completeness 判定の
+  // しきい値を食い違わせない。
   const freshnessThresholdsMs = {
     delayedAfterMs: parseIsoDurationMs(
       freshnessRule?.delayedAfter ?? DEFAULT_READ_MODEL_DELAYED_AFTER,
@@ -425,8 +425,8 @@ export async function processWeeklyReviewIngest(
     weeklyAnalysisRunId: weeklyAnalysisRun.id,
     structuredOutput: parsed.data,
     policy,
-    // AccountSummary が primaryScopeType: 'account' の Occurrence を watermark と
-    // 比較する際、analyzer の処理時刻ではなく元データの時刻を使えるようにする。
+    // AccountSummary が primaryScopeType: 'account' の Occurrence を watermark と比較する際、
+    // analyzer の処理時刻ではなく元データの時刻を使えるようにする。
     sourceObservedAt: weeklyAnalysisRun.finishedAt ?? weeklyAnalysisRun.lastHeartbeatAt,
   })
 
@@ -577,9 +577,9 @@ export async function handleWorkItemSettled(
     }
   }
 
-  // processReadModelRefresh 等が publish する Attention/Overview は WorkItem を
-  // succeeded/failed/dead にする前の状態で作られる。上の detectAnalysisStageFailure に
-  // よる OperationalIssue の解消や Cycle の再構築はその後に確定するため、
+  // processReadModelRefresh 等が publish する Attention/Overview は、WorkItem を
+  // succeeded/failed/dead にする前の状態で作られる。
+  // detectAnalysisStageFailure による解消や Cycle の再構築はその後に確定するため、
   // ここで改めて publish しないと表示だけ古い状態のまま次の refresh まで残ってしまう。
   await publishAttentionAndOverview(prisma, new Date())
 }
