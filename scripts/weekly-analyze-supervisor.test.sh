@@ -121,7 +121,10 @@ grep -q 'exceeded staleAfterAt=' "$STALE_CASE/repo/logs/weekly-analyze.log" || \
   fail 'stale timeout was not recorded in the supervisor log'
 grep -Fq -- "-e PATH=$STALE_SHIMS:" "$TMUX_ARGS" || \
   fail 'tmux session did not receive the cron-repaired PATH explicitly'
-grep -Fq -- '-e DATABASE_URL=postgresql://weekly_review:test-password@192.0.2.10:5432/testdb' "$TMUX_ARGS" || \
-  fail 'tmux session did not receive the weekly-review DATABASE_URL explicitly'
+grep -Fq -- '-e DATABASE_URL -e WEEKLY_ANALYSIS_RUN_ID=run1' "$TMUX_ARGS" || \
+  fail 'tmux session did not inherit the weekly-review DATABASE_URL by variable name'
+if grep -Fq -- 'DATABASE_URL=postgresql://' "$TMUX_ARGS"; then
+  fail 'tmux invocation exposed the weekly-review DATABASE_URL value in process arguments'
+fi
 
 echo '[weekly-analyze-supervisor.test] ok'
