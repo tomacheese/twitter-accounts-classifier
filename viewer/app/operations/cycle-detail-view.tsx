@@ -14,8 +14,9 @@ const STAGE_STATUS_LABEL: Record<string, { label: string; className: string }> =
 }
 
 /**
- * blocked_by_upstream は直前 Stage の失敗による未実行であり、failed（root cause）とは
- * 異なる色・注記で表示することで、1 件の根本原因が Stage 数分の failed に見える事態を避ける。
+ * blocked_by_upstream は直前 Stage の失敗による未実行であり、
+ * failed（root cause）とは異なる色・注記で表示することで、
+ * 1 件の根本原因が Stage 数分の failed に見える事態を避ける。
  * @param status - Stage の状態
  * @returns 表示用のラベルと色クラス
  */
