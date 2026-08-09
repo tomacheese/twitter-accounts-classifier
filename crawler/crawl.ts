@@ -1155,19 +1155,19 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   const registry = new LabelRuleRegistry()
   for (const rule of ALL_LABEL_RULES) registry.register(rule)
   const labelDefinitionIds = await deps.ensureLabelDefinitions(registry)
-  const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(labelDefinitionIds)
-  // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
-  // アカウントごとではなくサイクルごとに 1 回だけ構築する。
-  const replyCorpus = await deps.loadReplyCorpus()
-  const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
-  const replyHijackIndex = buildReplyHijackIndex(replyCorpus)
-
   const { id: crawlRunId, latestAccountStatuses } = await deps.startOrResumeCrawlRun(new Date())
 
-  // ここから下を try で囲む: 捕捉しないと CrawlRun が 'running' のまま残ってしまうため、
-  // 必ず 'failed' として確定させる。ただしプロセスの強制終了と、
-  // この確定処理自体の失敗の 2 つは検知できない。
+  // CrawlRun 開始後の前処理も try に含める。前処理は本番規模では長時間かかり得るため、
+  // 開始前に実行すると生存中でも古い heartbeat の CrawlRun が残って見える。また前処理が
+  // 失敗した場合に running 行を確定できない。
   try {
+    const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(labelDefinitionIds)
+    // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
+    // アカウントごとではなくサイクルごとに 1 回だけ構築する。
+    const replyCorpus = await deps.loadReplyCorpus()
+    const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
+    const replyHijackIndex = buildReplyHijackIndex(replyCorpus)
+
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
     for (const account of deps.config.accounts) {
