@@ -14,6 +14,11 @@ role_state() {
     "SELECT rolcanlogin::text || ':' || (rolpassword IS NOT NULL)::text FROM pg_authid WHERE rolname = '${role}'"
 }
 
+analysis_work_item_privileges() {
+  psql -At "$DATABASE_URL" -c \
+    "SELECT has_table_privilege('weekly_review', 'public.\"AnalysisWorkItem\"', 'SELECT')::text || ':' || has_table_privilege('weekly_review', 'public.\"AnalysisWorkItem\"', 'INSERT')::text || ':' || has_table_privilege('weekly_review', 'public.\"AnalysisWorkItem\"', 'UPDATE')::text || ':' || has_table_privilege('weekly_review', 'public.\"AnalysisWorkItem\"', 'DELETE')::text"
+}
+
 if psql -At "$DATABASE_URL" -c "SELECT rolname FROM pg_roles WHERE rolname IN ('viewer', 'analyzer')" | grep -q .; then
   echo "viewer/analyzer must not exist before this test" >&2
   exit 1
@@ -40,3 +45,14 @@ test -z "$(psql -At "$DATABASE_URL" -c "SELECT rolname FROM pg_roles WHERE rolna
 
 test "$(role_state viewer)" = "true:true"
 test "$(role_state analyzer)" = "true:true"
+
+# weekly_review が存在しないケースだけでは write allowlist の退行を検出できないため、存在するケースも検証する。
+psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "CREATE ROLE weekly_review NOLOGIN"
+(
+  cd /tmp
+  VIEWER_DB_PASSWORD=ci-viewer-password \
+  ANALYZER_DB_PASSWORD=ci-analyzer-password \
+    bash "$REPO_ROOT/scripts/db/run-migration-and-sync-grants.sh"
+)
+
+test "$(analysis_work_item_privileges)" = "true:true:false:false"

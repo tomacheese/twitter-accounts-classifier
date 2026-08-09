@@ -31,6 +31,9 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO weekly_review;
 -- write allowlist。Weekly Reviewが実行記録を作成し、後からcommitShaを補完する。
 GRANT INSERT, UPDATE ON TABLE "WeeklyAnalysisRun" TO weekly_review;
 
+-- Prisma の空 update upsert に UPDATE 権限まで与える必要はないため、INSERT のみに限定する。
+GRANT INSERT ON TABLE "AnalysisWorkItem" TO weekly_review;
+
 -- 以後、このSQLを実行した所有者が作るテーブルにも同じread方針を適用する。
 -- テーブル入れ替えmigrationでも新オブジェクトへSELECTが自動付与される。
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
