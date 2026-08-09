@@ -43,6 +43,9 @@ GRANT INSERT, UPDATE, DELETE ON TABLE
   "ReadModelGeneration", "ReadModelPointer", "ReadModelState"
   TO analyzer;
 
+-- build identity は analyzer 自身の起動情報を upsert するため INSERT/UPDATE のみ許可する。
+GRANT INSERT, UPDATE ON TABLE "ComponentBuildIdentity" TO analyzer;
+
 -- 現行スキーマは autoincrement を使わずシーケンスを持たないため、schema 全体への
 -- USAGE/SELECT は付与しない。write allowlist のテーブルがシーケンス列を持つに至った
 -- 時点で、個別のシーケンスを名指しして GRANT を追加する。
