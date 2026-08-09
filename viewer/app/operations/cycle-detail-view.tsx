@@ -2,6 +2,13 @@ import React from 'react'
 import type { OperationCycleDetailView } from '@/lib/queries/operation-cycles'
 import { formatDateTime } from '@/lib/format-date'
 
+/** label_aggregate_refresh Stage の errorCode ごとの表示ラベル。 */
+const LABEL_AGGREGATE_ERROR_LABEL: Record<string, string> = {
+  label_aggregate_snapshot_failed: 'Snapshot aggregation failed',
+  label_finding_generation_failed: 'Finding generation failed',
+  label_summary_publish_failed: 'Read model publish failed',
+}
+
 const STAGE_STATUS_LABEL: Record<string, { label: string; className: string }> = {
   blocked_by_upstream: {
     label: 'Blocked (upstream failure)',
@@ -89,7 +96,11 @@ export function OperationCycleDetail({
                   <td className="p-2">
                     {stage.finishedAt ? formatDateTime(stage.finishedAt) : '—'}
                   </td>
-                  <td className="p-2">{stage.errorSummary ?? '—'}</td>
+                  <td className="p-2">
+                    {stage.errorCode
+                      ? (LABEL_AGGREGATE_ERROR_LABEL[stage.errorCode] ?? stage.errorCode)
+                      : (stage.errorSummary ?? '—')}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -93,6 +93,7 @@ export interface OperationStageView {
   status: string
   startedAt: Date | null
   finishedAt: Date | null
+  errorCode: string | null
   errorSummary: string | null
 }
 
@@ -138,6 +139,7 @@ async function getCycleDetail(
       status: stage.status,
       startedAt: stage.startedAt,
       finishedAt: stage.finishedAt,
+      errorCode: stage.errorCode,
       errorSummary: stage.errorSummary,
     })),
   }

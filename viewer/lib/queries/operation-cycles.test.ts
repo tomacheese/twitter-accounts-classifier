@@ -57,6 +57,7 @@ const baseCycle = {
       status: 'succeeded',
       startedAt: null,
       finishedAt: null,
+      errorCode: null,
       errorSummary: null,
     },
     {
@@ -66,6 +67,7 @@ const baseCycle = {
       status: 'succeeded',
       startedAt: null,
       finishedAt: null,
+      errorCode: null,
       errorSummary: null,
     },
   ],

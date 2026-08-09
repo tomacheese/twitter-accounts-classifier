@@ -27,6 +27,7 @@ describe('OperationCycleDetail', () => {
         status: 'failed',
         startedAt: null,
         finishedAt: null,
+        errorCode: null,
         errorSummary: 'boom',
       },
       {
@@ -36,6 +37,7 @@ describe('OperationCycleDetail', () => {
         status: 'blocked_by_upstream',
         startedAt: null,
         finishedAt: null,
+        errorCode: null,
         errorSummary: 'work item was never enqueued',
       },
     ])
@@ -46,5 +48,48 @@ describe('OperationCycleDetail', () => {
     expect(html).toContain('bg-gray-100')
     expect(html).toContain('bg-red-100')
     expect(html).not.toContain('blocked_by_upstream')
+  })
+
+  it.each([
+    ['label_aggregate_snapshot_failed', 'Snapshot aggregation failed'],
+    ['label_finding_generation_failed', 'Finding generation failed'],
+    ['label_summary_publish_failed', 'Read model publish failed'],
+  ] as const)('errorCode が %s なら "%s" を表示する', (errorCode, label) => {
+    const detail = buildDetail([
+      {
+        stageKey: 'label_aggregate_refresh',
+        sequence: 1,
+        requiredness: 'required',
+        status: 'failed',
+        startedAt: null,
+        finishedAt: null,
+        errorCode,
+        errorSummary: 'boom',
+      },
+    ])
+
+    const html = renderToStaticMarkup(<OperationCycleDetail detail={detail} />)
+
+    expect(html).toContain(label)
+    expect(html).not.toContain('boom')
+  })
+
+  it('未知の errorCode はそのまま表示する', () => {
+    const detail = buildDetail([
+      {
+        stageKey: 'label_aggregate_refresh',
+        sequence: 1,
+        requiredness: 'required',
+        status: 'failed',
+        startedAt: null,
+        finishedAt: null,
+        errorCode: 'unknown_error_code',
+        errorSummary: 'boom',
+      },
+    ])
+
+    const html = renderToStaticMarkup(<OperationCycleDetail detail={detail} />)
+
+    expect(html).toContain('unknown_error_code')
   })
 })

@@ -40,6 +40,26 @@ const logger = Logger.configure('analyzer:worker-processors')
 
 const APP_VERSION = process.env.APPLICATION_VERSION ?? 'unknown'
 
+/** label_aggregate_refresh の失敗種別。 */
+export type LabelAggregateRefreshErrorCode =
+  | 'label_aggregate_snapshot_failed'
+  | 'label_finding_generation_failed'
+  | 'label_summary_publish_failed'
+
+/**
+ * `processLabelAggregateRefresh` の失敗を、どの段階で失敗したかを保持したまま worker-loop へ伝える。
+ * 段階を区別しないと、再試行のたびに root cause を Operations 画面から特定できない。
+ */
+export class LabelAggregateRefreshError extends Error {
+  readonly errorCode: LabelAggregateRefreshErrorCode
+
+  constructor(errorCode: LabelAggregateRefreshErrorCode, message: string) {
+    super(message)
+    this.errorCode = errorCode
+    this.name = 'LabelAggregateRefreshError'
+  }
+}
+
 /**
  * account_summary がまだ一度も公開されていない環境では、最新の完了済み crawl を
  * label_metrics から再処理して read model を bootstrap する。過去に succeeded になった
@@ -379,40 +399,62 @@ export async function processLabelAggregateRefresh(
   }
 
   const sourceCrawlRunId = workItem.triggerType === 'crawl_run' ? workItem.triggerId : undefined
-  const { snapshotAt } = await buildLabelAggregateSnapshotSet(prisma, {
-    triggerWorkItemId: workItem.id,
-    sourceCrawlRunId,
-    policyHash,
-    analyzerVersion: APP_VERSION,
-    thresholds,
-    freshnessThresholdsMs,
-  })
-
-  if (workItem.triggerType === 'crawl_run') {
-    await runLabelFindingsSerialized(prisma, {
-      snapshotAt,
-      run: (tx) =>
-        generateFindingsForAggregateRefresh(tx, {
-          triggerWorkItemId: workItem.id,
-          policy,
-          policyHash,
-          detectorVersion: APP_VERSION,
-          sourceObservedAt: snapshotAt,
-        }),
-    })
+  let snapshotAt: Date
+  try {
+    ;({ snapshotAt } = await buildLabelAggregateSnapshotSet(prisma, {
+      triggerWorkItemId: workItem.id,
+      sourceCrawlRunId,
+      policyHash,
+      analyzerVersion: APP_VERSION,
+      thresholds,
+      freshnessThresholdsMs,
+    }))
+  } catch (error) {
+    throw new LabelAggregateRefreshError(
+      'label_aggregate_snapshot_failed',
+      error instanceof Error ? error.message : String(error),
+    )
   }
 
-  await publishGeneration(prisma, {
-    modelKey: 'label_summary',
-    schemaVersion: 1,
-    sourceWatermarkAt: snapshotAt,
-    build: (generationId) =>
-      buildLabelSummary(prisma, {
-        generationId,
-        triggerWorkItemId: workItem.id,
-        sourceWatermarkAt: snapshotAt,
-      }),
-  })
+  if (workItem.triggerType === 'crawl_run') {
+    try {
+      await runLabelFindingsSerialized(prisma, {
+        snapshotAt,
+        run: (tx) =>
+          generateFindingsForAggregateRefresh(tx, {
+            triggerWorkItemId: workItem.id,
+            policy,
+            policyHash,
+            detectorVersion: APP_VERSION,
+            sourceObservedAt: snapshotAt,
+          }),
+      })
+    } catch (error) {
+      throw new LabelAggregateRefreshError(
+        'label_finding_generation_failed',
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+
+  try {
+    await publishGeneration(prisma, {
+      modelKey: 'label_summary',
+      schemaVersion: 1,
+      sourceWatermarkAt: snapshotAt,
+      build: (generationId) =>
+        buildLabelSummary(prisma, {
+          generationId,
+          triggerWorkItemId: workItem.id,
+          sourceWatermarkAt: snapshotAt,
+        }),
+    })
+  } catch (error) {
+    throw new LabelAggregateRefreshError(
+      'label_summary_publish_failed',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
   await publishAttentionAndOverview(prisma, snapshotAt)
 }
 
