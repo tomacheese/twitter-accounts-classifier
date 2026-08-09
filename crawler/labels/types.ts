@@ -34,6 +34,8 @@ export interface AccountFeatureBundle {
     isRetweet: boolean
     isPromoted: boolean
     isPaidPromotion: boolean
+    /** X URL entity から正規化した展開先 URL。旧 fixture 互換のため任意。 */
+    expandedUrls?: string[]
     /**
      * このツイートが直接リプライしている先のツイート ID。リプライでない場合、
      * または親ツイート ID が不明な場合は `null`/未設定にする。

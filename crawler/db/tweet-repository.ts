@@ -20,6 +20,7 @@ export async function upsertTweet(prisma: PrismaClient, input: TweetInput): Prom
     select: {
       isPromoted: true,
       isPaidPromotion: true,
+      expandedUrls: true,
       hasAiGeneratedMedia: true,
       aiGeneratedDetectionSource: true,
       foreignVideoSourceCount: true,
@@ -40,6 +41,9 @@ export async function upsertTweet(prisma: PrismaClient, input: TweetInput): Prom
       quoteCount: input.quoteCount,
       isPromoted: input.isPromoted || (existing?.isPromoted ?? false),
       isPaidPromotion: input.isPaidPromotion || (existing?.isPaidPromotion ?? false),
+      expandedUrls: [
+        ...new Set([...(input.expandedUrls ?? []), ...(existing?.expandedUrls ?? [])]),
+      ],
       hasAiGeneratedMedia: input.hasAiGeneratedMedia ?? existing?.hasAiGeneratedMedia ?? null,
       aiGeneratedDetectionSource:
         input.aiGeneratedDetectionSource ?? existing?.aiGeneratedDetectionSource ?? null,

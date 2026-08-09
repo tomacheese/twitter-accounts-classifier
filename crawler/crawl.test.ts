@@ -45,6 +45,7 @@ function rawTweet(
     isPaidPromotion?: boolean
     fullText?: string
     inReplyToStatusIdStr?: string
+    expandedUrls?: string[]
   } = {},
 ) {
   return {
@@ -60,6 +61,14 @@ function rawTweet(
       retweetedStatusIdStr: null,
       isPromoted: overrides.isPromoted,
       isPaidPromotion: overrides.isPaidPromotion,
+      entities: overrides.expandedUrls
+        ? {
+            urls: overrides.expandedUrls.map((expandedUrl, index) => ({
+              url: `https://t.co/${index}`,
+              expandedUrl,
+            })),
+          }
+        : undefined,
     },
     user,
   }
@@ -711,6 +720,51 @@ describe('runCrawlCycle', () => {
       expect.objectContaining({ id: 'promoted1', isPromoted: true, isPaidPromotion: true }),
     )
 
+    applyAllSpy.mockRestore()
+  })
+
+  it('passes normalized expanded URLs into the account label bundle', async () => {
+    const author = rawUser('author1')
+    const linkedTweet = rawTweet('linked1', author, null, {
+      expandedUrls: ['https://www.amazon.co.jp/dp/TEST?tag=fictional-22'],
+    })
+    const applyAllSpy = vi.spyOn(LabelRuleRegistry.prototype, 'applyAll')
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [linkedTweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    const bundleForAuthor = applyAllSpy.mock.calls
+      .map((call) => call[0])
+      .find((bundle) => bundle.account.id === 'author1')
+    expect(bundleForAuthor?.recentTweets).toContainEqual(
+      expect.objectContaining({
+        id: 'linked1',
+        expandedUrls: ['https://www.amazon.co.jp/dp/TEST?tag=fictional-22'],
+      }),
+    )
     applyAllSpy.mockRestore()
   })
 

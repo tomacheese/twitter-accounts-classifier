@@ -33,6 +33,9 @@ export interface RawTweetResult {
     isPaidPromotion?: boolean
     hasAiGeneratedMedia?: boolean | null
     aiGeneratedDetectionSource?: string | null
+    entities?: {
+      urls?: { url: string; expandedUrl?: string }[]
+    }
     extendedEntities?: {
       media?: { type: string; sourceUserIdStr?: string | null }[]
     }
@@ -90,6 +93,7 @@ export interface NormalizedTweet {
   retweetedTweetId: string | null
   isPromoted: boolean
   isPaidPromotion: boolean
+  expandedUrls?: string[]
   hasAiGeneratedMedia: boolean | null
   aiGeneratedDetectionSource: string | null
   foreignVideoSourceCount?: number | null
@@ -124,6 +128,13 @@ export interface ToTweetInputContext {
   viewerAccountId: string
 }
 
+function mergeUniqueStrings(
+  current: string[] | undefined,
+  previous: string[] | undefined,
+): string[] {
+  return [...new Set([...(current ?? []), ...(previous ?? [])])]
+}
+
 function mergeForeignVideoSourceCount(
   current: number | null | undefined,
   previous: number | null | undefined,
@@ -150,6 +161,7 @@ export function mergeTweetAdFlags(tweets: NormalizedTweet[]): NormalizedTweet[] 
       ...tweet,
       isPromoted: tweet.isPromoted || (existing?.isPromoted ?? false),
       isPaidPromotion: tweet.isPaidPromotion || (existing?.isPaidPromotion ?? false),
+      expandedUrls: mergeUniqueStrings(tweet.expandedUrls, existing?.expandedUrls),
       foreignVideoSourceCount: mergeForeignVideoSourceCount(
         tweet.foreignVideoSourceCount,
         existing?.foreignVideoSourceCount,
@@ -175,6 +187,13 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
         (media) => media.type === 'video' || media.type === 'animated_gif',
       )
     : null
+  const expandedUrls = [
+    ...new Set(
+      (raw.legacy.entities?.urls ?? [])
+        .map((entry) => entry.expandedUrl?.trim() ?? entry.url.trim())
+        .filter((url) => url.length > 0),
+    ),
+  ]
   const foreignVideoSourceCount = raw.legacy.extendedEntities
     ? (raw.legacy.extendedEntities.media?.filter(
         (media) =>
@@ -200,6 +219,7 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
     retweetedTweetId: raw.legacy.retweetedStatusIdStr,
     isPromoted: raw.legacy.isPromoted ?? false,
     isPaidPromotion: raw.legacy.isPaidPromotion ?? false,
+    expandedUrls,
     hasAiGeneratedMedia: raw.legacy.hasAiGeneratedMedia ?? null,
     aiGeneratedDetectionSource: raw.legacy.aiGeneratedDetectionSource ?? null,
     foreignVideoSourceCount,
