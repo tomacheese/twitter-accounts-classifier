@@ -1,3 +1,4 @@
+import { Logger } from '@book000/node-utils'
 import { withTwitterRetry, type OpenApiClientContext } from 'twitter-client'
 import type { PrismaClient } from './generated/prisma'
 import { recordSuccessfulBlock } from './db/block-repository'
@@ -8,8 +9,12 @@ import {
   hasBlockAction,
   markOutboxRemoteSucceeded,
   markOutboxLocalPersisted,
+  markOutboxRemoteFailed,
   type StalledOutboxEntry,
 } from './db/outbox-repository'
+import { captureException } from './monitoring/sentry'
+
+const logger = Logger.configure('reconciliation')
 
 export interface ReconcileOutboxEntriesDependencies {
   prisma: PrismaClient
@@ -23,6 +28,7 @@ export interface ReconcileOutboxEntriesDependencies {
   recordBlockAction: typeof recordBlockAction
   markOutboxRemoteSucceeded: typeof markOutboxRemoteSucceeded
   markOutboxLocalPersisted: typeof markOutboxLocalPersisted
+  markOutboxRemoteFailed: typeof markOutboxRemoteFailed
   /** Twitter 側で実際にブロック済みかを確認する。`pending_remote` の ambiguous state 解消にのみ使う。 */
   isRemotelyBlocked: (client: OpenApiClientContext, blockedId: string) => Promise<boolean>
 }
@@ -63,10 +69,9 @@ async function reconcileRemoteSucceeded(
 }
 
 /**
- * `pending_remote` は「remote 未実行」と「remote 成功済みだが状態更新が失敗した」を
- * 区別できない ambiguous state であるため、実際に Twitter 側でブロック済みかを確認する。
- * ブロック済みなら remote_succeeded へ進めて次回の reconciliation で補完する。
- * 未実施なら候補選定から除外されたまま次回 attemptBlock の resume 経路に委ねる。
+ * `pending_remote` は remote 実行の成否が不明な ambiguous state である。
+ * Twitter 側で実際にブロック済みなら remote_succeeded に進める。
+ * 未実施なら remote_failed にして、次回の block cycle で通常の候補として再選定できるようにする。
  * @param deps - reconciliation に必要な依存関数一式
  * @param entry - 対象の停滞した outbox entry
  */
@@ -75,14 +80,14 @@ async function reconcilePendingRemote(
   entry: StalledOutboxEntry,
 ): Promise<void> {
   const isBlocked = await deps.isRemotelyBlocked(deps.client, entry.blockedId)
-  if (isBlocked) {
-    await deps.markOutboxRemoteSucceeded(deps.prisma, entry.id)
-  }
+  await (isBlocked
+    ? deps.markOutboxRemoteSucceeded(deps.prisma, entry.id)
+    : deps.markOutboxRemoteFailed(deps.prisma, entry.id))
 }
 
 /**
- * 未 reconcile の outbox entry を巡回し、Twitter credential を持つ blocker 側でのみ
- * 判定可能な状態（remote 側の実ブロック済み確認）を解消する。Analyzer には持ち込まない。
+ * 未 reconcile の outbox entry を巡回し、Twitter credential を持つ blocker 側でのみ判定可能な状態 (remote 側の実ブロック済み確認) を解消する。
+ * Analyzer には持ち込まない。1 件の失敗が残りの entry の reconciliation を止めないよう、entry ごとに例外を分離する。
  * @param deps - reconciliation に必要な依存関数一式
  * @param prisma - Prisma クライアント
  */
@@ -92,22 +97,25 @@ export async function reconcileOutboxEntries(
 ): Promise<void> {
   const stalledEntries = await deps.findStalledOutboxEntries(prisma, deps.blockerId)
   for (const entry of stalledEntries) {
-    if (entry.status === 'remote_succeeded') {
-      await reconcileRemoteSucceeded(deps, entry)
-    } else if (entry.status === 'pending_remote') {
-      await reconcilePendingRemote(deps, entry)
+    try {
+      if (entry.status === 'remote_succeeded') {
+        await reconcileRemoteSucceeded(deps, entry)
+      } else if (entry.status === 'pending_remote') {
+        await reconcilePendingRemote(deps, entry)
+      }
+    } catch (error) {
+      logger.error(`Failed to reconcile outbox entry ${entry.id}`, error as Error)
+      captureException(error, { blockerId: deps.blockerId, outboxEntryId: entry.id })
     }
   }
 }
 
-// ブロック一覧は際限なく増える可能性があるため、reconciliation 1件あたりの
-// 全ページ走査を避け、この件数分のページを見て見つからなければ未実施と判断する。
+// ブロック一覧は際限なく増える可能性があるため、reconciliation 1 件あたりの全ページ走査を避け、この件数分のページを見て見つからなければ未実施と判断する。
 const BLOCK_LIST_PAGE_CAP = 20
 const BLOCK_LIST_PAGE_SIZE = 200
 
 /**
- * `crawler` の `syncBlocksPhase` と異なり全件同期が目的ではなく、単一の `blockedId` が
- * 一覧に含まれるかどうかだけを知れればよいため、一覧の先頭から必要な分だけ走査する。
+ * `crawler` の `syncBlocksPhase` と異なり全件同期が目的ではなく、単一の `blockedId` が一覧に含まれるかどうかだけを知れればよいため、一覧の先頭から必要な分だけ走査する。
  * @param client - ログイン済みの OpenAPI クライアント
  * @param blockedId - 確認対象のアカウント
  * @returns Twitter 側で実際にブロック済みなら true

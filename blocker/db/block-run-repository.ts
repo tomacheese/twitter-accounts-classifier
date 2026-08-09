@@ -44,7 +44,7 @@ export interface RecordBlockActionParams {
  * @param prisma - Prisma クライアント
  * @param id - 対象の `BlockRun` ID
  * @param finishedAt - サイクルが完了 (または失敗) した時刻
- * @param status - run の最終 status ("completed" | "failed")
+ * @param status - run の最終 status ("completed" | "partial" | "failed")
  */
 export async function finishBlockRun(
   prisma: PrismaClient,

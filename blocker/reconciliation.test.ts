@@ -13,6 +13,7 @@ function createMockDeps() {
     recordBlockAction: vi.fn().mockResolvedValue(undefined),
     markOutboxRemoteSucceeded: vi.fn().mockResolvedValue(undefined),
     markOutboxLocalPersisted: vi.fn().mockResolvedValue(undefined),
+    markOutboxRemoteFailed: vi.fn().mockResolvedValue(undefined),
     isRemotelyBlocked: vi.fn().mockResolvedValue(false),
   }
 }
@@ -72,7 +73,7 @@ describe('reconcileOutboxEntries', () => {
     expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
   })
 
-  it('pending_remote のまま停滞し実際は未実施の entry は resume 対象として残す', async () => {
+  it('pending_remote のまま停滞し実際は未実施の entry は remote_failed にして次回の再選定に委ねる', async () => {
     const deps = createMockDeps()
     vi.mocked(deps.findStalledOutboxEntries).mockResolvedValue([
       {
@@ -91,6 +92,7 @@ describe('reconcileOutboxEntries', () => {
 
     expect(deps.markOutboxRemoteSucceeded).not.toHaveBeenCalled()
     expect(deps.markOutboxLocalPersisted).not.toHaveBeenCalled()
+    expect(deps.markOutboxRemoteFailed).toHaveBeenCalledWith(deps.prisma, 'outbox-2')
   })
 
   it('pending_remote のまま停滞し実際は remote 成功済みの entry は remote_succeeded へ進める', async () => {
@@ -140,5 +142,35 @@ describe('reconcileOutboxEntries', () => {
 
     expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
     expect(deps.isRemotelyBlocked).toHaveBeenCalledWith(deps.client, 'blocked-2')
+  })
+
+  it('1件の entry の reconciliation が失敗しても残りの entry は処理する', async () => {
+    const deps = createMockDeps()
+    vi.mocked(deps.findStalledOutboxEntries).mockResolvedValue([
+      {
+        id: 'outbox-1',
+        status: 'remote_succeeded',
+        blockerId: 'blocker-1',
+        blockedId: 'blocked-1',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+        blockAccountRunId: 'bar-1',
+      },
+      {
+        id: 'outbox-2',
+        status: 'remote_succeeded',
+        blockerId: 'blocker-1',
+        blockedId: 'blocked-2',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+        blockAccountRunId: 'bar-1',
+      },
+    ])
+    vi.mocked(deps.hasBlockRow).mockRejectedValueOnce(new Error('db down')).mockResolvedValue(false)
+
+    await reconcileOutboxEntries(deps as never, deps.prisma as never)
+
+    expect(deps.markOutboxLocalPersisted).toHaveBeenCalledTimes(1)
+    expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-2')
   })
 })

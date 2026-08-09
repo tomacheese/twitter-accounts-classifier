@@ -458,9 +458,8 @@ model BlockAction {
   @@index([blockAccountRunId])
 }
 
-// createBlock (remote) 実行前に durable な intent を作ることで、DB 障害でどの段階が
-// 失敗しても直前に確定した状態が残るようにする。(blockerId, blockedId) の一意制約により
-// 同一ペアの outbox entry は常に 1 件に保たれ、中断後の再開は既存行の再利用で行う。
+// createBlock (remote) 実行前に durable な intent を作ることで、DB 障害でどの段階が失敗しても直前に確定した状態が残るようにする。
+// (blockerId, blockedId) の一意制約により同一ペアの outbox entry は常に 1 件に保たれ、中断や再選定後の再開は既存行の再利用で行う。
 model BlockOutboxEntry {
   id                String          @id @default(cuid())
   blockAccountRunId String

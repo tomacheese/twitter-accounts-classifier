@@ -218,9 +218,7 @@ const STALLED_OUTBOX_COUNT_THRESHOLD = 5
 const STALLED_OUTBOX_FINGERPRINT = computeFingerprint('outbox_stalled', { component: 'block' })
 
 /**
- * `BlockOutboxEntry` は blocker 側の reconciliation で解消される想定のため、Analyzer は
- * ここでは実 Twitter API を呼ばず件数の閾値超えのみを検出し、attention_items から
- * オペレーターが気付けるようにする。
+ * `BlockOutboxEntry` は blocker 側の reconciliation で解消される想定のため、Analyzer はここでは実 Twitter API を呼ばず件数の閾値超えのみを検出し、attention_items からオペレーターが気付けるようにする。
  * @param prisma - Prisma クライアント
  * @param now - 判定の基準時刻
  */
@@ -243,6 +241,20 @@ export async function detectStalledBlockOutboxEntries(
       await prisma.operationalIssue.update({
         where: { id: issue.id },
         data: { status: 'resolved', resolvedAt: now },
+      })
+      const observationKey = `${now.toISOString().slice(0, 13)}:resolved`
+      await prisma.operationalIssueOccurrence.upsert({
+        where: { issueId_observationKey: { issueId: issue.id, observationKey } },
+        create: {
+          issueId: issue.id,
+          observedAt: now,
+          stateTransition: 'resolved',
+          severity: issue.severity,
+          sourceType: 'block',
+          sourceId: 'outbox',
+          observationKey,
+        },
+        update: {},
       })
     }
     return

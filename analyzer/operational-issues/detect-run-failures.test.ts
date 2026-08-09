@@ -352,7 +352,7 @@ describe.skipIf(!process.env.DATABASE_URL)('detectStalledBlockOutboxEntries', ()
     expect(issues).toHaveLength(0)
   })
 
-  it('停滞が解消されると active な OperationalIssue を resolved にする', async () => {
+  it('停滞が解消されると active な OperationalIssue を resolved にし resolved Occurrence を記録する', async () => {
     await createStalledOutboxEntries(5)
     await detectStalledBlockOutboxEntries(prisma, new Date())
     await prisma.blockOutboxEntry.updateMany({ data: { status: 'local_persisted' } })
@@ -363,5 +363,10 @@ describe.skipIf(!process.env.DATABASE_URL)('detectStalledBlockOutboxEntries', ()
       where: { component: 'block', type: 'outbox_stalled' },
     })
     expect(issues[0]?.status).toBe('resolved')
+
+    const occurrences = await prisma.operationalIssueOccurrence.findMany({
+      where: { issueId: issues[0]?.id, stateTransition: 'resolved' },
+    })
+    expect(occurrences).toHaveLength(1)
   })
 })

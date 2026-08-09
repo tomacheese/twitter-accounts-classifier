@@ -56,9 +56,7 @@ export interface RunBlockCycleDependencies {
 }
 
 /**
- * 認証をこの関数内で行うのは、reconciliation が block cycle 本体とは別に
- * 常に全アカウントに対して実行される (block 対象候補が無いアカウントでも停滞 entry の
- * 有無を確認する必要がある) ため。
+ * 認証をこの関数内で行うのは、reconciliation が block cycle 本体とは別に常に全アカウントに対して実行される (block 対象候補が無いアカウントでも停滞 entry の有無を確認する必要がある) ためである。
  * @param account - reconciliation 対象のアカウント設定
  * @param prisma - Prisma クライアント
  */
@@ -88,6 +86,7 @@ async function reconcileAccountOutbox(
         recordBlockAction,
         markOutboxRemoteSucceeded,
         markOutboxLocalPersisted,
+        markOutboxRemoteFailed,
         isRemotelyBlocked,
       },
       prisma,

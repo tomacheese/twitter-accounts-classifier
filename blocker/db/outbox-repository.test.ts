@@ -66,14 +66,14 @@ describe('findOrCreateOutboxEntry', () => {
     expect(prisma.blockOutboxEntry.create).toHaveBeenCalled()
   })
 
-  it('既存 entry が local_persisted など解決済みなら新規作成する', async () => {
+  it('既存 entry が remote_failed など解決済みなら pending_remote に戻して再利用する', async () => {
     const prisma = createMockPrismaClient()
     vi.mocked(prisma.blockOutboxEntry.findUnique).mockResolvedValue({
       id: 'outbox-old',
-      status: 'local_persisted',
+      status: 'remote_failed',
     } as never)
-    vi.mocked(prisma.blockOutboxEntry.create).mockResolvedValue({
-      id: 'outbox-3',
+    vi.mocked(prisma.blockOutboxEntry.update).mockResolvedValue({
+      id: 'outbox-old',
       status: 'pending_remote',
     } as never)
 
@@ -85,8 +85,12 @@ describe('findOrCreateOutboxEntry', () => {
       confidence: 0.9,
     })
 
-    expect(result.id).toBe('outbox-3')
-    expect(prisma.blockOutboxEntry.create).toHaveBeenCalled()
+    expect(result).toEqual({ id: 'outbox-old', status: 'pending_remote' })
+    expect(prisma.blockOutboxEntry.update).toHaveBeenCalledWith({
+      where: { id: 'outbox-old' },
+      data: { status: 'pending_remote', remoteSucceededAt: null, localPersistedAt: null },
+    })
+    expect(prisma.blockOutboxEntry.create).not.toHaveBeenCalled()
   })
 })
 

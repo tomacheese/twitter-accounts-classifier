@@ -15,6 +15,7 @@ import {
   markOutboxRemoteSucceeded,
   markOutboxLocalPersisted,
   markOutboxRemoteFailed,
+  type OutboxEntryRef,
 } from './db/outbox-repository'
 import { captureException } from './monitoring/sentry'
 import type { AccountRunSummary } from './discord-notifier'
@@ -65,13 +66,10 @@ export async function resolveOwnAccountId(
 }
 
 /**
- * outbox entry を `createBlock` (remote) の前に確定させることで、Twitter 側の block が
- * 成立した直後に DB 障害が起きても「成立したかどうか不明」な状態を残さず、
- * reconciliation が Twitter 側の実態から補修できるようにする。
+ * outbox entry を `createBlock` (remote) の前に確定させる。
+ * これにより、Twitter 側の block 成立直後に DB 障害が起きても「成立したかどうか不明」な状態を残さず、reconciliation が Twitter 側の実態から補修できる。
  * 1 件の失敗が残りの候補の処理を止めないよう、この関数自身は例外を投げない。
- * Twitter 側への `createBlock` とその後の `BlockAction` 記録を別々の try で囲む: 記録側の
- * DB エラーを `createBlock` の失敗と同じ `catch` にまとめると、実際にはブロックが成立した
- * 候補まで `result: 'failure'` として記録されてしまい、履行済みの操作が誤って再試行対象になる。
+ * `createBlock` とその後の `BlockAction` 記録は別々の try で囲む。両者を同じ catch にまとめると、実際にはブロックが成立した候補まで `result: 'failure'` として記録され、履行済みの操作が誤って再試行対象になる。
  * @param client - ログイン済みの OpenAPI クライアント
  * @param deps - ブロック実行に必要な依存関数一式
  * @param blockAccountRunId - 記録先の `BlockAccountRun` ID
@@ -86,13 +84,23 @@ export async function attemptBlock(
   blockerId: string,
   candidate: BlockCandidate,
 ): Promise<boolean> {
-  const outboxEntry = await deps.findOrCreateOutboxEntry(deps.prisma, {
-    blockAccountRunId,
-    blockerId,
-    blockedId: candidate.accountId,
-    labelDefinitionId: candidate.labelDefinitionId,
-    confidence: candidate.confidence,
-  })
+  let outboxEntry: OutboxEntryRef
+  try {
+    outboxEntry = await deps.findOrCreateOutboxEntry(deps.prisma, {
+      blockAccountRunId,
+      blockerId,
+      blockedId: candidate.accountId,
+      labelDefinitionId: candidate.labelDefinitionId,
+      confidence: candidate.confidence,
+    })
+  } catch (error) {
+    logger.error(
+      `Failed to create outbox entry for ${candidate.accountId} on behalf of ${blockerId}`,
+      error as Error,
+    )
+    captureException(error, { blockerId, blockedId: candidate.accountId })
+    return false
+  }
 
   try {
     await withTwitterRetry(() => client.createBlock(candidate.accountId))
