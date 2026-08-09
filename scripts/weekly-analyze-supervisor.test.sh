@@ -52,6 +52,9 @@ STALE_SHIMS="$STALE_CASE/home/.local/share/mise/shims"
 export TIMEOUT_MARKER="$STALE_CASE/timeout-called"
 export TMUX_COUNT="$STALE_CASE/tmux-count"
 export TMUX_ARGS="$STALE_CASE/tmux-args"
+cat > "$STALE_CASE/repo/.env.weekly-review" <<'ENV'
+DATABASE_URL=postgresql://weekly_review:test-password@192.0.2.10:5432/testdb
+ENV
 cat > "$STALE_SHIMS/claude" <<'SCRIPT'
 #!/bin/sh
 if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then
@@ -118,5 +121,7 @@ grep -q 'exceeded staleAfterAt=' "$STALE_CASE/repo/logs/weekly-analyze.log" || \
   fail 'stale timeout was not recorded in the supervisor log'
 grep -Fq -- "-e PATH=$STALE_SHIMS:" "$TMUX_ARGS" || \
   fail 'tmux session did not receive the cron-repaired PATH explicitly'
+grep -Fq -- '-e DATABASE_URL=postgresql://weekly_review:test-password@192.0.2.10:5432/testdb' "$TMUX_ARGS" || \
+  fail 'tmux session did not receive the weekly-review DATABASE_URL explicitly'
 
 echo '[weekly-analyze-supervisor.test] ok'
