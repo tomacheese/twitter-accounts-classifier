@@ -170,10 +170,8 @@ interface WorstOfResult<T> {
 }
 
 /**
- * 複数の ReadModelState から、最も劣化している freshness と
- * lastSuccessAt が最も新しい state を求める。
- * getPipelineMeta(全 ReadModelState 対象)と getCoreReadModelMeta
- * (主要 read model のみ対象)の両方から呼ぶ共通ロジック。
+ * 複数の ReadModelState から、最も劣化している freshness と lastSuccessAt が最も新しい state を求める。
+ * getPipelineMeta と getCoreReadModelMeta の両方から呼ぶ共通ロジック。
  * @param states - worst-of の対象とする ReadModelState の一覧
  * @param thresholds - delayed/stale と判定するまでの経過時間
  * @param now - 判定基準時刻
@@ -234,8 +232,8 @@ export async function getPipelineMeta(prisma: PrismaClient): Promise<ReadModelMe
   }
 }
 
-// Overview の総合 freshness と揃える主要 read model。block_relation は Block 機能を
-// 使わない環境では Pointer が作られないため、固定の Set には含めず呼び出し側で判定する。
+// Overview の総合 freshness と揃える主要 read model。
+// block_relation は Block 機能を使わない環境では Pointer が作られないため、固定の Set には含めず呼び出し側で判定する。
 const CORE_MODEL_KEYS = ['account_summary_latest', 'label_summary', 'attention_items'] as const
 
 /** 主要 read model 1 件分の freshness。 */
@@ -254,9 +252,7 @@ const EMPTY_CORE_META: CoreReadModelMeta = { ...EMPTY_META, perModel: [] }
 
 /**
  * Overview の総合 freshness を、主要 read model の worst-of として計算する。
- * overview_snapshot 自身の freshness ではなく Accounts/Labels/Attention の
- * 元データの freshness を対象にすることで、
- * 「表示は最新だが元データは遅延している」状態を見逃さないようにする。
+ * overview_snapshot 自身の freshness ではなく、Accounts/Labels/Attention の元データの freshness を対象にすることで、「表示は最新だが元データは遅延している」状態を見逃さないようにする。
  * @param prisma - Prisma クライアント
  * @returns 主要 read model の worst-of と、モデルごとの内訳
  */

@@ -150,8 +150,7 @@ export async function getOverviewSnapshot(
     freshnessStatus,
   )
 
-  // overview_snapshot 自身の freshness だけでは、build 元となった
-  // Accounts/Labels/Attention の read model が遅延していても「最新」に見えてしまう。
+  // overview_snapshot 自身の freshness だけでは、build 元となった Accounts/Labels/Attention の read model が遅延していても「最新」に見えてしまう。
   // 主要 read model の worst-of を別途重ね、両者が一致しない場合は注記できるようにする。
   const coreMeta = await getCoreReadModelMeta(prisma)
 
