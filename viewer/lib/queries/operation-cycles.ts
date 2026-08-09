@@ -106,6 +106,8 @@ export interface OperationCycleDetailView {
   triggeredAt: Date
   startedAt: Date | null
   finishedAt: Date | null
+  /** account/action drill-down クエリが参照する CrawlRun/BlockRun の ID。 */
+  sourceId: string
   stages: OperationStageView[]
 }
 
@@ -132,6 +134,7 @@ async function getCycleDetail(
     triggeredAt: cycle.triggeredAt,
     startedAt: cycle.startedAt,
     finishedAt: cycle.finishedAt,
+    sourceId: cycle.sourceId,
     stages: cycle.stages.map((stage) => ({
       stageKey: stage.stageKey,
       sequence: stage.sequence,

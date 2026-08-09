@@ -13,6 +13,7 @@ function buildDetail(stages: OperationCycleDetailView['stages']): OperationCycle
     triggeredAt: new Date('2026-01-01T00:00:00Z'),
     startedAt: new Date('2026-01-01T00:00:00Z'),
     finishedAt: new Date('2026-01-01T00:10:00Z'),
+    sourceId: 'crawl-run-1',
     stages,
   }
 }

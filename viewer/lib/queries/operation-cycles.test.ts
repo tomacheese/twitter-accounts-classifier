@@ -49,6 +49,7 @@ const baseCycle = {
   triggeredAt: new Date('2026-08-07T00:00:00.000Z'),
   startedAt: new Date('2026-08-07T00:00:01.000Z'),
   finishedAt: new Date('2026-08-07T00:10:00.000Z'),
+  sourceId: 'crawl-run-1',
   stages: [
     {
       stageKey: 'label_metrics',
