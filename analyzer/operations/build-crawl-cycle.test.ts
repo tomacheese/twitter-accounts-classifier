@@ -34,10 +34,10 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     expect(cycle.attentionRequired).toBe(true)
 
     const stages = await prisma.operationStage.findMany({ where: { cycleId: cycle.id } })
-    expect(stages).toHaveLength(4)
+    expect(stages).toHaveLength(3)
   })
 
-  it('4 Stage すべて succeeded なら Cycle status は succeeded になる', async () => {
+  it('3 Stage すべて succeeded なら Cycle status は succeeded になる', async () => {
     const crawlRun = await prisma.crawlRun.create({
       data: {
         id: `crawl-${randomUUID()}`,
@@ -48,7 +48,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
       },
     })
 
-    for (const kind of ['label_metrics', 'finding_generation', 'read_model_refresh']) {
+    for (const kind of ['label_aggregate_refresh', 'read_model_refresh']) {
       const workItem = await prisma.analysisWorkItem.create({
         data: { kind, triggerType: 'crawl_run', triggerId: crawlRun.id, status: 'succeeded' },
       })
@@ -82,7 +82,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
       },
     })
 
-    for (const kind of ['label_metrics', 'finding_generation', 'read_model_refresh']) {
+    for (const kind of ['label_aggregate_refresh', 'read_model_refresh']) {
       const workItem = await prisma.analysisWorkItem.create({
         data: { kind, triggerType: 'crawl_run', triggerId: crawlRun.id, status: 'succeeded' },
       })
@@ -109,12 +109,12 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     expect(cycle.status).toBe('partial')
     expect(cycle.attentionRequired).toBe(true)
 
-    // label_metrics/finding_generation は partial なデータに対しても実際に処理を
+    // label_aggregate_refresh は partial なデータに対しても実際に処理を
     // 完了しているため、succeeded のまま表示してよい。
-    const labelMetricsStage = await prisma.operationStage.findUniqueOrThrow({
-      where: { cycleId_stageKey: { cycleId: cycle.id, stageKey: 'label_metrics' } },
+    const labelAggregateStage = await prisma.operationStage.findUniqueOrThrow({
+      where: { cycleId_stageKey: { cycleId: cycle.id, stageKey: 'label_aggregate_refresh' } },
     })
-    expect(labelMetricsStage.status).toBe('succeeded')
+    expect(labelAggregateStage.status).toBe('succeeded')
   })
 
   it('Viewer が絞り込む kind と同じ crawl を書き込む', async () => {
@@ -148,7 +148,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     })
     await prisma.analysisWorkItem.create({
       data: {
-        kind: 'label_metrics',
+        kind: 'label_aggregate_refresh',
         triggerType: 'crawl_run',
         triggerId: crawlRun.id,
         status: 'dead',
@@ -163,7 +163,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
       where: { sourceType_sourceId: { sourceType: 'crawl_run', sourceId: crawlRun.id } },
     })
     const stage = await prisma.operationStage.findUniqueOrThrow({
-      where: { cycleId_stageKey: { cycleId: cycle.id, stageKey: 'label_metrics' } },
+      where: { cycleId_stageKey: { cycleId: cycle.id, stageKey: 'label_aggregate_refresh' } },
     })
     expect(stage.status).toBe('failed')
     expect(stage.errorSummary).toBe('boom')
@@ -180,7 +180,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
         status: 'running',
       },
     })
-    for (const kind of ['label_metrics', 'finding_generation', 'read_model_refresh']) {
+    for (const kind of ['label_aggregate_refresh', 'read_model_refresh']) {
       await prisma.analysisWorkItem.create({
         data: { kind, triggerType: 'crawl_run', triggerId: crawlRun.id, status: 'leased' },
       })
@@ -211,6 +211,6 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     const cycles = await prisma.operationCycle.findMany({ where: { sourceId: crawlRun.id } })
     expect(cycles).toHaveLength(1)
     const stages = await prisma.operationStage.findMany({ where: { cycleId: cycles[0]?.id } })
-    expect(stages).toHaveLength(4)
+    expect(stages).toHaveLength(3)
   })
 })
