@@ -99,6 +99,26 @@ describe('upsertTweet ad-disclosure fields', () => {
   })
 })
 
+describe('upsertTweet expanded URLs', () => {
+  it('preserves previously observed expanded URLs while adding newly observed URLs', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
+    const findUnique = vi.fn().mockResolvedValue({
+      expandedUrls: ['https://example.com/old'],
+    })
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    await upsertTweet(prisma, {
+      ...sampleTweet,
+      expandedUrls: ['https://example.com/new'],
+    })
+
+    const call = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(call.update).toMatchObject({
+      expandedUrls: ['https://example.com/new', 'https://example.com/old'],
+    })
+  })
+})
+
 describe('upsertTweet quoted-tweet fields', () => {
   it('passes quotedTweetId, quotedTweetAuthorId and quotedTweetHasVideo through to both create and update', async () => {
     const upsert = vi.fn().mockResolvedValue({ id: 't1' })

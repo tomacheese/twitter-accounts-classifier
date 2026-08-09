@@ -322,6 +322,7 @@ describe('runRelabelBackfill', () => {
       isRetweet: false,
       isPromoted: false,
       isPaidPromotion: false,
+      expandedUrls: ['https://www.amazon.co.jp/dp/TEST?tag=fictional-22'],
       foreignVideoSourceCount: 1,
       inReplyToTweetId: null,
       quotedTweetAuthorId: 'bob',
@@ -346,6 +347,7 @@ describe('runRelabelBackfill', () => {
     await runRelabelBackfill(prisma, registry)
 
     expect(seenBundles[0]?.recentTweets[0]).toMatchObject({
+      expandedUrls: ['https://www.amazon.co.jp/dp/TEST?tag=fictional-22'],
       foreignVideoSourceCount: 1,
       quotedTweetAuthorId: 'bob',
       quotedTweetHasVideo: true,

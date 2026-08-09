@@ -547,6 +547,7 @@ async function runAccountCycleBody(
           isRetweet: t.isRetweet,
           isPromoted: t.isPromoted,
           isPaidPromotion: t.isPaidPromotion,
+          expandedUrls: t.expandedUrls ?? [],
           hasAiGeneratedMedia: t.hasAiGeneratedMedia,
           aiGeneratedDetectionSource: t.aiGeneratedDetectionSource,
           foreignVideoSourceCount: t.foreignVideoSourceCount,

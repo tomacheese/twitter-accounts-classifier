@@ -223,6 +223,14 @@ function toRawTweetResult(data: TweetApiUtilsData): RawTweetResult | null {
       quoteCount: data.tweet.legacy.quoteCount,
       inReplyToStatusIdStr: data.tweet.legacy.inReplyToStatusIdStr ?? null,
       retweetedStatusIdStr: data.retweeted?.tweet.restId ?? null,
+      entities: data.tweet.legacy.entities
+        ? {
+            urls: data.tweet.legacy.entities.urls?.map((entry) => ({
+              url: entry.url,
+              expandedUrl: entry.expandedUrl,
+            })),
+          }
+        : undefined,
       extendedEntities: data.tweet.legacy.extendedEntities,
       quotedStatusResult: data.quoted
         ? {

@@ -76,6 +76,7 @@ interface TweetRow {
   isRetweet: boolean
   isPromoted: boolean
   isPaidPromotion: boolean
+  expandedUrls: string[]
   foreignVideoSourceCount: number | null
   inReplyToTweetId: string | null
   quotedTweetAuthorId: string | null
@@ -102,7 +103,7 @@ async function fetchTweetsForAccounts(
 
   const rows = await prisma.$queryRaw<TweetRow[]>`
     SELECT id, "fullText", "createdAt", "retweetCount", "likeCount", "isReply",
-           "isRetweet", "isPromoted", "isPaidPromotion", "inReplyToTweetId",
+           "isRetweet", "isPromoted", "isPaidPromotion", "expandedUrls", "inReplyToTweetId",
            "quotedTweetAuthorId", "quotedTweetHasVideo", "foreignVideoSourceCount", "accountId"
     FROM (
       SELECT *, ROW_NUMBER() OVER (
@@ -168,6 +169,7 @@ function buildFeatureBundle(
       isRetweet: tweet.isRetweet,
       isPromoted: tweet.isPromoted,
       isPaidPromotion: tweet.isPaidPromotion,
+      expandedUrls: tweet.expandedUrls,
       foreignVideoSourceCount: tweet.foreignVideoSourceCount,
       inReplyToTweetId: tweet.inReplyToTweetId,
       quotedTweetAuthorId: tweet.quotedTweetAuthorId,

@@ -87,6 +87,7 @@ describe('toTweetInput', () => {
       retweetedTweetId: null,
       isPromoted: false,
       isPaidPromotion: false,
+      expandedUrls: [],
       hasAiGeneratedMedia: null,
       aiGeneratedDetectionSource: null,
       foreignVideoSourceCount: null,
@@ -126,6 +127,37 @@ describe('toTweetInput', () => {
     })
 
     expect(input.foreignVideoSourceCount).toBe(1)
+  })
+
+  it('normalizes expanded URL entities, falls back to the t.co URL, and deduplicates them', () => {
+    const linkedTweet: RawTweetResult = {
+      ...rawTweet,
+      legacy: {
+        ...rawTweet.legacy,
+        entities: {
+          urls: [
+            {
+              url: 'https://t.co/a',
+              expandedUrl: 'https://www.amazon.co.jp/dp/TEST?tag=sample-22',
+            },
+            {
+              url: 'https://t.co/b',
+              expandedUrl: 'https://www.amazon.co.jp/dp/TEST?tag=sample-22',
+            },
+            { url: 'https://t.co/c' },
+          ],
+        },
+      },
+    }
+
+    const input = toTweetInput(linkedTweet, {
+      source: 'recommended',
+      viewerAccountId: 'someone-else',
+    })
+
+    expect(input).toMatchObject({
+      expandedUrls: ['https://www.amazon.co.jp/dp/TEST?tag=sample-22', 'https://t.co/c'],
+    })
   })
 
   it('marks isAuthorReply true when the reply author matches the viewer account', () => {
@@ -290,6 +322,23 @@ describe('mergeTweetAdFlags', () => {
 
     expect(merged).toHaveLength(1)
     expect(merged[0]).toMatchObject({ id: 't1', isPromoted: true, isPaidPromotion: true })
+  })
+
+  it('unions expanded URL evidence across duplicate tweet ids', () => {
+    const first = {
+      ...tweetInput({ id: 't1' }),
+      expandedUrls: ['https://example.com/a'],
+    } as NormalizedTweet
+    const second = {
+      ...tweetInput({ id: 't1' }),
+      expandedUrls: ['https://example.com/b'],
+    } as NormalizedTweet
+
+    const merged = mergeTweetAdFlags([first, second])
+
+    expect(merged[0]).toMatchObject({
+      expandedUrls: ['https://example.com/b', 'https://example.com/a'],
+    })
   })
 
   it('leaves distinct tweet ids untouched', () => {

@@ -1,0 +1,2 @@
+ALTER TABLE "Tweet"
+ADD COLUMN "expandedUrls" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

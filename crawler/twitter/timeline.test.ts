@@ -3,6 +3,7 @@ import {
   fetchRecommendedTimeline,
   fetchFollowingTimeline,
   fetchTrendingTimeline,
+  convertTimelineResponse,
   type TweetApiLike,
 } from './timeline'
 import type { RawTweetResult, TrendsScraperLike } from 'twitter-client'
@@ -49,6 +50,69 @@ function page(
 ): { data: { data: RawTweetResult[]; cursor?: string; rawCount: number } } {
   return { data: { data: ids.map((id) => rawTweet(id)), cursor, rawCount } }
 }
+
+describe('convertTimelineResponse', () => {
+  it('preserves X URL entities including expandedUrl', async () => {
+    const result = await convertTimelineResponse(
+      Promise.resolve({
+        data: {
+          data: [
+            {
+              raw: {},
+              replies: [],
+              tweet: {
+                restId: 't-url',
+                legacy: {
+                  fullText: '商品リンク',
+                  createdAt: 'Wed Jan 01 00:00:00 +0000 2020',
+                  retweetCount: 0,
+                  favoriteCount: 0,
+                  replyCount: 0,
+                  quoteCount: 0,
+                  entities: {
+                    urls: [
+                      {
+                        url: 'https://t.co/example',
+                        expandedUrl: 'https://www.amazon.co.jp/dp/TEST?tag=sample-22',
+                        displayUrl: 'amazon.co.jp/dp/TEST',
+                        indices: [0, 23],
+                      },
+                    ],
+                  },
+                },
+                contentDisclosure: {},
+              },
+              user: {
+                restId: 'u-url',
+                legacy: {
+                  screenName: 'fictional_user',
+                  name: 'Fictional User',
+                  description: null,
+                  followersCount: 0,
+                  friendsCount: 0,
+                  statusesCount: 1,
+                  createdAt: 'Wed Jan 01 00:00:00 +0000 2020',
+                  profileImageUrlHttps: null,
+                  location: null,
+                  url: null,
+                },
+                isBlueVerified: false,
+              },
+            },
+          ],
+          cursor: {},
+        },
+      } as never),
+    )
+
+    expect(result.data.data[0]?.legacy.entities?.urls).toEqual([
+      {
+        url: 'https://t.co/example',
+        expandedUrl: 'https://www.amazon.co.jp/dp/TEST?tag=sample-22',
+      },
+    ])
+  })
+})
 
 describe('fetchRecommendedTimeline', () => {
   it('calls getHomeTimeline with the given count and tags results as recommended', async () => {
