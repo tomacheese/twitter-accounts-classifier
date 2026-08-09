@@ -96,4 +96,41 @@ describe('runBlockCycle', () => {
       'failed',
     )
   })
+
+  it('failedCount > 0 だが完走した場合 BlockRun.status は partial になる', async () => {
+    const config: BlockerAppConfig = {
+      accounts: [
+        {
+          email: 'a@example.com',
+          username: 'alice',
+          password: 'p',
+          otpSecret: null,
+          blockEnabled: true,
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+        },
+      ],
+      discordWebhookUrl: null,
+    }
+    const runBlockAccountCycle = vi
+      .fn()
+      .mockResolvedValue({ username: 'alice', blockedCount: 1, failedCount: 1, failed: false })
+    const deps = {
+      config,
+      startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1' }),
+      finishBlockRun: vi.fn().mockResolvedValue(undefined),
+      touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
+      runBlockAccountCycle,
+      notifyDiscord: vi.fn().mockResolvedValue(undefined),
+      prisma: {},
+    }
+
+    await runBlockCycle(deps as never)
+
+    expect(deps.finishBlockRun).toHaveBeenCalledWith(
+      deps.prisma,
+      'run-1',
+      expect.any(Date),
+      'partial',
+    )
+  })
 })

@@ -91,7 +91,11 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
   }
 
   await deps.notifyDiscord(deps.config.discordWebhookUrl, summaries)
-  const runStatus = summaries.some((summary) => summary.failed) ? 'failed' : 'completed'
+  const runStatus = summaries.some((summary) => summary.failed)
+    ? 'failed'
+    : summaries.some((summary) => summary.failedCount > 0)
+      ? 'partial'
+      : 'completed'
   await deps.finishBlockRun(deps.prisma, run.id, new Date(), runStatus)
 }
 
