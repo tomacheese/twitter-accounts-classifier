@@ -56,4 +56,18 @@ psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "CREATE ROLE weekly_review NOLOGIN"
 )
 
 test "$(analysis_work_item_privileges)" = "true:true:false:false"
+
+# grant sync が途中で落ちても、REVOKE だけが残って write allowlist を壊さないことを検証する。
+psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'GRANT UPDATE ON TABLE "AnalysisWorkItem" TO weekly_review'
+INTERRUPTED_SYNC_SQL="$(mktemp)"
+trap 'rm -f "$INTERRUPTED_SYNC_SQL"' EXIT
+sed '/^COMMIT;$/i SELECT 1 / 0;' "$REPO_ROOT/scripts/db/sync-weekly-review-grants.sql" > "$INTERRUPTED_SYNC_SQL"
+if psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$INTERRUPTED_SYNC_SQL" >/dev/null 2>&1; then
+  echo "weekly_review grant sync must fail at the injected error" >&2
+  exit 1
+fi
+test "$(analysis_work_item_privileges)" = "true:true:true:false"
+psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$REPO_ROOT/scripts/db/sync-weekly-review-grants.sql" >/dev/null
+test "$(analysis_work_item_privileges)" = "true:true:false:false"
+
 psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "DROP OWNED BY weekly_review; DROP ROLE weekly_review"

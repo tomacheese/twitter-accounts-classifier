@@ -2,6 +2,8 @@
 -- Prisma migration を実行するテーブル所有者ロールで、migration後に毎回実行する。
 -- 方針: public の全テーブルは読める。書き込みは明示allowlistだけに限定する。
 
+BEGIN;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'weekly_review') THEN
@@ -46,3 +48,5 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 
 -- write allowlistを増やす場合は、上の全体REVOKEより後へ明示GRANTを追加し、
 -- verify-weekly-review-grants.sqlのallowlistも同時に更新する。
+
+COMMIT;
