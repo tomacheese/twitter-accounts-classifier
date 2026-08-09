@@ -717,6 +717,8 @@ model LabelMetricDaily {
 
 // normalizedDisplayName の部分一致検索は pg_trgm の GIN インデックスで支える
 // (Task 5 Step 2b の raw SQL で作成する。Prisma の schema DSL では表現できない)。
+// recentlyChanged 用の DESC NULLS LAST / accountId DESC 索引は Prisma DSL で NULLS LAST を表現できないため、
+// migration 20260809151500_fix_recently_changed_order の raw SQL で管理する。
 model AccountSummaryCurrent {
   generationId                String
   accountId                   String

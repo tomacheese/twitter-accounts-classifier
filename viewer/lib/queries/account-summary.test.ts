@@ -43,7 +43,7 @@ describe('listAccountSummaries', () => {
     expect(result.nextCursor).toBeNull()
   })
 
-  it('view: recentlyChanged は lastClassificationChangedAt 降順で問い合わせる', async () => {
+  it('view: recentlyChanged は lastClassificationChangedAt 降順・NULL LAST で問い合わせる', async () => {
     const { prisma, findMany } = createMockPrisma({
       pointer: { currentGenerationId: 'generation-1' },
     })
@@ -51,7 +51,9 @@ describe('listAccountSummaries', () => {
     await listAccountSummaries(prisma, { view: 'recentlyChanged' })
 
     const call = findMany.mock.calls[0][0] as { orderBy: unknown[] }
-    expect(call.orderBy[0]).toEqual({ lastClassificationChangedAt: 'desc' })
+    expect(call.orderBy[0]).toEqual({
+      lastClassificationChangedAt: { sort: 'desc', nulls: 'last' },
+    })
   })
 
   it('常に current generationId で絞り込む (古い generation を返さない)', async () => {
@@ -163,10 +165,37 @@ describe('listAccountSummaries', () => {
       cursor: nextCursor,
     })
 
+    const call = second.findMany.mock.calls[0][0] as {
+      where: { lastClassificationChangedAt?: null; accountId?: { lt: string }; OR?: unknown[] }
+    }
+    expect(call.where.OR).toBeUndefined()
+    expect(call.where.lastClassificationChangedAt).toBeNull()
+    expect(call.where.accountId).toEqual({ lt: 'account-0' })
+  })
+
+  it('recentlyChanged の日時あり cursor は日時行の続きの後に null 行も辿る', async () => {
+    const changedAt = new Date('2026-08-09T00:00:00Z')
+    const first = createMockPrisma({
+      pointer: { currentGenerationId: 'generation-1' },
+      rows: [createRow(0, changedAt), createRow(1, null)],
+    })
+    const { nextCursor } = await listAccountSummaries(first.prisma, {
+      view: 'recentlyChanged',
+      limit: 1,
+    })
+
+    const second = createMockPrisma({ pointer: { currentGenerationId: 'generation-1' } })
+    await listAccountSummaries(second.prisma, {
+      view: 'recentlyChanged',
+      limit: 1,
+      cursor: nextCursor,
+    })
+
     const call = second.findMany.mock.calls[0][0] as { where: { OR?: unknown[] } }
     expect(call.where.OR).toEqual([
-      { lastClassificationChangedAt: null, accountId: { lt: 'account-0' } },
-      { lastClassificationChangedAt: { not: null } },
+      { lastClassificationChangedAt: { lt: changedAt } },
+      { lastClassificationChangedAt: changedAt, accountId: { lt: 'account-0' } },
+      { lastClassificationChangedAt: null },
     ])
   })
 
