@@ -10,6 +10,8 @@ import { verifiedGovernmentRule } from './rules/verified-government'
 import { spamRule } from './rules/spam'
 import { adPromotedRule } from './rules/ad-promoted'
 import { adPrHashtagRule } from './rules/ad-pr-hashtag'
+import { amazonAffiliateLinkRule } from './rules/amazon-affiliate-link'
+import { amazonAffiliatePromotedRule } from './rules/amazon-affiliate-promoted'
 import { adReplyHijackRule } from './rules/ad-reply-hijack'
 import { replyLanguageMismatchRule } from './rules/reply-language-mismatch'
 import { botRule } from './rules/bot'
@@ -59,6 +61,8 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   spamRule,
   adPromotedRule,
   adPrHashtagRule,
+  amazonAffiliateLinkRule,
+  amazonAffiliatePromotedRule,
   adReplyHijackRule,
   replyLanguageMismatchRule,
   botRule,
