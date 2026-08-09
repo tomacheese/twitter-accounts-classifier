@@ -24,6 +24,7 @@ function fakePrisma() {
     },
     blockAction: {
       create: vi.fn().mockResolvedValue({}),
+      upsert: vi.fn().mockResolvedValue({}),
       count: vi.fn().mockResolvedValue(0),
     },
     analysisWorkItem: {
@@ -226,7 +227,7 @@ describe('finishBlockAccountRun', () => {
 })
 
 describe('recordBlockAction', () => {
-  it('creates a BlockAction row for a single attempt', async () => {
+  it('upserts a BlockAction row keyed by outboxEntryId for a single attempt', async () => {
     const prisma = fakePrisma()
 
     await recordBlockAction(prisma as never, {
@@ -237,10 +238,12 @@ describe('recordBlockAction', () => {
       confidence: 0.95,
       result: 'success',
       errorMessage: null,
+      outboxEntryId: 'outbox-1',
     })
 
-    expect(prisma.blockAction.create).toHaveBeenCalledWith({
-      data: {
+    expect(prisma.blockAction.upsert).toHaveBeenCalledWith({
+      where: { outboxEntryId: 'outbox-1' },
+      create: {
         blockAccountRunId: 'account-run-1',
         blockerId: 'blocker-1',
         blockedId: 'blocked-1',
@@ -248,8 +251,30 @@ describe('recordBlockAction', () => {
         confidence: 0.95,
         result: 'success',
         errorMessage: null,
+        outboxEntryId: 'outbox-1',
       },
+      update: { result: 'success', errorMessage: null },
     })
+  })
+
+  it('同一 outboxEntryId に対する複数回呼び出しは重複行を作らない', async () => {
+    const prisma = fakePrisma()
+
+    await recordBlockAction(prisma as never, {
+      blockAccountRunId: 'bar-1',
+      blockerId: 'blocker-1',
+      blockedId: 'blocked-1',
+      labelDefinitionId: 'label-1',
+      confidence: 0.9,
+      result: 'success',
+      errorMessage: null,
+      outboxEntryId: 'outbox-1',
+    })
+
+    expect(prisma.blockAction.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { outboxEntryId: 'outbox-1' } }),
+    )
+    expect(prisma.blockAction.create).not.toHaveBeenCalled()
   })
 })
 

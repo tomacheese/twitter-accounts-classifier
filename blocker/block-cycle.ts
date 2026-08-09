@@ -10,6 +10,13 @@ import {
   finishBlockAccountRun,
   recordBlockAction,
 } from './db/block-run-repository'
+import {
+  findOrCreateOutboxEntry,
+  markOutboxRemoteSucceeded,
+  markOutboxLocalPersisted,
+  markOutboxRemoteFailed,
+  type OutboxEntryRef,
+} from './db/outbox-repository'
 import { captureException } from './monitoring/sentry'
 import type { AccountRunSummary } from './discord-notifier'
 
@@ -28,6 +35,10 @@ export interface BlockAccountCycleDependencies {
   startBlockAccountRun: typeof startBlockAccountRun
   finishBlockAccountRun: typeof finishBlockAccountRun
   recordBlockAction: typeof recordBlockAction
+  findOrCreateOutboxEntry: typeof findOrCreateOutboxEntry
+  markOutboxRemoteSucceeded: typeof markOutboxRemoteSucceeded
+  markOutboxLocalPersisted: typeof markOutboxLocalPersisted
+  markOutboxRemoteFailed: typeof markOutboxRemoteFailed
   prisma: PrismaClient
   limits: BlockLimits
   sleepImpl?: (ms: number) => Promise<void>
@@ -42,7 +53,7 @@ const defaultSleep = (ms: number): Promise<void> =>
  * @param username - 解決対象のログインアカウントのユーザー名
  * @returns 解決した `Account.id`
  */
-async function resolveOwnAccountId(
+export async function resolveOwnAccountId(
   client: OpenApiClientContext,
   username: string,
 ): Promise<string> {
@@ -55,10 +66,10 @@ async function resolveOwnAccountId(
 }
 
 /**
+ * outbox entry を `createBlock` (remote) の前に確定させる。
+ * これにより、Twitter 側の block 成立直後に DB 障害が起きても「成立したかどうか不明」な状態を残さず、reconciliation が Twitter 側の実態から補修できる。
  * 1 件の失敗が残りの候補の処理を止めないよう、この関数自身は例外を投げない。
- * Twitter 側への `createBlock` とその後の `BlockAction` 記録を別々の try で囲む: 記録側の
- * DB エラーを `createBlock` の失敗と同じ `catch` にまとめると、実際にはブロックが成立した
- * 候補まで `result: 'failure'` として記録されてしまい、履行済みの操作が誤って再試行対象になる。
+ * `createBlock` とその後の `BlockAction` 記録は別々の try で囲む。両者を同じ catch にまとめると、実際にはブロックが成立した候補まで `result: 'failure'` として記録され、履行済みの操作が誤って再試行対象になる。
  * @param client - ログイン済みの OpenAPI クライアント
  * @param deps - ブロック実行に必要な依存関数一式
  * @param blockAccountRunId - 記録先の `BlockAccountRun` ID
@@ -66,13 +77,31 @@ async function resolveOwnAccountId(
  * @param candidate - ブロック対象と根拠ラベル・確信度
  * @returns ブロックに成功したかどうか
  */
-async function attemptBlock(
+export async function attemptBlock(
   client: OpenApiClientContext,
   deps: BlockAccountCycleDependencies,
   blockAccountRunId: string,
   blockerId: string,
   candidate: BlockCandidate,
 ): Promise<boolean> {
+  let outboxEntry: OutboxEntryRef
+  try {
+    outboxEntry = await deps.findOrCreateOutboxEntry(deps.prisma, {
+      blockAccountRunId,
+      blockerId,
+      blockedId: candidate.accountId,
+      labelDefinitionId: candidate.labelDefinitionId,
+      confidence: candidate.confidence,
+    })
+  } catch (error) {
+    logger.error(
+      `Failed to create outbox entry for ${candidate.accountId} on behalf of ${blockerId}`,
+      error as Error,
+    )
+    captureException(error, { blockerId, blockedId: candidate.accountId })
+    return false
+  }
+
   try {
     await withTwitterRetry(() => client.createBlock(candidate.accountId))
   } catch (error) {
@@ -81,6 +110,7 @@ async function attemptBlock(
       error as Error,
     )
     captureException(error, { blockerId, blockedId: candidate.accountId })
+    await deps.markOutboxRemoteFailed(deps.prisma, outboxEntry.id)
     await deps.recordBlockAction(deps.prisma, {
       blockAccountRunId,
       blockerId,
@@ -89,11 +119,13 @@ async function attemptBlock(
       confidence: candidate.confidence,
       result: 'failure',
       errorMessage: error instanceof Error ? error.message : String(error),
+      outboxEntryId: outboxEntry.id,
     })
     return false
   }
 
   try {
+    await deps.markOutboxRemoteSucceeded(deps.prisma, outboxEntry.id)
     await deps.recordSuccessfulBlock(deps.prisma, blockerId, candidate.accountId, blockAccountRunId)
     await deps.recordBlockAction(deps.prisma, {
       blockAccountRunId,
@@ -103,7 +135,9 @@ async function attemptBlock(
       confidence: candidate.confidence,
       result: 'success',
       errorMessage: null,
+      outboxEntryId: outboxEntry.id,
     })
+    await deps.markOutboxLocalPersisted(deps.prisma, outboxEntry.id)
   } catch (error) {
     logger.error(
       `Blocked account ${candidate.accountId} but failed to record it for ${blockerId}`,

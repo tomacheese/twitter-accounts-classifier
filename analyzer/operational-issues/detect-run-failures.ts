@@ -210,3 +210,83 @@ export async function detectAnalysisStageFailure(
     observationKey: `${input.workItemId}:${input.attemptNumber}`,
   })
 }
+
+/** 停滞と判定するまでの経過時間 (ミリ秒)。blocker 側の reconciliation と同じ基準にする。 */
+const STALLED_OUTBOX_AGE_MS = 30 * 60 * 1000
+/** この件数を超えたら Attention に上げる。1〜2 件程度は reconciliation の巡回待ちとして許容する。 */
+const STALLED_OUTBOX_COUNT_THRESHOLD = 5
+const STALLED_OUTBOX_FINGERPRINT = computeFingerprint('outbox_stalled', { component: 'block' })
+
+/**
+ * `BlockOutboxEntry` は blocker 側の reconciliation で解消される想定のため、Analyzer はここでは実 Twitter API を呼ばず件数の閾値超えのみを検出し、attention_items からオペレーターが気付けるようにする。
+ * @param prisma - Prisma クライアント
+ * @param now - 判定の基準時刻
+ */
+export async function detectStalledBlockOutboxEntries(
+  prisma: PrismaClient,
+  now: Date,
+): Promise<void> {
+  const staleCount = await prisma.blockOutboxEntry.count({
+    where: {
+      status: { in: ['pending_remote', 'remote_succeeded'] },
+      createdAt: { lt: new Date(now.getTime() - STALLED_OUTBOX_AGE_MS) },
+    },
+  })
+
+  if (staleCount < STALLED_OUTBOX_COUNT_THRESHOLD) {
+    const issue = await prisma.operationalIssue.findUnique({
+      where: { fingerprint: STALLED_OUTBOX_FINGERPRINT },
+    })
+    if (issue?.status === 'active') {
+      await prisma.operationalIssue.update({
+        where: { id: issue.id },
+        data: { status: 'resolved', resolvedAt: now },
+      })
+      const observationKey = `${now.toISOString().slice(0, 13)}:resolved`
+      await prisma.operationalIssueOccurrence.upsert({
+        where: { issueId_observationKey: { issueId: issue.id, observationKey } },
+        create: {
+          issueId: issue.id,
+          observedAt: now,
+          stateTransition: 'resolved',
+          severity: issue.severity,
+          sourceType: 'block',
+          sourceId: 'outbox',
+          observationKey,
+        },
+        update: {},
+      })
+    }
+    return
+  }
+
+  const issue = await prisma.operationalIssue.upsert({
+    where: { fingerprint: STALLED_OUTBOX_FINGERPRINT },
+    create: {
+      component: 'block',
+      type: 'outbox_stalled',
+      fingerprint: STALLED_OUTBOX_FINGERPRINT,
+      status: 'active',
+      severity: 'high',
+      firstDetectedAt: now,
+      lastDetectedAt: now,
+    },
+    update: { status: 'active', severity: 'high', lastDetectedAt: now, resolvedAt: null },
+  })
+
+  const observationKey = now.toISOString().slice(0, 13)
+  await prisma.operationalIssueOccurrence.upsert({
+    where: { issueId_observationKey: { issueId: issue.id, observationKey } },
+    create: {
+      issueId: issue.id,
+      observedAt: now,
+      stateTransition: 'activated',
+      severity: 'high',
+      sourceType: 'block',
+      sourceId: 'outbox',
+      measurements: { staleCount },
+      observationKey,
+    },
+    update: {},
+  })
+}

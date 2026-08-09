@@ -57,6 +57,8 @@ model Account {
   blockedEdges                   Block[]                @relation("BlockedEdges")
   blockActionsAsBlocker          BlockAction[]          @relation("BlockActionBlocker")
   blockActionsAsBlocked          BlockAction[]          @relation("BlockActionBlocked")
+  blockOutboxEntriesAsBlocker    BlockOutboxEntry[]     @relation("BlockOutboxBlocker")
+  blockOutboxEntriesAsBlocked    BlockOutboxEntry[]     @relation("BlockOutboxBlocked")
 
   // この3カラムは絞り込みなしで並び替えに使われうるため、
   // インデックスがないと行数増加に伴い全件ソートが発生する。
@@ -107,6 +109,7 @@ model LabelDefinition {
   accountLabelsLatest AccountLabelLatest[]
   labelAggregate      LabelAggregate?
   blockActions        BlockAction[]
+  blockOutboxEntries  BlockOutboxEntry[]
 }
 
 model AccountLabel {
@@ -284,29 +287,29 @@ model CrawlRun {
 }
 
 model CrawlAccountRun {
-  id                 String    @id @default(cuid())
-  crawlRunId         String
-  crawlRun           CrawlRun  @relation(fields: [crawlRunId], references: [id])
-  username           String
-  startedAt          DateTime
-  finishedAt         DateTime?
-  status             String
-  recommendedCount   Int       @default(0)
-  followingCount     Int       @default(0)
-  trendingCount      Int       @default(0)
-  replyCount         Int       @default(0)
-  profileCount       Int       @default(0)
-  labelsAppliedCount Int       @default(0)
-  followingSynced    Boolean   @default(false)
-  followersSynced    Boolean   @default(false)
-  blocksSynced       Boolean   @default(false)
-  warnings           Json      @default("[]")
-  errorMessage       String?
+  id                   String    @id @default(cuid())
+  crawlRunId           String
+  crawlRun             CrawlRun  @relation(fields: [crawlRunId], references: [id])
+  username             String
+  startedAt            DateTime
+  finishedAt           DateTime?
+  status               String
+  recommendedCount     Int       @default(0)
+  followingCount       Int       @default(0)
+  trendingCount        Int       @default(0)
+  replyCount           Int       @default(0)
+  profileCount         Int       @default(0)
+  labelsAppliedCount   Int       @default(0)
+  followingSynced      Boolean   @default(false)
+  followersSynced      Boolean   @default(false)
+  blocksSynced         Boolean   @default(false)
+  warnings             Json      @default("[]")
+  errorMessage         String?
   /// crawler イメージに埋め込まれた APPLICATION_VERSION (Docker のビルド引数)。
   /// 値が取得できない場合は "unknown" になる。
   /// この行を最終的に確定させたビルドを表しており、
   /// 個々の warning を発生させたビルドは warnings 内の各要素が持つ appVersion を参照する。
-  appVersion         String    @default("unknown")
+  appVersion           String    @default("unknown")
   classificationStatus String    @default("unknown")
 
   @@index([crawlRunId])
@@ -345,13 +348,13 @@ model AccountSummaryLatest {
   accountId                   String    @id
   normalizedScreenName        String
   normalizedDisplayName       String
-  searchDocument               String
+  searchDocument              String
   profileObservedAt           DateTime
-  activeLabelKeys              String[]
-  activeLabelCount             Int
+  activeLabelKeys             String[]
+  activeLabelCount            Int
   lastClassificationChangedAt DateTime?
   classificationObservedAt    DateTime?
-  activeFindingCount           Int       @default(0)
+  activeFindingCount          Int       @default(0)
   highestFindingSeverity      String?
   findingObservedAt           DateTime?
   updatedAt                   DateTime  @updatedAt
@@ -413,18 +416,19 @@ model BlockRun {
 }
 
 model BlockAccountRun {
-  id              String        @id @default(cuid())
+  id              String             @id @default(cuid())
   blockRunId      String
-  blockRun        BlockRun      @relation(fields: [blockRunId], references: [id])
+  blockRun        BlockRun           @relation(fields: [blockRunId], references: [id])
   username        String
   startedAt       DateTime
   finishedAt      DateTime?
   status          String
-  candidatesCount Int           @default(0)
-  blockedCount    Int           @default(0)
-  failedCount     Int           @default(0)
+  candidatesCount Int                @default(0)
+  blockedCount    Int                @default(0)
+  failedCount     Int                @default(0)
   errorMessage    String?
   actions         BlockAction[]
+  outboxEntries   BlockOutboxEntry[]
 
   @@index([blockRunId])
   @@index([blockRunId, username, startedAt(sort: Desc), id(sort: Desc)])
@@ -432,24 +436,50 @@ model BlockAccountRun {
 }
 
 model BlockAction {
-  id                String          @id @default(cuid())
+  id                String            @id @default(cuid())
   blockAccountRunId String
-  blockAccountRun   BlockAccountRun @relation(fields: [blockAccountRunId], references: [id])
+  blockAccountRun   BlockAccountRun   @relation(fields: [blockAccountRunId], references: [id])
   blockerId         String
-  blocker           Account         @relation("BlockActionBlocker", fields: [blockerId], references: [id])
+  blocker           Account           @relation("BlockActionBlocker", fields: [blockerId], references: [id])
   blockedId         String
-  blocked           Account         @relation("BlockActionBlocked", fields: [blockedId], references: [id])
+  blocked           Account           @relation("BlockActionBlocked", fields: [blockedId], references: [id])
   labelDefinitionId String
-  labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
+  labelDefinition   LabelDefinition   @relation(fields: [labelDefinitionId], references: [id])
   confidence        Float
   result            String
   errorMessage      String?
-  createdAt         DateTime        @default(now())
+  createdAt         DateTime          @default(now())
+  outboxEntryId     String?           @unique
+  outboxEntry       BlockOutboxEntry? @relation(fields: [outboxEntryId], references: [id])
 
   // selectBlockCandidates が「過去に result = 'success' の BlockAction が存在するか」を
   // (blockerId, blockedId) 単位で調べるためのインデックス。
   @@index([blockerId, blockedId, result])
   @@index([blockAccountRunId])
+}
+
+// createBlock (remote) 実行前に durable な intent を作ることで、DB 障害でどの段階が失敗しても直前に確定した状態が残るようにする。
+// (blockerId, blockedId) の一意制約により同一ペアの outbox entry は常に 1 件に保たれ、中断や再選定後の再開は既存行の再利用で行う。
+model BlockOutboxEntry {
+  id                String          @id @default(cuid())
+  blockAccountRunId String
+  blockAccountRun   BlockAccountRun @relation(fields: [blockAccountRunId], references: [id])
+  blockerId         String
+  blocker           Account         @relation("BlockOutboxBlocker", fields: [blockerId], references: [id])
+  blockedId         String
+  blocked           Account         @relation("BlockOutboxBlocked", fields: [blockedId], references: [id])
+  labelDefinitionId String
+  labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
+  confidence        Float
+  status            String
+  createdAt         DateTime        @default(now())
+  remoteSucceededAt DateTime?
+  localPersistedAt  DateTime?
+  reconciledAt      DateTime?
+  actions           BlockAction[]
+
+  @@unique([blockerId, blockedId])
+  @@index([status, createdAt])
 }
 
 // analyzer が処理する耐久キュー。at-least-once を前提とし、
@@ -776,7 +806,7 @@ model LabelMetricDaily {
   // この行の値が採用された元 LabelMetricSnapshot.observedAt。
   // 遅延して実行された backlog 分の build が、それより新しい observedAt を
   // 採用済みの行を古い値へ巻き戻すのを防ぐ判定にのみ使う。
-  sourceObservedAt DateTime
+  sourceObservedAt   DateTime
 
   @@unique([date, labelDefinitionId])
   @@index([labelDefinitionId, date(sort: Desc)])
@@ -857,6 +887,8 @@ model LabelSummaryCurrent {
   latestSnapshotId       String?
   evaluatedCount         Int
   trueCount              Int
+  populationCount        Int      @default(0)
+  coverage               Float    @default(0)
   prevalence             Float
   previousRunDelta       Float?
   dayDelta               Float?
@@ -971,4 +1003,15 @@ model ReadModelState {
   analyzerVersion     String?
   errorCode           String?
   errorSummary        String?
+}
+
+// 各コンポーネントの起動時に自身の build identity を upsert する。
+// component ごとに 1 行のみ保持し、直近起動時の値のみを表示対象とする。
+model ComponentBuildIdentity {
+  component          String    @id
+  applicationVersion String
+  gitRevision        String
+  buildTime          DateTime?
+  startedAt          DateTime
+  updatedAt          DateTime  @updatedAt
 }

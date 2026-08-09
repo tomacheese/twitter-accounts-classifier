@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import type { GlobalSearchResult } from '@/lib/queries/global-search'
 
@@ -62,6 +62,7 @@ export function GlobalSearch(): React.ReactElement {
   const [result, setResult] = useState<GlobalSearchResult | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const controllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     const trimmed = query.trim()
@@ -73,7 +74,10 @@ export function GlobalSearch(): React.ReactElement {
 
     setIsLoading(true)
     const timer = setTimeout(() => {
-      fetch(`/api/search?q=${encodeURIComponent(trimmed)}`)
+      controllerRef.current?.abort()
+      const controller = new AbortController()
+      controllerRef.current = controller
+      fetch(`/api/search?q=${encodeURIComponent(trimmed)}`, { signal: controller.signal })
         .then(async (response) => {
           if (!response.ok) throw new Error(`Unexpected status: ${String(response.status)}`)
           const data = (await response.json()) as GlobalSearchResult
@@ -81,17 +85,20 @@ export function GlobalSearch(): React.ReactElement {
           setError(null)
         })
         .catch((fetchError: unknown) => {
+          if (fetchError instanceof DOMException && fetchError.name === 'AbortError') return
           console.error('Failed to search:', fetchError)
           setResult(null)
           setError('Failed to search.')
         })
         .finally(() => {
-          setIsLoading(false)
+          // abort された古い fetch の finally が、後発の fetch がまだ進行中の isLoading を誤って false に戻すことがあるため、この fetch がまだ最新かを確認する。
+          if (controllerRef.current === controller) setIsLoading(false)
         })
     }, DEBOUNCE_MS)
 
     return () => {
       clearTimeout(timer)
+      controllerRef.current?.abort()
     }
   }, [query])
 

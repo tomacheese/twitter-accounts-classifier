@@ -9,6 +9,7 @@ import {
   finishAnalysisRun,
   startAnalysisRun,
 } from './queue/work-item-repository'
+import { LabelAggregateRefreshError } from './worker-processors'
 import { Logger } from '@book000/node-utils'
 
 const logger = Logger.configure('analyzer:worker-loop')
@@ -77,6 +78,7 @@ export interface WorkerLoopDeps {
 /** WorkItem 1 attempt の終了状態。 */
 export interface WorkItemOutcome {
   status: 'succeeded' | 'failed' | 'dead'
+  errorCode?: string
   errorSummary?: string
 }
 
@@ -125,7 +127,6 @@ async function dispatch(
     }
   }
 }
-
 
 async function runPostCompletionHook(
   prisma: PrismaClient,
@@ -222,6 +223,7 @@ export async function runWorkerLoopOnce(
     logger.error(`work item ${workItem.id} (${workItem.kind}) failed`, error as Error)
     outcome = {
       status: workItem.attemptCount >= workItem.maxAttempts ? 'dead' : 'failed',
+      errorCode: error instanceof LabelAggregateRefreshError ? error.errorCode : undefined,
       errorSummary: String(error),
     }
   } finally {
@@ -232,6 +234,7 @@ export async function runWorkerLoopOnce(
   await finishAnalysisRun(prisma, {
     analysisRunId,
     status: outcome.status,
+    errorCode: outcome.errorCode,
     errorSummary: outcome.errorSummary,
   })
 
@@ -239,6 +242,7 @@ export async function runWorkerLoopOnce(
     workItemId: workItem.id,
     leaseOwner: deps.leaseOwner,
     status: outcome.status,
+    errorCode: outcome.errorCode,
     errorSummary: outcome.errorSummary,
     retryAvailableAt: new Date(Date.now() + computeRetryBackoffMs(workItem.attemptCount)),
   })

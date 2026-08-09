@@ -5,6 +5,7 @@ import {
   POST_COMPLETION_REFRESH_KIND,
   WORK_ITEM_COMPLETION_TRIGGER_TYPE,
 } from './worker-loop'
+import { LabelAggregateRefreshError } from './worker-processors'
 
 const deadLetterExhaustedWorkItem = vi.fn()
 const claimNextWorkItem = vi.fn()
@@ -340,6 +341,25 @@ describe('runWorkerLoopOnce', () => {
 
     expect(deps.processAccountSummaryRefresh).toHaveBeenCalledTimes(1)
     expect(deps.processAccountFindingRefresh).not.toHaveBeenCalled()
+  })
+
+  it('専用エラーの errorCode を completeWorkItem/finishAnalysisRun に渡す', async () => {
+    claimNextWorkItem.mockResolvedValue(makeWorkItem({ attemptCount: 1, maxAttempts: 5 }))
+    const deps = makeDeps()
+    deps.processLabelAggregateRefresh.mockRejectedValue(
+      new LabelAggregateRefreshError('label_aggregate_snapshot_failed', 'boom'),
+    )
+
+    await runWorkerLoopOnce(prisma, deps)
+
+    expect(completeWorkItem).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({ errorCode: 'label_aggregate_snapshot_failed' }),
+    )
+    expect(finishAnalysisRun).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({ errorCode: 'label_aggregate_snapshot_failed' }),
+    )
   })
 
   it('kind が account_summary_refresh のとき、triggerType が review_finding_occurrence なら processAccountFindingRefresh だけを呼ぶ', async () => {

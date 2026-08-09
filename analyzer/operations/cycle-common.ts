@@ -8,6 +8,7 @@ export type StageStatus =
   | 'partial'
   | 'failed'
   | 'skipped'
+  | 'blocked_by_upstream'
   | 'delayed'
   | 'stale'
   | 'unknown'
@@ -40,6 +41,9 @@ export function deriveCycleStatus(requiredStages: StageStatus[]): CycleStatus {
   if (requiredStages.includes('skipped')) {
     return requiredStages[0] === 'succeeded' ? 'partial' : 'failed'
   }
+  if (requiredStages.includes('blocked_by_upstream')) {
+    return requiredStages[0] === 'succeeded' ? 'partial' : 'failed'
+  }
   if (requiredStages.includes('running')) return 'running'
   if (requiredStages.every((status) => status === 'succeeded')) return 'succeeded'
   if (requiredStages.includes('stale')) return 'stale'
@@ -64,6 +68,8 @@ export interface WorkItemStage {
   startedAt: Date | undefined
   /** 直近の AnalysisRun の完了時刻。 */
   finishedAt: Date | undefined
+  /** 対応する AnalysisWorkItem が enqueue されているかどうか。 */
+  workItemExists: boolean
 }
 
 /**
@@ -120,6 +126,7 @@ export async function deriveWorkItemStage(
       analysisRunId: undefined,
       startedAt: undefined,
       finishedAt: undefined,
+      workItemExists: false,
     }
   }
 
@@ -135,7 +142,24 @@ export async function deriveWorkItemStage(
     analysisRunId: latestRun?.id,
     startedAt: latestRun?.startedAt,
     finishedAt: latestRun?.finishedAt ?? undefined,
+    workItemExists: true,
   }
+}
+
+/**
+ * WorkItem が enqueue されていない Stage を、直前 Stage 未完了による `blocked_by_upstream` と root cause の `failed` とで区別する。
+ * WorkItem 自体は変更せず、Cycle/Stage の表示状態だけ差し替える。
+ * @param stage - deriveWorkItemStage が返した Stage
+ * @param upstreamStatus - 直前の必須 Stage の状態
+ * @returns 差し替え後の Stage
+ */
+export function applyUpstreamBlocking(
+  stage: WorkItemStage,
+  upstreamStatus: StageStatus,
+): WorkItemStage {
+  if (stage.workItemExists) return stage
+  if (upstreamStatus === 'succeeded' || upstreamStatus === 'partial') return stage
+  return { ...stage, status: 'blocked_by_upstream' }
 }
 
 /** upsertCycleWithStages が受け取る Stage 1 件分の入力。 */

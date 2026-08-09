@@ -20,6 +20,10 @@ function createMockPrisma(overrides: { pointer?: unknown; rows?: unknown[]; labe
 function makeRow(overrides: Partial<Record<string, unknown>>) {
   return {
     labelDefinitionId: 'label-1',
+    evaluatedCount: 100,
+    trueCount: 10,
+    populationCount: 100,
+    coverage: 1,
     prevalence: 0.1,
     qualityStatus: 'stable',
     activeFindingCount: 0,
@@ -42,6 +46,28 @@ describe('listLabelSummaries', () => {
 
     expect(result).toEqual({ items: [], readiness: 'bootstrapping' })
     expect(labelSummaryFindMany).not.toHaveBeenCalled()
+  })
+
+  it('populationCount/coverage を含めて返す', async () => {
+    vi.mocked(getReadModelReadiness).mockResolvedValue({ accounts: 'ready', labels: 'ready' })
+    const rows = [
+      makeRow({ evaluatedCount: 80, trueCount: 8, populationCount: 100, coverage: 0.8 }),
+    ]
+    const labels = [{ id: 'label-1', key: 'label-key' }]
+    const { prisma } = createMockPrisma({
+      pointer: { currentGenerationId: 'generation-1' },
+      rows,
+      labels,
+    })
+
+    const result = await listLabelSummaries(prisma)
+
+    expect(result.items[0]).toMatchObject({
+      evaluatedCount: 80,
+      trueCount: 8,
+      populationCount: 100,
+      coverage: 0.8,
+    })
   })
 
   it('ReadModelPointer が無ければ空配列を返す', async () => {

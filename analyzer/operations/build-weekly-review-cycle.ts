@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../generated/prisma'
 import {
+  applyUpstreamBlocking,
   deriveWorkItemStage,
   upsertCycleWithStages,
   type CycleStageInput,
@@ -38,16 +39,18 @@ export async function buildOrUpdateWeeklyReviewCycle(
     where: { id: input.weeklyAnalysisRunId },
   })
 
-  const ingestStage = await deriveWorkItemStage(
+  const weeklyReviewStageStatus = deriveWeeklyReviewStageStatus(run.status)
+  const rawIngestStage = await deriveWorkItemStage(
     prisma,
     'weekly_review_ingest',
     'weekly_analysis_run',
     run.id,
   )
+  const ingestStage = applyUpstreamBlocking(rawIngestStage, weeklyReviewStageStatus)
   const stages: CycleStageInput[] = [
     {
       stageKey: 'weekly_review',
-      status: deriveWeeklyReviewStageStatus(run.status),
+      status: weeklyReviewStageStatus,
       sourceType: 'weekly_analysis_run',
       sourceId: run.id,
       startedAt: run.startedAt,

@@ -17,6 +17,7 @@ interface MockData {
   labelDefinitions?: unknown[]
   findings?: unknown[]
   blocks?: unknown[]
+  counterparts?: unknown[]
   changes?: unknown[]
 }
 
@@ -24,7 +25,10 @@ function createMockPrisma(data: MockData) {
   const blockFindMany = vi.fn().mockResolvedValue(data.blocks ?? [])
   const prisma = {
     readModelPointer: { findUnique: vi.fn().mockResolvedValue(data.pointer ?? null) },
-    account: { findUnique: vi.fn().mockResolvedValue(data.account ?? null) },
+    account: {
+      findUnique: vi.fn().mockResolvedValue(data.account ?? null),
+      findMany: vi.fn().mockResolvedValue(data.counterparts ?? []),
+    },
     accountSummaryCurrent: { findUnique: vi.fn().mockResolvedValue(data.summary ?? null) },
     accountClassificationCurrent: {
       findMany: vi.fn().mockResolvedValue(data.classifications ?? []),
@@ -167,6 +171,10 @@ describe('getAccountRelations', () => {
         { id: 'block-1', blockerId: 'account-1', blockedId: 'account-2', status: 'active' },
         { id: 'block-2', blockerId: 'account-3', blockedId: 'account-1', status: 'missing' },
       ],
+      counterparts: [
+        { id: 'account-2', screenName: 'bob' },
+        { id: 'account-3', screenName: 'carol' },
+      ],
     })
 
     const result = await getAccountRelations(prisma, 'account-1')
@@ -176,15 +184,39 @@ describe('getAccountRelations', () => {
         blockId: 'block-1',
         direction: 'blocker',
         counterpartAccountId: 'account-2',
+        counterpartScreenName: 'bob',
         status: 'active',
       },
       {
         blockId: 'block-2',
         direction: 'blocked',
         counterpartAccountId: 'account-3',
+        counterpartScreenName: 'carol',
         status: 'missing',
       },
     ])
+  })
+
+  it('counterpart の screenName を解決する', async () => {
+    const { prisma } = createMockPrisma({
+      blocks: [{ id: 'block-1', blockerId: 'account-1', blockedId: 'account-2', status: 'active' }],
+      counterparts: [{ id: 'account-2', screenName: 'bob' }],
+    })
+
+    const result = await getAccountRelations(prisma, 'account-1')
+
+    expect(result[0].counterpartScreenName).toBe('bob')
+  })
+
+  it('対応する Account が無ければ counterpartAccountId をそのまま使う', async () => {
+    const { prisma } = createMockPrisma({
+      blocks: [{ id: 'block-1', blockerId: 'account-1', blockedId: 'account-2', status: 'active' }],
+      counterparts: [],
+    })
+
+    const result = await getAccountRelations(prisma, 'account-1')
+
+    expect(result[0].counterpartScreenName).toBe('account-2')
   })
 
   it('取得件数に上限を設ける', async () => {
@@ -198,7 +230,7 @@ describe('getAccountRelations', () => {
 })
 
 describe('getAccountHistory', () => {
-  it('ラベル変化履歴を整形して返す', async () => {
+  it('labelDefinitionId を labelKey に解決する', async () => {
     const changedAt = new Date('2026-01-05T00:00:00Z')
     const { prisma } = createMockPrisma({
       changes: [
@@ -211,18 +243,40 @@ describe('getAccountHistory', () => {
           changedAt,
         },
       ],
+      labelDefinitions: [{ id: 'label-1', key: 'spam' }],
     })
 
     expect(await getAccountHistory(prisma, 'account-1')).toEqual([
       {
         id: 'change-1',
-        labelDefinitionId: 'label-1',
+        labelKey: 'spam',
         changeType: 'updated',
         previousValue: false,
         newValue: true,
         changedAt,
       },
     ])
+  })
+
+  it('対象 LabelDefinition が削除済みなら labelDefinitionId をそのまま使う', async () => {
+    const changedAt = new Date('2026-01-05T00:00:00Z')
+    const { prisma } = createMockPrisma({
+      changes: [
+        {
+          id: 'change-1',
+          labelDefinitionId: 'label-deleted',
+          changeType: 'updated',
+          previousValue: false,
+          newValue: true,
+          changedAt,
+        },
+      ],
+      labelDefinitions: [],
+    })
+
+    const result = await getAccountHistory(prisma, 'account-1')
+
+    expect(result[0].labelKey).toBe('label-deleted')
   })
 })
 

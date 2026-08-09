@@ -1,7 +1,37 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import type { PrismaClient } from '../generated/prisma'
 import { getPrismaClient } from '../db/client'
 import { buildOrUpdateCrawlCycle } from './build-crawl-cycle'
+
+/**
+ * @returns buildOrUpdateCrawlCycle が参照するメソッドのみ差し替え可能な Prisma クライアントのモックと、
+ * その差し替え用の関数
+ */
+function createMockPrismaClient(): {
+  prisma: PrismaClient
+  findUniqueOrThrow: ReturnType<typeof vi.fn>
+  findUnique: ReturnType<typeof vi.fn>
+  cycleUpsert: ReturnType<typeof vi.fn>
+  stageUpsert: ReturnType<typeof vi.fn>
+} {
+  const findUniqueOrThrow = vi.fn()
+  const findUnique = vi.fn()
+  const cycleUpsert = vi.fn().mockResolvedValue({ id: 'cycle-1' })
+  const stageUpsert = vi.fn()
+  return {
+    prisma: {
+      crawlRun: { findUniqueOrThrow },
+      analysisWorkItem: { findUnique },
+      operationCycle: { upsert: cycleUpsert },
+      operationStage: { upsert: stageUpsert },
+    } as unknown as PrismaClient,
+    findUniqueOrThrow,
+    findUnique,
+    cycleUpsert,
+    stageUpsert,
+  }
+}
 
 describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
   const prisma = getPrismaClient()
@@ -217,5 +247,33 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     expect(cycles).toHaveLength(1)
     const stages = await prisma.operationStage.findMany({ where: { cycleId: cycles[0]?.id } })
     expect(stages).toHaveLength(3)
+  })
+})
+
+describe('buildOrUpdateCrawlCycle (mock)', () => {
+  it('crawl が failed の場合、未 enqueue の label_aggregate_refresh/read_model_refresh は blocked_by_upstream になる', async () => {
+    const { prisma, findUniqueOrThrow, findUnique, cycleUpsert, stageUpsert } =
+      createMockPrismaClient()
+    findUniqueOrThrow.mockResolvedValue({
+      id: 'run-1',
+      status: 'failed',
+      startedAt: new Date(),
+      finishedAt: new Date(),
+    } as never)
+    findUnique.mockResolvedValue(null)
+
+    await buildOrUpdateCrawlCycle(prisma, { crawlRunId: 'run-1' })
+
+    const upsertCall = cycleUpsert.mock.calls[0]?.[0] as { create: { status: string } }
+    expect(upsertCall.create.status).toBe('failed')
+    // Stage 単位の検証は upsertCycleWithStages 経由の operationStage.upsert 呼び出しで確認する
+    const stageUpserts = stageUpsert.mock.calls as {
+      where: { cycleId_stageKey: { stageKey: string } }
+      create: { status: string }
+    }[][]
+    const labelAggregateStage = stageUpserts.find(
+      (call) => call[0]?.where.cycleId_stageKey.stageKey === 'label_aggregate_refresh',
+    )
+    expect(labelAggregateStage?.[0]?.create.status).toBe('blocked_by_upstream')
   })
 })

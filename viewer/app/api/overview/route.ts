@@ -26,6 +26,9 @@ export async function GET(): Promise<NextResponse> {
         qualityStatus: snapshot.qualityStatus,
         attention: snapshot.attention,
         latestPipeline: snapshot.latestPipeline,
+        coreFreshnessStatus: snapshot.coreFreshnessStatus,
+        corePerModel: snapshot.corePerModel,
+        coreFreshnessDivergesFromSnapshot: snapshot.coreFreshnessDivergesFromSnapshot,
         meta: buildApiResponseMeta({
           generatedAt,
           sourceDataAt: snapshot.sourceDataAt,
@@ -39,6 +42,9 @@ export async function GET(): Promise<NextResponse> {
         qualityStatus: 'unknown',
         attention: [],
         latestPipeline: null,
+        coreFreshnessStatus: 'unknown' as const,
+        corePerModel: [],
+        coreFreshnessDivergesFromSnapshot: false,
         meta: buildApiResponseMeta({
           generatedAt,
           sourceDataAt: null,

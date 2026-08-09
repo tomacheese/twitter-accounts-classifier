@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../generated/prisma'
 import {
+  applyUpstreamBlocking,
   deriveWorkItemStage,
   upsertCycleWithStages,
   type CycleStageInput,
@@ -40,18 +41,23 @@ export async function buildOrUpdateCrawlCycle(
 ): Promise<void> {
   const crawlRun = await prisma.crawlRun.findUniqueOrThrow({ where: { id: input.crawlRunId } })
 
+  const crawlStageStatus = deriveCrawlStageStatus(crawlRun.status)
   const stages: CycleStageInput[] = [
     {
       stageKey: 'crawl',
-      status: deriveCrawlStageStatus(crawlRun.status),
+      status: crawlStageStatus,
       sourceType: 'crawl_run',
       sourceId: crawlRun.id,
       startedAt: crawlRun.startedAt,
       finishedAt: crawlRun.finishedAt ?? undefined,
     },
   ]
+
+  let previousStageStatus: StageStatus = crawlStageStatus
   for (const kind of ANALYSIS_WORK_ITEM_STAGE_KINDS) {
-    const stage = await deriveWorkItemStage(prisma, kind, 'crawl_run', input.crawlRunId)
+    const rawStage = await deriveWorkItemStage(prisma, kind, 'crawl_run', input.crawlRunId)
+    const stage = applyUpstreamBlocking(rawStage, previousStageStatus)
+
     // processReadModelRefresh() は partial/failed CrawlRun では read model 公開を
     // 見送って正常終了するため、WorkItem 自体は succeeded になる。この succeeded を
     // そのまま表示すると必須後続処理が完了していないことが Operations から見えなくなるため、
@@ -61,18 +67,22 @@ export async function buildOrUpdateCrawlCycle(
       crawlRun.status !== 'success' &&
       crawlRun.status !== 'partial' &&
       stage.status === 'succeeded'
+
+    const finalStatus: StageStatus = isReadModelRefreshSkippedForIncompleteCrawl
+      ? 'skipped'
+      : stage.status
+
     stages.push({
       stageKey: kind,
       sourceType: 'analysis_work_item',
       sourceId: crawlRun.id,
       ...stage,
+      status: finalStatus,
       ...(isReadModelRefreshSkippedForIncompleteCrawl
-        ? {
-            status: 'skipped' as StageStatus,
-            errorSummary: `crawl run is ${crawlRun.status}: read model refresh skipped`,
-          }
+        ? { errorSummary: `crawl run is ${crawlRun.status}: read model refresh skipped` }
         : {}),
     })
+    previousStageStatus = finalStatus
   }
 
   await upsertCycleWithStages(prisma, {

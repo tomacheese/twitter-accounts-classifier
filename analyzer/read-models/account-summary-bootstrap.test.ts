@@ -33,7 +33,9 @@ describe('processAccountSummaryBootstrap transaction options', () => {
       account: { findMany: vi.fn().mockResolvedValue([]) },
       analysisWorkItem: { upsert: vi.fn().mockResolvedValue({}) },
     }
-    const transaction = vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx))
+    const transaction = vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+      callback(tx),
+    )
     const fakePrisma = { $transaction: transaction }
     const workItem = { id: 'work_item' }
 
@@ -57,9 +59,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     `
 
     expect(rows).toHaveLength(1)
-    expect(rows[0]?.indexdef).toContain(
-      'INCLUDE ("screenName", "displayName", "lastCrawledAt")',
-    )
+    expect(rows[0]?.indexdef).toContain('INCLUDE ("screenName", "displayName", "lastCrawledAt")')
   })
 
   it('builds AccountSummaryLatest from Account/AccountLabelLatest baseline and marks completed when done', async () => {

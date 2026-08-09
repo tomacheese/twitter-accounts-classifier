@@ -63,6 +63,21 @@ describe.skipIf(!process.env.DATABASE_URL)(
     const allGenerationIds = [generationId, ...staleGenerationIds]
 
     beforeAll(async () => {
+      await prisma.accountSummaryLatest.createMany({
+        data: Array.from({ length: ROWS_PER_GENERATION }, (_, index) => ({
+          accountId: `account-seq-scan-test-${index}`,
+          normalizedScreenName: `screen_seq_${index}`,
+          normalizedDisplayName: `Display ${index}`,
+          searchDocument: `screen_seq_${index} display ${index}`,
+          profileObservedAt: new Date(),
+          activeLabelKeys: [],
+          activeLabelCount: 0,
+          activeFindingCount: 0,
+          updatedAt: new Date(),
+        })),
+      })
+      await prisma.$executeRawUnsafe('ANALYZE "AccountSummaryLatest"')
+
       for (const gid of allGenerationIds) {
         await prisma.accountSummaryCurrent.createMany({
           data: Array.from({ length: ROWS_PER_GENERATION }, (_, index) => ({
@@ -84,6 +99,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
             labelDefinitionId: `label-${gid}-${index}`,
             evaluatedCount: 100,
             trueCount: 10,
+            populationCount: 100,
+            coverage: 1,
             prevalence: 0.1,
             activeFindingCount: 0,
             qualityStatus: 'stable',
@@ -103,6 +120,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
       })
       await prisma.labelSummaryCurrent.deleteMany({
         where: { generationId: { in: allGenerationIds } },
+      })
+      await prisma.accountSummaryLatest.deleteMany({
+        where: { accountId: { startsWith: 'account-seq-scan-test-' } },
       })
     })
 
@@ -125,6 +145,30 @@ describe.skipIf(!process.env.DATABASE_URL)(
     `)
 
       expect(collectSeqScans(plan, 'LabelSummaryCurrent')).toEqual([])
+    })
+
+    it('searchAccounts (accountId exact) は AccountSummaryLatest の Seq Scan を行わない', async () => {
+      const plan = await explain(`
+        SELECT "accountId" FROM "AccountSummaryLatest" WHERE "accountId" = 'account-seq-scan-test-0'
+      `)
+      expect(collectSeqScans(plan, 'AccountSummaryLatest')).toEqual([])
+    })
+
+    it('searchAccounts (screen name prefix range) は AccountSummaryLatest の Seq Scan を行わない', async () => {
+      const plan = await explain(`
+        SELECT "accountId" FROM "AccountSummaryLatest"
+        WHERE "normalizedScreenName" >= 'screen_seq' AND "normalizedScreenName" < 'screen_seq￿'
+        ORDER BY "normalizedScreenName" ASC, "accountId" ASC
+      `)
+      expect(collectSeqScans(plan, 'AccountSummaryLatest')).toEqual([])
+    })
+
+    it('searchAccounts (display name contains) は AccountSummaryLatest の Seq Scan を行わない', async () => {
+      const plan = await explain(`
+        SELECT "accountId" FROM "AccountSummaryLatest"
+        WHERE "normalizedDisplayName" ILIKE '%display 42%'
+      `)
+      expect(collectSeqScans(plan, 'AccountSummaryLatest')).toEqual([])
     })
   },
 )

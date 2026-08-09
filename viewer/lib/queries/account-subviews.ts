@@ -140,6 +140,7 @@ export interface AccountRelationView {
   blockId: string
   direction: 'blocker' | 'blocked'
   counterpartAccountId: string
+  counterpartScreenName: string
   status: string
 }
 
@@ -158,19 +159,30 @@ export async function getAccountRelations(
     where: { OR: [{ blockerId: accountId }, { blockedId: accountId }] },
     take: RELATION_LIMIT,
   })
+  const counterpartIds = blocks.map((block) =>
+    block.blockerId === accountId ? block.blockedId : block.blockerId,
+  )
+  const counterparts = await prisma.account.findMany({
+    where: { id: { in: counterpartIds } },
+  })
+  const screenNameById = new Map(counterparts.map((account) => [account.id, account.screenName]))
 
-  return blocks.map((block) => ({
-    blockId: block.id,
-    direction: block.blockerId === accountId ? 'blocker' : 'blocked',
-    counterpartAccountId: block.blockerId === accountId ? block.blockedId : block.blockerId,
-    status: block.status,
-  }))
+  return blocks.map((block) => {
+    const counterpartAccountId = block.blockerId === accountId ? block.blockedId : block.blockerId
+    return {
+      blockId: block.id,
+      direction: block.blockerId === accountId ? 'blocker' : 'blocked',
+      counterpartAccountId,
+      counterpartScreenName: screenNameById.get(counterpartAccountId) ?? counterpartAccountId,
+      status: block.status,
+    }
+  })
 }
 
 /** ラベル変化履歴の 1 件。 */
 export interface AccountLabelChangeView {
   id: string
-  labelDefinitionId: string
+  labelKey: string
   changeType: string
   previousValue: boolean | null
   newValue: boolean | null
@@ -193,10 +205,14 @@ export async function getAccountHistory(
     orderBy: [{ changedAt: 'desc' }],
     take: HISTORY_LIMIT,
   })
+  const labelDefinitions = await prisma.labelDefinition.findMany({
+    where: { id: { in: changes.map((change) => change.labelDefinitionId) } },
+  })
+  const keyById = new Map(labelDefinitions.map((label) => [label.id, label.key]))
 
   return changes.map((change) => ({
     id: change.id,
-    labelDefinitionId: change.labelDefinitionId,
+    labelKey: keyById.get(change.labelDefinitionId) ?? change.labelDefinitionId,
     changeType: change.changeType,
     previousValue: change.previousValue,
     newValue: change.newValue,

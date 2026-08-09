@@ -1,11 +1,16 @@
 import React from 'react'
 import Link from 'next/link'
 import { getPrismaClient } from '@/lib/prisma'
-import { listOperationCycles, type OperationCycleKind } from '@/lib/queries/operation-cycles'
+import {
+  listOperationCycles,
+  type OperationCycleKind,
+  type OperationCycleListItem,
+} from '@/lib/queries/operation-cycles'
 import { formatDateTime } from '@/lib/format-date'
 import { formatDuration } from '@/lib/format-duration'
 import { ErrorFallback } from '../components/error-fallback'
 import { CursorPagination } from '../components/cursor-pagination'
+import { ResponsiveTable, type ResponsiveTableColumn } from '../components/responsive-table'
 import { notFound } from 'next/navigation'
 import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 
@@ -51,6 +56,59 @@ function stageLabel(stageKey: string | null): string {
   return labels[stageKey] ?? stageKey.replaceAll('_', ' ')
 }
 
+const cycleColumns: ResponsiveTableColumn<OperationCycleListItem>[] = [
+  {
+    key: 'operation',
+    header: 'Operation',
+    priority: 'primary',
+    render: (cycle) => (
+      <Link
+        href={`/operations/${KIND_TO_PATH[cycle.kind] ?? cycle.kind}/${cycle.id}`}
+        className="text-blue-600 hover:underline dark:text-blue-400"
+      >
+        {KIND_LABEL[cycle.kind] ?? cycle.kind}
+      </Link>
+    ),
+  },
+  {
+    key: 'status',
+    header: 'Status',
+    priority: 'primary',
+    render: (cycle) => STATUS_LABEL[cycle.status] ?? cycle.status,
+  },
+  {
+    key: 'attention',
+    header: 'Attention',
+    priority: 'primary',
+    render: (cycle) => (cycle.attentionRequired ? 'Required' : '—'),
+  },
+  {
+    key: 'currentStage',
+    header: 'Current stage',
+    priority: 'secondary',
+    render: (cycle) => stageLabel(cycle.currentStageKey),
+  },
+  {
+    key: 'started',
+    header: 'Started',
+    priority: 'secondary',
+    render: (cycle) => (cycle.startedAt ? formatDateTime(cycle.startedAt) : '—'),
+  },
+  {
+    key: 'finished',
+    header: 'Finished',
+    priority: 'secondary',
+    render: (cycle) => (cycle.finishedAt ? formatDateTime(cycle.finishedAt) : 'In progress'),
+  },
+  {
+    key: 'duration',
+    header: 'Duration',
+    priority: 'secondary',
+    render: (cycle) =>
+      cycle.startedAt && cycle.finishedAt ? formatDuration(cycle.startedAt, cycle.finishedAt) : '—',
+  },
+]
+
 interface OperationsPageProps {
   searchParams: Promise<{ kind?: string; attentionRequired?: string; cursor?: string }>
 }
@@ -89,45 +147,7 @@ export default async function OperationsPage({
         {cycles.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">No cycles to show yet.</p>
         ) : (
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="bg-gray-100 dark:bg-gray-700">
-              <tr>
-                <th className="p-3">Operation</th>
-                <th className="p-3">Status</th>
-                <th className="p-3">Current stage</th>
-                <th className="p-3">Started</th>
-                <th className="p-3">Finished</th>
-                <th className="p-3">Duration</th>
-                <th className="p-3">Attention</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cycles.map((cycle) => (
-                <tr key={cycle.id} className="border-t dark:border-gray-700">
-                  <td className="p-3">
-                    <Link
-                      href={`/operations/${KIND_TO_PATH[cycle.kind] ?? cycle.kind}/${cycle.id}`}
-                      className="text-blue-600 hover:underline dark:text-blue-400"
-                    >
-                      {KIND_LABEL[cycle.kind] ?? cycle.kind}
-                    </Link>
-                  </td>
-                  <td className="p-3">{STATUS_LABEL[cycle.status] ?? cycle.status}</td>
-                  <td className="p-3">{stageLabel(cycle.currentStageKey)}</td>
-                  <td className="p-3">{cycle.startedAt ? formatDateTime(cycle.startedAt) : '—'}</td>
-                  <td className="p-3">
-                    {cycle.finishedAt ? formatDateTime(cycle.finishedAt) : 'In progress'}
-                  </td>
-                  <td className="p-3">
-                    {cycle.startedAt && cycle.finishedAt
-                      ? formatDuration(cycle.startedAt, cycle.finishedAt)
-                      : '—'}
-                  </td>
-                  <td className="p-3">{cycle.attentionRequired ? 'Required' : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <ResponsiveTable columns={cycleColumns} rows={cycles} rowKey={(cycle) => cycle.id} />
         )}
         <CursorPagination basePath="/operations" currentParams={params} nextCursor={nextCursor} />
       </div>

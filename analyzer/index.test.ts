@@ -6,11 +6,17 @@ const mainPrisma = { $connect: connect }
 const leasePrisma = { $connect: leaseConnect }
 const runWorkerLoopOnce = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false)
 const recordPolicyVersion = vi.fn().mockResolvedValue('hash')
+const upsertComponentBuildIdentity = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('./db/client', () => ({
   getPrismaClient: () => mainPrisma,
   getLeasePrismaClient: () => leasePrisma,
   disconnectPrisma: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('./build-identity', () => ({
+  upsertComponentBuildIdentity: (...args: unknown[]): unknown =>
+    upsertComponentBuildIdentity(...args),
 }))
 
 vi.mock('./policy/load-policy', () => ({
@@ -50,6 +56,7 @@ describe('main', () => {
     await expect(main()).resolves.toBeUndefined()
     expect(connect).toHaveBeenCalledTimes(1)
     expect(leaseConnect).toHaveBeenCalledTimes(1)
+    expect(upsertComponentBuildIdentity).toHaveBeenCalledWith(mainPrisma, 'analyzer')
     expect(runWorkerLoopOnce).toHaveBeenCalledWith(
       mainPrisma,
       expect.objectContaining({ leasePrisma }),

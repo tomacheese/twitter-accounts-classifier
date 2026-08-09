@@ -28,6 +28,7 @@ describe('runBlockCycle', () => {
       .fn()
       .mockResolvedValue({ username: 'alice', blockedCount: 2, failedCount: 0, failed: false })
     const notifyDiscord = vi.fn().mockResolvedValue(undefined)
+    const reconcileAccountOutbox = vi.fn().mockResolvedValue(undefined)
     const deps = {
       config,
       startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1', completedUsernames: [] }),
@@ -35,6 +36,7 @@ describe('runBlockCycle', () => {
       touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
       runBlockAccountCycle,
       notifyDiscord,
+      reconcileAccountOutbox,
       prisma: {},
     }
 
@@ -55,6 +57,11 @@ describe('runBlockCycle', () => {
       'run-1',
       expect.any(Date),
       'completed',
+    )
+    expect(reconcileAccountOutbox).toHaveBeenCalledTimes(1)
+    expect(reconcileAccountOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({ username: 'alice' }),
+      deps.prisma,
     )
   })
 
@@ -138,6 +145,7 @@ describe('runBlockCycle', () => {
       touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
       runBlockAccountCycle,
       notifyDiscord,
+      reconcileAccountOutbox: vi.fn().mockResolvedValue(undefined),
       prisma: {},
     }
 
@@ -152,5 +160,88 @@ describe('runBlockCycle', () => {
       expect.any(Date),
       'failed',
     )
+  })
+
+  it('failedCount > 0 だが完走した場合 BlockRun.status は partial になる', async () => {
+    const config: BlockerAppConfig = {
+      accounts: [
+        {
+          email: 'a@example.com',
+          username: 'alice',
+          password: 'p',
+          otpSecret: null,
+          blockEnabled: true,
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+        },
+      ],
+      discordWebhookUrl: null,
+    }
+    const runBlockAccountCycle = vi
+      .fn()
+      .mockResolvedValue({ username: 'alice', blockedCount: 1, failedCount: 1, failed: false })
+    const deps = {
+      config,
+      startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1' }),
+      finishBlockRun: vi.fn().mockResolvedValue(undefined),
+      touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
+      runBlockAccountCycle,
+      notifyDiscord: vi.fn().mockResolvedValue(undefined),
+      reconcileAccountOutbox: vi.fn().mockResolvedValue(undefined),
+      prisma: {},
+    }
+
+    await runBlockCycle(deps as never)
+
+    expect(deps.finishBlockRun).toHaveBeenCalledWith(
+      deps.prisma,
+      'run-1',
+      expect.any(Date),
+      'partial',
+    )
+  })
+
+  it('reconcileAccountOutbox が失敗しても他アカウントの reconciliation と run 自体は継続する', async () => {
+    const config: BlockerAppConfig = {
+      accounts: [
+        {
+          email: 'a@example.com',
+          username: 'alice',
+          password: 'p',
+          otpSecret: null,
+          blockEnabled: true,
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+        },
+        {
+          email: 'c@example.com',
+          username: 'carol',
+          password: 'p',
+          otpSecret: null,
+          blockEnabled: true,
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+        },
+      ],
+      discordWebhookUrl: null,
+    }
+    const runBlockAccountCycle = vi
+      .fn()
+      .mockResolvedValue({ username: 'alice', blockedCount: 0, failedCount: 0, failed: false })
+    const reconcileAccountOutbox = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('cookie issuer down'))
+      .mockResolvedValueOnce(undefined)
+    const deps = {
+      config,
+      startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1' }),
+      finishBlockRun: vi.fn().mockResolvedValue(undefined),
+      touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
+      runBlockAccountCycle,
+      notifyDiscord: vi.fn().mockResolvedValue(undefined),
+      reconcileAccountOutbox,
+      prisma: {},
+    }
+
+    await runBlockCycle(deps as never)
+
+    expect(reconcileAccountOutbox).toHaveBeenCalledTimes(2)
   })
 })

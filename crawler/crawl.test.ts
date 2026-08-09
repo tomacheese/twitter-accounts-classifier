@@ -1,6 +1,11 @@
 import { Logger } from '@book000/node-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { runCrawlCycle, deriveClassificationStatus, type CrawlDependencies } from './crawl'
+import {
+  runCrawlCycle,
+  deriveClassificationStatus,
+  measurePhaseDuration,
+  type CrawlDependencies,
+} from './crawl'
 import type { CrawlAccountCheckpointParams } from './db/crawl-run-repository'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
@@ -2097,5 +2102,45 @@ describe('deriveClassificationStatus', () => {
     expect(
       deriveClassificationStatus({ warnings: [], wasSkipped: false, wasCaughtException: false }),
     ).toBe('success')
+  })
+})
+
+describe('measurePhaseDuration', () => {
+  it('実処理時間と retry 待機時間を分離して計測する', async () => {
+    let retryWaitMs = 0
+    const result = await measurePhaseDuration(async (trackRetryWait) => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      trackRetryWait(5)
+      retryWaitMs += 5
+      return 'done'
+    })
+
+    expect(result.value).toBe('done')
+    expect(result.durationMs).toBeGreaterThanOrEqual(10)
+    expect(result.retryWaitMs).toBe(5)
+    expect(retryWaitMs).toBe(5)
+  })
+})
+
+describe('runCrawlCycle checkpoint phase timing', () => {
+  it('各 phase の checkpoint data に durationMs/retryWaitMs を記録する', async () => {
+    const deps = makeDeps()
+
+    await runCrawlCycle(deps)
+
+    const completeCrawlAccountCheckpoint = deps.completeCrawlAccountCheckpoint as ReturnType<
+      typeof vi.fn
+    >
+    for (const phase of ['timelines', 'authors', 'following', 'followers', 'blocks']) {
+      expect(completeCrawlAccountCheckpoint).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase,
+          data: expect.objectContaining({
+            durationMs: expect.any(Number),
+            retryWaitMs: expect.any(Number),
+          }),
+        }),
+      )
+    }
   })
 })

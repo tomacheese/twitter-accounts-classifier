@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { Logger } from '@book000/node-utils'
 import { getPrismaClient, getLeasePrismaClient, disconnectPrisma } from './db/client'
+import { upsertComponentBuildIdentity } from './build-identity'
 import { initMonitoring, captureException } from './monitoring/sentry'
 import { runWorkerLoopOnce, type WorkerLoopDeps } from './worker-loop'
 import {
@@ -50,6 +51,7 @@ export async function main(): Promise<void> {
   const leasePrisma = getLeasePrismaClient()
   logger.info('analyzer starting')
   await Promise.all([prisma.$connect(), leasePrisma.$connect()])
+  await upsertComponentBuildIdentity(prisma, 'analyzer')
 
   // 起動時に記録しておかないと、queue が空で 1 件も処理しなかった期間の
   // System 画面が適用中 policy 不明のままになる。

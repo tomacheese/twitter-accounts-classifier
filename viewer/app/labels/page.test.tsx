@@ -10,7 +10,12 @@ vi.mock('@/lib/queries/dashboard', () => ({
   getLabelAggregateSnapshot: vi.fn(),
 }))
 
+vi.mock('@/lib/queries/label-summary', () => ({
+  listLabelSummaries: vi.fn(),
+}))
+
 const { getLabelAggregateSnapshot } = await import('@/lib/queries/dashboard')
+const { listLabelSummaries } = await import('@/lib/queries/label-summary')
 const { default: LabelsPage } = await import('./page')
 
 describe('LabelsPage', () => {
@@ -36,6 +41,27 @@ describe('LabelsPage', () => {
     expect(html).toContain('spam')
     expect(html).toContain(formatDateTime(lastSuccessAt))
     expect(html).not.toContain('最新の集計に失敗しました')
+  })
+
+  it('shows true count/evaluated count/coverage/prevalence for the percentage in the legacy view', async () => {
+    vi.mocked(getLabelAggregateSnapshot).mockResolvedValue({
+      labeledAccounts: 42,
+      distribution: [
+        {
+          labelKey: 'spam',
+          labelDescription: 'Likely spam account',
+          trueCount: 5,
+          totalAccounts: 10_000,
+        },
+      ],
+      lastSuccessAt: new Date('2026-08-05T00:00:00Z'),
+      lastAttemptStatus: 'success',
+    })
+
+    const element = await LabelsPage()
+    const html = renderToStaticMarkup(element)
+
+    expect(html).toContain('5/10000 (&lt; 0.1%)')
   })
 
   it('shows a warning banner when the last aggregation attempt failed after a prior success', async () => {
@@ -89,5 +115,70 @@ describe('LabelsPage', () => {
 
     expect(html).toContain('No labels are registered yet.')
     expect(html).toContain('—')
+  })
+
+  it('shows true count/evaluated count/coverage/prevalence columns in the new view', async () => {
+    process.env.VIEWER_NEW_UI_SECTIONS = 'labels'
+    try {
+      vi.mocked(listLabelSummaries).mockResolvedValue({
+        readiness: 'ready',
+        items: [
+          {
+            labelDefinitionId: 'label-1',
+            labelKey: 'spam',
+            evaluatedCount: 80,
+            trueCount: 8,
+            populationCount: 100,
+            coverage: 0.8,
+            prevalence: 0.1,
+            qualityStatus: 'normal',
+            activeFindingCount: 0,
+            highestFindingSeverity: null,
+          },
+        ],
+      })
+
+      const html = renderToStaticMarkup(await LabelsPage())
+
+      expect(html).toContain('True count')
+      expect(html).toContain('Evaluated count')
+      expect(html).toContain('Coverage')
+      expect(html).toContain('>8<')
+      expect(html).toContain('>80<')
+      expect(html).toContain('80.0%')
+      expect(html).toContain('10.0%')
+      expect(html).not.toContain('low coverage')
+    } finally {
+      delete process.env.VIEWER_NEW_UI_SECTIONS
+    }
+  })
+
+  it('shows a low coverage badge when qualityStatus is unknown in the new view', async () => {
+    process.env.VIEWER_NEW_UI_SECTIONS = 'labels'
+    try {
+      vi.mocked(listLabelSummaries).mockResolvedValue({
+        readiness: 'ready',
+        items: [
+          {
+            labelDefinitionId: 'label-1',
+            labelKey: 'spam',
+            evaluatedCount: 0,
+            trueCount: 0,
+            populationCount: 0,
+            coverage: 0,
+            prevalence: 0,
+            qualityStatus: 'unknown',
+            activeFindingCount: 0,
+            highestFindingSeverity: null,
+          },
+        ],
+      })
+
+      const html = renderToStaticMarkup(await LabelsPage())
+
+      expect(html).toContain('low coverage')
+    } finally {
+      delete process.env.VIEWER_NEW_UI_SECTIONS
+    }
   })
 })

@@ -152,6 +152,63 @@ export async function getReadModelMeta(
   return toMeta(state, thresholds, new Date())
 }
 
+/** worst-of 計算の対象にできる ReadModelState の最小形。 */
+interface WorstOfState {
+  modelKey: string
+  lastSuccessAt: Date | null
+  sourceWatermarkAt: Date | null
+  currentGenerationId: string | null
+  policyHash: string | null
+  status: string
+}
+
+/** worst-of 計算の結果。 */
+interface WorstOfResult<T> {
+  latest: T
+  worstStatus: ReadModelFreshnessStatus
+  perModel: CoreReadModelStatus[]
+}
+
+/**
+ * getPipelineMeta と getCoreReadModelMeta の両方が同じ判定を必要とするため、重複させずここへ集約する。
+ * @param states - worst-of の対象とする ReadModelState の一覧
+ * @param thresholds - delayed/stale と判定するまでの経過時間
+ * @param now - 判定基準時刻
+ * @returns 最も劣化している状態、lastSuccessAt が最新の state、モデルごとの内訳
+ */
+function computeWorstOf<T extends WorstOfState>(
+  states: T[],
+  thresholds: FreshnessThresholds,
+  now: Date,
+): WorstOfResult<T> {
+  let latest = states[0]
+  // unknown と healthy は DEGRADATION_ORDER 上どちらも 0 のため、'unknown' 初期値に
+  // 対して > 比較するだけでは全 state が healthy でも初期値から更新されない。
+  // 実在する範囲外の順位から始めて必ず 1 回目で上書きされるようにする。
+  let worstStatus: ReadModelFreshnessStatus = 'healthy'
+  let worstOrder = -1
+  const perModel: CoreReadModelStatus[] = []
+  for (const state of states) {
+    if ((state.lastSuccessAt?.getTime() ?? 0) > (latest.lastSuccessAt?.getTime() ?? 0)) {
+      latest = state
+    }
+    // 1 つでも失敗・遅延していれば section 全体の鮮度もそれに引きずられる。
+    const reconciled = reconcileFreshness(
+      toFreshnessStatus(state.status),
+      state.lastSuccessAt,
+      thresholds,
+      now,
+    )
+    perModel.push({ modelKey: state.modelKey, freshnessStatus: reconciled })
+    const order = DEGRADATION_ORDER[reconciled]
+    if (order > worstOrder) {
+      worstOrder = order
+      worstStatus = reconciled
+    }
+  }
+  return { latest, worstStatus, perModel }
+}
+
 /**
  * 特定の読み取りモデルに紐づかない section 向けのメタデータ。
  * ReviewFinding や OperationCycle は generation 管理下に無いため、
@@ -165,35 +222,62 @@ export async function getPipelineMeta(prisma: PrismaClient): Promise<ReadModelMe
 
   const thresholds = await getFreshnessThresholds(prisma)
   const now = new Date()
-
-  let latest = states[0]
-  // unknown と healthy は DEGRADATION_ORDER 上どちらも 0 のため、'unknown' 初期値に
-  // 対して > 比較するだけでは全 state が healthy でも初期値から更新されない。
-  // 実在する範囲外の順位から始めて必ず 1 回目で上書きされるようにする。
-  let worstStatus: ReadModelFreshnessStatus = 'healthy'
-  let worstOrder = -1
-  for (const state of states) {
-    if ((state.lastSuccessAt?.getTime() ?? 0) > (latest.lastSuccessAt?.getTime() ?? 0)) {
-      latest = state
-    }
-    // 1 つでも失敗・遅延していれば section 全体の鮮度もそれに引きずられる。
-    const reconciled = reconcileFreshness(
-      toFreshnessStatus(state.status),
-      state.lastSuccessAt,
-      thresholds,
-      now,
-    )
-    const order = DEGRADATION_ORDER[reconciled]
-    if (order > worstOrder) {
-      worstOrder = order
-      worstStatus = reconciled
-    }
-  }
+  const { latest, worstStatus } = computeWorstOf(states, thresholds, now)
 
   return {
     ...toMeta(latest, thresholds, now),
     generationId: null,
     freshnessStatus: worstStatus,
+  }
+}
+
+// Overview の総合 freshness と揃える主要 read model。
+// block_relation は Block 機能を使わない環境では Pointer が作られないため、固定の Set には含めず呼び出し側で判定する。
+const CORE_MODEL_KEYS = ['account_summary_latest', 'label_summary', 'attention_items'] as const
+
+/** 主要 read model 1 件分の freshness。 */
+export interface CoreReadModelStatus {
+  modelKey: string
+  freshnessStatus: ReadModelFreshnessStatus
+}
+
+/** Overview の総合 freshness と、その内訳。 */
+export interface CoreReadModelMeta extends ReadModelMeta {
+  perModel: CoreReadModelStatus[]
+}
+
+/** ReadModelState が 1 件も無い場合に返す CoreReadModelMeta。 */
+const EMPTY_CORE_META: CoreReadModelMeta = { ...EMPTY_META, perModel: [] }
+
+/**
+ * overview_snapshot 自身の freshness ではなく、Accounts/Labels/Attention の元データの freshness を対象にすることで、「表示は最新だが元データは遅延している」状態を見逃さないようにする。
+ * @param prisma - Prisma クライアント
+ * @returns 主要 read model の worst-of と、モデルごとの内訳
+ */
+export async function getCoreReadModelMeta(prisma: PrismaClient): Promise<CoreReadModelMeta> {
+  const [states, blockRelationPointer] = await Promise.all([
+    prisma.readModelState.findMany({ where: { modelKey: { in: [...CORE_MODEL_KEYS] } } }),
+    prisma.readModelPointer.findUnique({ where: { modelKey: 'block_relation' } }),
+  ])
+
+  if (blockRelationPointer) {
+    const blockRelationState = await prisma.readModelState.findUnique({
+      where: { modelKey: 'block_relation' },
+    })
+    if (blockRelationState) states.push(blockRelationState)
+  }
+
+  if (states.length === 0) return EMPTY_CORE_META
+
+  const thresholds = await getFreshnessThresholds(prisma)
+  const now = new Date()
+  const { latest, worstStatus, perModel } = computeWorstOf(states, thresholds, now)
+
+  return {
+    ...toMeta(latest, thresholds, now),
+    generationId: null,
+    freshnessStatus: worstStatus,
+    perModel,
   }
 }
 

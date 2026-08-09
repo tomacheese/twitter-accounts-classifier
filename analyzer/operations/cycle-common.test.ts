@@ -1,5 +1,26 @@
-import { describe, it, expect } from 'vitest'
-import { deriveCycleStatus } from './cycle-common'
+import { describe, it, expect, vi } from 'vitest'
+import type { PrismaClient } from '../generated/prisma'
+import {
+  applyUpstreamBlocking,
+  deriveCycleStatus,
+  deriveWorkItemStage,
+  type WorkItemStage,
+} from './cycle-common'
+
+/**
+ * @returns analysisWorkItem.findUnique を差し替え可能な Prisma クライアントのモックと、
+ * その差し替え用の関数
+ */
+function createMockPrismaClient(): {
+  prisma: PrismaClient
+  findUnique: ReturnType<typeof vi.fn>
+} {
+  const findUnique = vi.fn()
+  return {
+    prisma: { analysisWorkItem: { findUnique } } as unknown as PrismaClient,
+    findUnique,
+  }
+}
 
 describe('deriveCycleStatus', () => {
   it('4 Stage すべて succeeded なら succeeded を返す', () => {
@@ -38,5 +59,83 @@ describe('deriveCycleStatus', () => {
 
   it('起点 Stage が failed なら後続に partial があっても failed を返す', () => {
     expect(deriveCycleStatus(['failed', 'partial'])).toBe('failed')
+  })
+
+  it('blocked_by_upstream を含む場合 partial を返す', () => {
+    expect(deriveCycleStatus(['succeeded', 'blocked_by_upstream'])).toBe('partial')
+  })
+})
+
+describe('deriveWorkItemStage', () => {
+  it('WorkItem が存在しない場合 workItemExists: false を返す', async () => {
+    const { prisma, findUnique } = createMockPrismaClient()
+    findUnique.mockResolvedValue(null)
+
+    const stage = await deriveWorkItemStage(prisma, 'label_aggregate_refresh', 'crawl_run', 'run-1')
+
+    expect(stage.workItemExists).toBe(false)
+    expect(stage.status).toBe('failed')
+  })
+
+  it('WorkItem が存在する場合 workItemExists: true を返す', async () => {
+    const { prisma, findUnique } = createMockPrismaClient()
+    findUnique.mockResolvedValue({
+      status: 'succeeded',
+      attemptCount: 1,
+      lastErrorCode: null,
+      lastErrorSummary: null,
+      runs: [],
+    } as never)
+
+    const stage = await deriveWorkItemStage(prisma, 'label_aggregate_refresh', 'crawl_run', 'run-1')
+
+    expect(stage.workItemExists).toBe(true)
+  })
+})
+
+describe('applyUpstreamBlocking', () => {
+  it('WorkItem が存在せず直前 Stage が succeeded 以外なら blocked_by_upstream にする', () => {
+    const stage: WorkItemStage = {
+      status: 'failed',
+      attemptCount: 0,
+      errorCode: undefined,
+      errorSummary: 'work item was never enqueued',
+      analysisRunId: undefined,
+      startedAt: undefined,
+      finishedAt: undefined,
+      workItemExists: false,
+    }
+    const result = applyUpstreamBlocking(stage, 'failed')
+    expect(result.status).toBe('blocked_by_upstream')
+  })
+
+  it('WorkItem が存在しない場合でも直前 Stage が succeeded なら変更しない', () => {
+    const stage: WorkItemStage = {
+      status: 'failed',
+      attemptCount: 0,
+      errorCode: undefined,
+      errorSummary: 'work item was never enqueued',
+      analysisRunId: undefined,
+      startedAt: undefined,
+      finishedAt: undefined,
+      workItemExists: false,
+    }
+    const result = applyUpstreamBlocking(stage, 'succeeded')
+    expect(result.status).toBe('failed')
+  })
+
+  it('WorkItem が存在する場合は変更しない', () => {
+    const stage: WorkItemStage = {
+      status: 'succeeded',
+      attemptCount: 1,
+      errorCode: undefined,
+      errorSummary: undefined,
+      analysisRunId: 'run-1',
+      startedAt: new Date(),
+      finishedAt: new Date(),
+      workItemExists: true,
+    }
+    const result = applyUpstreamBlocking(stage, 'failed')
+    expect(result.status).toBe('succeeded')
   })
 })

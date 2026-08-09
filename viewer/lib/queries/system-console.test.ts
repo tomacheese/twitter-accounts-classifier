@@ -7,6 +7,7 @@ function createMockPrisma(overrides: {
   policy?: unknown
   readModelStates?: unknown[]
   overviewReadModelState?: unknown
+  componentBuildIdentities?: unknown[]
 }) {
   // snapshot を渡すテストは、それが current generation として公開されている状態を
   // 前提にするため、明示指定が無ければ generationId で対応する ReadModelState を補う。
@@ -20,6 +21,9 @@ function createMockPrisma(overrides: {
     readModelState: {
       findUnique: vi.fn().mockResolvedValue(overviewReadModelState),
       findMany: vi.fn().mockResolvedValue(overrides.readModelStates ?? []),
+    },
+    componentBuildIdentity: {
+      findMany: vi.fn().mockResolvedValue(overrides.componentBuildIdentities ?? []),
     },
   } as unknown as PrismaClient
 }
@@ -153,6 +157,26 @@ describe('getSystemConsoleData', () => {
     const data = await getSystemConsoleData(prisma)
 
     expect(data.readModels[0].errorSummary).toBeNull()
+  })
+
+  it('4 component の build identity を返す', async () => {
+    const prisma = createMockPrisma({
+      componentBuildIdentities: [
+        {
+          component: 'viewer',
+          applicationVersion: '1.0.0',
+          gitRevision: 'abc123',
+          buildTime: new Date('2026-08-01T00:00:00.000Z'),
+          updatedAt: new Date(),
+        },
+      ],
+    })
+
+    const result = await getSystemConsoleData(prisma)
+
+    expect(result.componentBuildIdentities).toEqual([
+      expect.objectContaining({ component: 'viewer', gitRevision: 'abc123' }),
+    ])
   })
 
   it('秘密情報を含む環境変数は allowlist に無ければ含まれない', async () => {

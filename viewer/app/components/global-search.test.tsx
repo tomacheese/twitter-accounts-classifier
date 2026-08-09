@@ -1,6 +1,8 @@
+// @vitest-environment jsdom
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GlobalSearch, buildOperationCycleHref, resolveDisplayState } from './global-search'
 
 describe('GlobalSearch', () => {
@@ -17,6 +19,53 @@ describe('GlobalSearch', () => {
   })
 })
 
+describe('GlobalSearch AbortController', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => undefined)),
+    )
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('連続して入力すると直前の fetch を abort する', () => {
+    const abortSpy = vi.spyOn(AbortController.prototype, 'abort')
+    render(<GlobalSearch />)
+    const input = screen.getByRole('searchbox')
+
+    fireEvent.change(input, { target: { value: 'al' } })
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+    fireEvent.change(input, { target: { value: 'ali' } })
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+
+    expect(abortSpy).toHaveBeenCalled()
+  })
+
+  it('アンマウント時に処理中の fetch を abort する', () => {
+    const abortSpy = vi.spyOn(AbortController.prototype, 'abort')
+    const { unmount } = render(<GlobalSearch />)
+    const input = screen.getByRole('searchbox')
+
+    fireEvent.change(input, { target: { value: 'al' } })
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+    unmount()
+
+    expect(abortSpy).toHaveBeenCalled()
+  })
+})
+
 describe('buildOperationCycleHref', () => {
   it('kindに応じてOperations詳細ページのpathを切り替える', () => {
     expect(buildOperationCycleHref('cycle-1', 'crawl')).toBe('/operations/crawl/cycle-1')
@@ -25,7 +74,13 @@ describe('buildOperationCycleHref', () => {
   })
 })
 
-const emptyResult = { accounts: [], labels: [], findings: [], operations: [] }
+const emptyResult = {
+  accounts: [],
+  labels: [],
+  findings: [],
+  operations: [],
+  timingMs: { accounts: 0, labels: 0, findings: 0, operations: 0 },
+}
 
 describe('resolveDisplayState', () => {
   it('検索失敗は空の結果と区別して error になる', () => {

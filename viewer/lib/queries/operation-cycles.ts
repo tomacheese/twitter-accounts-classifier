@@ -93,6 +93,7 @@ export interface OperationStageView {
   status: string
   startedAt: Date | null
   finishedAt: Date | null
+  errorCode: string | null
   errorSummary: string | null
 }
 
@@ -105,6 +106,8 @@ export interface OperationCycleDetailView {
   triggeredAt: Date
   startedAt: Date | null
   finishedAt: Date | null
+  /** account/action drill-down クエリが参照する CrawlRun/BlockRun の ID。 */
+  sourceId: string
   stages: OperationStageView[]
 }
 
@@ -161,6 +164,7 @@ async function getCycleDetail(
       status: stage.status,
       startedAt: stage.startedAt,
       finishedAt: stage.finishedAt,
+      errorCode: stage.errorCode,
       errorSummary: stage.errorSummary,
     })),
   }

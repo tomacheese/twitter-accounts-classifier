@@ -61,34 +61,89 @@ function EmptyState({ message }: { message: string }): React.ReactElement {
   return <p className="text-sm text-gray-500 dark:text-gray-400">{message}</p>
 }
 
+const RECENTLY_CHANGED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+
 /**
  * @param entries - Classification subview のデータ
+ * @returns Active/Recently changed/Remaining false の 3 群
+ */
+function groupClassificationEntries(entries: AccountClassificationEntryView[]): {
+  active: AccountClassificationEntryView[]
+  recentlyChanged: AccountClassificationEntryView[]
+  remainingFalse: AccountClassificationEntryView[]
+} {
+  const now = Date.now()
+  const active = entries
+    .filter((entry) => entry.value)
+    .toSorted((a, b) => b.lastChangedAt.getTime() - a.lastChangedAt.getTime())
+  const recentlyChanged = entries
+    .filter(
+      (entry) => !entry.value && now - entry.lastChangedAt.getTime() <= RECENTLY_CHANGED_WINDOW_MS,
+    )
+    .toSorted((a, b) => b.lastChangedAt.getTime() - a.lastChangedAt.getTime())
+  const recentlyChangedKeys = new Set(recentlyChanged.map((entry) => entry.labelKey))
+  const remainingFalse = entries.filter(
+    (entry) => !entry.value && !recentlyChangedKeys.has(entry.labelKey),
+  )
+  return { active, recentlyChanged, remainingFalse }
+}
+
+/**
+ * @param props - 表示する 1 件分の分類結果
  * @returns 描画結果
  */
-function ClassificationView({
+function ClassificationEntryItem({
+  entry,
+}: {
+  entry: AccountClassificationEntryView
+}): React.ReactElement {
+  return (
+    <li className="rounded-lg border bg-white p-3 text-sm shadow-sm dark:border-gray-700 dark:bg-gray-800">
+      <span className="font-medium">{entry.labelKey}</span>{' '}
+      <span className="text-gray-500 dark:text-gray-400">
+        {entry.value ? 'true' : 'false'} · confidence {entry.confidence.toFixed(2)} · {entry.reason}
+      </span>
+      <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+        {formatDateTime(entry.lastChangedAt)}
+      </p>
+    </li>
+  )
+}
+
+/**
+ * @param entries - Classification subview のデータ
+ * @returns 描画結果。true のラベルと直近変化した false のラベルを常に表示し、それより古い false のラベルは折り畳む
+ */
+export function ClassificationView({
   entries,
 }: {
   entries: AccountClassificationEntryView[]
 }): React.ReactElement {
   if (entries.length === 0) return <EmptyState message="No classification recorded." />
+  const { active, recentlyChanged, remainingFalse } = groupClassificationEntries(entries)
   return (
-    <ul className="flex flex-col gap-2">
-      {entries.map((entry) => (
-        <li
-          key={entry.labelKey}
-          className="rounded-lg border bg-white p-3 text-sm shadow-sm dark:border-gray-700 dark:bg-gray-800"
-        >
-          <span className="font-medium">{entry.labelKey}</span>{' '}
-          <span className="text-gray-500 dark:text-gray-400">
-            {entry.value ? 'true' : 'false'} · confidence {entry.confidence.toFixed(2)} ·{' '}
-            {entry.reason}
-          </span>
-          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-            {formatDateTime(entry.lastChangedAt)}
-          </p>
-        </li>
-      ))}
-    </ul>
+    <div className="flex flex-col gap-4">
+      <ul className="flex flex-col gap-2">
+        {active.map((entry) => (
+          <ClassificationEntryItem key={entry.labelKey} entry={entry} />
+        ))}
+        {recentlyChanged.map((entry) => (
+          <ClassificationEntryItem key={entry.labelKey} entry={entry} />
+        ))}
+      </ul>
+      {remainingFalse.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-sm text-gray-500 dark:text-gray-400">
+            Remaining false ({remainingFalse.length})
+          </summary>
+          <ul className="mt-2 flex flex-col gap-2">
+            {remainingFalse.map((entry) => (
+              <ClassificationEntryItem key={entry.labelKey} entry={entry} />
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
   )
 }
 
@@ -124,7 +179,7 @@ function EvidenceView({ entries }: { entries: AccountEvidenceView[] }): React.Re
  * @param entries - Relations subview のデータ
  * @returns 描画結果
  */
-function RelationsView({ entries }: { entries: AccountRelationView[] }): React.ReactElement {
+export function RelationsView({ entries }: { entries: AccountRelationView[] }): React.ReactElement {
   if (entries.length === 0) return <EmptyState message="No block relation recorded." />
   return (
     <ul className="flex flex-col gap-2">
@@ -137,7 +192,7 @@ function RelationsView({ entries }: { entries: AccountRelationView[] }): React.R
             href={`/accounts/${entry.counterpartAccountId}`}
             className="text-blue-600 hover:underline dark:text-blue-400"
           >
-            {entry.counterpartAccountId}
+            {entry.counterpartScreenName}
           </Link>{' '}
           <span className="text-gray-500 dark:text-gray-400">
             {entry.direction} · {entry.status}
@@ -152,7 +207,11 @@ function RelationsView({ entries }: { entries: AccountRelationView[] }): React.R
  * @param entries - History subview のデータ
  * @returns 描画結果
  */
-function HistoryView({ entries }: { entries: AccountLabelChangeView[] }): React.ReactElement {
+export function HistoryView({
+  entries,
+}: {
+  entries: AccountLabelChangeView[]
+}): React.ReactElement {
   if (entries.length === 0) return <EmptyState message="No label change recorded." />
   return (
     <ul className="flex flex-col gap-2">
@@ -161,7 +220,7 @@ function HistoryView({ entries }: { entries: AccountLabelChangeView[] }): React.
           key={entry.id}
           className="rounded-lg border bg-white p-3 text-sm shadow-sm dark:border-gray-700 dark:bg-gray-800"
         >
-          <span className="font-medium">{entry.labelDefinitionId}</span>{' '}
+          <span className="font-medium">{entry.labelKey}</span>{' '}
           <span className="text-gray-500 dark:text-gray-400">
             {entry.changeType}: {String(entry.previousValue)} → {String(entry.newValue)}
           </span>

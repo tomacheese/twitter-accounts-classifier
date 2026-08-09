@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { getPrismaClient } from './db/client'
+import * as labelMetricSnapshotModule from './metrics/label-metric-snapshot'
+import * as publishModule from './read-models/publish'
 import {
   processReadModelRefresh,
   processLabelAggregateRefresh,
@@ -522,5 +524,44 @@ describe.skipIf(!process.env.DATABASE_URL)('processLabelAggregateRefresh', () =>
     expect(snapshot.currentCount + snapshot.delayedCount + snapshot.staleCount).toBe(
       snapshot.evaluatedCount,
     )
+  })
+})
+
+describe('processLabelAggregateRefresh のエラーコード分岐', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('buildLabelAggregateSnapshotSet が失敗すると label_aggregate_snapshot_failed を投げる', async () => {
+    vi.spyOn(labelMetricSnapshotModule, 'buildLabelAggregateSnapshotSet').mockRejectedValue(
+      new Error('db error'),
+    )
+
+    await expect(
+      processLabelAggregateRefresh(prisma, {
+        id: 'wi-1',
+        triggerType: 'crawl_run',
+        triggerId: 'run-1',
+      } as never),
+    ).rejects.toMatchObject({ errorCode: 'label_aggregate_snapshot_failed' })
+  })
+
+  it('publishGeneration が失敗すると label_summary_publish_failed を投げる', async () => {
+    vi.spyOn(labelMetricSnapshotModule, 'buildLabelAggregateSnapshotSet').mockResolvedValue({
+      triggerWorkItemId: 'wi-1',
+      snapshotAt: new Date(),
+      reused: false,
+    })
+    vi.spyOn(publishModule, 'publishGeneration').mockRejectedValue(new Error('publish error'))
+
+    // triggerType を schedule にして Finding 評価 (crawl_run 限定) を経由させず、
+    // publishGeneration 失敗だけを単独で検証する。
+    await expect(
+      processLabelAggregateRefresh(prisma, {
+        id: 'wi-1',
+        triggerType: 'schedule',
+        triggerId: '2026-08-09T00',
+      } as never),
+    ).rejects.toMatchObject({ errorCode: 'label_summary_publish_failed' })
   })
 })

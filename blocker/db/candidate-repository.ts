@@ -77,6 +77,12 @@ export async function selectBlockCandidates(
       WHERE (f."followerId" = ${blockerId} AND f."followeeId" = b."accountId")
          OR (f."followerId" = b."accountId" AND f."followeeId" = ${blockerId})
     )
+    AND NOT EXISTS (
+      SELECT 1 FROM "BlockOutboxEntry" oe
+      WHERE oe."blockerId" = ${blockerId}
+        AND oe."blockedId" = b."accountId"
+        AND oe."status" IN ('pending_remote', 'remote_succeeded')
+    )
     ORDER BY b."confidence" DESC
     LIMIT ${maxCount}
   `
