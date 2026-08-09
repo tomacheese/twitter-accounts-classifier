@@ -43,10 +43,8 @@ export interface GlobalSearchEnabledEntityTypes {
   operations?: boolean
 }
 
-const ACCOUNT_SUMMARY_MODEL_KEY = 'account_summary'
-
 /**
- * アカウント検索は Account 本体ではなく read model の AccountSummaryCurrent を引く。
+ * アカウント検索は Account 本体ではなく read model の AccountSummaryLatest を引く。
  * 3 条件を OR で束ねると screenName の case-insensitive prefix が全体を Seq Scan に
  * 落とすため、既存索引を使える query へ分割して結果を重複排除する。
  * @param prisma - Prisma クライアント
@@ -57,21 +55,14 @@ async function searchAccounts(
   prisma: PrismaClient,
   query: string,
 ): Promise<GlobalSearchAccountResult[]> {
-  const pointer = await prisma.readModelPointer.findUnique({
-    where: { modelKey: ACCOUNT_SUMMARY_MODEL_KEY },
-  })
-  if (!pointer) return []
-
-  const generationId = pointer.currentGenerationId
   const normalizedScreenQuery = query.toLowerCase()
   const [accountIdRows, screenNameRows, displayNameRows] = await Promise.all([
-    prisma.accountSummaryCurrent.findMany({
-      where: { generationId, accountId: query },
+    prisma.accountSummaryLatest.findMany({
+      where: { accountId: query },
       take: MAX_RESULTS_PER_TYPE,
     }),
-    prisma.accountSummaryCurrent.findMany({
+    prisma.accountSummaryLatest.findMany({
       where: {
-        generationId,
         normalizedScreenName: {
           gte: normalizedScreenQuery,
           lt: `${normalizedScreenQuery}￿`,
@@ -80,9 +71,8 @@ async function searchAccounts(
       orderBy: [{ normalizedScreenName: 'asc' }, { accountId: 'asc' }],
       take: MAX_RESULTS_PER_TYPE,
     }),
-    prisma.accountSummaryCurrent.findMany({
+    prisma.accountSummaryLatest.findMany({
       where: {
-        generationId,
         normalizedDisplayName: { contains: query, mode: 'insensitive' },
       },
       take: MAX_RESULTS_PER_TYPE,
