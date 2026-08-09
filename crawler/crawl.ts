@@ -163,12 +163,46 @@ export interface CrawlDependencies {
   sleep: (ms: number) => Promise<void>
 }
 
-function retryOptions(deps: CrawlDependencies): {
+function retryOptions(
+  deps: CrawlDependencies,
+  trackRetryWait: (ms: number) => void,
+): {
   maxAttempts: number
   delayMs: number
   sleepImpl: (ms: number) => Promise<void>
 } {
-  return { ...TWITTER_RETRY, sleepImpl: deps.sleep }
+  return {
+    ...TWITTER_RETRY,
+    sleepImpl: async (ms) => {
+      trackRetryWait(ms)
+      await deps.sleep(ms)
+    },
+  }
+}
+
+/** measurePhaseDuration の結果。 */
+export interface PhaseDurationResult<T> {
+  value: T
+  durationMs: number
+  retryWaitMs: number
+}
+
+/**
+ * phase の実処理時間と retry/backoff で消費した待機時間を分離して計測する。
+ * 待機時間を実処理時間に含めると、rate limit 由来の待ちを phase 自体の遅さと誤認するため、
+ * `trackRetryWait` で呼び出し元が明示的に切り出す。
+ * @param fn - 計測対象の非同期処理。`trackRetryWait` で retry 待機時間を加算できる
+ * @returns 処理結果と、実処理時間・retry 待機時間 (ミリ秒)
+ */
+export async function measurePhaseDuration<T>(
+  fn: (trackRetryWait: (ms: number) => void) => Promise<T>,
+): Promise<PhaseDurationResult<T>> {
+  let retryWaitMs = 0
+  const start = Date.now()
+  const value = await fn((ms) => {
+    retryWaitMs += ms
+  })
+  return { value, durationMs: Date.now() - start, retryWaitMs }
 }
 
 /**
@@ -284,6 +318,7 @@ async function fetchTimelineSnapshot(
   account: AppConfig['accounts'][number],
   trendsContext: { scraper: TrendsScraperLike },
   client: CrawlOpenApiClient,
+  trackRetryWait: (ms: number) => void,
 ): Promise<TimelineSnapshot> {
   const tweetApi = client.getTweetApi()
   const warnings: CrawlWarning[] = []
@@ -294,7 +329,7 @@ async function fetchTimelineSnapshot(
   const [recommended, following, trending] = await Promise.all([
     withTwitterRetry(
       () => fetchRecommendedTimeline(tweetApi, deps.limits.tweetsPerTimeline),
-      retryOptions(deps),
+      retryOptions(deps, trackRetryWait),
     ).catch((error: unknown) => {
       const message = `Recommended timeline fetch failed for ${account.username}, continuing without it`
       logger.error(message, error as Error)
@@ -310,7 +345,7 @@ async function fetchTimelineSnapshot(
     }),
     withTwitterRetry(
       () => fetchFollowingTimeline(tweetApi, deps.limits.tweetsPerTimeline),
-      retryOptions(deps),
+      retryOptions(deps, trackRetryWait),
     ).catch((error: unknown) => {
       const message = `Following timeline fetch failed for ${account.username}, continuing without it`
       logger.error(message, error as Error)
@@ -332,7 +367,7 @@ async function fetchTimelineSnapshot(
           deps.limits.tweetsPerTimeline,
           deps.limits.trendsPerCycle,
         ),
-      retryOptions(deps),
+      retryOptions(deps, trackRetryWait),
     ).catch((error: unknown) => {
       const message = `Trending timeline fetch failed for ${account.username}, continuing without it`
       logger.error(message, error as Error)
@@ -361,6 +396,7 @@ async function runAccountCycleBody(
   crawlRunId: string,
   timelineSnapshot: TimelineSnapshot,
   client: CrawlOpenApiClient,
+  trackRetryWait: (ms: number) => void,
 ): Promise<AccountCycleMetrics> {
   const tweetApi = client.getTweetApi()
   const userApi = client.getUserApi()
@@ -390,7 +426,7 @@ async function runAccountCycleBody(
   for (const topTweet of topTweets) {
     const { authorReplies, otherReplies, authors } = await withTwitterRetry(
       () => fetchReplies(tweetApi, topTweet, deps.limits.repliesPerTweet),
-      retryOptions(deps),
+      retryOptions(deps, trackRetryWait),
     )
     replyTweets.push(...authorReplies, ...otherReplies)
     for (const reply of otherReplies) {
@@ -417,7 +453,7 @@ async function runAccountCycleBody(
     try {
       const profile = await withTwitterRetry(
         () => fetchAccountProfile(userApi, authorId),
-        retryOptions(deps),
+        retryOptions(deps, trackRetryWait),
       )
       await deps.persistAccount(profile)
       succeededAuthorIds.add(authorId)
@@ -425,7 +461,7 @@ async function runAccountCycleBody(
       const { tweets: recentTweets, authors } = await guardTimelineFetch(() =>
         withTwitterRetry(
           () => fetchRecentTweets(userApi, authorId, deps.limits.recentTweetsPerAccount),
-          retryOptions(deps),
+          retryOptions(deps, trackRetryWait),
         ),
       )
       profileTweets.push(...recentTweets)
@@ -441,7 +477,7 @@ async function runAccountCycleBody(
               authorId,
               deps.limits.followEdgesPerLabeledAccount,
             ),
-          retryOptions(deps),
+          retryOptions(deps, trackRetryWait),
         )
         await deps.replaceLabelingFollowSample(authorId, followSample)
       } catch (error) {
@@ -609,12 +645,13 @@ async function syncFollowingPhase(
   deps: CrawlDependencies,
   account: AppConfig['accounts'][number],
   client: CrawlOpenApiClient,
+  trackRetryWait: (ms: number) => void,
 ): Promise<FollowingCheckpointData> {
   let userId: string
   try {
     const response = await withTwitterRetry(
       () => client.getUserApi().getUserByScreenName({ screenName: account.username }),
-      retryOptions(deps),
+      retryOptions(deps, trackRetryWait),
     )
     userId = response.data.restId
     // Follow テーブルの followerId/followeeId は Account への必須外部キーであり、
@@ -642,7 +679,7 @@ async function syncFollowingPhase(
   try {
     const following = await withTwitterRetry(
       () => fetchFollowing(client.getUserListApi(), userId, deps.limits.followEdgesPerAccount),
-      retryOptions(deps),
+      retryOptions(deps, trackRetryWait),
     )
     await deps.syncFollowing(userId, following)
     return { userId, synced: true, warnings: [] }
@@ -670,12 +707,13 @@ async function syncFollowersPhase(
   account: AppConfig['accounts'][number],
   client: CrawlOpenApiClient,
   userId: string | null,
+  trackRetryWait: (ms: number) => void,
 ): Promise<FollowersCheckpointData> {
   if (!userId) return { synced: false, warnings: [] }
   try {
     const followers = await withTwitterRetry(
       () => fetchFollowers(client.getUserListApi(), userId, deps.limits.followEdgesPerAccount),
-      retryOptions(deps),
+      retryOptions(deps, trackRetryWait),
     )
     await deps.syncFollowers(userId, followers)
     return { synced: true, warnings: [] }
@@ -703,12 +741,13 @@ async function syncBlocksPhase(
   client: CrawlOpenApiClient,
   blockerId: string | null,
   crawlRunId: string,
+  trackRetryWait: (ms: number) => void,
 ): Promise<BlocksCheckpointData> {
   if (!blockerId) return { synced: false, warnings: [] }
   try {
     const blocks = await withTwitterRetry(
       () => fetchBlocks(client.getBlocksApi(), deps.limits.blockEdgesPerAccount),
-      retryOptions(deps),
+      retryOptions(deps, trackRetryWait),
     )
     await deps.syncBlocks(blockerId, crawlRunId, blocks)
     return { synced: true, warnings: [] }
@@ -1032,76 +1071,116 @@ async function runAccountCycle(
         try {
           if (needsTimeline) {
             if (!trendsContext) throw new Error('Missing trends context for timeline checkpoint')
-            timelineSnapshot = await fetchTimelineSnapshot(
-              deps,
-              account,
-              trendsContext,
-              openApiContext.client,
+            const timelinePhase = await measurePhaseDuration((trackRetryWait) =>
+              fetchTimelineSnapshot(
+                deps,
+                account,
+                trendsContext,
+                openApiContext.client,
+                trackRetryWait,
+              ),
             )
+            timelineSnapshot = timelinePhase.value
             await deps.completeCrawlAccountCheckpoint({
               crawlRunId,
               username: account.username,
               phase: 'timelines',
-              data: toCheckpointData(storeTimelineSnapshot(timelineSnapshot)),
+              data: toCheckpointData({
+                ...storeTimelineSnapshot(timelineSnapshot),
+                durationMs: timelinePhase.durationMs,
+                retryWaitMs: timelinePhase.retryWaitMs,
+              }),
             })
           }
           if (needsAuthors) {
             if (!timelineSnapshot) throw new Error('Missing timeline checkpoint for author phase')
-            metrics = await runAccountCycleBody(
-              deps,
-              registry,
-              labelDefinitionIds,
-              duplicateReplyIndex,
-              replyHijackIndex,
-              followGraphLabelIndex,
-              account,
-              crawlRunId,
-              timelineSnapshot,
-              openApiContext.client,
+            const resolvedTimelineSnapshot = timelineSnapshot
+            const authorsPhase = await measurePhaseDuration((trackRetryWait) =>
+              runAccountCycleBody(
+                deps,
+                registry,
+                labelDefinitionIds,
+                duplicateReplyIndex,
+                replyHijackIndex,
+                followGraphLabelIndex,
+                account,
+                crawlRunId,
+                resolvedTimelineSnapshot,
+                openApiContext.client,
+                trackRetryWait,
+              ),
             )
+            metrics = authorsPhase.value
             await deps.completeCrawlAccountCheckpoint({
               crawlRunId,
               username: account.username,
               phase: 'authors',
-              data: toCheckpointData(metrics),
+              data: toCheckpointData({
+                ...metrics,
+                durationMs: authorsPhase.durationMs,
+                retryWaitMs: authorsPhase.retryWaitMs,
+              }),
             })
           }
           if (needsFollowing) {
-            following = await syncFollowingPhase(deps, account, openApiContext.client)
+            const followingPhase = await measurePhaseDuration((trackRetryWait) =>
+              syncFollowingPhase(deps, account, openApiContext.client, trackRetryWait),
+            )
+            following = followingPhase.value
             await deps.completeCrawlAccountCheckpoint({
               crawlRunId,
               username: account.username,
               phase: 'following',
-              data: toCheckpointData(following),
+              data: toCheckpointData({
+                ...following,
+                durationMs: followingPhase.durationMs,
+                retryWaitMs: followingPhase.retryWaitMs,
+              }),
             })
           }
           if (needsFollowers) {
-            followers = await syncFollowersPhase(
-              deps,
-              account,
-              openApiContext.client,
-              following?.userId ?? null,
+            const followersPhase = await measurePhaseDuration((trackRetryWait) =>
+              syncFollowersPhase(
+                deps,
+                account,
+                openApiContext.client,
+                following?.userId ?? null,
+                trackRetryWait,
+              ),
             )
+            followers = followersPhase.value
             await deps.completeCrawlAccountCheckpoint({
               crawlRunId,
               username: account.username,
               phase: 'followers',
-              data: toCheckpointData(followers),
+              data: toCheckpointData({
+                ...followers,
+                durationMs: followersPhase.durationMs,
+                retryWaitMs: followersPhase.retryWaitMs,
+              }),
             })
           }
           if (needsBlocks) {
-            blocks = await syncBlocksPhase(
-              deps,
-              account,
-              openApiContext.client,
-              following?.userId ?? null,
-              crawlRunId,
+            const blocksPhase = await measurePhaseDuration((trackRetryWait) =>
+              syncBlocksPhase(
+                deps,
+                account,
+                openApiContext.client,
+                following?.userId ?? null,
+                crawlRunId,
+                trackRetryWait,
+              ),
             )
+            blocks = blocksPhase.value
             await deps.completeCrawlAccountCheckpoint({
               crawlRunId,
               username: account.username,
               phase: 'blocks',
-              data: toCheckpointData(blocks),
+              data: toCheckpointData({
+                ...blocks,
+                durationMs: blocksPhase.durationMs,
+                retryWaitMs: blocksPhase.retryWaitMs,
+              }),
             })
           }
         } finally {
