@@ -5,8 +5,8 @@ import {
   markOutboxLocalPersisted,
   markOutboxRemoteFailed,
   findStalledOutboxEntries,
-  hasBlockRow,
-  hasBlockAction,
+  findExistingBlockedIds,
+  findOutboxEntryIdsWithBlockAction,
 } from './outbox-repository'
 
 function createMockPrismaClient() {
@@ -18,10 +18,10 @@ function createMockPrismaClient() {
       findMany: vi.fn().mockResolvedValue([]),
     },
     block: {
-      count: vi.fn().mockResolvedValue(0),
+      findMany: vi.fn().mockResolvedValue([]),
     },
     blockAction: {
-      count: vi.fn().mockResolvedValue(0),
+      findMany: vi.fn().mockResolvedValue([]),
     },
   }
 }
@@ -178,24 +178,45 @@ describe('findStalledOutboxEntries', () => {
   })
 })
 
-describe('hasBlockRow', () => {
-  it('Block 行が存在すれば true を返す', async () => {
+describe('findExistingBlockedIds', () => {
+  it('Block 行が存在する blockedId の集合を返す', async () => {
     const prisma = createMockPrismaClient()
-    vi.mocked(prisma.block.count).mockResolvedValue(1)
+    vi.mocked(prisma.block.findMany).mockResolvedValue([{ blockedId: 'blocked-1' }] as never)
 
-    const result = await hasBlockRow(prisma as never, 'blocker-1', 'blocked-1')
+    const result = await findExistingBlockedIds(prisma as never, 'blocker-1', [
+      'blocked-1',
+      'blocked-2',
+    ])
 
-    expect(result).toBe(true)
+    expect(result).toEqual(new Set(['blocked-1']))
+    expect(prisma.block.findMany).toHaveBeenCalledWith({
+      where: { blockerId: 'blocker-1', blockedId: { in: ['blocked-1', 'blocked-2'] } },
+      select: { blockedId: true },
+    })
+  })
+
+  it('blockedIds が空なら query を発行せず空集合を返す', async () => {
+    const prisma = createMockPrismaClient()
+
+    const result = await findExistingBlockedIds(prisma as never, 'blocker-1', [])
+
+    expect(result).toEqual(new Set())
+    expect(prisma.block.findMany).not.toHaveBeenCalled()
   })
 })
 
-describe('hasBlockAction', () => {
-  it('BlockAction 行が存在すれば true を返す', async () => {
+describe('findOutboxEntryIdsWithBlockAction', () => {
+  it('BlockAction が存在する outboxEntryId の集合を返す', async () => {
     const prisma = createMockPrismaClient()
-    vi.mocked(prisma.blockAction.count).mockResolvedValue(1)
+    vi.mocked(prisma.blockAction.findMany).mockResolvedValue([
+      { outboxEntryId: 'outbox-1' },
+    ] as never)
 
-    const result = await hasBlockAction(prisma as never, 'outbox-1')
+    const result = await findOutboxEntryIdsWithBlockAction(prisma as never, [
+      'outbox-1',
+      'outbox-2',
+    ])
 
-    expect(result).toBe(true)
+    expect(result).toEqual(new Set(['outbox-1']))
   })
 })

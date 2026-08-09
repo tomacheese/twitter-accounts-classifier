@@ -147,11 +147,8 @@ export async function deriveWorkItemStage(
 }
 
 /**
- * WorkItem が enqueue されていない Stage を、
- * 直前の必須 Stage が未完了だったために実行されなかった `blocked_by_upstream` と、
- * それ以外の理由で欠落した root cause の `failed` とで区別する。
- * WorkItem 自体は変更せず、
- * Cycle/Stage の表示状態だけ差し替える。
+ * WorkItem が enqueue されていない Stage を、直前 Stage 未完了による `blocked_by_upstream` と root cause の `failed` とで区別する。
+ * WorkItem 自体は変更せず、Cycle/Stage の表示状態だけ差し替える。
  * @param stage - deriveWorkItemStage が返した Stage
  * @param upstreamStatus - 直前の必須 Stage の状態
  * @returns 差し替え後の Stage

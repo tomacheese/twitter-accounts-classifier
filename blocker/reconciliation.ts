@@ -5,8 +5,8 @@ import { recordSuccessfulBlock } from './db/block-repository'
 import { recordBlockAction } from './db/block-run-repository'
 import {
   findStalledOutboxEntries,
-  hasBlockRow,
-  hasBlockAction,
+  findExistingBlockedIds,
+  findOutboxEntryIdsWithBlockAction,
   markOutboxRemoteSucceeded,
   markOutboxLocalPersisted,
   markOutboxRemoteFailed,
@@ -16,35 +16,36 @@ import { captureException } from './monitoring/sentry'
 
 const logger = Logger.configure('reconciliation')
 
+/** `reconcileOutboxEntries` が必要とする依存関数一式。 */
 export interface ReconcileOutboxEntriesDependencies {
   prisma: PrismaClient
   /** reconciliation の対象範囲を決める blocker アカウント。 */
   blockerId: string
   client: OpenApiClientContext
   findStalledOutboxEntries: typeof findStalledOutboxEntries
-  hasBlockRow: typeof hasBlockRow
-  hasBlockAction: typeof hasBlockAction
+  findExistingBlockedIds: typeof findExistingBlockedIds
+  findOutboxEntryIdsWithBlockAction: typeof findOutboxEntryIdsWithBlockAction
   recordSuccessfulBlock: typeof recordSuccessfulBlock
   recordBlockAction: typeof recordBlockAction
   markOutboxRemoteSucceeded: typeof markOutboxRemoteSucceeded
   markOutboxLocalPersisted: typeof markOutboxLocalPersisted
   markOutboxRemoteFailed: typeof markOutboxRemoteFailed
-  /** Twitter 側で実際にブロック済みかを確認する。`pending_remote` の ambiguous state 解消にのみ使う。 */
-  isRemotelyBlocked: (client: OpenApiClientContext, blockedId: string) => Promise<boolean>
+  /** Twitter 側で実際にブロック済みの一覧を取得する。`pending_remote` の ambiguous state 解消にのみ使う。 */
+  fetchRemotelyBlockedIds: (client: OpenApiClientContext) => Promise<Set<string>>
 }
 
 /**
  * @param deps - reconciliation に必要な依存関数一式
  * @param entry - 対象の停滞した outbox entry
+ * @param blockExists - 対応する Block 行が既に存在するか
+ * @param actionExists - 対応する BlockAction が既に存在するか
  */
 async function reconcileRemoteSucceeded(
   deps: ReconcileOutboxEntriesDependencies,
   entry: StalledOutboxEntry,
+  blockExists: boolean,
+  actionExists: boolean,
 ): Promise<void> {
-  const [blockExists, actionExists] = await Promise.all([
-    deps.hasBlockRow(deps.prisma, entry.blockerId, entry.blockedId),
-    deps.hasBlockAction(deps.prisma, entry.id),
-  ])
   if (!blockExists) {
     await deps.recordSuccessfulBlock(
       deps.prisma,
@@ -70,16 +71,17 @@ async function reconcileRemoteSucceeded(
 
 /**
  * `pending_remote` は remote 実行の成否が不明な ambiguous state である。
- * Twitter 側で実際にブロック済みなら remote_succeeded に進める。
  * 未実施なら remote_failed にして、次回の block cycle で通常の候補として再選定できるようにする。
  * @param deps - reconciliation に必要な依存関数一式
  * @param entry - 対象の停滞した outbox entry
+ * @param remotelyBlockedIds - Twitter 側で実際にブロック済みの blockedId 集合
  */
 async function reconcilePendingRemote(
   deps: ReconcileOutboxEntriesDependencies,
   entry: StalledOutboxEntry,
+  remotelyBlockedIds: Set<string>,
 ): Promise<void> {
-  const isBlocked = await deps.isRemotelyBlocked(deps.client, entry.blockedId)
+  const isBlocked = remotelyBlockedIds.has(entry.blockedId)
   await (isBlocked
     ? deps.markOutboxRemoteSucceeded(deps.prisma, entry.id, true)
     : deps.markOutboxRemoteFailed(deps.prisma, entry.id))
@@ -96,12 +98,39 @@ export async function reconcileOutboxEntries(
   prisma: PrismaClient,
 ): Promise<void> {
   const stalledEntries = await deps.findStalledOutboxEntries(prisma, deps.blockerId)
+  if (stalledEntries.length === 0) return
+
+  const remoteSucceededEntries = stalledEntries.filter(
+    (entry) => entry.status === 'remote_succeeded',
+  )
+  const pendingRemoteEntries = stalledEntries.filter((entry) => entry.status === 'pending_remote')
+
+  const [blockedIds, actionOutboxIds, remotelyBlockedIds] = await Promise.all([
+    deps.findExistingBlockedIds(
+      deps.prisma,
+      deps.blockerId,
+      remoteSucceededEntries.map((entry) => entry.blockedId),
+    ),
+    deps.findOutboxEntryIdsWithBlockAction(
+      deps.prisma,
+      remoteSucceededEntries.map((entry) => entry.id),
+    ),
+    pendingRemoteEntries.length > 0
+      ? deps.fetchRemotelyBlockedIds(deps.client)
+      : Promise.resolve(new Set<string>()),
+  ])
+
   for (const entry of stalledEntries) {
     try {
       if (entry.status === 'remote_succeeded') {
-        await reconcileRemoteSucceeded(deps, entry)
+        await reconcileRemoteSucceeded(
+          deps,
+          entry,
+          blockedIds.has(entry.blockedId),
+          actionOutboxIds.has(entry.id),
+        )
       } else if (entry.status === 'pending_remote') {
-        await reconcilePendingRemote(deps, entry)
+        await reconcilePendingRemote(deps, entry, remotelyBlockedIds)
       }
     } catch (error) {
       logger.error(`Failed to reconcile outbox entry ${entry.id}`, error as Error)
@@ -110,28 +139,26 @@ export async function reconcileOutboxEntries(
   }
 }
 
-// ブロック一覧は際限なく増える可能性があるため、reconciliation 1 件あたりの全ページ走査を避け、この件数分のページを見て見つからなければ未実施と判断する。
+// ブロック一覧は際限なく増える可能性があるため、reconciliation 1 回あたりの全ページ走査を避け、この件数分のページを見て見つからなければ未実施と判断する。
 const BLOCK_LIST_PAGE_CAP = 20
 const BLOCK_LIST_PAGE_SIZE = 200
 
 /**
- * `crawler` の `syncBlocksPhase` と異なり全件同期が目的ではなく、単一の `blockedId` が一覧に含まれるかどうかだけを知れればよいため、一覧の先頭から必要な分だけ走査する。
+ * `crawler` の `syncBlocksPhase` と異なり全件同期が目的ではなく、reconciliation 対象の停滞 entry 群が一覧に含まれるかどうかだけを知れればよいため、
+ * entry ごとに一覧を再取得するのではなくここで一度だけ取得して集合として返す。
  * @param client - ログイン済みの OpenAPI クライアント
- * @param blockedId - 確認対象のアカウント
- * @returns Twitter 側で実際にブロック済みなら true
+ * @returns Twitter 側で実際にブロック済みの blockedId 集合
  */
-export async function isRemotelyBlocked(
-  client: OpenApiClientContext,
-  blockedId: string,
-): Promise<boolean> {
+export async function fetchRemotelyBlockedIds(client: OpenApiClientContext): Promise<Set<string>> {
+  const blockedIds = new Set<string>()
   let cursor: string | undefined
   for (let page = 0; page < BLOCK_LIST_PAGE_CAP; page++) {
     const result = await withTwitterRetry(() =>
       client.blocksClient.getBlocksPage(cursor, BLOCK_LIST_PAGE_SIZE),
     )
-    if (result.users.some((user) => user.restId === blockedId)) return true
-    if (!result.nextCursor) return false
+    for (const user of result.users) blockedIds.add(user.restId)
+    if (!result.nextCursor) break
     cursor = result.nextCursor
   }
-  return false
+  return blockedIds
 }

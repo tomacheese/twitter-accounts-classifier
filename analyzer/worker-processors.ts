@@ -48,7 +48,6 @@ export type LabelAggregateRefreshErrorCode =
   | 'label_summary_publish_failed'
 
 /**
- * `processLabelAggregateRefresh` の失敗を、どの段階で失敗したかを保持したまま worker-loop へ伝える。
  * 段階を区別しないと、再試行のたびに root cause を Operations 画面から特定できない。
  */
 export class LabelAggregateRefreshError extends Error {

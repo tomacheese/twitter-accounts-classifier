@@ -8,6 +8,7 @@ export interface ResponsiveTableColumn<T> {
   render: (row: T) => React.ReactNode
 }
 
+/** ResponsiveTable の入力。 */
 interface ResponsiveTableProps<T> {
   columns: ResponsiveTableColumn<T>[]
   rows: T[]
@@ -15,9 +16,7 @@ interface ResponsiveTableProps<T> {
 }
 
 /**
- * デスクトップでは通常の table、モバイル (md 未満) では行を card 化して表示する共通テーブル。
- * JS で幅を判定せず CSS の md: breakpoint で切り替えることで、
- * SSR 結果とハイドレーション後の表示を一致させる。
+ * JS で幅を判定せず CSS の md: breakpoint で切り替えることで、SSR 結果とハイドレーション後の表示を一致させる。
  * @param props - 列定義・行データ・行キー抽出関数
  * @returns 描画結果
  */

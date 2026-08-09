@@ -225,4 +225,22 @@ describe('attemptBlock', () => {
     )
     expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
   })
+
+  it('createBlock 成功後の記録が失敗しても例外を投げず true を返す', async () => {
+    const deps = fakeDeps()
+    vi.mocked(deps.findOrCreateOutboxEntry).mockResolvedValue({
+      id: 'outbox-1',
+      status: 'pending_remote',
+    })
+    vi.mocked(deps.markOutboxRemoteSucceeded).mockRejectedValue(new Error('db down'))
+    const client = createMockClient()
+
+    const succeeded = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
+      accountId: 'blocked-1',
+      labelDefinitionId: 'label-1',
+      confidence: 0.9,
+    })
+
+    expect(succeeded).toBe(true)
+  })
 })

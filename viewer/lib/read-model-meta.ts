@@ -170,8 +170,7 @@ interface WorstOfResult<T> {
 }
 
 /**
- * 複数の ReadModelState から、最も劣化している freshness と lastSuccessAt が最も新しい state を求める。
- * getPipelineMeta と getCoreReadModelMeta の両方から呼ぶ共通ロジック。
+ * getPipelineMeta と getCoreReadModelMeta の両方が同じ判定を必要とするため、重複させずここへ集約する。
  * @param states - worst-of の対象とする ReadModelState の一覧
  * @param thresholds - delayed/stale と判定するまでの経過時間
  * @param now - 判定基準時刻
@@ -251,7 +250,6 @@ export interface CoreReadModelMeta extends ReadModelMeta {
 const EMPTY_CORE_META: CoreReadModelMeta = { ...EMPTY_META, perModel: [] }
 
 /**
- * Overview の総合 freshness を、主要 read model の worst-of として計算する。
  * overview_snapshot 自身の freshness ではなく、Accounts/Labels/Attention の元データの freshness を対象にすることで、「表示は最新だが元データは遅延している」状態を見逃さないようにする。
  * @param prisma - Prisma クライアント
  * @returns 主要 read model の worst-of と、モデルごとの内訳

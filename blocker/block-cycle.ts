@@ -124,9 +124,8 @@ export async function attemptBlock(
     return false
   }
 
-  await deps.markOutboxRemoteSucceeded(deps.prisma, outboxEntry.id)
-
   try {
+    await deps.markOutboxRemoteSucceeded(deps.prisma, outboxEntry.id)
     await deps.recordSuccessfulBlock(deps.prisma, blockerId, candidate.accountId, blockAccountRunId)
     await deps.recordBlockAction(deps.prisma, {
       blockAccountRunId,

@@ -7,14 +7,14 @@ function createMockDeps() {
     blockerId: 'blocker-1',
     client: {},
     findStalledOutboxEntries: vi.fn().mockResolvedValue([]),
-    hasBlockRow: vi.fn().mockResolvedValue(false),
-    hasBlockAction: vi.fn().mockResolvedValue(false),
+    findExistingBlockedIds: vi.fn().mockResolvedValue(new Set()),
+    findOutboxEntryIdsWithBlockAction: vi.fn().mockResolvedValue(new Set()),
     recordSuccessfulBlock: vi.fn().mockResolvedValue(undefined),
     recordBlockAction: vi.fn().mockResolvedValue(undefined),
     markOutboxRemoteSucceeded: vi.fn().mockResolvedValue(undefined),
     markOutboxLocalPersisted: vi.fn().mockResolvedValue(undefined),
     markOutboxRemoteFailed: vi.fn().mockResolvedValue(undefined),
-    isRemotelyBlocked: vi.fn().mockResolvedValue(false),
+    fetchRemotelyBlockedIds: vi.fn().mockResolvedValue(new Set()),
   }
 }
 
@@ -32,8 +32,8 @@ describe('reconcileOutboxEntries', () => {
         blockAccountRunId: 'bar-1',
       },
     ])
-    vi.mocked(deps.hasBlockRow).mockResolvedValue(false)
-    vi.mocked(deps.hasBlockAction).mockResolvedValue(false)
+    vi.mocked(deps.findExistingBlockedIds).mockResolvedValue(new Set())
+    vi.mocked(deps.findOutboxEntryIdsWithBlockAction).mockResolvedValue(new Set())
 
     await reconcileOutboxEntries(deps as never, deps.prisma as never)
 
@@ -63,8 +63,8 @@ describe('reconcileOutboxEntries', () => {
         blockAccountRunId: 'bar-1',
       },
     ])
-    vi.mocked(deps.hasBlockRow).mockResolvedValue(true)
-    vi.mocked(deps.hasBlockAction).mockResolvedValue(true)
+    vi.mocked(deps.findExistingBlockedIds).mockResolvedValue(new Set(['blocked-1']))
+    vi.mocked(deps.findOutboxEntryIdsWithBlockAction).mockResolvedValue(new Set(['outbox-1']))
 
     await reconcileOutboxEntries(deps as never, deps.prisma as never)
 
@@ -86,7 +86,7 @@ describe('reconcileOutboxEntries', () => {
         blockAccountRunId: 'bar-1',
       },
     ])
-    vi.mocked(deps.isRemotelyBlocked).mockResolvedValue(false)
+    vi.mocked(deps.fetchRemotelyBlockedIds).mockResolvedValue(new Set())
 
     await reconcileOutboxEntries(deps as never, deps.prisma as never)
 
@@ -108,14 +108,14 @@ describe('reconcileOutboxEntries', () => {
         blockAccountRunId: 'bar-1',
       },
     ])
-    vi.mocked(deps.isRemotelyBlocked).mockResolvedValue(true)
+    vi.mocked(deps.fetchRemotelyBlockedIds).mockResolvedValue(new Set(['blocked-3']))
 
     await reconcileOutboxEntries(deps as never, deps.prisma as never)
 
     expect(deps.markOutboxRemoteSucceeded).toHaveBeenCalledWith(deps.prisma, 'outbox-3', true)
   })
 
-  it('停滞 entry が複数あれば順に処理する', async () => {
+  it('停滞 entry が複数あれば順に処理し、remote 確認は entry ごとではなく 1 回にまとめる', async () => {
     const deps = createMockDeps()
     vi.mocked(deps.findStalledOutboxEntries).mockResolvedValue([
       {
@@ -141,7 +141,8 @@ describe('reconcileOutboxEntries', () => {
     await reconcileOutboxEntries(deps as never, deps.prisma as never)
 
     expect(deps.markOutboxLocalPersisted).toHaveBeenCalledWith(deps.prisma, 'outbox-1', true)
-    expect(deps.isRemotelyBlocked).toHaveBeenCalledWith(deps.client, 'blocked-2')
+    expect(deps.fetchRemotelyBlockedIds).toHaveBeenCalledTimes(1)
+    expect(deps.fetchRemotelyBlockedIds).toHaveBeenCalledWith(deps.client)
   })
 
   it('1件の entry の reconciliation が失敗しても残りの entry は処理する', async () => {
@@ -166,7 +167,7 @@ describe('reconcileOutboxEntries', () => {
         blockAccountRunId: 'bar-1',
       },
     ])
-    vi.mocked(deps.hasBlockRow).mockRejectedValueOnce(new Error('db down')).mockResolvedValue(false)
+    vi.mocked(deps.recordSuccessfulBlock).mockRejectedValueOnce(new Error('db down'))
 
     await reconcileOutboxEntries(deps as never, deps.prisma as never)
 

@@ -30,11 +30,11 @@ import {
   markOutboxLocalPersisted,
   markOutboxRemoteFailed,
   findStalledOutboxEntries,
-  hasBlockRow,
-  hasBlockAction,
+  findExistingBlockedIds,
+  findOutboxEntryIdsWithBlockAction,
 } from './db/outbox-repository'
 import { runBlockAccountCycle, resolveOwnAccountId } from './block-cycle'
-import { reconcileOutboxEntries, isRemotelyBlocked } from './reconciliation'
+import { reconcileOutboxEntries, fetchRemotelyBlockedIds } from './reconciliation'
 import { notifyDiscord, type AccountRunSummary } from './discord-notifier'
 import { initMonitoring, captureException } from './monitoring/sentry'
 
@@ -80,14 +80,14 @@ async function reconcileAccountOutbox(
         blockerId,
         client,
         findStalledOutboxEntries,
-        hasBlockRow,
-        hasBlockAction,
+        findExistingBlockedIds,
+        findOutboxEntryIdsWithBlockAction,
         recordSuccessfulBlock,
         recordBlockAction,
         markOutboxRemoteSucceeded,
         markOutboxLocalPersisted,
         markOutboxRemoteFailed,
-        isRemotelyBlocked,
+        fetchRemotelyBlockedIds,
       },
       prisma,
     )

@@ -188,9 +188,7 @@ export interface PhaseDurationResult<T> {
 }
 
 /**
- * phase の実処理時間と retry/backoff で消費した待機時間を分離して計測する。
- * 待機時間を実処理時間に含めると、rate limit 由来の待ちを phase 自体の遅さと誤認するため、
- * `trackRetryWait` で呼び出し元が明示的に切り出す。
+ * 待機時間を実処理時間に含めると、rate limit 由来の待ちを phase 自体の遅さと誤認するため、`trackRetryWait` で呼び出し元が明示的に切り出す。
  * @param fn - 計測対象の非同期処理。`trackRetryWait` で retry 待機時間を加算できる
  * @returns 処理結果と、実処理時間・retry 待機時間 (ミリ秒)
  */

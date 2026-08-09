@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../generated/prisma'
 import {
+  applyUpstreamBlocking,
   deriveWorkItemStage,
   upsertCycleWithStages,
   type CycleStageInput,
@@ -37,16 +38,18 @@ export async function buildOrUpdateBlockCycle(
 ): Promise<void> {
   const run = await prisma.blockRun.findUniqueOrThrow({ where: { id: input.blockRunId } })
 
-  const reconciliationStage = await deriveWorkItemStage(
+  const blockStageStatus = deriveBlockStageStatus(run.status)
+  const rawReconciliationStage = await deriveWorkItemStage(
     prisma,
     'block_reconciliation',
     'block_run',
     run.id,
   )
+  const reconciliationStage = applyUpstreamBlocking(rawReconciliationStage, blockStageStatus)
   const stages: CycleStageInput[] = [
     {
       stageKey: 'block',
-      status: deriveBlockStageStatus(run.status),
+      status: blockStageStatus,
       sourceType: 'block_run',
       sourceId: run.id,
       startedAt: run.startedAt,

@@ -16,8 +16,7 @@ function parseBuildTime(value: string | undefined): Date | null {
 }
 
 /**
- * 起動時に自身の build identity を ComponentBuildIdentity へ upsert する。
- * System 画面から 4 component の revision 差を一目で確認できるようにするための唯一の書き込み経路。
+ * System 画面から component 間の revision 差を一目で確認できるようにするための唯一の書き込み経路。
  * @param prisma - Prisma クライアント
  * @param component - 自身のコンポーネント名
  */

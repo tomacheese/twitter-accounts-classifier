@@ -1,8 +1,13 @@
 import type { PrismaClient } from '../generated/prisma'
 
-/** 未解決 (まだ local_persisted/remote_failed に至っていない) outbox 状態。 */
-const UNRESOLVED_STATUSES = ['pending_remote', 'remote_succeeded'] as const
+/** BlockOutboxEntry.status が取りうる値。 */
+export type OutboxEntryStatus =
+  'pending_remote' | 'remote_succeeded' | 'local_persisted' | 'remote_failed'
 
+/** 未解決 (まだ local_persisted/remote_failed に至っていない) outbox 状態。 */
+const UNRESOLVED_STATUSES: readonly OutboxEntryStatus[] = ['pending_remote', 'remote_succeeded']
+
+/** `findOrCreateOutboxEntry` の入力。 */
 export interface FindOrCreateOutboxEntryInput {
   blockAccountRunId: string
   blockerId: string
@@ -11,14 +16,14 @@ export interface FindOrCreateOutboxEntryInput {
   confidence: number
 }
 
+/** `findOrCreateOutboxEntry` が返す outbox entry の参照情報。 */
 export interface OutboxEntryRef {
   id: string
-  status: string
+  status: OutboxEntryStatus
 }
 
 /**
  * `createBlock` (remote) 実行前に呼ぶことで、DB 障害でどの段階が失敗しても直前に確定した状態が残るようにする。
- * 同一 (blockerId, blockedId) の未解決 entry が既に存在する場合は新規作成せず、その entry を再利用して処理を resume する。
  * 既存行が `remote_failed` など解決済みの場合は、一意制約により新規行を作れないため既存行を pending_remote に戻して再利用する。
  * @param prisma - Prisma クライアント
  * @param input - 対象ペアと根拠ラベル・確信度
@@ -32,8 +37,8 @@ export async function findOrCreateOutboxEntry(
     where: { blockerId_blockedId: { blockerId: input.blockerId, blockedId: input.blockedId } },
   })
   if (existing) {
-    if ((UNRESOLVED_STATUSES as readonly string[]).includes(existing.status)) {
-      return { id: existing.id, status: existing.status }
+    if (UNRESOLVED_STATUSES.includes(existing.status as OutboxEntryStatus)) {
+      return { id: existing.id, status: existing.status as OutboxEntryStatus }
     }
 
     const reset = await prisma.blockOutboxEntry.update({
@@ -47,7 +52,7 @@ export async function findOrCreateOutboxEntry(
         confidence: input.confidence,
       },
     })
-    return { id: reset.id, status: reset.status }
+    return { id: reset.id, status: reset.status as OutboxEntryStatus }
   }
 
   const created = await prisma.blockOutboxEntry.create({
@@ -60,7 +65,7 @@ export async function findOrCreateOutboxEntry(
       status: 'pending_remote',
     },
   })
-  return { id: created.id, status: created.status }
+  return { id: created.id, status: created.status as OutboxEntryStatus }
 }
 
 /**
@@ -123,7 +128,7 @@ export async function markOutboxRemoteFailed(
 /** 停滞判定の対象となった outbox entry。 */
 export interface StalledOutboxEntry {
   id: string
-  status: string
+  status: OutboxEntryStatus
   blockerId: string
   blockedId: string
   labelDefinitionId: string
@@ -143,39 +148,50 @@ export async function findStalledOutboxEntries(
   blockerId: string,
   staleAfterMs = 30 * 60 * 1000,
 ): Promise<StalledOutboxEntry[]> {
-  return prisma.blockOutboxEntry.findMany({
+  const entries = await prisma.blockOutboxEntry.findMany({
     where: {
       blockerId,
-      status: { in: ['pending_remote', 'remote_succeeded'] },
+      status: { in: [...UNRESOLVED_STATUSES] },
       createdAt: { lt: new Date(Date.now() - staleAfterMs) },
     },
   })
+  return entries.map((entry) => ({ ...entry, status: entry.status as OutboxEntryStatus }))
 }
 
 /**
+ * entry ごとに個別 query を発行すると停滞 entry 数に比例して DB 往復が増えるため、対象の blockedId をまとめて 1 query で引く。
  * @param prisma - Prisma クライアント
  * @param blockerId - ブロックを実行したアカウント
- * @param blockedId - ブロックされたアカウント
- * @returns 対応する Block 行が既に存在すれば true
+ * @param blockedIds - 確認対象の blockedId 一覧
+ * @returns 対応する Block 行が既に存在する blockedId の集合
  */
-export async function hasBlockRow(
+export async function findExistingBlockedIds(
   prisma: PrismaClient,
   blockerId: string,
-  blockedId: string,
-): Promise<boolean> {
-  const count = await prisma.block.count({ where: { blockerId, blockedId } })
-  return count > 0
+  blockedIds: string[],
+): Promise<Set<string>> {
+  if (blockedIds.length === 0) return new Set()
+  const rows = await prisma.block.findMany({
+    where: { blockerId, blockedId: { in: blockedIds } },
+    select: { blockedId: true },
+  })
+  return new Set(rows.map((row) => row.blockedId))
 }
 
 /**
+ * entry ごとに個別 query を発行すると停滞 entry 数に比例して DB 往復が増えるため、対象の outboxEntryId をまとめて 1 query で引く。
  * @param prisma - Prisma クライアント
- * @param outboxEntryId - 対象 outbox entry の ID
- * @returns 対応する BlockAction が既に存在すれば true
+ * @param outboxEntryIds - 確認対象の outbox entry ID 一覧
+ * @returns 対応する BlockAction が既に存在する outboxEntryId の集合
  */
-export async function hasBlockAction(
+export async function findOutboxEntryIdsWithBlockAction(
   prisma: PrismaClient,
-  outboxEntryId: string,
-): Promise<boolean> {
-  const count = await prisma.blockAction.count({ where: { outboxEntryId } })
-  return count > 0
+  outboxEntryIds: string[],
+): Promise<Set<string>> {
+  if (outboxEntryIds.length === 0) return new Set()
+  const rows = await prisma.blockAction.findMany({
+    where: { outboxEntryId: { in: outboxEntryIds } },
+    select: { outboxEntryId: true },
+  })
+  return new Set(rows.flatMap((row) => (row.outboxEntryId ? [row.outboxEntryId] : [])))
 }

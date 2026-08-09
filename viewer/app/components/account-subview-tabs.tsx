@@ -112,8 +112,7 @@ function ClassificationEntryItem({
 
 /**
  * @param entries - Classification subview のデータ
- * @returns 描画結果。true のラベルと直近 7 日以内に変化した false のラベルを常に表示し、
- * それより古い false のラベルは折り畳む
+ * @returns 描画結果。true のラベルと直近変化した false のラベルを常に表示し、それより古い false のラベルは折り畳む
  */
 export function ClassificationView({
   entries,

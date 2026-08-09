@@ -91,7 +91,8 @@ export function GlobalSearch(): React.ReactElement {
           setError('Failed to search.')
         })
         .finally(() => {
-          setIsLoading(false)
+          // abort された古い fetch の finally が、後発の fetch がまだ進行中の isLoading を誤って false に戻すことがあるため、この fetch がまだ最新かを確認する。
+          if (controllerRef.current === controller) setIsLoading(false)
         })
     }, DEBOUNCE_MS)
 
