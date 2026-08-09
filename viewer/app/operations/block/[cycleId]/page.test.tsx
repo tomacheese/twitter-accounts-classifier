@@ -59,6 +59,7 @@ describe('BlockCycleDetailPage', () => {
     expect(html).toContain('1 action(s)')
     expect(html).toContain('account-2')
     expect(html).toContain('test_label')
+    expect(getBlockAccountRunsWithActions).toHaveBeenCalledWith(expect.anything(), 'block-run-1')
   })
 
   it('accountRuns が既定件数を超えると Show more リンクを表示する', async () => {

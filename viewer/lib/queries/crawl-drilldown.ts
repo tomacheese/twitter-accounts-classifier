@@ -59,6 +59,7 @@ export async function getCrawlAccountRuns(
   const usernames = accountRuns.map((run) => run.username)
   const checkpoints = await prisma.crawlAccountCheckpoint.findMany({
     where: { crawlRunId, username: { in: usernames } },
+    orderBy: [{ completedAt: 'asc' }],
   })
 
   const phaseDurationsByUsername = new Map<string, CrawlPhaseDurationView[]>()

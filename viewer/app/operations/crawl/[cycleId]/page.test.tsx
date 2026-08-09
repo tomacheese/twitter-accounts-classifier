@@ -59,6 +59,7 @@ describe('CrawlCycleDetailPage', () => {
     expect(html).toContain('rate_limited')
     expect(html).toContain('timeout')
     expect(html).toContain('following: 0m 01s')
+    expect(getCrawlAccountRuns).toHaveBeenCalledWith(expect.anything(), 'crawl-run-1')
   })
 
   it('accountRuns が既定件数を超えると Show more リンクを表示する', async () => {
