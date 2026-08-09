@@ -244,7 +244,10 @@ export async function buildLabelAggregateSnapshotSet(
 
       return sharedSnapshotAt
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      timeout: 120_000,
+    },
   )
 
   return { triggerWorkItemId: input.triggerWorkItemId, snapshotAt, reused: false }

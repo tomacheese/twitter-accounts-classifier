@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { getPrismaClient } from '../db/client'
 import {
   buildLabelAggregateSnapshotSet,
@@ -19,6 +19,30 @@ describe('deriveCompletenessFromCoverage', () => {
   it('returns complete when both coverage and staleRatio are within thresholds', () => {
     expect(deriveCompletenessFromCoverage(0.9, 0.1, { minCoverage: 0.5, maxStaleRatio: 0.5 })).toBe(
       'complete',
+    )
+  })
+})
+
+describe('buildLabelAggregateSnapshotSet transaction options', () => {
+  it('allows production-scale label aggregation to run longer than Prisma default timeout', async () => {
+    const transaction = vi.fn(() => Promise.resolve(new Date('2026-08-09T00:00:00Z')))
+    const fakePrisma = {
+      labelDefinition: { findMany: vi.fn(() => Promise.resolve([])) },
+      labelMetricSnapshot: { count: vi.fn(() => Promise.resolve(0)) },
+      $transaction: transaction,
+    }
+
+    await buildLabelAggregateSnapshotSet(fakePrisma as never, {
+      triggerWorkItemId: 'work_item_timeout',
+      policyHash: 'hash',
+      analyzerVersion: 'test',
+      thresholds: { minCoverage: 0, maxStaleRatio: 1 },
+      freshnessThresholdsMs: { delayedAfterMs: 1, staleAfterMs: 2 },
+    })
+
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: 'RepeatableRead', timeout: 120_000 }),
     )
   })
 })
