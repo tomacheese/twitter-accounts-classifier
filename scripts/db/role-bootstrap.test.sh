@@ -56,3 +56,4 @@ psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "CREATE ROLE weekly_review NOLOGIN"
 )
 
 test "$(analysis_work_item_privileges)" = "true:true:false:false"
+psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "DROP OWNED BY weekly_review; DROP ROLE weekly_review"
