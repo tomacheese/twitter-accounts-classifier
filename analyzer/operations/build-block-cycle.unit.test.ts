@@ -9,4 +9,8 @@ describe('deriveBlockStageStatus', () => {
   it('BlockRun failed を failed に正規化する', () => {
     expect(deriveBlockStageStatus('failed')).toBe('failed')
   })
+
+  it('BlockRun partial を partial StageStatus に正規化する', () => {
+    expect(deriveBlockStageStatus('partial')).toBe('partial')
+  })
 })

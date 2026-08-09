@@ -12,8 +12,8 @@ import {
  */
 export function deriveBlockStageStatus(runStatus: string): StageStatus {
   if (runStatus === 'running') return 'running'
-  if (runStatus === 'completed' || runStatus === 'success' || runStatus === 'partial')
-    return 'succeeded'
+  if (runStatus === 'completed' || runStatus === 'success') return 'succeeded'
+  if (runStatus === 'partial') return 'partial'
   if (runStatus === 'failed' || runStatus === 'timeout') return 'failed'
   return 'unknown'
 }
