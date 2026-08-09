@@ -24,6 +24,16 @@ function collectSeqScans(node: ExplainPlanNode, targetTable: string): ExplainPla
 }
 
 /**
+ * @param node - 探索対象のプランノード
+ * @returns Sort / Incremental Sort ノードの一覧
+ */
+function collectSorts(node: ExplainPlanNode): ExplainPlanNode[] {
+  const found =
+    node['Node Type'] === 'Sort' || node['Node Type'] === 'Incremental Sort' ? [node] : []
+  return [...found, ...(node.Plans ?? []).flatMap((child) => collectSorts(child))]
+}
+
+/**
  * @param sql - `EXPLAIN (FORMAT JSON)` を付けて実行する SQL
  * @returns プランのルートノード
  */
@@ -100,11 +110,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const plan = await explain(`
       SELECT "accountId" FROM "AccountSummaryCurrent"
       WHERE "generationId" = '${generationId}'
-      ORDER BY "lastClassificationChangedAt" DESC, "accountId" DESC
+      ORDER BY "lastClassificationChangedAt" DESC NULLS LAST, "accountId" DESC
       LIMIT 25
     `)
 
       expect(collectSeqScans(plan, 'AccountSummaryCurrent')).toEqual([])
+      expect(collectSorts(plan)).toEqual([])
     })
 
     it('listLabelSummaries は LabelSummaryCurrent の Seq Scan を行わない', async () => {

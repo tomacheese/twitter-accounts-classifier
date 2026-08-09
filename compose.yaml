@@ -171,7 +171,8 @@ services:
       # crawler/blocker/viewer と異なり、analyzer は正本テーブルへ SELECT のみ・
       # 分析/運用テーブルへ書き込み可能な allowlist 権限の analyzer ロールで接続する
       # (scripts/db/create-analyzer-role.sql 参照)。
-      DATABASE_URL: postgresql://analyzer:${ANALYZER_DB_PASSWORD:?ANALYZER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
+      # label metric refresh は全 Label を一時的に並列投入する。HDD と PostgreSQL の shared memory を圧迫しないよう DB 接続を 1 本に直列化し、有限件数のキュー待ちは失敗させない。
+      DATABASE_URL: postgresql://analyzer:${ANALYZER_DB_PASSWORD:?ANALYZER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}?connection_limit=1&pool_timeout=0
       ANALYZER_WORKER_CONCURRENCY: ${ANALYZER_WORKER_CONCURRENCY:-1}
       ANALYZER_POLL_INTERVAL_SECONDS: ${ANALYZER_POLL_INTERVAL_SECONDS:-10}
       GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}

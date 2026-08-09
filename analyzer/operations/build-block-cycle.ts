@@ -10,9 +10,10 @@ import {
  * @param runStatus - BlockRun.status の値
  * @returns block Stage の状態
  */
-function deriveBlockStageStatus(runStatus: string): StageStatus {
+export function deriveBlockStageStatus(runStatus: string): StageStatus {
   if (runStatus === 'running') return 'running'
-  if (runStatus === 'success' || runStatus === 'partial') return 'succeeded'
+  if (runStatus === 'completed' || runStatus === 'success' || runStatus === 'partial')
+    return 'succeeded'
   if (runStatus === 'failed' || runStatus === 'timeout') return 'failed'
   return 'unknown'
 }

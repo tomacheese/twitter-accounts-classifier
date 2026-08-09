@@ -2,7 +2,15 @@ import type { PrismaClient } from '../generated/prisma'
 
 /** OperationStage 1 件の状態。 */
 export type StageStatus =
-  'waiting' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'delayed' | 'stale' | 'unknown'
+  | 'waiting'
+  | 'running'
+  | 'succeeded'
+  | 'partial'
+  | 'failed'
+  | 'skipped'
+  | 'delayed'
+  | 'stale'
+  | 'unknown'
 
 /** OperationCycle 全体の状態。 */
 export type CycleStatus =
@@ -24,8 +32,9 @@ export type CycleStatus =
  */
 export function deriveCycleStatus(requiredStages: StageStatus[]): CycleStatus {
   if (requiredStages.includes('failed')) {
-    return requiredStages[0] === 'succeeded' ? 'partial' : 'failed'
+    return requiredStages[0] === 'failed' ? 'failed' : 'partial'
   }
+  if (requiredStages.includes('partial')) return 'partial'
   // 必須 Stage が例外なく正常終了して skipped になることは無い。partial な起点データで
   // 後続処理が意図的に見送られた場合の明示状態として使うため、failed と同じ扱いにする。
   if (requiredStages.includes('skipped')) {

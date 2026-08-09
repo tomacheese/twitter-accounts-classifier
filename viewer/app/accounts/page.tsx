@@ -1,3 +1,4 @@
+import React from 'react'
 import Link from 'next/link'
 import { formatDateTime } from '@/lib/format-date'
 import { getPrismaClient } from '@/lib/prisma'
@@ -221,7 +222,7 @@ async function LegacyAccountsPage({
  */
 async function NewAccountsView({ searchParams }: AccountsPageProps): Promise<React.ReactElement> {
   const params = await searchParams
-  const view: AccountSummaryView = params.view === 'all' ? 'all' : 'recentlyChanged'
+  const view: AccountSummaryView = params.view === 'recentlyChanged' ? 'recentlyChanged' : 'all'
 
   const prisma = getPrismaClient()
   try {
@@ -238,9 +239,48 @@ async function NewAccountsView({ searchParams }: AccountsPageProps): Promise<Rea
 
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-2xl font-semibold">Accounts</h1>
+        <div>
+          <h1 className="text-2xl font-semibold">Accounts</h1>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            Current account classification snapshot. Use Recently changed to inspect classification
+            churn.
+          </p>
+        </div>
+
+        <div className="flex gap-3 text-sm">
+          <Link
+            href="/accounts?view=all"
+            className={
+              view === 'all'
+                ? 'font-semibold underline'
+                : 'text-blue-600 hover:underline dark:text-blue-400'
+            }
+          >
+            All accounts
+          </Link>
+          <Link
+            href="/accounts?view=recentlyChanged"
+            className={
+              view === 'recentlyChanged'
+                ? 'font-semibold underline'
+                : 'text-blue-600 hover:underline dark:text-blue-400'
+            }
+          >
+            Recently changed
+          </Link>
+        </div>
+
+        <div className="rounded-lg border bg-white p-3 text-sm dark:border-gray-700 dark:bg-gray-800">
+          <span className="font-medium">Data freshness:</span>{' '}
+          {result.freshnessStatus === 'healthy'
+            ? 'Current'
+            : result.freshnessStatus.charAt(0).toUpperCase() + result.freshnessStatus.slice(1)}
+        </div>
+
         {result.items.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No accounts to show yet.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            No accounts match this view yet.
+          </p>
         ) : (
           <table className="w-full border-collapse text-left text-sm">
             <thead className="bg-gray-100 dark:bg-gray-700">

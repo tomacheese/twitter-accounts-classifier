@@ -38,7 +38,8 @@ describe('startOrResumeCrawlRun', () => {
     })
   })
 
-  it('reuses the newest interrupted run when its heartbeat is within the threshold', async () => {
+  it('reuses the newest interrupted run and refreshes its heartbeat', async () => {
+    const startedAt = new Date('2026-07-28T00:00:00Z')
     const findFirst = vi.fn().mockResolvedValue({
       id: 'run2',
       lastHeartbeatAt: new Date('2026-07-27T23:00:00Z'),
@@ -60,11 +61,7 @@ describe('startOrResumeCrawlRun', () => {
       $queryRaw: queryRaw,
     } as unknown as PrismaClient
 
-    const result = await startOrResumeCrawlRun(
-      prisma,
-      new Date('2026-07-28T00:00:00Z'),
-      staleThresholdMs,
-    )
+    const result = await startOrResumeCrawlRun(prisma, startedAt, staleThresholdMs)
 
     expect(result).toEqual({
       id: 'run2',
@@ -81,7 +78,13 @@ describe('startOrResumeCrawlRun', () => {
     expect(sqlQuery.join('')).toContain('ORDER BY "username", "startedAt" DESC, "id" DESC')
     expect(requestedRunId).toBe('run2')
     expect(create).not.toHaveBeenCalled()
-    expect(update).not.toHaveBeenCalled()
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'run2' },
+      data: {
+        lastHeartbeatAt: startedAt,
+        staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
+      },
+    })
   })
 
   it('abandons a running row whose heartbeat exceeds the stale threshold and starts a new run', async () => {
@@ -153,7 +156,13 @@ describe('startOrResumeCrawlRun', () => {
 
     expect(result.id).toBe('run3')
     expect(create).not.toHaveBeenCalled()
-    expect(update).not.toHaveBeenCalled()
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'run3' },
+      data: {
+        lastHeartbeatAt: startedAt,
+        staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
+      },
+    })
   })
 })
 

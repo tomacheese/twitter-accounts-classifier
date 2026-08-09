@@ -63,8 +63,8 @@ function resolveSeverityCandidates(minSeverity: string): string[] | null {
 /**
  * `view: 'recentlyChanged'` は `lastClassificationChangedAt` 降順、
  * `view: 'all'` は `normalizedScreenName` 昇順で返す。
- * 降順側は NULLS FIRST となる索引順をそのまま使うため、
- * cursor 条件も null 行を先に消化してから日時比較へ移る形にしている。
+ * recentlyChanged は変更日時のある行を新しい順に見せ、未変更 (null) は末尾へ送る。
+ * cursor 条件も非 null の日時領域から null 領域へ一方向に遷移する形にする。
  * @param prisma - Prisma クライアント
  * @param input - view・filters・cursor・limit
  * @returns 1 ページ分のアカウント一覧と次ページの cursor
@@ -110,18 +110,14 @@ export async function listAccountSummaries(
       }
     }
     if (!first) {
-      return {
-        OR: [
-          { lastClassificationChangedAt: null, accountId: { lt: accountId } },
-          { lastClassificationChangedAt: { not: null } },
-        ],
-      }
+      return { lastClassificationChangedAt: null, accountId: { lt: accountId } }
     }
     const changedAt = new Date(first)
     return {
       OR: [
         { lastClassificationChangedAt: { lt: changedAt } },
         { lastClassificationChangedAt: changedAt, accountId: { lt: accountId } },
+        { lastClassificationChangedAt: null },
       ],
     }
   })()
@@ -134,7 +130,7 @@ export async function listAccountSummaries(
     },
     orderBy:
       input.view === 'recentlyChanged'
-        ? [{ lastClassificationChangedAt: 'desc' }, { accountId: 'desc' }]
+        ? [{ lastClassificationChangedAt: { sort: 'desc', nulls: 'last' } }, { accountId: 'desc' }]
         : [{ normalizedScreenName: 'asc' }, { accountId: 'asc' }],
     take: limit + 1,
   })

@@ -14,7 +14,8 @@ const ANALYSIS_WORK_ITEM_STAGE_KINDS = ['label_aggregate_refresh', 'read_model_r
  */
 function deriveCrawlStageStatus(crawlRunStatus: string): StageStatus {
   if (crawlRunStatus === 'running') return 'running'
-  if (crawlRunStatus === 'success' || crawlRunStatus === 'partial') return 'succeeded'
+  if (crawlRunStatus === 'success') return 'succeeded'
+  if (crawlRunStatus === 'partial') return 'partial'
   if (crawlRunStatus === 'failed') return 'failed'
   return 'unknown'
 }
@@ -56,7 +57,10 @@ export async function buildOrUpdateCrawlCycle(
     // そのまま表示すると必須後続処理が完了していないことが Operations から見えなくなるため、
     // ここで skipped + 理由へ差し替える (WorkItem の実状態は変更しない)。
     const isReadModelRefreshSkippedForIncompleteCrawl =
-      kind === 'read_model_refresh' && crawlRun.status !== 'success' && stage.status === 'succeeded'
+      kind === 'read_model_refresh' &&
+      crawlRun.status !== 'success' &&
+      crawlRun.status !== 'partial' &&
+      stage.status === 'succeeded'
     stages.push({
       stageKey: kind,
       sourceType: 'analysis_work_item',

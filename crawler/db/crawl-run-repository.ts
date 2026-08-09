@@ -249,7 +249,8 @@ export async function clearCrawlAccountCheckpoints(
 /**
  * 単一の crawler プロセスだけが動作する前提で運用する: 複数プロセスの同時実行は想定しない。
  * `lastHeartbeatAt` が `staleThresholdMs` を超えて更新されていない `running` 行は、
- * 正常終了できなかったものとみなして `failed` に確定する。
+ * 正常終了できなかったものとみなして `failed` に確定する。再開可能な run は、
+ * 再開を決定した時点で heartbeat/staleAfterAt を更新して生存中であることを即時に記録する。
  * @param prisma - Prisma クライアント
  * @param startedAt - 新規 run の開始時刻
  * @param staleThresholdMs - 放置判定のしきい値 (ミリ秒)。経過時間がこれを超えれば放置とみなす
@@ -269,6 +270,13 @@ export async function startOrResumeCrawlRun(
   if (existingRun) {
     const isStale = startedAt.getTime() - existingRun.lastHeartbeatAt.getTime() > staleThresholdMs
     if (!isStale) {
+      await prisma.crawlRun.update({
+        where: { id: existingRun.id },
+        data: {
+          lastHeartbeatAt: startedAt,
+          staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
+        },
+      })
       const accountRuns = await prisma.$queryRaw<
         { username: string; status: string; classificationStatus: string }[]
       >`

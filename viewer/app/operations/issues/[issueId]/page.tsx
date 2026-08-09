@@ -43,6 +43,8 @@ export default async function OperationalIssueDetailPage({
   }
   if (!detail) notFound()
 
+  const sourceCyclePath = detail.sourceCycleKind ? KIND_TO_PATH[detail.sourceCycleKind] : undefined
+
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-2xl font-semibold">
@@ -67,10 +69,10 @@ export default async function OperationalIssueDetailPage({
           {formatDateTime(detail.lastDetectedAt)}
           {detail.resolvedAt ? `, resolved ${formatDateTime(detail.resolvedAt)}` : ''}.
         </p>
-        {detail.sourceCycleId && (
+        {detail.sourceCycleId && sourceCyclePath && (
           <p className="mt-2">
             <Link
-              href={`/operations/${KIND_TO_PATH[detail.component] ?? detail.component}/${detail.sourceCycleId}`}
+              href={`/operations/${sourceCyclePath}/${detail.sourceCycleId}`}
               className="text-blue-600 hover:underline dark:text-blue-400"
             >
               Source cycle

@@ -35,6 +35,9 @@ BEGIN
   IF to_regclass('public."WeeklyAnalysisRun"') IS NULL THEN
     RAISE EXCEPTION 'required table public."WeeklyAnalysisRun" does not exist';
   END IF;
+  IF to_regclass('public."AnalysisWorkItem"') IS NULL THEN
+    RAISE EXCEPTION 'required table public."AnalysisWorkItem" does not exist';
+  END IF;
 
   IF NOT has_table_privilege('weekly_review', 'public."WeeklyAnalysisRun"', 'INSERT') THEN
     RAISE EXCEPTION 'weekly_review lacks INSERT on WeeklyAnalysisRun';
@@ -48,13 +51,22 @@ BEGIN
     RAISE EXCEPTION 'weekly_review has excessive write privileges on WeeklyAnalysisRun';
   END IF;
 
+  IF NOT has_table_privilege('weekly_review', 'public."AnalysisWorkItem"', 'INSERT') THEN
+    RAISE EXCEPTION 'weekly_review lacks INSERT on AnalysisWorkItem';
+  END IF;
+  IF has_table_privilege(
+    'weekly_review', 'public."AnalysisWorkItem"', 'UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER'
+  ) THEN
+    RAISE EXCEPTION 'weekly_review has excessive write privileges on AnalysisWorkItem';
+  END IF;
+
   SELECT string_agg(format('%I.%I', n.nspname, c.relname), ', ' ORDER BY c.relname)
   INTO unexpected_write_tables
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = 'public'
     AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-    AND c.relname <> 'WeeklyAnalysisRun'
+    AND c.relname NOT IN ('WeeklyAnalysisRun', 'AnalysisWorkItem')
     AND has_table_privilege(
       'weekly_review',
       format('%I.%I', n.nspname, c.relname),

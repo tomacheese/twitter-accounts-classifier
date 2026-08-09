@@ -1279,6 +1279,33 @@ describe('runCrawlCycle', () => {
     )
   })
 
+  it('starts or resumes the CrawlRun before cycle-wide precomputation', async () => {
+    const deps = makeDeps()
+
+    await runCrawlCycle(deps)
+
+    const startOrder = (deps.startOrResumeCrawlRun as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0]
+    const followIndexOrder = (deps.loadFollowGraphLabelIndex as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0]
+    const replyCorpusOrder = (deps.loadReplyCorpus as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0]
+
+    expect(startOrder).toBeLessThan(followIndexOrder)
+    expect(startOrder).toBeLessThan(replyCorpusOrder)
+  })
+
+  it('finalizes the CrawlRun as failed when cycle-wide precomputation fails', async () => {
+    const deps = makeDeps({
+      loadFollowGraphLabelIndex: vi.fn().mockRejectedValue(new Error('precompute failed')),
+    })
+
+    await expect(runCrawlCycle(deps)).rejects.toThrow('precompute failed')
+
+    expect(deps.startOrResumeCrawlRun).toHaveBeenCalledTimes(1)
+    expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'failed')
+  })
+
   it('records a CrawlRun and one successful CrawlAccountRun for a clean cycle', async () => {
     const deps = makeDeps()
 

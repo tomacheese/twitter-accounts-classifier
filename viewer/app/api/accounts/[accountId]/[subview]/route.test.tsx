@@ -35,6 +35,15 @@ afterEach(() => {
 })
 
 describe('GET /api/accounts/[accountId]/[subview]', () => {
+  it('accounts feature flag が無くても既知の subview を利用できる', async () => {
+    process.env.VIEWER_NEW_UI_SECTIONS = ''
+    getAccountOverview.mockResolvedValue({ accountId: 'account-1' })
+
+    const response = await callGet('account-1', 'overview')
+
+    expect(response.status).toBe(200)
+  })
+
   it('既知の subview はデータを 200 で返す', async () => {
     getAccountOverview.mockResolvedValue({ accountId: 'account-1' })
 

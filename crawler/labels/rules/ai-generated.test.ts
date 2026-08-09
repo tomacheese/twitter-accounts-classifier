@@ -231,6 +231,34 @@ describe('aiGeneratedRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it('is false for a bio that lists generative AI as one item in a comma-separated interest list', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: '興味関心：旅行、料理、生成AI、映画鑑賞' }),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for a bio that lists generative AI as one skill inside a parenthetical skill list', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: '事務職 / 資格(簿記, TOEIC, 生成AI, 統計検定) / 週末は登山' }),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is still true when a comma sits on only one side of the declaration, not both', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: '雑談垢、生成AIで絵を描いています。よろしくお願いします。' }),
+    )
+    expect(result.value).toBe(true)
+  })
+
+  it('is false for a bio listing generative AI under an opposition-list heading placed before the term', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: '苦手なもの：辛い食べ物、人混み、生成AI、早起き' }),
+    )
+    expect(result.value).toBe(false)
+  })
+
   it.each([
     [
       'a follow-back refusal aimed at other AI users',

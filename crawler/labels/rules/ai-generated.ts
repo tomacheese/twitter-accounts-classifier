@@ -79,12 +79,46 @@ function isThirdPartyReference(bio: string): boolean {
   return THIRD_PARTY_REFERENCE_PATTERN.test(bio) && !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
 }
 
+// 「/」「、」「,」やカッコなど、両側とも列挙の区切り文字に挟まれている用語は、
+// 趣味・スキルの一覧の1項目として並べられているだけで、
+// 自身のコンテンツの生成元を宣言しているわけではない。
+// 前後どちらか一方だけの一致では通常の文中の読点なども誤って拾ってしまうため、
+// 両側が区切りである場合に限定している。
+const LIST_DELIMITER_CHARS = new Set(['/', '、', ',', '・', '|', '｜', '(', ')', '（', '）'])
+
+function isListEnumerationItem(bio: string): boolean {
+  const match = BIO_DECLARATION_PATTERN.exec(bio)
+  if (match === null) return false
+  const before = bio.slice(0, match.index).trimEnd()
+  const after = bio.slice(match.index + match[0].length).trimStart()
+  const beforeIsDelimiter = before.length === 0 || LIST_DELIMITER_CHARS.has(before.at(-1) ?? '')
+  const afterIsDelimiter = after.length === 0 || LIST_DELIMITER_CHARS.has(after.at(0) ?? '')
+  return beforeIsDelimiter && afterIsDelimiter && !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
+}
+
+// AI_OPPOSITION_PATTERN は用語の直後に「反対」が続く定型文のみを対象としているため、
+// 「反対しているもの」のような見出しの後に複数項目を並べ、
+// その中に AI 語が含まれる bio を検出できない。
+// 見出しは用語より前に来るため、直前の範囲だけを別途確認する。
+const OPPOSITION_LIST_HEADER_PATTERN = /反対(?:して(?:いる|る))?(?:もの|こと)|嫌いなもの|苦手なもの/
+const OPPOSITION_LIST_HEADER_WINDOW_LENGTH = 40
+
+function isOppositionListHeader(bio: string): boolean {
+  const match = BIO_DECLARATION_PATTERN.exec(bio)
+  if (match === null) return false
+  const beforeMatch = bio.slice(
+    Math.max(0, match.index - OPPOSITION_LIST_HEADER_WINDOW_LENGTH),
+    match.index,
+  )
+  return OPPOSITION_LIST_HEADER_PATTERN.test(beforeMatch)
+}
+
 const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?作成した/i
 
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.7.0',
+  version: '1.8.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
@@ -94,7 +128,9 @@ export const aiGeneratedRule: LabelRule = {
       !AI_OPPOSITION_PATTERN.test(bio) &&
       !isInstitutionalMention(bio) &&
       !isTopicInterestMention(bio) &&
-      !isThirdPartyReference(bio)
+      !isThirdPartyReference(bio) &&
+      !isListEnumerationItem(bio) &&
+      !isOppositionListHeader(bio)
 
     const sampled = bundle.recentTweets
     const hasCorroboratingTweet = sampled.some((t) => TWEET_BOILERPLATE_PATTERN.test(t.fullText))
