@@ -119,59 +119,66 @@ describe('LabelsPage', () => {
 
   it('shows true count/evaluated count/coverage/prevalence columns in the new view', async () => {
     process.env.VIEWER_NEW_UI_SECTIONS = 'labels'
-    vi.mocked(listLabelSummaries).mockResolvedValue({
-      readiness: 'ready',
-      items: [
-        {
-          labelDefinitionId: 'label-1',
-          labelKey: 'spam',
-          evaluatedCount: 80,
-          trueCount: 8,
-          populationCount: 100,
-          coverage: 0.8,
-          prevalence: 0.1,
-          qualityStatus: 'normal',
-          activeFindingCount: 0,
-          highestFindingSeverity: null,
-        },
-      ],
-    })
+    try {
+      vi.mocked(listLabelSummaries).mockResolvedValue({
+        readiness: 'ready',
+        items: [
+          {
+            labelDefinitionId: 'label-1',
+            labelKey: 'spam',
+            evaluatedCount: 80,
+            trueCount: 8,
+            populationCount: 100,
+            coverage: 0.8,
+            prevalence: 0.1,
+            qualityStatus: 'normal',
+            activeFindingCount: 0,
+            highestFindingSeverity: null,
+          },
+        ],
+      })
 
-    const html = renderToStaticMarkup(await LabelsPage())
-    delete process.env.VIEWER_NEW_UI_SECTIONS
+      const html = renderToStaticMarkup(await LabelsPage())
 
-    expect(html).toContain('True count')
-    expect(html).toContain('Evaluated count')
-    expect(html).toContain('Coverage')
-    expect(html).toContain('>8<')
-    expect(html).toContain('>80<')
-    expect(html).toContain('80.0%')
-    expect(html).toContain('10.0%')
+      expect(html).toContain('True count')
+      expect(html).toContain('Evaluated count')
+      expect(html).toContain('Coverage')
+      expect(html).toContain('>8<')
+      expect(html).toContain('>80<')
+      expect(html).toContain('80.0%')
+      expect(html).toContain('10.0%')
+      expect(html).not.toContain('low coverage')
+    } finally {
+      delete process.env.VIEWER_NEW_UI_SECTIONS
+    }
   })
 
   it('shows a low coverage badge when qualityStatus is unknown in the new view', async () => {
     process.env.VIEWER_NEW_UI_SECTIONS = 'labels'
-    vi.mocked(listLabelSummaries).mockResolvedValue({
-      readiness: 'ready',
-      items: [
-        {
-          labelDefinitionId: 'label-1',
-          labelKey: 'spam',
-          evaluatedCount: 0,
-          trueCount: 0,
-          populationCount: 0,
-          coverage: 0,
-          prevalence: 0,
-          qualityStatus: 'unknown',
-          activeFindingCount: 0,
-          highestFindingSeverity: null,
-        },
-      ],
-    })
+    try {
+      vi.mocked(listLabelSummaries).mockResolvedValue({
+        readiness: 'ready',
+        items: [
+          {
+            labelDefinitionId: 'label-1',
+            labelKey: 'spam',
+            evaluatedCount: 0,
+            trueCount: 0,
+            populationCount: 0,
+            coverage: 0,
+            prevalence: 0,
+            qualityStatus: 'unknown',
+            activeFindingCount: 0,
+            highestFindingSeverity: null,
+          },
+        ],
+      })
 
-    const html = renderToStaticMarkup(await LabelsPage())
-    delete process.env.VIEWER_NEW_UI_SECTIONS
+      const html = renderToStaticMarkup(await LabelsPage())
 
-    expect(html).toContain('low coverage')
+      expect(html).toContain('low coverage')
+    } finally {
+      delete process.env.VIEWER_NEW_UI_SECTIONS
+    }
   })
 })

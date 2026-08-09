@@ -887,8 +887,8 @@ model LabelSummaryCurrent {
   latestSnapshotId       String?
   evaluatedCount         Int
   trueCount              Int
-  populationCount        Int
-  coverage               Float
+  populationCount        Int      @default(0)
+  coverage               Float    @default(0)
   prevalence             Float
   previousRunDelta       Float?
   dayDelta               Float?
