@@ -50,6 +50,20 @@ describe('GlobalSearch AbortController', () => {
 
     expect(abortSpy).toHaveBeenCalled()
   })
+
+  it('アンマウント時に処理中の fetch を abort する', () => {
+    const abortSpy = vi.spyOn(AbortController.prototype, 'abort')
+    const { unmount } = render(<GlobalSearch />)
+    const input = screen.getByRole('searchbox')
+
+    fireEvent.change(input, { target: { value: 'al' } })
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+    unmount()
+
+    expect(abortSpy).toHaveBeenCalled()
+  })
 })
 
 describe('buildOperationCycleHref', () => {
