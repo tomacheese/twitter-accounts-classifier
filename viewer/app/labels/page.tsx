@@ -3,14 +3,112 @@ import Link from 'next/link'
 import { formatDateTime } from '@/lib/format-date'
 import { formatPercentage } from '@/lib/format-percentage'
 import { getPrismaClient } from '@/lib/prisma'
-import { getLabelAggregateSnapshot } from '@/lib/queries/dashboard'
-import { listLabelSummaries } from '@/lib/queries/label-summary'
+import { getLabelAggregateSnapshot, type LabelDistributionEntry } from '@/lib/queries/dashboard'
+import { listLabelSummaries, type LabelSummaryListItem } from '@/lib/queries/label-summary'
 import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { ErrorFallback } from '../components/error-fallback'
 import { ReadModelReadinessPanel } from '../components/read-model-readiness-panel'
+import { ResponsiveTable, type ResponsiveTableColumn } from '../components/responsive-table'
 
 // 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
+
+const legacyLabelColumns: ResponsiveTableColumn<LabelDistributionEntry>[] = [
+  {
+    key: 'key',
+    header: 'Key',
+    priority: 'primary',
+    render: (entry) => <span className="font-mono">{entry.labelKey}</span>,
+  },
+  {
+    key: 'accountsLabeledTrue',
+    header: 'Accounts labeled true',
+    priority: 'primary',
+    render: (entry) => {
+      const percentage = formatPercentage(
+        entry.totalAccounts === 0 ? 0 : entry.trueCount / entry.totalAccounts,
+      )
+      return (
+        <Link
+          href={`/accounts?label=${encodeURIComponent(entry.labelKey)}`}
+          className="text-blue-600 hover:underline dark:text-blue-400"
+        >
+          {entry.trueCount}/{entry.totalAccounts} ({percentage})
+        </Link>
+      )
+    },
+  },
+  {
+    key: 'condition',
+    header: 'Condition',
+    priority: 'secondary',
+    render: (entry) => entry.labelDescription,
+  },
+]
+
+const newLabelColumns: ResponsiveTableColumn<LabelSummaryListItem>[] = [
+  {
+    key: 'key',
+    header: 'Key',
+    priority: 'primary',
+    render: (item) => (
+      <Link
+        href={`/labels/${encodeURIComponent(item.labelKey)}`}
+        className="font-mono text-blue-600 hover:underline dark:text-blue-400"
+      >
+        {item.labelKey}
+      </Link>
+    ),
+  },
+  {
+    key: 'trueCount',
+    header: 'True count',
+    priority: 'primary',
+    render: (item) => item.trueCount,
+  },
+  {
+    key: 'coverage',
+    header: 'Coverage',
+    priority: 'primary',
+    render: (item) => (
+      <>
+        {formatPercentage(item.coverage)}
+        {item.qualityStatus === 'unknown' && (
+          <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+            low coverage
+          </span>
+        )}
+      </>
+    ),
+  },
+  {
+    key: 'evaluatedCount',
+    header: 'Evaluated count',
+    priority: 'secondary',
+    render: (item) => item.evaluatedCount,
+  },
+  {
+    key: 'prevalence',
+    header: 'Prevalence',
+    priority: 'secondary',
+    render: (item) => formatPercentage(item.prevalence),
+  },
+  {
+    key: 'quality',
+    header: 'Quality',
+    priority: 'secondary',
+    render: (item) => item.qualityStatus,
+  },
+  {
+    key: 'findings',
+    header: 'Findings',
+    priority: 'secondary',
+    render: (item) =>
+      item.activeFindingCount > 0
+        ? `${item.activeFindingCount} (${item.highestFindingSeverity ?? 'unknown'})`
+        : '—',
+  },
+]
 
 /**
  * 旧 Labels 一覧画面。`isNewUiSectionEnabled('labels')` が無効な間はこちらを表示する。
@@ -52,36 +150,11 @@ async function LegacyLabelsPage(): Promise<React.ReactElement> {
         <p className="text-sm text-gray-500 dark:text-gray-400">No labels are registered yet.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-          <table className="w-full border-collapse text-sm">
-            <thead className="bg-gray-100 text-left dark:bg-gray-700">
-              <tr>
-                <th className="p-3">Key</th>
-                <th className="p-3">Condition</th>
-                <th className="p-3">Accounts labeled true</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry) => {
-                const percentage = formatPercentage(
-                  entry.totalAccounts === 0 ? 0 : entry.trueCount / entry.totalAccounts,
-                )
-                return (
-                  <tr key={entry.labelKey} className="border-t align-top dark:border-gray-700">
-                    <td className="p-3 font-mono">{entry.labelKey}</td>
-                    <td className="p-3">{entry.labelDescription}</td>
-                    <td className="p-3 whitespace-nowrap">
-                      <Link
-                        href={`/accounts?label=${encodeURIComponent(entry.labelKey)}`}
-                        className="text-blue-600 hover:underline dark:text-blue-400"
-                      >
-                        {entry.trueCount}/{entry.totalAccounts} ({percentage})
-                      </Link>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <ResponsiveTable
+            columns={legacyLabelColumns}
+            rows={entries}
+            rowKey={(entry) => entry.labelKey}
+          />
         </div>
       )}
     </div>
@@ -112,50 +185,11 @@ async function NewLabelsView(): Promise<React.ReactElement> {
         {items.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">No labels to show yet.</p>
         ) : (
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="bg-gray-100 dark:bg-gray-700">
-              <tr>
-                <th className="p-3">Key</th>
-                <th className="p-3">True count</th>
-                <th className="p-3">Evaluated count</th>
-                <th className="p-3">Coverage</th>
-                <th className="p-3">Prevalence</th>
-                <th className="p-3">Quality</th>
-                <th className="p-3">Findings</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.labelDefinitionId} className="border-t dark:border-gray-700">
-                  <td className="p-3 font-mono">
-                    <Link
-                      href={`/labels/${encodeURIComponent(item.labelKey)}`}
-                      className="text-blue-600 hover:underline dark:text-blue-400"
-                    >
-                      {item.labelKey}
-                    </Link>
-                  </td>
-                  <td className="p-3">{item.trueCount}</td>
-                  <td className="p-3">{item.evaluatedCount}</td>
-                  <td className="p-3">
-                    {formatPercentage(item.coverage)}
-                    {item.qualityStatus === 'unknown' && (
-                      <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900 dark:text-amber-200">
-                        low coverage
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-3">{formatPercentage(item.prevalence)}</td>
-                  <td className="p-3">{item.qualityStatus}</td>
-                  <td className="p-3">
-                    {item.activeFindingCount > 0
-                      ? `${item.activeFindingCount} (${item.highestFindingSeverity ?? 'unknown'})`
-                      : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <ResponsiveTable
+            columns={newLabelColumns}
+            rows={items}
+            rowKey={(item) => item.labelDefinitionId}
+          />
         )}
       </div>
     )

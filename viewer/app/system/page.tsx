@@ -3,9 +3,86 @@ import { getPrismaClient } from '@/lib/prisma'
 import { getSystemConsoleData } from '@/lib/queries/system-console'
 import { formatDateTime } from '@/lib/format-date'
 import { ErrorFallback } from '../components/error-fallback'
+import { ResponsiveTable, type ResponsiveTableColumn } from '../components/responsive-table'
 import { PolicyRawViewer } from './policy-raw-viewer'
 import { notFound } from 'next/navigation'
 import { isNewUiSectionEnabled } from '@/lib/feature-flags'
+import type {
+  SystemComponentBuildIdentity,
+  SystemReadModelStatus,
+} from '@/lib/queries/system-console'
+
+const componentBuildIdentityColumns: ResponsiveTableColumn<SystemComponentBuildIdentity>[] = [
+  {
+    key: 'component',
+    header: 'Component',
+    priority: 'primary',
+    render: (identity) => <span className="font-mono">{identity.component}</span>,
+  },
+  {
+    key: 'applicationVersion',
+    header: 'Application version',
+    priority: 'primary',
+    render: (identity) => identity.applicationVersion,
+  },
+  {
+    key: 'gitRevision',
+    header: 'Git revision',
+    priority: 'secondary',
+    render: (identity) => <span className="font-mono">{identity.gitRevision}</span>,
+  },
+  {
+    key: 'buildTime',
+    header: 'Build time',
+    priority: 'secondary',
+    render: (identity) => (identity.buildTime ? formatDateTime(identity.buildTime) : '—'),
+  },
+  {
+    key: 'updatedAt',
+    header: 'Updated at',
+    priority: 'secondary',
+    render: (identity) => formatDateTime(identity.updatedAt),
+  },
+]
+
+const readModelColumns: ResponsiveTableColumn<SystemReadModelStatus>[] = [
+  {
+    key: 'model',
+    header: 'Model',
+    priority: 'primary',
+    render: (model) => <span className="font-mono">{model.modelKey}</span>,
+  },
+  {
+    key: 'status',
+    header: 'Status',
+    priority: 'primary',
+    render: (model) => model.status,
+  },
+  {
+    key: 'schema',
+    header: 'Schema',
+    priority: 'secondary',
+    render: (model) => model.schemaVersion,
+  },
+  {
+    key: 'lastSuccess',
+    header: 'Last success',
+    priority: 'secondary',
+    render: (model) => (model.lastSuccessAt ? formatDateTime(model.lastSuccessAt) : '—'),
+  },
+  {
+    key: 'staleAt',
+    header: 'Stale at',
+    priority: 'secondary',
+    render: (model) => (model.staleAt ? formatDateTime(model.staleAt) : '—'),
+  },
+  {
+    key: 'error',
+    header: 'Error',
+    priority: 'secondary',
+    render: (model) => model.errorSummary ?? '—',
+  },
+]
 
 // 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
@@ -42,30 +119,13 @@ export default async function SystemPage(): Promise<React.ReactElement> {
           {data.componentBuildIdentities.length === 0 ? (
             <p className="mt-2">No component has recorded a build identity yet.</p>
           ) : (
-            <table className="mt-2 w-full text-left text-sm">
-              <thead>
-                <tr>
-                  <th className="p-2">Component</th>
-                  <th className="p-2">Application version</th>
-                  <th className="p-2">Git revision</th>
-                  <th className="p-2">Build time</th>
-                  <th className="p-2">Updated at</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.componentBuildIdentities.map((identity) => (
-                  <tr key={identity.component} className="border-t dark:border-gray-700">
-                    <td className="p-2 font-mono">{identity.component}</td>
-                    <td className="p-2">{identity.applicationVersion}</td>
-                    <td className="p-2 font-mono">{identity.gitRevision}</td>
-                    <td className="p-2">
-                      {identity.buildTime ? formatDateTime(identity.buildTime) : '—'}
-                    </td>
-                    <td className="p-2">{formatDateTime(identity.updatedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="mt-2">
+              <ResponsiveTable
+                columns={componentBuildIdentityColumns}
+                rows={data.componentBuildIdentities}
+                rowKey={(identity) => identity.component}
+              />
+            </div>
           )}
         </section>
 
@@ -112,32 +172,13 @@ export default async function SystemPage(): Promise<React.ReactElement> {
           {data.readModels.length === 0 ? (
             <p className="mt-2">No read models recorded yet.</p>
           ) : (
-            <table className="mt-2 w-full text-left text-sm">
-              <thead>
-                <tr>
-                  <th className="p-2">Model</th>
-                  <th className="p-2">Status</th>
-                  <th className="p-2">Schema</th>
-                  <th className="p-2">Last success</th>
-                  <th className="p-2">Stale at</th>
-                  <th className="p-2">Error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.readModels.map((model) => (
-                  <tr key={model.modelKey} className="border-t dark:border-gray-700">
-                    <td className="p-2 font-mono">{model.modelKey}</td>
-                    <td className="p-2">{model.status}</td>
-                    <td className="p-2">{model.schemaVersion}</td>
-                    <td className="p-2">
-                      {model.lastSuccessAt ? formatDateTime(model.lastSuccessAt) : '—'}
-                    </td>
-                    <td className="p-2">{model.staleAt ? formatDateTime(model.staleAt) : '—'}</td>
-                    <td className="p-2">{model.errorSummary ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="mt-2">
+              <ResponsiveTable
+                columns={readModelColumns}
+                rows={data.readModels}
+                rowKey={(model) => model.modelKey}
+              />
+            </div>
           )}
         </section>
 
