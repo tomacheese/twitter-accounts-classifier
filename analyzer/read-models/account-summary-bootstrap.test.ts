@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { getPrismaClient } from '../db/client'
 import {
   processAccountSummaryBootstrap,
@@ -24,8 +24,43 @@ async function resetDb(): Promise<void> {
   await prisma.account.deleteMany()
 }
 
+describe('processAccountSummaryBootstrap transaction options', () => {
+  it('uses an explicit transaction timeout for bootstrap chunks', async () => {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      $queryRaw: vi.fn().mockResolvedValue([{ status: 'pending', cursor: null }]),
+      readModelBootstrap: { update: vi.fn().mockResolvedValue({}) },
+      account: { findMany: vi.fn().mockResolvedValue([]) },
+      analysisWorkItem: { upsert: vi.fn().mockResolvedValue({}) },
+    }
+    const transaction = vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx))
+    const fakePrisma = { $transaction: transaction }
+    const workItem = { id: 'work_item' }
+
+    await processAccountSummaryBootstrap(fakePrisma as never, workItem as never, { chunkSize: 10 })
+
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ timeout: 60_000 }),
+    )
+  })
+})
+
 describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () => {
   beforeEach(resetDb)
+
+  it('has a covering index for the Account bootstrap scan', async () => {
+    const rows = await prisma.$queryRaw<{ indexdef: string }[]>`
+      SELECT indexdef FROM pg_indexes
+      WHERE schemaname = current_schema()
+        AND indexname = 'Account_account_summary_latest_cover_idx'
+    `
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.indexdef).toContain(
+      'INCLUDE ("screenName", "displayName", "lastCrawledAt")',
+    )
+  })
 
   it('builds AccountSummaryLatest from Account/AccountLabelLatest baseline and marks completed when done', async () => {
     const account = await prisma.account.create({

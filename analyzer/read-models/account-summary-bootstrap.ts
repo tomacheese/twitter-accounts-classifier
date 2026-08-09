@@ -14,6 +14,7 @@ const logger = Logger.configure('analyzer:account-summary-bootstrap')
 
 const MODEL_KEY = 'account_summary'
 const DEFAULT_CHUNK_SIZE = 2000
+const BOOTSTRAP_TRANSACTION_TIMEOUT_MS = 60_000
 
 /** account_summary_bootstrap WorkItem がまだ進行可能とみなせる status。 */
 const PROGRESSABLE_WORK_ITEM_STATUSES = ['queued', 'leased', 'failed']
@@ -322,7 +323,7 @@ export async function processAccountSummaryBootstrap(
       }
 
       return chunkWatermarkAt
-    })
+    }, { timeout: BOOTSTRAP_TRANSACTION_TIMEOUT_MS })
 
     // このチャンクで実際に処理した Account が無い (他 worker が先に進めた) 場合は
     // 鮮度を更新する新しい観測が無いため、ReadModelState には触れない。
