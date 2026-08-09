@@ -1,6 +1,13 @@
+// @vitest-environment jsdom
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type {
+  AccountClassificationEntryView,
+  AccountLabelChangeView,
+  AccountRelationView,
+} from '@/lib/queries/account-subviews'
 
 const { useRouterMock, usePathnameMock, useSearchParamsMock } = vi.hoisted(() => ({
   useRouterMock: vi.fn(() => ({ replace: vi.fn() })),
@@ -14,8 +21,18 @@ vi.mock('next/navigation', () => ({
   useSearchParams: useSearchParamsMock,
 }))
 
-const { AccountSubviewTabs, buildSubviewUrl, TAB_QUERY_PARAM } =
-  await import('./account-subview-tabs')
+const {
+  AccountSubviewTabs,
+  buildSubviewUrl,
+  ClassificationView,
+  HistoryView,
+  RelationsView,
+  TAB_QUERY_PARAM,
+} = await import('./account-subview-tabs')
+
+afterEach(() => {
+  cleanup()
+})
 
 describe('buildSubviewUrl', () => {
   it('accountId と subview から Route Handler の URL を組み立てる', () => {
@@ -60,5 +77,84 @@ describe('AccountSubviewTabs', () => {
     const html = renderToStaticMarkup(<AccountSubviewTabs accountId="account-1" />)
 
     expect(html).not.toContain('aria-selected="true"')
+  })
+})
+
+describe('ClassificationView', () => {
+  it('Active → Recently changed (7日以内) → Remaining false の順に表示する', () => {
+    const now = new Date('2026-08-09T00:00:00.000Z')
+    vi.setSystemTime(now)
+    const RECENTLY_CHANGED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+    const entries: AccountClassificationEntryView[] = [
+      {
+        labelKey: 'old_false',
+        value: false,
+        confidence: 0.5,
+        reason: 'x',
+        lastChangedAt: new Date(now.getTime() - RECENTLY_CHANGED_WINDOW_MS - 1000),
+      },
+      {
+        labelKey: 'recent_false',
+        value: false,
+        confidence: 0.5,
+        reason: 'x',
+        lastChangedAt: new Date(now.getTime() - 1000),
+      },
+      {
+        labelKey: 'active_1',
+        value: true,
+        confidence: 0.9,
+        reason: 'x',
+        lastChangedAt: new Date(now.getTime() - 2000),
+      },
+    ]
+
+    render(<ClassificationView entries={entries} />)
+    vi.useRealTimers()
+
+    const items = screen.getAllByRole('listitem').map((el) => el.textContent)
+    expect(items[0]).toContain('active_1')
+    expect(items[1]).toContain('recent_false')
+    // Remaining false (old_false) は <details> で折り畳まれているため既定では閉じている
+    const oldFalseText = screen.getByText(/old_false/)
+    expect(oldFalseText.closest('details')?.hasAttribute('open')).toBe(false)
+  })
+})
+
+describe('HistoryView', () => {
+  it('labelKey を表示する', () => {
+    const entries: AccountLabelChangeView[] = [
+      {
+        id: 'change-1',
+        labelKey: 'spam',
+        changeType: 'updated',
+        previousValue: false,
+        newValue: true,
+        changedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]
+
+    render(<HistoryView entries={entries} />)
+
+    expect(screen.getByText('spam')).not.toBeNull()
+  })
+})
+
+describe('RelationsView', () => {
+  it('counterpartScreenName をリンク文字列に表示し、リンク先は counterpartAccountId のままにする', () => {
+    const entries: AccountRelationView[] = [
+      {
+        blockId: 'block-1',
+        direction: 'blocker',
+        counterpartAccountId: 'account-2',
+        counterpartScreenName: 'bob',
+        status: 'active',
+      },
+    ]
+
+    render(<RelationsView entries={entries} />)
+
+    const link = screen.getByRole('link', { name: 'bob' })
+    expect(link.getAttribute('href')).toBe('/accounts/account-2')
   })
 })
