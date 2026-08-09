@@ -14,6 +14,7 @@ DECLARE
     'PolicyBacktestRun', 'PolicyBacktestFinding',
     'LabelMetricSnapshot', 'LabelMetricDaily',
     'AccountSummaryCurrent', 'AccountClassificationCurrent', 'AccountLabelChange',
+    'AccountSummaryLatest', 'AccountClassificationLatest', 'ReadModelBootstrap',
     'LabelSummaryCurrent', 'BlockRelationCurrent', 'BlockStateChange',
     'AttentionItemCurrent', 'OverviewSnapshot',
     'ReadModelGeneration', 'ReadModelPointer', 'ReadModelState'
