@@ -4,6 +4,7 @@ import {
   enqueueWorkItem,
   claimNextWorkItem,
   completeWorkItem,
+  renewWorkItemLease,
   computeRetryBackoffMs,
   startAnalysisRun,
   finishAnalysisRun,
@@ -71,6 +72,52 @@ describe.skipIf(!process.env.DATABASE_URL)('claimNextWorkItem / completeWorkItem
     })
     expect(second?.id).toBe(first?.id)
     expect(second?.leaseOwner).toBe('worker-b')
+  })
+
+  it('現在 owner は実行中 WorkItem の lease を延長できる', async () => {
+    await enqueueWorkItem(prisma, {
+      kind: 'label_metrics',
+      triggerType: 'crawl_run',
+      triggerId: 'crawl-renew-1',
+    })
+    const claimed = await claimNextWorkItem(prisma, {
+      kinds: ['label_metrics'],
+      leaseOwner: 'worker-a',
+      leaseDurationMs: 1000,
+    })
+    if (!claimed?.leaseExpiresAt) throw new Error('claim に失敗した')
+
+    const renewed = await renewWorkItemLease(prisma, {
+      workItemId: claimed.id,
+      leaseOwner: 'worker-a',
+      leaseDurationMs: 60_000,
+    })
+
+    expect(renewed).toBe(true)
+    const row = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: claimed.id } })
+    expect(row.leaseExpiresAt?.getTime()).toBeGreaterThan(claimed.leaseExpiresAt.getTime())
+  })
+
+  it('別 owner は WorkItem の lease を延長できない', async () => {
+    await enqueueWorkItem(prisma, {
+      kind: 'label_metrics',
+      triggerType: 'crawl_run',
+      triggerId: 'crawl-renew-2',
+    })
+    const claimed = await claimNextWorkItem(prisma, {
+      kinds: ['label_metrics'],
+      leaseOwner: 'worker-a',
+      leaseDurationMs: 60_000,
+    })
+    if (!claimed) throw new Error('claim に失敗した')
+
+    const renewed = await renewWorkItemLease(prisma, {
+      workItemId: claimed.id,
+      leaseOwner: 'worker-b',
+      leaseDurationMs: 120_000,
+    })
+
+    expect(renewed).toBe(false)
   })
 
   it('failed で終了した WorkItem を再 claim できる', async () => {

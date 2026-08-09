@@ -117,6 +117,35 @@ export async function claimNextWorkItem(
 /**
  * completeWorkItem の入力。
  */
+/** renewWorkItemLease の入力。 */
+export interface RenewWorkItemLeaseInput {
+  /** 対象 WorkItem の ID。 */
+  workItemId: string
+  /** 現在の lease owner。 */
+  leaseOwner: string
+  /** 更新後の lease 有効期間 (ミリ秒)。 */
+  leaseDurationMs: number
+}
+
+/**
+ * 実行中 WorkItem の lease を owner 一致時だけ延長する。長時間処理が初回 lease を超えても、
+ * 生存中 worker の WorkItem を別 worker が再 claim しないようにする。
+ * @param prisma - Prisma クライアント
+ * @param input - 対象 WorkItem と lease 情報
+ * @returns lease を更新できたら true、owner/status が変わっていれば false
+ */
+export async function renewWorkItemLease(
+  prisma: PrismaClient,
+  input: RenewWorkItemLeaseInput,
+): Promise<boolean> {
+  const now = new Date()
+  const result = await prisma.analysisWorkItem.updateMany({
+    where: { id: input.workItemId, leaseOwner: input.leaseOwner, status: 'leased' },
+    data: { leaseExpiresAt: new Date(now.getTime() + input.leaseDurationMs) },
+  })
+  return result.count > 0
+}
+
 export interface CompleteWorkItemInput {
   /** 対象の WorkItem ID。 */
   workItemId: string
