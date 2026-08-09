@@ -47,9 +47,8 @@ const ACCOUNT_SUMMARY_MODEL_KEY = 'account_summary'
 
 /**
  * アカウント検索は Account 本体ではなく read model の AccountSummaryCurrent を引く。
- * normalizedDisplayName は pg_trgm の GIN 索引を使う contains、
- * normalizedScreenName は通常の btree 索引を使う startsWith で絞り込む。
- * screenName にも contains を使うと索引を使わない全表スキャンになるため区別している。
+ * 3 条件を OR で束ねると screenName の case-insensitive prefix が全体を Seq Scan に
+ * 落とすため、既存索引を使える query へ分割して結果を重複排除する。
  * @param prisma - Prisma クライアント
  * @param query - 検索クエリ文字列
  * @returns 上限件数までのアカウント検索結果
@@ -63,19 +62,41 @@ async function searchAccounts(
   })
   if (!pointer) return []
 
-  const rows = await prisma.accountSummaryCurrent.findMany({
-    where: {
-      generationId: pointer.currentGenerationId,
-      OR: [
-        { normalizedDisplayName: { contains: query, mode: 'insensitive' } },
-        { normalizedScreenName: { startsWith: query, mode: 'insensitive' } },
-        { accountId: query },
-      ],
-    },
-    take: MAX_RESULTS_PER_TYPE,
+  const generationId = pointer.currentGenerationId
+  const normalizedScreenQuery = query.toLowerCase()
+  const [accountIdRows, screenNameRows, displayNameRows] = await Promise.all([
+    prisma.accountSummaryCurrent.findMany({
+      where: { generationId, accountId: query },
+      take: MAX_RESULTS_PER_TYPE,
+    }),
+    prisma.accountSummaryCurrent.findMany({
+      where: {
+        generationId,
+        normalizedScreenName: {
+          gte: normalizedScreenQuery,
+          lt: `${normalizedScreenQuery}￿`,
+        },
+      },
+      orderBy: [{ normalizedScreenName: 'asc' }, { accountId: 'asc' }],
+      take: MAX_RESULTS_PER_TYPE,
+    }),
+    prisma.accountSummaryCurrent.findMany({
+      where: {
+        generationId,
+        normalizedDisplayName: { contains: query, mode: 'insensitive' },
+      },
+      take: MAX_RESULTS_PER_TYPE,
+    }),
+  ])
+
+  const seen = new Set<string>()
+  const rows = [...accountIdRows, ...screenNameRows, ...displayNameRows].filter((row) => {
+    if (seen.has(row.accountId)) return false
+    seen.add(row.accountId)
+    return true
   })
 
-  return rows.map((row) => ({
+  return rows.slice(0, MAX_RESULTS_PER_TYPE).map((row) => ({
     id: row.accountId,
     screenName: row.normalizedScreenName,
     displayName: row.normalizedDisplayName,

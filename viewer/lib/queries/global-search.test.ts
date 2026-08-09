@@ -41,46 +41,66 @@ describe('searchAcrossEntities', () => {
     expect(tweetFindMany).not.toHaveBeenCalled()
   })
 
-  it('アカウント検索は Account 本体ではなく read model を参照する', async () => {
+  it('アカウント検索は Account 本体ではなく read model の indexed query 3 本へ分割する', async () => {
     const { prisma, accountSummaryFindMany } = createMockPrisma()
-    await searchAcrossEntities(prisma, { query: 'example' })
+    await searchAcrossEntities(prisma, { query: 'Example' })
 
     const accountFindMany = (
       prisma as unknown as { account: { findMany: ReturnType<typeof vi.fn> } }
     ).account.findMany
     expect(accountFindMany).not.toHaveBeenCalled()
+    expect(accountSummaryFindMany).toHaveBeenCalledTimes(3)
 
-    const call = accountSummaryFindMany.mock.calls[0][0] as {
-      where: { generationId: string; OR: Record<string, unknown>[] }
-    }
-    expect(call.where.generationId).toBe('generation-1')
-    expect(call.where.OR.map((condition) => Object.keys(condition)[0])).toEqual([
-      'normalizedDisplayName',
-      'normalizedScreenName',
-      'accountId',
-    ])
+    const calls = [0, 1, 2].map(
+      (index) =>
+        accountSummaryFindMany.mock.calls[index]?.[0] as { where: Record<string, unknown> },
+    )
+    expect(calls.every(({ where }) => where.generationId === 'generation-1')).toBe(true)
+    expect(calls.every(({ where }) => !('OR' in where))).toBe(true)
   })
 
-  it('screenName は btree 索引を使える startsWith で、displayName は trigram 索引を使える contains で絞り込む', async () => {
+  it('screenName は小文字化した btree range、displayName は trigram contains で検索する', async () => {
     const { prisma, accountSummaryFindMany } = createMockPrisma()
-    await searchAcrossEntities(prisma, { query: 'example' })
+    await searchAcrossEntities(prisma, { query: 'Example' })
 
-    const call = accountSummaryFindMany.mock.calls[0][0] as {
-      where: { OR: Record<string, { contains?: string; startsWith?: string }>[] }
+    const screenNameCall = accountSummaryFindMany.mock.calls[1]?.[0] as {
+      where: Record<string, unknown>
     }
-    const [displayNameCondition, screenNameCondition] = call.where.OR
-    expect(displayNameCondition.normalizedDisplayName.contains).toBe('example')
-    expect(screenNameCondition.normalizedScreenName.startsWith).toBe('example')
+    const displayNameCall = accountSummaryFindMany.mock.calls[2]?.[0] as {
+      where: Record<string, unknown>
+    }
+    expect(screenNameCall.where.normalizedScreenName).toEqual({ gte: 'example', lt: 'example￿' })
+    expect(displayNameCall.where.normalizedDisplayName).toEqual({
+      contains: 'Example',
+      mode: 'insensitive',
+    })
   })
 
-  it('accountId の完全一致でもアカウントを検索できる', async () => {
+  it('accountId の完全一致を独立した indexed query で検索する', async () => {
     const { prisma, accountSummaryFindMany } = createMockPrisma()
     await searchAcrossEntities(prisma, { query: 'account-1' })
 
-    const call = accountSummaryFindMany.mock.calls[0][0] as {
-      where: { OR: Record<string, unknown>[] }
+    const firstCall = accountSummaryFindMany.mock.calls[0][0] as {
+      where: Record<string, unknown>
     }
-    expect(call.where.OR[2]).toEqual({ accountId: 'account-1' })
+    expect(firstCall.where).toEqual({ generationId: 'generation-1', accountId: 'account-1' })
+  })
+
+  it('複数の indexed query で同じ account が見つかっても重複を返さない', async () => {
+    const { prisma, accountSummaryFindMany } = createMockPrisma()
+    const row = {
+      accountId: 'account-1',
+      normalizedScreenName: 'example',
+      normalizedDisplayName: 'Example',
+    }
+    accountSummaryFindMany
+      .mockResolvedValueOnce([row])
+      .mockResolvedValueOnce([row])
+      .mockResolvedValueOnce([row])
+
+    const result = await searchAcrossEntities(prisma, { query: 'example' })
+
+    expect(result.accounts).toEqual([{ id: 'account-1', screenName: 'example', displayName: 'Example' }])
   })
 
   it('ReadModelPointer が無ければアカウント検索結果は空になる', async () => {
