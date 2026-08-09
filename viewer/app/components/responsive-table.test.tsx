@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react'
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 import { ResponsiveTable, type ResponsiveTableColumn } from './responsive-table'
 
 interface Row {
@@ -17,6 +17,10 @@ const columns: ResponsiveTableColumn<Row>[] = [
 const rows: Row[] = [{ id: 'r-1', name: 'alice', detail: 'x' }]
 
 describe('ResponsiveTable', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
   it('table 要素で全列を表示する', () => {
     render(<ResponsiveTable columns={columns} rows={rows} rowKey={(row) => row.id} />)
     expect(screen.getByRole('table')).toBeTruthy()
