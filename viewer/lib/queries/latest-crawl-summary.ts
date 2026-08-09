@@ -57,6 +57,7 @@ export async function getLatestCrawlSummary(
       "labelsAppliedCount", "warnings", "appVersion"
     FROM "CrawlAccountRun"
     WHERE "crawlRunId" = ${latestRun.id}
+      AND "classificationStatus" <> 'skipped'
     ORDER BY "username", "startedAt" DESC, "id" DESC
   `
 

@@ -73,4 +73,28 @@ describe('getLatestCrawlSummary', () => {
       appVersions: ['1.2.0', '1.3.0'],
     })
   })
+
+  it('excludes resume skipped rows from the DISTINCT ON query', async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      id: 'run1',
+      startedAt: new Date('2026-08-04T00:00:00Z'),
+      finishedAt: new Date('2026-08-04T01:00:00Z'),
+      status: 'success',
+    })
+    let sqlQuery: TemplateStringsArray | undefined
+    const queryRaw = vi.fn((query: TemplateStringsArray) => {
+      sqlQuery = query
+      return Promise.resolve([])
+    })
+    const prisma = {
+      crawlRun: { findFirst },
+      $queryRaw: queryRaw,
+    } as unknown as PrismaClient
+
+    await getLatestCrawlSummary(prisma)
+
+    if (!sqlQuery) throw new Error('Expected the account run query')
+    expect(sqlQuery.join('')).toContain('classificationStatus')
+    expect(sqlQuery.join('')).toContain(`<> 'skipped'`)
+  })
 })
