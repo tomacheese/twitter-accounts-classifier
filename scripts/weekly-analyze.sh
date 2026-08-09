@@ -264,14 +264,15 @@ if [ "$FINAL_STATUS" = "running" ]; then
 fi
 
 echo "[weekly-analyze] saving diagnostics for run $RUN_ID (status=$FINAL_STATUS) to $DIAGNOSTICS_DIR"
-{
+# 親シェルで cd すると成功時の worktree 削除後に cwd が消えるため、診断取得はサブシェルに閉じ込める。
+(
   cd "$WORKTREE_DIR"
   git status --porcelain
   echo '--- diff ---'
   git diff
   echo '--- untracked ---'
   git ls-files --others --exclude-standard
-} > "$DIAGNOSTICS_DIR/git-state.log" 2>&1 || true
+) > "$DIAGNOSTICS_DIR/git-state.log" 2>&1 || true
 printf '%s\n' "$FINAL_RUN_JSON" > "$DIAGNOSTICS_DIR/run-metadata.json"
 # シークレット (.env・.env.weekly-review) 由来の値が紛れ込まないよう、
 # 保存前にそれらのファイル自体を診断ディレクトリにコピーしない。
