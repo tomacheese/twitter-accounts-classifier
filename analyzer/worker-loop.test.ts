@@ -77,6 +77,7 @@ function makeDeps() {
 }
 
 const prisma = {} as PrismaClient
+const leasePrisma = { lease: true } as unknown as PrismaClient
 
 describe('runWorkerLoopOnce', () => {
   beforeEach(() => {
@@ -171,13 +172,14 @@ describe('runWorkerLoopOnce', () => {
 
     const running = runWorkerLoopOnce(prisma, {
       ...deps,
+      leasePrisma,
       leaseDurationMs: 100,
       leaseRenewIntervalMs: 5,
     })
 
     try {
       await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(renewWorkItemLease).toHaveBeenCalledWith(prisma, {
+      expect(renewWorkItemLease).toHaveBeenCalledWith(leasePrisma, {
         workItemId: 'work-item-1',
         leaseOwner: 'worker-1',
         leaseDurationMs: 100,

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { Logger } from '@book000/node-utils'
-import { getPrismaClient, disconnectPrisma } from './db/client'
+import { getPrismaClient, getLeasePrismaClient, disconnectPrisma } from './db/client'
 import { initMonitoring, captureException } from './monitoring/sentry'
 import { runWorkerLoopOnce, type WorkerLoopDeps } from './worker-loop'
 import {
@@ -42,8 +42,9 @@ async function drainLane(prisma: PrismaClient, deps: WorkerLoopDeps): Promise<vo
  */
 export async function main(): Promise<void> {
   const prisma = getPrismaClient()
+  const leasePrisma = getLeasePrismaClient()
   logger.info('analyzer starting')
-  await prisma.$connect()
+  await Promise.all([prisma.$connect(), leasePrisma.$connect()])
 
   // 起動時に記録しておかないと、queue が空で 1 件も処理しなかった期間の
   // System 画面が適用中 policy 不明のままになる。
@@ -57,6 +58,7 @@ export async function main(): Promise<void> {
 
   const deps: WorkerLoopDeps = {
     leaseOwner: `${hostname()}-${process.pid}-${randomUUID()}`,
+    leasePrisma,
     processLabelMetrics,
     processFindingGeneration,
     processReadModelRefresh,

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { getPrismaClient, disconnectPrisma } from './client'
+import { getPrismaClient, getLeasePrismaClient, disconnectPrisma } from './client'
 
 describe('getPrismaClient', () => {
   afterEach(async () => {
@@ -10,5 +10,10 @@ describe('getPrismaClient', () => {
     const first = getPrismaClient()
     const second = getPrismaClient()
     expect(first).toBe(second)
+  })
+
+  it('lease 更新用 client は処理用 client と別インスタンスを返す', () => {
+    expect(getLeasePrismaClient()).not.toBe(getPrismaClient())
+    expect(getLeasePrismaClient()).toBe(getLeasePrismaClient())
   })
 })

@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 
 const connect = vi.fn().mockResolvedValue(undefined)
+const leaseConnect = vi.fn().mockResolvedValue(undefined)
+const mainPrisma = { $connect: connect }
+const leasePrisma = { $connect: leaseConnect }
 const runWorkerLoopOnce = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false)
 const recordPolicyVersion = vi.fn().mockResolvedValue('hash')
 
 vi.mock('./db/client', () => ({
-  getPrismaClient: () => ({ $connect: connect }),
+  getPrismaClient: () => mainPrisma,
+  getLeasePrismaClient: () => leasePrisma,
   disconnectPrisma: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -39,7 +43,11 @@ describe('main', () => {
 
     await expect(main()).resolves.toBeUndefined()
     expect(connect).toHaveBeenCalledTimes(1)
-    expect(runWorkerLoopOnce).toHaveBeenCalled()
+    expect(leaseConnect).toHaveBeenCalledTimes(1)
+    expect(runWorkerLoopOnce).toHaveBeenCalledWith(
+      mainPrisma,
+      expect.objectContaining({ leasePrisma }),
+    )
   })
 
   it('起動時に適用中 policy を記録する', async () => {
