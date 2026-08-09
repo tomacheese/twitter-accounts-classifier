@@ -52,6 +52,14 @@ describe('topicFinanceRule', () => {
     ).toBe(false)
   })
 
+  it('is false for a bio containing the Portuguese/Spanish "investigado(s)" (not a word-boundary match for "invest")', () => {
+    expect(
+      topicFinanceRule.evaluate(
+        makeBundle({ bio: 'Fã de mistérios policiais nunca investigados pela polícia local.' }),
+      ).value,
+    ).toBe(false)
+  })
+
   it('is false for a bio containing "株式会社" (the generic Japanese corporate suffix, not a finance signal)', () => {
     expect(
       topicFinanceRule.evaluate(

@@ -185,6 +185,10 @@ describe('aiGeneratedRule', () => {
       'a non-use declaration later in the bio than the first mention',
       '猫と暮らしています。⚠️生成AI利用・無断編集・無断転載お断り 投稿/画像はすべて【生成AI不使用】です',
     ],
+    [
+      'an "unnecessary" opposition phrase using 不要 rather than a prohibition verb',
+      '週末は釣りとキャンプ。手描きこそ至高、生成AIは不要と考える派です',
+    ],
   ])('is false for a bio that opposes generative AI via %s', (_label, bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })

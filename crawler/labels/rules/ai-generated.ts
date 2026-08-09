@@ -12,7 +12,7 @@ const BIO_DECLARATION_PATTERN =
 // 確認範囲は前後に十分な幅を持たせている。
 const NEGATION_WINDOW_LENGTH = 25
 const NEGATION_PATTERN =
-  /しません|していません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
+  /しません|していません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|不要|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
 
 function isNegatedDeclaration(bio: string): boolean {
   const match = BIO_DECLARATION_PATTERN.exec(bio)
@@ -118,7 +118,7 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.8.0',
+  version: '1.9.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
