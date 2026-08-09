@@ -151,13 +151,14 @@ describe('attemptBlock', () => {
   it('createBlock 実行前に outbox entry を pending_remote で作成する', async () => {
     const deps = fakeDeps()
     const callOrder: string[] = []
-    vi.mocked(deps.findOrCreateOutboxEntry).mockImplementation(async () => {
+    vi.mocked(deps.findOrCreateOutboxEntry).mockImplementation(() => {
       callOrder.push('outbox_created')
-      return { id: 'outbox-1', status: 'pending_remote' }
+      return Promise.resolve({ id: 'outbox-1', status: 'pending_remote' })
     })
     const client = createMockClient()
-    vi.mocked(client.createBlock).mockImplementation(async () => {
+    vi.mocked(client.createBlock).mockImplementation(() => {
       callOrder.push('remote_block_called')
+      return Promise.resolve()
     })
 
     await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {

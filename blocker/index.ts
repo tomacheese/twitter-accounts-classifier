@@ -29,8 +29,12 @@ import {
   markOutboxRemoteSucceeded,
   markOutboxLocalPersisted,
   markOutboxRemoteFailed,
+  findStalledOutboxEntries,
+  hasBlockRow,
+  hasBlockAction,
 } from './db/outbox-repository'
-import { runBlockAccountCycle } from './block-cycle'
+import { runBlockAccountCycle, resolveOwnAccountId } from './block-cycle'
+import { reconcileOutboxEntries, isRemotelyBlocked } from './reconciliation'
 import { notifyDiscord, type AccountRunSummary } from './discord-notifier'
 import { initMonitoring, captureException } from './monitoring/sentry'
 
@@ -44,6 +48,53 @@ export interface RunBlockCycleDependencies {
   touchBlockRunHeartbeat: typeof touchBlockRunHeartbeat
   runBlockAccountCycle: typeof runBlockAccountCycle
   notifyDiscord: typeof notifyDiscord
+  /** アカウント単位で認証し直し、そのアカウントが持つ停滞 outbox entry を補修する。 */
+  reconcileAccountOutbox: (
+    account: Extract<BlockerAccountConfig, { blockEnabled: true }>,
+    prisma: PrismaClient,
+  ) => Promise<void>
+}
+
+/**
+ * 認証をこの関数内で行うのは、reconciliation が block cycle 本体とは別に
+ * 常に全アカウントに対して実行される (block 対象候補が無いアカウントでも停滞 entry の
+ * 有無を確認する必要がある) ため。
+ * @param account - reconciliation 対象のアカウント設定
+ * @param prisma - Prisma クライアント
+ */
+async function reconcileAccountOutbox(
+  account: Extract<BlockerAccountConfig, { blockEnabled: true }>,
+  prisma: PrismaClient,
+): Promise<void> {
+  const cookies = await createCookieIssuerClient({
+    baseUrl: getCookieIssuerBaseUrl(),
+  }).issueCookiesWithRetry({
+    username: account.username,
+    password: account.password,
+    otp_secret: account.otpSecret,
+  })
+  const client = await createOpenApiClient(cookies)
+  try {
+    const blockerId = await resolveOwnAccountId(client, account.username)
+    await reconcileOutboxEntries(
+      {
+        prisma,
+        blockerId,
+        client,
+        findStalledOutboxEntries,
+        hasBlockRow,
+        hasBlockAction,
+        recordSuccessfulBlock,
+        recordBlockAction,
+        markOutboxRemoteSucceeded,
+        markOutboxLocalPersisted,
+        isRemotelyBlocked,
+      },
+      prisma,
+    )
+  } finally {
+    await closeOpenApiClient(client)
+  }
 }
 
 /**
@@ -107,6 +158,15 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
       ? 'partial'
       : 'completed'
   await deps.finishBlockRun(deps.prisma, run.id, new Date(), runStatus)
+
+  for (const account of targetAccounts) {
+    try {
+      await deps.reconcileAccountOutbox(account, deps.prisma)
+    } catch (error) {
+      logger.error(`Failed to reconcile outbox entries for ${account.username}`, error as Error)
+      captureException(error, { username: account.username })
+    }
+  }
 }
 
 async function main(): Promise<void> {
@@ -122,6 +182,7 @@ async function main(): Promise<void> {
       touchBlockRunHeartbeat,
       runBlockAccountCycle,
       notifyDiscord,
+      reconcileAccountOutbox,
     })
   } finally {
     await disconnectPrisma()

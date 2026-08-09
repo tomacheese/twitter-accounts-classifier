@@ -52,7 +52,7 @@ const defaultSleep = (ms: number): Promise<void> =>
  * @param username - 解決対象のログインアカウントのユーザー名
  * @returns 解決した `Account.id`
  */
-async function resolveOwnAccountId(
+export async function resolveOwnAccountId(
   client: OpenApiClientContext,
   username: string,
 ): Promise<string> {

@@ -105,16 +105,21 @@ export interface StalledOutboxEntry {
 }
 
 /**
+ * Twitter への実ブロック確認 (`isRemotelyBlocked`) は blocker アカウントごとの認証済み
+ * クライアントを必要とするため、この一覧も同じ blockerId に絞って返す。
  * @param prisma - Prisma クライアント
+ * @param blockerId - 対象の blocker アカウント
  * @param staleAfterMs - 停滞と判定するまでの経過時間 (ミリ秒)
  * @returns 停滞した outbox entry の一覧
  */
 export async function findStalledOutboxEntries(
   prisma: PrismaClient,
+  blockerId: string,
   staleAfterMs = 30 * 60 * 1000,
 ): Promise<StalledOutboxEntry[]> {
   return prisma.blockOutboxEntry.findMany({
     where: {
+      blockerId,
       status: { in: ['pending_remote', 'remote_succeeded'] },
       createdAt: { lt: new Date(Date.now() - staleAfterMs) },
     },

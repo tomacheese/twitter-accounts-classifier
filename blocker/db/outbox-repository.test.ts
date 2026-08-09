@@ -126,13 +126,14 @@ describe('markOutboxRemoteSucceeded/markOutboxLocalPersisted/markOutboxRemoteFai
 })
 
 describe('findStalledOutboxEntries', () => {
-  it('pending_remote/remote_succeeded を停滞判定の対象にする', async () => {
+  it('blockerId と pending_remote/remote_succeeded を停滞判定の対象にする', async () => {
     const prisma = createMockPrismaClient()
 
-    await findStalledOutboxEntries(prisma as never, 1_000)
+    await findStalledOutboxEntries(prisma as never, 'blocker-1', 1000)
 
     expect(prisma.blockOutboxEntry.findMany).toHaveBeenCalledWith({
       where: {
+        blockerId: 'blocker-1',
         status: { in: ['pending_remote', 'remote_succeeded'] },
         createdAt: { lt: expect.any(Date) },
       },
