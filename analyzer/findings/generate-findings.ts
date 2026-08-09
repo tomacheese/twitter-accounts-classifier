@@ -14,6 +14,14 @@ import { Logger } from '@book000/node-utils'
 const logger = Logger.configure('analyzer:generate-findings')
 
 /**
+ * generateFindingsForAggregateRefresh に渡せるクライアント。
+ * runLabelFindingsSerialized の直列化トランザクション内から呼ばれる場合は
+ * Prisma.TransactionClient が渡り、それ自体は $transaction を持たないため
+ * 単独呼び出しとネストした呼び出しの両方を同じ関数で扱えるようにする。
+ */
+type FindingsClient = PrismaClient | Prisma.TransactionClient
+
+/**
  * generateFindingsForAggregateRefresh の入力。
  */
 export interface GenerateFindingsForAggregateRefreshInput {
@@ -58,7 +66,7 @@ const RULE_TYPES_EVALUATED_ELSEWHERE = new Set(['possible_false_positive', 'read
  * @returns 比較対象の snapshot (見つからなければ null)
  */
 async function resolveBaselineSnapshot(
-  prisma: PrismaClient,
+  prisma: FindingsClient,
   labelDefinitionId: string,
   current: { triggerWorkItemId: string; observedAt: Date },
   baselineWindow: string | undefined,
@@ -247,13 +255,13 @@ async function upsertOccurrence(
  * @param ctx - 実行全体で共通のパラメータ
  */
 async function processObservation(
-  prisma: PrismaClient,
+  prisma: FindingsClient,
   input: ProcessObservationInput,
   ctx: GenerateFindingsForAggregateRefreshInput,
 ): Promise<void> {
   const fingerprint = computeFingerprint(input.type, input.dimensions)
 
-  await prisma.$transaction(async (tx) => {
+  const run = async (tx: Prisma.TransactionClient): Promise<void> => {
     // WorkItem の at-least-once retry で同じ sourceId が再度渡されたとき、
     // lifecycle 遷移を再適用すると consecutiveExceed/recurrenceCount が
     // 二重に進んでしまう。DetectorEvaluation の一意キーで既処理を検出し、
@@ -351,7 +359,12 @@ async function processObservation(
       })
     }
     await upsertOccurrence(tx, created.id, next.status, input, ctx, now)
-  })
+  }
+
+  // Prisma.TransactionClient には $transaction 自体が無いため、既にトランザクション
+  // 内で呼ばれている場合はネストせずそのまま run を実行し、そうでなければここで
+  // トランザクションを開く。
+  await ('$transaction' in prisma ? prisma.$transaction(run) : run(prisma))
 }
 
 /**
@@ -362,7 +375,7 @@ async function processObservation(
  * @param input - 対象 snapshot set と検出ポリシー
  */
 export async function generateFindingsForAggregateRefresh(
-  prisma: PrismaClient,
+  prisma: FindingsClient,
   input: GenerateFindingsForAggregateRefreshInput,
 ): Promise<void> {
   // complete 以外は母集団が欠けた記録であり、実測値として検出器へ渡すと
@@ -462,8 +475,6 @@ export async function generateFindingsForAggregateRefresh(
 
 /**
  * generateFindingsForCrawlCycle の入力。
- * Task 13 で processLabelAggregateRefresh からの呼び出しへ置き換え、
- * この型と generateFindingsForCrawlCycle 自体を削除する。
  */
 export interface GenerateFindingsForCrawlCycleInput {
   /** 対象の CrawlRun ID。 */
@@ -479,9 +490,8 @@ export interface GenerateFindingsForCrawlCycleInput {
 }
 
 /**
- * worker-processors.ts の未移行呼び出し元 (processFindingGeneration) 向けの
- * 互換 shim。CrawlRun 起点の識別子を triggerWorkItemId として委譲するだけで、
- * Task 13 で呼び出し元を processLabelAggregateRefresh へ差し替えた後に削除する。
+ * crawlRunId を triggerWorkItemId として generateFindingsForAggregateRefresh へ
+ * 委譲する薄いラッパー。
  * @param prisma - Prisma クライアント
  * @param input - 対象 crawl run と検出ポリシー
  */

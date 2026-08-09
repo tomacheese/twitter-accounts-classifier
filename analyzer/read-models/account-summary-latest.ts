@@ -23,23 +23,33 @@ export interface UpsertAccountSummaryLatestInput {
  * component は、その component の現在値をそのまま入力として渡す契約とする。
  * これにより Weekly Review 由来の finding 更新と crawler 由来の classification
  * 更新が同じ行を同時に更新しても、互いの component を巻き戻し合わない。
+ * `activeLabelKeys` が行ごとに長さの異なる配列のため `UNNEST` ではなく
+ * `jsonb_to_recordset` で複数行をまとめて渡す。bootstrap の 1 chunk に含まれる
+ * 全 Account 分を 1 回の呼び出しにまとめられるようにし、chunk 内で Account 数分の
+ * 往復が発生しないようにする。
  * @param prisma - Prisma クライアント
- * @param input - 3 watermark 分のフィールドを含む更新内容
+ * @param rows - 3 watermark 分のフィールドを含む更新内容の一覧
  */
 export async function upsertAccountSummaryLatest(
   prisma: PrismaClient,
-  input: UpsertAccountSummaryLatestInput,
+  rows: UpsertAccountSummaryLatestInput[],
 ): Promise<void> {
+  if (rows.length === 0) return
   await prisma.$executeRaw`
     INSERT INTO "AccountSummaryLatest" (
       "accountId", "normalizedScreenName", "normalizedDisplayName", "searchDocument", "profileObservedAt",
       "activeLabelKeys", "activeLabelCount", "lastClassificationChangedAt", "classificationObservedAt",
       "activeFindingCount", "highestFindingSeverity", "findingObservedAt", "updatedAt"
-    ) VALUES (
-      ${input.accountId}, ${input.normalizedScreenName}, ${input.normalizedDisplayName}, ${input.searchDocument},
-      ${input.profileObservedAt}, ${input.activeLabelKeys}, ${input.activeLabelCount},
-      ${input.lastClassificationChangedAt}, ${input.classificationObservedAt},
-      ${input.activeFindingCount}, ${input.highestFindingSeverity}, ${input.findingObservedAt}, now()
+    )
+    SELECT
+      "accountId", "normalizedScreenName", "normalizedDisplayName", "searchDocument", "profileObservedAt",
+      "activeLabelKeys", "activeLabelCount", "lastClassificationChangedAt", "classificationObservedAt",
+      "activeFindingCount", "highestFindingSeverity", "findingObservedAt", now()
+    FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS u(
+      "accountId" text, "normalizedScreenName" text, "normalizedDisplayName" text, "searchDocument" text,
+      "profileObservedAt" timestamp, "activeLabelKeys" text[], "activeLabelCount" int,
+      "lastClassificationChangedAt" timestamp, "classificationObservedAt" timestamp,
+      "activeFindingCount" int, "highestFindingSeverity" text, "findingObservedAt" timestamp
     )
     ON CONFLICT ("accountId") DO UPDATE SET
       "normalizedScreenName" = CASE
@@ -139,7 +149,6 @@ const ACCOUNT_SUMMARY_LATEST_MODEL_KEY = 'account_summary_latest'
 /**
  * `AccountSummaryLatest`/`AccountClassificationLatest` の更新が成功した直後に呼ぶ。
  * generation を持たないためレイアウトは `publishGeneration` と異なるが、
- * `lastSuccessAt`/`sourceWatermarkAt`/`status: 'healthy'` を記録する点は同じであり、
  * 経過時間からの delayed/stale 判定 (`refreshReadModelFreshness`) が
  * 汎用的にこの行も拾えるようにする。
  * @param prisma - Prisma クライアント

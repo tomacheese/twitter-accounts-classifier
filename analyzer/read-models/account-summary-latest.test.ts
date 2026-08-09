@@ -32,36 +32,40 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountSummaryLatest', () => {
     const classificationTime = new Date('2026-01-01T00:00:00Z')
     const profileTime = new Date('2026-01-02T00:00:00Z')
 
-    await upsertAccountSummaryLatest(prisma, {
-      accountId: account.id,
-      normalizedScreenName: 'alice',
-      normalizedDisplayName: 'alice',
-      searchDocument: 'alice alice',
-      profileObservedAt: classificationTime,
-      activeLabelKeys: ['test_label'],
-      activeLabelCount: 1,
-      lastClassificationChangedAt: classificationTime,
-      classificationObservedAt: classificationTime,
-      activeFindingCount: 0,
-      highestFindingSeverity: null,
-      findingObservedAt: null,
-    })
+    await upsertAccountSummaryLatest(prisma, [
+      {
+        accountId: account.id,
+        normalizedScreenName: 'alice',
+        normalizedDisplayName: 'alice',
+        searchDocument: 'alice alice',
+        profileObservedAt: classificationTime,
+        activeLabelKeys: ['test_label'],
+        activeLabelCount: 1,
+        lastClassificationChangedAt: classificationTime,
+        classificationObservedAt: classificationTime,
+        activeFindingCount: 0,
+        highestFindingSeverity: null,
+        findingObservedAt: null,
+      },
+    ])
 
     // profile のみ更新する呼び出し (classification は現状値をそのまま渡す)。
-    await upsertAccountSummaryLatest(prisma, {
-      accountId: account.id,
-      normalizedScreenName: 'alice_renamed',
-      normalizedDisplayName: 'alice_renamed',
-      searchDocument: 'alice_renamed alice_renamed',
-      profileObservedAt: profileTime,
-      activeLabelKeys: ['test_label'],
-      activeLabelCount: 1,
-      lastClassificationChangedAt: classificationTime,
-      classificationObservedAt: classificationTime,
-      activeFindingCount: 0,
-      highestFindingSeverity: null,
-      findingObservedAt: null,
-    })
+    await upsertAccountSummaryLatest(prisma, [
+      {
+        accountId: account.id,
+        normalizedScreenName: 'alice_renamed',
+        normalizedDisplayName: 'alice_renamed',
+        searchDocument: 'alice_renamed alice_renamed',
+        profileObservedAt: profileTime,
+        activeLabelKeys: ['test_label'],
+        activeLabelCount: 1,
+        lastClassificationChangedAt: classificationTime,
+        classificationObservedAt: classificationTime,
+        activeFindingCount: 0,
+        highestFindingSeverity: null,
+        findingObservedAt: null,
+      },
+    ])
 
     const row = await prisma.accountSummaryLatest.findUnique({
       where: { accountId: account.id },
@@ -95,20 +99,24 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountSummaryLatest', () => {
       highestFindingSeverity: null,
       findingObservedAt: null,
     }
-    await upsertAccountSummaryLatest(prisma, {
-      ...base,
-      profileObservedAt: newer,
-      activeLabelKeys: ['newer_label'],
-      lastClassificationChangedAt: newer,
-      classificationObservedAt: newer,
-    })
-    await upsertAccountSummaryLatest(prisma, {
-      ...base,
-      profileObservedAt: older,
-      activeLabelKeys: ['older_label'],
-      lastClassificationChangedAt: older,
-      classificationObservedAt: older,
-    })
+    await upsertAccountSummaryLatest(prisma, [
+      {
+        ...base,
+        profileObservedAt: newer,
+        activeLabelKeys: ['newer_label'],
+        lastClassificationChangedAt: newer,
+        classificationObservedAt: newer,
+      },
+    ])
+    await upsertAccountSummaryLatest(prisma, [
+      {
+        ...base,
+        profileObservedAt: older,
+        activeLabelKeys: ['older_label'],
+        lastClassificationChangedAt: older,
+        classificationObservedAt: older,
+      },
+    ])
 
     const row = await prisma.accountSummaryLatest.findUnique({
       where: { accountId: account.id },

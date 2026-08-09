@@ -1,11 +1,16 @@
 import { randomUUID } from 'node:crypto'
+import { Logger } from '@book000/node-utils'
 import { Prisma, type AnalysisWorkItem, type PrismaClient } from '../generated/prisma'
 import {
   upsertAccountClassificationLatest,
   upsertAccountSummaryLatest,
   touchAccountSummaryLatestState,
   markAccountSummaryLatestFailed,
+  type AccountClassificationLatestRow,
+  type UpsertAccountSummaryLatestInput,
 } from './account-summary-latest'
+
+const logger = Logger.configure('analyzer:account-summary-bootstrap')
 
 const MODEL_KEY = 'account_summary'
 const DEFAULT_CHUNK_SIZE = 2000
@@ -15,6 +20,18 @@ const PROGRESSABLE_WORK_ITEM_STATUSES = ['queued', 'leased', 'failed']
 
 /** ReviewFindingOccurrence.stateTransition のうち、Finding が open 状態であることを表す値。 */
 const OPEN_STATE_TRANSITIONS = new Set(['active', 'recurring', 'new_episode'])
+
+const SEVERITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 }
+
+/**
+ * @param a - 比較対象の severity (null は severity なし扱い)
+ * @param b - 比較対象の severity
+ * @returns より深刻な方の severity
+ */
+function maxSeverity(a: string | null, b: string): string {
+  if (!a) return b
+  return (SEVERITY_RANK[a] ?? 0) >= (SEVERITY_RANK[b] ?? 0) ? a : b
+}
 
 /**
  * `ReadModelBootstrap` 行が既に存在する場合に呼ぶ。status が `pending`/`running`
@@ -95,32 +112,40 @@ export interface ProcessAccountSummaryBootstrapOptions {
 interface ActiveFindingAtWatermark {
   primaryScopeId: string
   severity: string
+  sourceObservedAt: Date
 }
 
 /**
  * @param prisma - Prisma クライアント
  * @param accountIds - 対象 Account ID
+ * @param watermark - この時刻以前の Finding だけを対象にする
  * @returns Account ごとの active Finding 件数・最高 severity・観測時刻
  */
 async function findActiveFindingsForAccounts(
   prisma: PrismaClient,
   accountIds: string[],
+  watermark: Date,
 ): Promise<ActiveFindingAtWatermark[]> {
   if (accountIds.length === 0) return []
   const rows = await prisma.$queryRaw<
-    { primaryScopeId: string; severity: string; stateTransition: string }[]
+    { primaryScopeId: string; severity: string; stateTransition: string; sourceObservedAt: Date }[]
   >`
     SELECT DISTINCT ON (o."findingId")
-      f."primaryScopeId", o."severity", o."stateTransition"
+      f."primaryScopeId", o."severity", o."stateTransition", o."sourceObservedAt"
     FROM "ReviewFindingOccurrence" o
     JOIN "ReviewFinding" f ON f.id = o."findingId"
     WHERE f."primaryScopeType" = 'account'
       AND f."primaryScopeId" IN (${Prisma.join(accountIds)})
+      AND o."sourceObservedAt" <= ${watermark}
     ORDER BY o."findingId", o."sourceObservedAt" DESC, o.id DESC
   `
   return rows
     .filter((row) => OPEN_STATE_TRANSITIONS.has(row.stateTransition))
-    .map((row) => ({ primaryScopeId: row.primaryScopeId, severity: row.severity }))
+    .map((row) => ({
+      primaryScopeId: row.primaryScopeId,
+      severity: row.severity,
+      sourceObservedAt: row.sourceObservedAt,
+    }))
 }
 
 /**
@@ -179,7 +204,11 @@ export async function processAccountSummaryBootstrap(
         const accountIds = accounts.map((account) => account.id)
         const [labelLatestRows, activeFindings, labelDefinitions] = await Promise.all([
           tx.accountLabelLatest.findMany({ where: { accountId: { in: accountIds } } }),
-          findActiveFindingsForAccounts(tx as unknown as PrismaClient, accountIds),
+          findActiveFindingsForAccounts(
+            tx as unknown as PrismaClient,
+            accountIds,
+            chunkWatermarkAt ?? new Date(),
+          ),
           tx.labelDefinition.findMany({ select: { id: true, key: true } }),
         ])
         const labelKeyById = new Map(labelDefinitions.map((def) => [def.id, def.key]))
@@ -189,15 +218,24 @@ export async function processAccountSummaryBootstrap(
           list.push(row)
           labelsByAccount.set(row.accountId, list)
         }
-        const findingsByAccount = new Map<string, { count: number; highestSeverity: string }>()
+        const findingsByAccount = new Map<
+          string,
+          { count: number; highestSeverity: string; observedAt: Date }
+        >()
         for (const row of activeFindings) {
           const entry = findingsByAccount.get(row.primaryScopeId)
           findingsByAccount.set(row.primaryScopeId, {
             count: (entry?.count ?? 0) + 1,
-            highestSeverity: row.severity,
+            highestSeverity: maxSeverity(entry?.highestSeverity ?? null, row.severity),
+            observedAt:
+              entry && entry.observedAt > row.sourceObservedAt
+                ? entry.observedAt
+                : row.sourceObservedAt,
           })
         }
 
+        const summaryRows: UpsertAccountSummaryLatestInput[] = []
+        const classificationRows: AccountClassificationLatestRow[] = []
         for (const account of accounts) {
           const labels = labelsByAccount.get(account.id) ?? []
           const activeLabelKeys = labels
@@ -212,7 +250,7 @@ export async function processAccountSummaryBootstrap(
           }
           const finding = findingsByAccount.get(account.id)
 
-          await upsertAccountSummaryLatest(tx as unknown as PrismaClient, {
+          summaryRows.push({
             accountId: account.id,
             normalizedScreenName: account.screenName.toLowerCase(),
             normalizedDisplayName: account.displayName.toLowerCase(),
@@ -224,11 +262,10 @@ export async function processAccountSummaryBootstrap(
             classificationObservedAt,
             activeFindingCount: finding?.count ?? 0,
             highestFindingSeverity: finding?.highestSeverity ?? null,
-            findingObservedAt: finding ? account.lastCrawledAt : null,
+            findingObservedAt: finding?.observedAt ?? null,
           })
-          await upsertAccountClassificationLatest(
-            tx as unknown as PrismaClient,
-            labels.map((label) => ({
+          for (const label of labels) {
+            classificationRows.push({
               accountId: label.accountId,
               labelDefinitionId: label.labelDefinitionId,
               value: label.value,
@@ -238,9 +275,11 @@ export async function processAccountSummaryBootstrap(
               ruleVersion: label.ruleVersion,
               observedAt: label.labeledAt,
               sourceObservationId: null,
-            })),
-          )
+            })
+          }
         }
+        await upsertAccountSummaryLatest(tx as unknown as PrismaClient, summaryRows)
+        await upsertAccountClassificationLatest(tx as unknown as PrismaClient, classificationRows)
       }
 
       const nextCursor = accounts.at(-1)?.id ?? state.cursor
@@ -291,7 +330,16 @@ export async function processAccountSummaryBootstrap(
       await touchAccountSummaryLatestState(prisma, chunkWatermarkAt)
     }
   } catch (error) {
-    await markAccountSummaryLatestFailed(prisma, String(error))
+    // 失敗記録の書き込みが更に失敗しても、呼び出し元へは本来の原因を伝える。
+    try {
+      await prisma.readModelBootstrap.updateMany({
+        where: { modelKey: MODEL_KEY, status: { not: 'completed' } },
+        data: { status: 'failed', errorSummary: String(error) },
+      })
+      await markAccountSummaryLatestFailed(prisma, String(error))
+    } catch (bookkeepingError) {
+      logger.error(`failed to record account_summary_bootstrap failure`, bookkeepingError as Error)
+    }
     throw error
   }
 }

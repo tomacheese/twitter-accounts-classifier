@@ -27,7 +27,6 @@ function computePrevalence(evaluatedCount: number, trueCount: number): number {
 // 過去の比較対象としては、集計が完全に成立した snapshot だけを使う。
 // partial・unknown を比較対象に混ぜると、実際には検出できていない変化を
 // prevalence の増減として誤って見せてしまう。
-/** 集計に成功した snapshot だけを対象にする where 条件。 */
 const COMPLETED_SNAPSHOT_FILTER = { completeness: 'complete' } as const
 
 /**
@@ -70,8 +69,8 @@ async function findSnapshotAtOrBefore(
 }
 
 /**
- * 今回の triggerWorkItemId の snapshot set (Task 10 の buildLabelAggregateSnapshotSet
- * が構築した、全 LabelDefinition 分の一貫した snapshot 群) から LabelSummaryCurrent を
+ * 今回の triggerWorkItemId の snapshot set (buildLabelAggregateSnapshotSet が
+ * 構築した、全 LabelDefinition 分の一貫した snapshot 群) から LabelSummaryCurrent を
  * 構築し、Label 詳細のトレンドが参照する LabelMetricDaily も併せて更新する。
  * completeness が complete でない snapshot (unknown・partial) も、古い complete
  * snapshot へフォールバックせずそのまま今回の値として採用する。fallback すると

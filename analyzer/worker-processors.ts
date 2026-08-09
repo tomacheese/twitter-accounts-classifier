@@ -31,7 +31,6 @@ import {
   findPreviousLabelAtWatermarkForAccount,
 } from './read-models/build-account-summary-latest-row'
 import {
-  markAccountSummaryLatestFailed,
   touchAccountSummaryLatestState,
   upsertAccountClassificationLatest,
   upsertAccountSummaryLatest,
@@ -129,38 +128,38 @@ export async function processAccountSummaryRefresh(
   prisma: PrismaClient,
   workItem: AnalysisWorkItem,
 ): Promise<void> {
-  try {
-    const observation = await prisma.accountClassificationObservation.findUniqueOrThrow({
-      where: { id: workItem.triggerId },
-    })
-    const account = await prisma.account.findUniqueOrThrow({
-      where: { id: observation.accountId },
-    })
-    const [labels, previousLabels, existing] = await Promise.all([
-      findLabelsAtWatermarkForAccount(prisma, observation.accountId, observation.observedAt),
-      findPreviousLabelAtWatermarkForAccount(prisma, observation.accountId, observation.observedAt),
-      prisma.accountSummaryLatest.findUnique({ where: { accountId: observation.accountId } }),
-    ])
-    const previousByLabelDefinitionId = new Map(
-      previousLabels.map((label) => [label.labelDefinitionId, label]),
-    )
-    const labelDefinitions = await prisma.labelDefinition.findMany({
-      select: { id: true, key: true },
-    })
-    const labelKeyById = new Map(
-      labelDefinitions.map((definition) => [definition.id, definition.key]),
-    )
+  const observation = await prisma.accountClassificationObservation.findUniqueOrThrow({
+    where: { id: workItem.triggerId },
+  })
+  const account = await prisma.account.findUniqueOrThrow({
+    where: { id: observation.accountId },
+  })
+  const [labels, previousLabels, existing] = await Promise.all([
+    findLabelsAtWatermarkForAccount(prisma, observation.accountId, observation.observedAt),
+    findPreviousLabelAtWatermarkForAccount(prisma, observation.accountId, observation.observedAt),
+    prisma.accountSummaryLatest.findUnique({ where: { accountId: observation.accountId } }),
+  ])
+  const previousByLabelDefinitionId = new Map(
+    previousLabels.map((label) => [label.labelDefinitionId, label]),
+  )
+  const labelDefinitions = await prisma.labelDefinition.findMany({
+    select: { id: true, key: true },
+  })
+  const labelKeyById = new Map(
+    labelDefinitions.map((definition) => [definition.id, definition.key]),
+  )
 
-    const activeLabelKeys = labels
-      .filter((label) => label.value)
-      .map((label) => labelKeyById.get(label.labelDefinitionId))
-      .filter((key): key is string => key !== undefined)
-    const changed = existing
-      ? !isSameLabelKeySet(existing.activeLabelKeys, activeLabelKeys)
-      : activeLabelKeys.length > 0
+  const activeLabelKeys = labels
+    .filter((label) => label.value)
+    .map((label) => labelKeyById.get(label.labelDefinitionId))
+    .filter((key): key is string => key !== undefined)
+  const changed = existing
+    ? !isSameLabelKeySet(existing.activeLabelKeys, activeLabelKeys)
+    : activeLabelKeys.length > 0
 
-    await prisma.$transaction(async (tx) => {
-      await upsertAccountSummaryLatest(tx as unknown as PrismaClient, {
+  await prisma.$transaction(async (tx) => {
+    await upsertAccountSummaryLatest(tx as unknown as PrismaClient, [
+      {
         accountId: observation.accountId,
         normalizedScreenName: account.screenName.toLowerCase(),
         normalizedDisplayName: account.displayName.toLowerCase(),
@@ -178,65 +177,62 @@ export async function processAccountSummaryRefresh(
         activeFindingCount: existing?.activeFindingCount ?? 0,
         highestFindingSeverity: existing?.highestFindingSeverity ?? null,
         findingObservedAt: existing?.findingObservedAt ?? null,
-      })
-      await upsertAccountClassificationLatest(
-        tx as unknown as PrismaClient,
-        labels.map((label) => ({
-          accountId: label.accountId,
-          labelDefinitionId: label.labelDefinitionId,
-          value: label.value,
-          confidence: label.confidence,
-          reason: label.reason,
-          method: label.method,
-          ruleVersion: label.ruleVersion,
-          observedAt: observation.observedAt,
-          sourceObservationId: observation.id,
-        })),
-      )
+      },
+    ])
+    await upsertAccountClassificationLatest(
+      tx as unknown as PrismaClient,
+      labels.map((label) => ({
+        accountId: label.accountId,
+        labelDefinitionId: label.labelDefinitionId,
+        value: label.value,
+        confidence: label.confidence,
+        reason: label.reason,
+        method: label.method,
+        ruleVersion: label.ruleVersion,
+        observedAt: observation.observedAt,
+        sourceObservationId: observation.id,
+      })),
+    )
 
-      for (const label of labels) {
-        const previous = previousByLabelDefinitionId.get(label.labelDefinitionId)
-        let changeType: string | undefined
-        if (previous === undefined) {
-          if (label.value) changeType = 'added'
-        } else if (previous.value !== label.value) {
-          changeType = label.value ? 'added' : 'removed'
-        } else if (previous.confidence !== label.confidence || previous.reason !== label.reason) {
-          changeType = 'updated'
-        }
-        if (!changeType) continue
+    for (const label of labels) {
+      const previous = previousByLabelDefinitionId.get(label.labelDefinitionId)
+      let changeType: string | undefined
+      if (previous === undefined) {
+        if (label.value) changeType = 'added'
+      } else if (previous.value !== label.value) {
+        changeType = label.value ? 'added' : 'removed'
+      } else if (previous.confidence !== label.confidence || previous.reason !== label.reason) {
+        changeType = 'updated'
+      }
+      if (!changeType) continue
 
-        await (tx as unknown as PrismaClient).accountLabelChange.upsert({
-          where: {
-            accountId_labelDefinitionId_changedAt: {
-              accountId: label.accountId,
-              labelDefinitionId: label.labelDefinitionId,
-              changedAt: label.labeledAt,
-            },
-          },
-          create: {
+      await (tx as unknown as PrismaClient).accountLabelChange.upsert({
+        where: {
+          accountId_labelDefinitionId_changedAt: {
             accountId: label.accountId,
             labelDefinitionId: label.labelDefinitionId,
-            changeType,
-            previousValue: previous?.value ?? null,
-            newValue: label.value,
-            previousConfidence: previous?.confidence ?? null,
-            newConfidence: label.confidence,
-            previousReason: previous?.reason ?? null,
-            newReason: label.reason,
-            sourceId: observation.crawlRunId,
             changedAt: label.labeledAt,
           },
-          update: {},
-        })
-      }
-    })
+        },
+        create: {
+          accountId: label.accountId,
+          labelDefinitionId: label.labelDefinitionId,
+          changeType,
+          previousValue: previous?.value ?? null,
+          newValue: label.value,
+          previousConfidence: previous?.confidence ?? null,
+          newConfidence: label.confidence,
+          previousReason: previous?.reason ?? null,
+          newReason: label.reason,
+          sourceId: observation.crawlRunId,
+          changedAt: label.labeledAt,
+        },
+        update: {},
+      })
+    }
+  })
 
-    await touchAccountSummaryLatestState(prisma, observation.observedAt)
-  } catch (error) {
-    await markAccountSummaryLatestFailed(prisma, String(error))
-    throw error
-  }
+  await touchAccountSummaryLatestState(prisma, observation.observedAt)
 }
 
 /**
@@ -249,25 +245,25 @@ export async function processAccountFindingRefresh(
   prisma: PrismaClient,
   workItem: AnalysisWorkItem,
 ): Promise<void> {
-  try {
-    const occurrence = await prisma.reviewFindingOccurrence.findUniqueOrThrow({
-      where: { id: workItem.triggerId },
-      include: { finding: true },
-    })
-    if (occurrence.finding.primaryScopeType !== 'account') return
-    const accountId = occurrence.finding.primaryScopeId
-    const account = await prisma.account.findUniqueOrThrow({ where: { id: accountId } })
-    const [activeFindings, existing] = await Promise.all([
-      findActiveFindingsAtWatermarkForAccount(prisma, accountId, occurrence.sourceObservedAt),
-      prisma.accountSummaryLatest.findUnique({ where: { accountId } }),
-    ])
+  const occurrence = await prisma.reviewFindingOccurrence.findUniqueOrThrow({
+    where: { id: workItem.triggerId },
+    include: { finding: true },
+  })
+  if (occurrence.finding.primaryScopeType !== 'account') return
+  const accountId = occurrence.finding.primaryScopeId
+  const account = await prisma.account.findUniqueOrThrow({ where: { id: accountId } })
+  const [activeFindings, existing] = await Promise.all([
+    findActiveFindingsAtWatermarkForAccount(prisma, accountId, occurrence.sourceObservedAt),
+    prisma.accountSummaryLatest.findUnique({ where: { accountId } }),
+  ])
 
-    let highestFindingSeverity: string | null = null
-    for (const finding of activeFindings) {
-      highestFindingSeverity = maxAccountFindingSeverity(highestFindingSeverity, finding.severity)
-    }
+  let highestFindingSeverity: string | null = null
+  for (const finding of activeFindings) {
+    highestFindingSeverity = maxAccountFindingSeverity(highestFindingSeverity, finding.severity)
+  }
 
-    await upsertAccountSummaryLatest(prisma, {
+  await upsertAccountSummaryLatest(prisma, [
+    {
       accountId,
       normalizedScreenName: existing?.normalizedScreenName ?? account.screenName.toLowerCase(),
       normalizedDisplayName: existing?.normalizedDisplayName ?? account.displayName.toLowerCase(),
@@ -281,12 +277,9 @@ export async function processAccountFindingRefresh(
       activeFindingCount: activeFindings.length,
       highestFindingSeverity,
       findingObservedAt: occurrence.sourceObservedAt,
-    })
-    await touchAccountSummaryLatestState(prisma, occurrence.sourceObservedAt)
-  } catch (error) {
-    await markAccountSummaryLatestFailed(prisma, String(error))
-    throw error
-  }
+    },
+  ])
+  await touchAccountSummaryLatestState(prisma, occurrence.sourceObservedAt)
 }
 
 const DEFAULT_READ_MODEL_CADENCE = 'PT1H'
@@ -352,7 +345,7 @@ export async function processLabelAggregateRefresh(
     await runLabelFindingsSerialized(prisma, {
       snapshotAt,
       run: (tx) =>
-        generateFindingsForAggregateRefresh(tx as unknown as PrismaClient, {
+        generateFindingsForAggregateRefresh(tx, {
           triggerWorkItemId: workItem.id,
           policy,
           policyHash,

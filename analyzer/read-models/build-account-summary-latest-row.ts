@@ -38,10 +38,7 @@ export async function findLabelsAtWatermarkForAccount(
 /**
  * 1 Account 分の「直前のラベル値」を `AccountLabel` 履歴から watermark 時点で復元する。
  * `AccountLabelChange` の生成に使う。`findLabelsAtWatermarkForAccount` が返す
- * 最新行そのものではなく、その 1 つ前の履歴行 (同じ labelDefinitionId で
- * 2 番目に新しい行) を返す。既存の `build-account-summary.ts` の
- * `findPreviousLabelsAtWatermark` と同じ `ROW_NUMBER() OVER (...) = 2` パターンを
- * 1 Account 向けに使う。
+ * 最新行ではなく、その 1 つ前の履歴行を返す。
  * @param prisma - Prisma クライアント
  * @param accountId - 対象アカウント
  * @param sourceWatermarkAt - 復元する基準時刻
