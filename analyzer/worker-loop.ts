@@ -33,6 +33,8 @@ const HANDLED_KINDS = [
 export interface WorkerLoopDeps {
   /** claim した worker を識別する文字列。 */
   leaseOwner: string
+  /** lease 更新専用 Prisma client。処理用 pool と分離して長時間 query の影響を受けない。 */
+  leasePrisma?: PrismaClient
   /** lease の有効期間 (ミリ秒)。 */
   leaseDurationMs?: number
   /** lease 更新間隔 (ミリ秒)。テストや特殊運用向け。既定は leaseDurationMs の 1/3。 */
@@ -140,7 +142,7 @@ export async function runWorkerLoopOnce(
   let renewalPromise: Promise<void> | undefined
   const leaseRenewTimer = setInterval(() => {
     if (renewalPromise) return
-    renewalPromise = renewWorkItemLease(prisma, {
+    renewalPromise = renewWorkItemLease(deps.leasePrisma ?? prisma, {
       workItemId: workItem.id,
       leaseOwner: deps.leaseOwner,
       leaseDurationMs,
