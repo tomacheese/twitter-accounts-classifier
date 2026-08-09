@@ -19,7 +19,22 @@ export interface BlockAccountRunView {
   blockedCount: number
   failedCount: number
   status: string
+  errorMessage: string | null
   actions: BlockActionView[]
+}
+
+/**
+ * 中断・再開により同じ username の BlockAccountRun が複数残ることがあるため、
+ * 一番新しい試行のみ残す。
+ * @param accountRuns - startedAt 昇順の BlockAccountRun 一覧
+ * @returns username ごとに最新の 1 件へ絞った一覧
+ */
+function latestByUsername<T extends { username: string }>(accountRuns: T[]): T[] {
+  const latestByUsernameMap = new Map<string, T>()
+  for (const run of accountRuns) {
+    latestByUsernameMap.set(run.username, run)
+  }
+  return [...latestByUsernameMap.values()]
 }
 
 /**
@@ -31,10 +46,11 @@ export async function getBlockAccountRunsWithActions(
   prisma: PrismaClient,
   blockRunId: string,
 ): Promise<BlockAccountRunView[]> {
-  const accountRuns = await prisma.blockAccountRun.findMany({
+  const allAccountRuns = await prisma.blockAccountRun.findMany({
     where: { blockRunId },
     orderBy: [{ startedAt: 'asc' }],
   })
+  const accountRuns = latestByUsername(allAccountRuns)
   const accountRunIds = accountRuns.map((run) => run.id)
   const actions = await prisma.blockAction.findMany({
     where: { blockAccountRunId: { in: accountRunIds } },
@@ -78,6 +94,7 @@ export async function getBlockAccountRunsWithActions(
     blockedCount: run.blockedCount,
     failedCount: run.failedCount,
     status: run.status,
+    errorMessage: run.errorMessage,
     actions: actionsByAccountRunId.get(run.id) ?? [],
   }))
 }

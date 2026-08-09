@@ -95,7 +95,7 @@ export async function startOrResumeBlockRun(
   prisma: PrismaClient,
   startedAt: Date,
   staleThresholdMs: number,
-): Promise<{ id: string }> {
+): Promise<{ id: string; completedUsernames: string[] }> {
   const existingRun = await prisma.blockRun.findFirst({
     where: { status: 'running' },
     orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
@@ -105,7 +105,32 @@ export async function startOrResumeBlockRun(
   if (existingRun) {
     const isStale = startedAt.getTime() - existingRun.lastHeartbeatAt.getTime() > staleThresholdMs
     if (!isStale) {
-      return { id: existingRun.id }
+      return prisma.$transaction(async (tx) => {
+        await tx.blockRun.update({
+          where: { id: existingRun.id },
+          data: {
+            lastHeartbeatAt: startedAt,
+            staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
+          },
+        })
+        await tx.blockAccountRun.updateMany({
+          where: { blockRunId: existingRun.id, status: 'running' },
+          data: {
+            status: 'failed',
+            finishedAt: startedAt,
+            errorMessage: 'blocker restarted before account run completed',
+          },
+        })
+        const completedRuns = await tx.blockAccountRun.findMany({
+          where: { blockRunId: existingRun.id, status: 'completed' },
+          select: { username: true },
+          distinct: ['username'],
+        })
+        return {
+          id: existingRun.id,
+          completedUsernames: [...new Set(completedRuns.map((run) => run.username))],
+        }
+      })
     }
 
     logger.warn(
@@ -123,7 +148,7 @@ export async function startOrResumeBlockRun(
       staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
     },
   })
-  return { id: run.id }
+  return { id: run.id, completedUsernames: [] }
 }
 
 /**

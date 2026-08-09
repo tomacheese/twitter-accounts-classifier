@@ -108,9 +108,10 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
   const staleThresholdMs = getBlockIntervalSeconds() * getBlockStaleThresholdMultiplier() * 1000
   const run = await deps.startOrResumeBlockRun(deps.prisma, startedAt, staleThresholdMs)
   const summaries: AccountRunSummary[] = []
+  const completedUsernames = new Set(run.completedUsernames)
   const targetAccounts = deps.config.accounts.filter(
     (account): account is Extract<BlockerAccountConfig, { blockEnabled: true }> =>
-      account.blockEnabled,
+      account.blockEnabled && !completedUsernames.has(account.username),
   )
 
   for (const account of targetAccounts) {

@@ -1,16 +1,25 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
 import {
+  getBlockCycleDetail,
   getCrawlCycleDetail,
   getWeeklyReviewCycleDetail,
   listOperationCycles,
 } from './operation-cycles'
 
-function createMockPrisma(overrides: { cycles?: unknown[]; cycle?: unknown }) {
+function createMockPrisma(overrides: {
+  cycles?: unknown[]
+  cycle?: unknown
+  blockAccountRuns?: unknown[]
+}) {
   const findMany = vi.fn().mockResolvedValue(overrides.cycles ?? [])
   const findUnique = vi.fn().mockResolvedValue(overrides.cycle ?? null)
-  const prisma = { operationCycle: { findMany, findUnique } } as unknown as PrismaClient
-  return { prisma, findMany, findUnique }
+  const queryRaw = vi.fn().mockResolvedValue(overrides.blockAccountRuns ?? [])
+  const prisma = {
+    operationCycle: { findMany, findUnique },
+    $queryRaw: queryRaw,
+  } as unknown as PrismaClient
+  return { prisma, findMany, findUnique, queryRaw }
 }
 
 describe('listOperationCycles', () => {
@@ -94,5 +103,42 @@ describe('getWeeklyReviewCycleDetail', () => {
   it('kind: weekly_review でなければ null を返す', async () => {
     const { prisma } = createMockPrisma({ cycle: baseCycle })
     expect(await getWeeklyReviewCycleDetail(prisma, 'cycle-1')).toBeNull()
+  })
+})
+
+describe('getBlockCycleDetail', () => {
+  it('BlockRun sourceId から username ごとの最新 BlockAccountRun 内訳を返す', async () => {
+    const cycle = {
+      ...baseCycle,
+      kind: 'block',
+      sourceType: 'block_run',
+      sourceId: 'block-run-1',
+    }
+    const latestAccountRuns = [
+      {
+        id: 'account-run-alice-latest',
+        username: 'alice',
+        status: 'completed',
+        startedAt: new Date('2026-08-07T00:01:00.000Z'),
+        finishedAt: new Date('2026-08-07T00:02:00.000Z'),
+        candidatesCount: 12,
+        blockedCount: 10,
+        failedCount: 2,
+        errorMessage: null,
+      },
+    ]
+    const { prisma, queryRaw } = createMockPrisma({
+      cycle,
+      blockAccountRuns: latestAccountRuns,
+    })
+
+    const detail = await getBlockCycleDetail(prisma, 'cycle-1')
+
+    expect(detail?.accountRuns).toEqual(latestAccountRuns)
+    expect(queryRaw).toHaveBeenCalledOnce()
+    expect(queryRaw.mock.calls[0]?.[1]).toBe('block-run-1')
+    const sql = (queryRaw.mock.calls[0]?.[0] as TemplateStringsArray).join('')
+    expect(sql).toContain('DISTINCT ON ("username")')
+    expect(sql).toContain('"startedAt" DESC, "id" DESC')
   })
 })

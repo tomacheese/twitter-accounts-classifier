@@ -171,6 +171,7 @@ export default async function BlockCycleDetailPage({
                   <th className="p-2">Candidates</th>
                   <th className="p-2">Blocked</th>
                   <th className="p-2">Failed</th>
+                  <th className="p-2">Error</th>
                   <th className="p-2">Actions</th>
                 </tr>
               </thead>
@@ -184,6 +185,7 @@ export default async function BlockCycleDetailPage({
                     <td className="p-2">{run.candidatesCount}</td>
                     <td className="p-2">{run.blockedCount}</td>
                     <td className="p-2">{run.failedCount}</td>
+                    <td className="p-2">{run.errorMessage ?? '—'}</td>
                     <td className="p-2">
                       <ActionsCell actions={run.actions} />
                     </td>

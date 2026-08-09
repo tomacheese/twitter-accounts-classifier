@@ -67,6 +67,7 @@ export interface BuildLabelAggregateSnapshotSetResult {
 
 /** 1 (value, reason, ruleVersion, confidenceBucket) 組み合わせ分の集計行。 */
 interface AggregateSnapshotRow {
+  labelDefinitionId: string
   value: boolean
   reason: string
   ruleVersion: string
@@ -135,29 +136,40 @@ export async function buildLabelAggregateSnapshotSet(
       const delayedAfterSeconds = freshnessThresholds.delayedAfterMs / 1000
       const staleAfterSeconds = freshnessThresholds.staleAfterMs / 1000
 
+      const aggregateRows: AggregateSnapshotRow[] =
+        labelDefinitions.length === 0
+          ? []
+          : await tx.$queryRaw<AggregateSnapshotRow[]>`
+              SELECT
+                "labelDefinitionId", "value", "reason", "ruleVersion",
+                LEAST(FLOOR("confidence" * 10), 9)::int AS "confidenceBucket",
+                COUNT(*) AS "count",
+                SUM("confidence") AS "confidenceSum",
+                COUNT(*) FILTER (
+                  WHERE ${sharedSnapshotAt}::timestamp - "observedAt" <= make_interval(secs => ${delayedAfterSeconds})
+                ) AS "currentCount",
+                COUNT(*) FILTER (
+                  WHERE ${sharedSnapshotAt}::timestamp - "observedAt" > make_interval(secs => ${delayedAfterSeconds})
+                    AND ${sharedSnapshotAt}::timestamp - "observedAt" <= make_interval(secs => ${staleAfterSeconds})
+                ) AS "delayedCount",
+                COUNT(*) FILTER (
+                  WHERE ${sharedSnapshotAt}::timestamp - "observedAt" > make_interval(secs => ${staleAfterSeconds})
+                ) AS "staleCount"
+              FROM "AccountClassificationLatest"
+              WHERE "labelDefinitionId" IN (${Prisma.join(labelDefinitions.map((label) => label.id))})
+              GROUP BY 1, 2, 3, 4, 5
+            `
+
+      const rowsByLabelDefinitionId = new Map<string, AggregateSnapshotRow[]>()
+      for (const row of aggregateRows) {
+        const rows = rowsByLabelDefinitionId.get(row.labelDefinitionId) ?? []
+        rows.push(row)
+        rowsByLabelDefinitionId.set(row.labelDefinitionId, rows)
+      }
+
       await Promise.all(
         labelDefinitions.map(async (label) => {
-          const rows = await tx.$queryRaw<AggregateSnapshotRow[]>`
-            SELECT
-              "value", "reason", "ruleVersion",
-              LEAST(FLOOR("confidence" * 10), 9)::int AS "confidenceBucket",
-              COUNT(*) AS "count",
-              SUM("confidence") AS "confidenceSum",
-              COUNT(*) FILTER (
-                WHERE ${sharedSnapshotAt}::timestamp - "observedAt" <= make_interval(secs => ${delayedAfterSeconds})
-              ) AS "currentCount",
-              COUNT(*) FILTER (
-                WHERE ${sharedSnapshotAt}::timestamp - "observedAt" > make_interval(secs => ${delayedAfterSeconds})
-                  AND ${sharedSnapshotAt}::timestamp - "observedAt" <= make_interval(secs => ${staleAfterSeconds})
-              ) AS "delayedCount",
-              COUNT(*) FILTER (
-                WHERE ${sharedSnapshotAt}::timestamp - "observedAt" > make_interval(secs => ${staleAfterSeconds})
-              ) AS "staleCount"
-            FROM "AccountClassificationLatest"
-            WHERE "labelDefinitionId" = ${label.id}
-            GROUP BY 1, 2, 3, 4
-          `
-
+          const rows = rowsByLabelDefinitionId.get(label.id) ?? []
           let evaluatedCount = 0
           let trueCount = 0
           let trueConfidenceSum = 0
@@ -244,7 +256,10 @@ export async function buildLabelAggregateSnapshotSet(
 
       return sharedSnapshotAt
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      timeout: 120_000,
+    },
   )
 
   return { triggerWorkItemId: input.triggerWorkItemId, snapshotAt, reused: false }

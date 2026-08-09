@@ -7,6 +7,7 @@ import {
 } from './worker-loop'
 import { LabelAggregateRefreshError } from './worker-processors'
 
+const deadLetterExhaustedWorkItem = vi.fn()
 const claimNextWorkItem = vi.fn()
 const completeWorkItem = vi.fn()
 const renewWorkItemLease = vi.fn()
@@ -28,6 +29,8 @@ vi.mock('@book000/node-utils', () => ({
 }))
 
 vi.mock('./queue/work-item-repository', () => ({
+  deadLetterExhaustedWorkItem: (...args: unknown[]): unknown =>
+    deadLetterExhaustedWorkItem(...args) as unknown,
   claimNextWorkItem: (...args: unknown[]): unknown => claimNextWorkItem(...args) as unknown,
   completeWorkItem: (...args: unknown[]): unknown => completeWorkItem(...args) as unknown,
   renewWorkItemLease: (...args: unknown[]): unknown => renewWorkItemLease(...args) as unknown,
@@ -84,6 +87,7 @@ const leasePrisma = { lease: true } as unknown as PrismaClient
 
 describe('runWorkerLoopOnce', () => {
   beforeEach(() => {
+    deadLetterExhaustedWorkItem.mockReset().mockResolvedValue(undefined)
     claimNextWorkItem.mockReset()
     completeWorkItem.mockReset().mockResolvedValue(true)
     renewWorkItemLease.mockReset().mockResolvedValue(true)
@@ -92,6 +96,25 @@ describe('runWorkerLoopOnce', () => {
     finishAnalysisRun.mockReset().mockResolvedValue(undefined)
     loggerWarn.mockReset()
     loggerError.mockReset()
+  })
+
+  it('maxAttempts 到達済みの期限切れ WorkItem は processor を再実行せず dead として settle する', async () => {
+    deadLetterExhaustedWorkItem.mockResolvedValue(
+      makeWorkItem({ status: 'dead', attemptCount: 5, maxAttempts: 5, leaseOwner: null }),
+    )
+    const deps = makeDeps()
+
+    const result = await runWorkerLoopOnce(prisma, deps)
+
+    expect(result).toBe(true)
+    expect(claimNextWorkItem).not.toHaveBeenCalled()
+    expect(deps.processLabelAggregateRefresh).not.toHaveBeenCalled()
+    expect(startAnalysisRun).not.toHaveBeenCalled()
+    expect(deps.onWorkItemSettled).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({ id: 'work-item-1', status: 'dead' }),
+      expect.objectContaining({ status: 'dead' }),
+    )
   })
 
   it('queue が空なら false を返し、どの処理関数も呼ばない', async () => {

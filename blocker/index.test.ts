@@ -31,7 +31,7 @@ describe('runBlockCycle', () => {
     const reconcileAccountOutbox = vi.fn().mockResolvedValue(undefined)
     const deps = {
       config,
-      startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1' }),
+      startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1', completedUsernames: [] }),
       finishBlockRun: vi.fn().mockResolvedValue(undefined),
       touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
       runBlockAccountCycle,
@@ -65,6 +65,63 @@ describe('runBlockCycle', () => {
     )
   })
 
+  it('resume した BlockRun では completed 済み username を再処理しない', async () => {
+    const config: BlockerAppConfig = {
+      accounts: [
+        {
+          email: 'a@example.com',
+          username: 'alice',
+          password: 'p',
+          otpSecret: null,
+          blockEnabled: true,
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+        },
+        {
+          email: 'b@example.com',
+          username: 'bob',
+          password: 'p',
+          otpSecret: null,
+          blockEnabled: true,
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+        },
+      ],
+      discordWebhookUrl: null,
+    }
+    const runBlockAccountCycle = vi
+      .fn()
+      .mockResolvedValue({ username: 'bob', blockedCount: 1, failedCount: 0, failed: false })
+    const deps = {
+      config,
+      startOrResumeBlockRun: vi.fn().mockResolvedValue({
+        id: 'run-1',
+        completedUsernames: ['alice'],
+      }),
+      finishBlockRun: vi.fn().mockResolvedValue(undefined),
+      touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
+      runBlockAccountCycle,
+      notifyDiscord: vi.fn().mockResolvedValue(undefined),
+      prisma: {},
+    }
+
+    await runBlockCycle(deps as never)
+
+    expect(runBlockAccountCycle).toHaveBeenCalledTimes(1)
+    expect(runBlockAccountCycle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ username: 'bob' }),
+      'run-1',
+    )
+    expect(deps.notifyDiscord).toHaveBeenCalledWith(null, [
+      { username: 'bob', blockedCount: 1, failedCount: 0, failed: false },
+    ])
+    expect(deps.finishBlockRun).toHaveBeenCalledWith(
+      deps.prisma,
+      'run-1',
+      expect.any(Date),
+      'completed',
+    )
+  })
+
   it('continues to the next account, notifies, and marks the run failed when one account cycle throws', async () => {
     const config: BlockerAppConfig = {
       accounts: [
@@ -83,7 +140,7 @@ describe('runBlockCycle', () => {
     const notifyDiscord = vi.fn().mockResolvedValue(undefined)
     const deps = {
       config,
-      startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1' }),
+      startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1', completedUsernames: [] }),
       finishBlockRun: vi.fn().mockResolvedValue(undefined),
       touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
       runBlockAccountCycle,

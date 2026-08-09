@@ -111,6 +111,28 @@ export interface OperationCycleDetailView {
   stages: OperationStageView[]
 }
 
+/** Block Cycle 詳細に表示する、実行元アカウント単位の最新試行。 */
+export interface BlockAccountRunView {
+  id: string
+  username: string
+  status: string
+  startedAt: Date
+  finishedAt: Date | null
+  candidatesCount: number
+  blockedCount: number
+  failedCount: number
+  errorMessage: string | null
+}
+
+/** Block Cycle 専用の詳細表示。 */
+export interface BlockOperationCycleDetailView extends OperationCycleDetailView {
+  accountRuns: BlockAccountRunView[]
+}
+
+interface OperationCycleDetailRecord extends OperationCycleDetailView {
+  sourceId: string
+}
+
 /**
  * @param prisma - Prisma クライアント
  * @param cycleId - 対象 OperationCycle の ID
@@ -119,7 +141,7 @@ export interface OperationCycleDetailView {
 async function getCycleDetail(
   prisma: PrismaClient,
   cycleId: string,
-): Promise<OperationCycleDetailView | null> {
+): Promise<OperationCycleDetailRecord | null> {
   const cycle = await prisma.operationCycle.findUnique({
     where: { id: cycleId },
     include: { stages: { orderBy: [{ sequence: 'asc' }] } },
@@ -182,7 +204,25 @@ export async function getWeeklyReviewCycleDetail(
 export async function getBlockCycleDetail(
   prisma: PrismaClient,
   cycleId: string,
-): Promise<OperationCycleDetailView | null> {
+): Promise<BlockOperationCycleDetailView | null> {
   const detail = await getCycleDetail(prisma, cycleId)
-  return detail?.kind === 'block' ? detail : null
+  if (detail?.kind !== 'block') return null
+
+  const accountRuns = await prisma.$queryRaw<BlockAccountRunView[]>`
+    SELECT DISTINCT ON ("username")
+      "id",
+      "username",
+      "status",
+      "startedAt",
+      "finishedAt",
+      "candidatesCount",
+      "blockedCount",
+      "failedCount",
+      "errorMessage"
+    FROM "BlockAccountRun"
+    WHERE "blockRunId" = ${detail.sourceId}
+    ORDER BY "username", "startedAt" DESC, "id" DESC
+  `
+
+  return { ...detail, accountRuns }
 }

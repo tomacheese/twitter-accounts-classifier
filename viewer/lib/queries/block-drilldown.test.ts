@@ -101,4 +101,34 @@ describe('getBlockAccountRunsWithActions', () => {
       outboxStatus: null,
     })
   })
+
+  it('同じ username の BlockAccountRun が複数あれば最新の 1 件だけ返す', async () => {
+    const { prisma } = createMockPrisma({
+      accountRuns: [
+        {
+          id: 'bar-1-old',
+          username: 'alice',
+          candidatesCount: 1,
+          blockedCount: 0,
+          failedCount: 1,
+          status: 'failed',
+          errorMessage: 'rate limited',
+        },
+        {
+          id: 'bar-1-new',
+          username: 'alice',
+          candidatesCount: 2,
+          blockedCount: 2,
+          failedCount: 0,
+          status: 'success',
+          errorMessage: null,
+        },
+      ],
+    })
+
+    const result = await getBlockAccountRunsWithActions(prisma, 'block-run-1')
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ id: 'bar-1-new', status: 'success' })
+  })
 })

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import type { OperationCycleDetailView } from '@/lib/queries/operation-cycles'
+import type { BlockOperationCycleDetailView } from '@/lib/queries/operation-cycles'
 
 vi.mock('@/lib/prisma', () => ({ getPrismaClient: () => ({}) }))
 vi.mock('@/lib/queries/operation-cycles', () => ({ getBlockCycleDetail: vi.fn() }))
@@ -10,7 +10,7 @@ const { getBlockCycleDetail } = await import('@/lib/queries/operation-cycles')
 const { getBlockAccountRunsWithActions } = await import('@/lib/queries/block-drilldown')
 const { default: BlockCycleDetailPage } = await import('./page')
 
-const baseDetail: OperationCycleDetailView = {
+const baseDetail: BlockOperationCycleDetailView = {
   id: 'cycle-1',
   kind: 'block',
   status: 'succeeded',
@@ -20,6 +20,7 @@ const baseDetail: OperationCycleDetailView = {
   finishedAt: new Date('2026-08-08T00:10:00Z'),
   sourceId: 'block-run-1',
   stages: [],
+  accountRuns: [],
 }
 
 describe('BlockCycleDetailPage', () => {
@@ -34,6 +35,7 @@ describe('BlockCycleDetailPage', () => {
         blockedCount: 1,
         failedCount: 1,
         status: 'partial',
+        errorMessage: null,
         actions: [
           {
             id: 'ba-1',
@@ -75,6 +77,7 @@ describe('BlockCycleDetailPage', () => {
         blockedCount: 0,
         failedCount: 0,
         status: 'success',
+        errorMessage: null,
         actions: [],
       })),
     )
@@ -102,6 +105,7 @@ describe('BlockCycleDetailPage', () => {
         blockedCount: 0,
         failedCount: 1,
         status: 'partial',
+        errorMessage: null,
         actions: [
           {
             id: 'ba-1',
@@ -126,5 +130,31 @@ describe('BlockCycleDetailPage', () => {
     expect(html).toContain('Remote failed')
     expect(html).toContain('bg-red-100')
     expect(html).not.toContain('bg-green-100')
+  })
+
+  it('account 単位の errorMessage を Error 列に表示する', async () => {
+    process.env.VIEWER_NEW_UI_SECTIONS = 'operations'
+    vi.mocked(getBlockCycleDetail).mockResolvedValue(baseDetail)
+    vi.mocked(getBlockAccountRunsWithActions).mockResolvedValue([
+      {
+        id: 'bar-1',
+        username: 'alice',
+        candidatesCount: 12,
+        blockedCount: 10,
+        failedCount: 2,
+        status: 'partial',
+        errorMessage: 'rate limited',
+        actions: [],
+      },
+    ])
+
+    const html = renderToStaticMarkup(
+      await BlockCycleDetailPage({
+        params: Promise.resolve({ cycleId: 'cycle-1' }),
+        searchParams: Promise.resolve({}),
+      }),
+    )
+
+    expect(html).toContain('rate limited')
   })
 })
