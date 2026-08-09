@@ -1,5 +1,27 @@
+import React from 'react'
 import type { OperationCycleDetailView } from '@/lib/queries/operation-cycles'
 import { formatDateTime } from '@/lib/format-date'
+
+const STAGE_STATUS_LABEL: Record<string, { label: string; className: string }> = {
+  blocked_by_upstream: {
+    label: 'Blocked (upstream failure)',
+    className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+  },
+  failed: {
+    label: 'Failed',
+    className: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
+  },
+}
+
+/**
+ * blocked_by_upstream は直前 Stage の失敗による未実行であり、failed（root cause）とは
+ * 異なる色・注記で表示することで、1 件の根本原因が Stage 数分の failed に見える事態を避ける。
+ * @param status - Stage の状態
+ * @returns 表示用のラベルと色クラス
+ */
+function stageStatusBadge(status: string): { label: string; className: string } {
+  return STAGE_STATUS_LABEL[status] ?? { label: status, className: '' }
+}
 
 /**
  * crawl/weekly_review/block の 3 種類の Cycle 詳細ページで共通の Stage timeline を描画する。
@@ -55,7 +77,13 @@ export function OperationCycleDetail({
                 <tr key={stage.stageKey} className="border-t dark:border-gray-700">
                   <td className="p-2">{stage.stageKey}</td>
                   <td className="p-2">{stage.requiredness}</td>
-                  <td className="p-2">{stage.status}</td>
+                  <td className="p-2">
+                    <span
+                      className={`rounded px-2 py-0.5 ${stageStatusBadge(stage.status).className}`}
+                    >
+                      {stageStatusBadge(stage.status).label}
+                    </span>
+                  </td>
                   <td className="p-2">{stage.startedAt ? formatDateTime(stage.startedAt) : '—'}</td>
                   <td className="p-2">
                     {stage.finishedAt ? formatDateTime(stage.finishedAt) : '—'}
