@@ -1,10 +1,12 @@
 import type { PrismaClient } from '../../generated/prisma'
 import type { ReadModelFreshnessStatus } from '../api-response'
 import {
+  getCoreReadModelMeta,
   getFreshnessThresholds,
   overlayHealthWithFreshness,
   reconcileFreshness,
   toFreshnessStatus,
+  type CoreReadModelStatus,
 } from '../read-model-meta'
 
 /** Attention Queue の 1 件。 */
@@ -40,6 +42,9 @@ export interface OverviewSnapshotView {
   generationId: string | null
   policyHash: string | null
   freshnessStatus: ReadModelFreshnessStatus
+  coreFreshnessStatus: ReadModelFreshnessStatus
+  corePerModel: CoreReadModelStatus[]
+  coreFreshnessDivergesFromSnapshot: boolean
 }
 
 const MODEL_KEY = 'overview_snapshot'
@@ -145,6 +150,11 @@ export async function getOverviewSnapshot(
     freshnessStatus,
   )
 
+  // overview_snapshot 自身の freshness だけでは、build 元となった
+  // Accounts/Labels/Attention の read model が遅延していても「最新」に見えてしまう。
+  // 主要 read model の worst-of を別途重ね、両者が一致しない場合は注記できるようにする。
+  const coreMeta = await getCoreReadModelMeta(prisma)
+
   return {
     operationalStatus,
     qualityStatus,
@@ -154,5 +164,8 @@ export async function getOverviewSnapshot(
     generationId: readModelState.currentGenerationId,
     policyHash: readModelState.policyHash,
     freshnessStatus,
+    coreFreshnessStatus: coreMeta.freshnessStatus,
+    corePerModel: coreMeta.perModel,
+    coreFreshnessDivergesFromSnapshot: coreMeta.freshnessStatus !== freshnessStatus,
   }
 }

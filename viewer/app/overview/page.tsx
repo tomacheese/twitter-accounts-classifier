@@ -90,12 +90,29 @@ export default async function OverviewPage(): Promise<React.JSX.Element> {
             <div className="rounded-lg border bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
               <h2 className="font-semibold">Data freshness</h2>
               <p className="mt-2 text-lg">
-                {FRESHNESS_LABEL[snapshot.freshnessStatus] ?? snapshot.freshnessStatus}
+                {FRESHNESS_LABEL[snapshot.coreFreshnessStatus] ?? snapshot.coreFreshnessStatus}
               </p>
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Source data: {snapshot.sourceDataAt ? formatDateTime(snapshot.sourceDataAt) : '—'}{' '}
                 JST
               </p>
+              {snapshot.coreFreshnessDivergesFromSnapshot && (
+                <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+                  {`Snapshot 自体は ${FRESHNESS_LABEL[snapshot.freshnessStatus] ?? snapshot.freshnessStatus} ですが、元データの freshness は ${FRESHNESS_LABEL[snapshot.coreFreshnessStatus] ?? snapshot.coreFreshnessStatus} です。`}
+                </p>
+              )}
+              <table className="mt-3 w-full border-collapse text-xs">
+                <tbody>
+                  {snapshot.corePerModel.map((model) => (
+                    <tr key={model.modelKey} className="border-t dark:border-gray-700">
+                      <td className="py-1 pr-2 font-mono">{model.modelKey}</td>
+                      <td className="py-1 text-right">
+                        {FRESHNESS_LABEL[model.freshnessStatus] ?? model.freshnessStatus}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </section>
 

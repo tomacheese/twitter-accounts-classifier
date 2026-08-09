@@ -6,6 +6,7 @@ function createMockPrisma(overrides: {
   snapshot?: unknown
   readModelState?: unknown
   policyVersion?: unknown
+  coreReadModelStates?: unknown[]
 }) {
   return {
     overviewSnapshot: {
@@ -13,6 +14,10 @@ function createMockPrisma(overrides: {
     },
     readModelState: {
       findUnique: vi.fn().mockResolvedValue(overrides.readModelState ?? null),
+      findMany: vi.fn().mockResolvedValue(overrides.coreReadModelStates ?? []),
+    },
+    readModelPointer: {
+      findUnique: vi.fn().mockResolvedValue(null),
     },
     detectionPolicyVersion: {
       findFirst: vi.fn().mockResolvedValue(overrides.policyVersion ?? null),
@@ -180,6 +185,67 @@ describe('getOverviewSnapshot', () => {
     const result = await getOverviewSnapshot(prisma)
 
     expect(result?.latestPipeline).toBeNull()
+  })
+
+  it('overview_snapshot 自身より主要 read model の worst-of が劣化していれば注記を返す', async () => {
+    const prisma = createMockPrisma({
+      snapshot: baseSnapshot,
+      readModelState: baseReadModelState,
+      coreReadModelStates: [
+        {
+          modelKey: 'account_summary_latest',
+          status: 'delayed',
+          lastSuccessAt: null,
+          sourceWatermarkAt: null,
+          currentGenerationId: null,
+          policyHash: null,
+        },
+        {
+          modelKey: 'label_summary',
+          status: 'healthy',
+          lastSuccessAt: null,
+          sourceWatermarkAt: null,
+          currentGenerationId: null,
+          policyHash: null,
+        },
+        {
+          modelKey: 'attention_items',
+          status: 'healthy',
+          lastSuccessAt: null,
+          sourceWatermarkAt: null,
+          currentGenerationId: null,
+          policyHash: null,
+        },
+      ],
+    })
+
+    const result = await getOverviewSnapshot(prisma)
+
+    expect(result?.freshnessStatus).toBe('healthy')
+    expect(result?.coreFreshnessStatus).toBe('delayed')
+    expect(result?.coreFreshnessDivergesFromSnapshot).toBe(true)
+  })
+
+  it('主要 read model の worst-of が overview_snapshot 自身と同じなら注記を返さない', async () => {
+    const prisma = createMockPrisma({
+      snapshot: baseSnapshot,
+      readModelState: baseReadModelState,
+      coreReadModelStates: [
+        {
+          modelKey: 'account_summary_latest',
+          status: 'healthy',
+          lastSuccessAt: null,
+          sourceWatermarkAt: null,
+          currentGenerationId: null,
+          policyHash: null,
+        },
+      ],
+    })
+
+    const result = await getOverviewSnapshot(prisma)
+
+    expect(result?.coreFreshnessStatus).toBe('healthy')
+    expect(result?.coreFreshnessDivergesFromSnapshot).toBe(false)
   })
 
   it('latestPipeline の stages が配列でなければ空配列にする', async () => {

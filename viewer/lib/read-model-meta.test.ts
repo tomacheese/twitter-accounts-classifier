@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
+  getCoreReadModelMeta,
   getPipelineMeta,
   getReadModelMeta,
   getReadModelReadiness,
@@ -9,8 +10,8 @@ import type { PrismaClient } from '../generated/prisma'
 import { getPrismaClient } from './prisma'
 
 /**
- * getReadModelMeta/getPipelineMeta が読む範囲だけを実装したモック。
- * @param overrides - readModelState/detectionPolicyVersion の返り値
+ * getReadModelMeta/getPipelineMeta/getCoreReadModelMeta が読む範囲だけを実装したモック。
+ * @param overrides - readModelState/readModelPointer/detectionPolicyVersion の返り値
  * @returns テスト用の PrismaClient 互換オブジェクト
  */
 function createMockPrisma(overrides: {
@@ -23,13 +24,22 @@ function createMockPrisma(overrides: {
     status: string
   }[]
   policyContent?: unknown
+  blockRelationPointer?: unknown
 }): PrismaClient {
   const states = overrides.readModelStates ?? []
   return {
     readModelState: {
       findUnique: (args: { where: { modelKey: string } }) =>
         Promise.resolve(states.find((state) => state.modelKey === args.where.modelKey) ?? null),
-      findMany: () => Promise.resolve(states),
+      findMany: (args?: { where?: { modelKey?: { in: string[] } } }) => {
+        const keys = args?.where?.modelKey?.in
+        return Promise.resolve(
+          keys ? states.filter((state) => keys.includes(state.modelKey)) : states,
+        )
+      },
+    },
+    readModelPointer: {
+      findUnique: () => Promise.resolve(overrides.blockRelationPointer ?? null),
     },
     detectionPolicyVersion: {
       findFirst: () =>
@@ -147,6 +157,126 @@ describe('getPipelineMeta', () => {
 
     const meta = await getPipelineMeta(prisma)
     expect(meta.freshnessStatus).toBe('healthy')
+  })
+})
+
+describe('getCoreReadModelMeta', () => {
+  it('block_relation の Pointer が存在しなければ対象から除外する', async () => {
+    const prisma = createMockPrisma({
+      readModelStates: [
+        {
+          modelKey: 'account_summary_latest',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-1',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+        {
+          modelKey: 'label_summary',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-2',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+        {
+          modelKey: 'attention_items',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-3',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+        {
+          modelKey: 'block_relation',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-4',
+          policyHash: 'hash-1',
+          status: 'failed',
+        },
+      ],
+      blockRelationPointer: null,
+    })
+
+    const meta = await getCoreReadModelMeta(prisma)
+
+    expect(meta.freshnessStatus).toBe('healthy')
+    expect(meta.perModel.map((model) => model.modelKey)).not.toContain('block_relation')
+  })
+
+  it('block_relation の Pointer が存在すれば対象に含める', async () => {
+    const prisma = createMockPrisma({
+      readModelStates: [
+        {
+          modelKey: 'account_summary_latest',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-1',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+        {
+          modelKey: 'block_relation',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-4',
+          policyHash: 'hash-1',
+          status: 'failed',
+        },
+      ],
+      blockRelationPointer: { modelKey: 'block_relation', currentGenerationId: 'generation-4' },
+    })
+
+    const meta = await getCoreReadModelMeta(prisma)
+
+    expect(meta.freshnessStatus).toBe('failed')
+    expect(meta.perModel.map((model) => model.modelKey)).toContain('block_relation')
+  })
+
+  it('主要 read model のうち最も劣化した freshness を返す', async () => {
+    const prisma = createMockPrisma({
+      readModelStates: [
+        {
+          modelKey: 'account_summary_latest',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-1',
+          policyHash: 'hash-1',
+          status: 'delayed',
+        },
+        {
+          modelKey: 'label_summary',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-2',
+          policyHash: 'hash-1',
+          status: 'stale',
+        },
+        {
+          modelKey: 'attention_items',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-3',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+      ],
+    })
+
+    const meta = await getCoreReadModelMeta(prisma)
+
+    expect(meta.freshnessStatus).toBe('stale')
+  })
+
+  it('ReadModelState が 1 件も無ければ unknown な既定値を返す', async () => {
+    const prisma = createMockPrisma({ readModelStates: [] })
+
+    const meta = await getCoreReadModelMeta(prisma)
+
+    expect(meta.freshnessStatus).toBe('unknown')
+    expect(meta.perModel).toEqual([])
   })
 })
 

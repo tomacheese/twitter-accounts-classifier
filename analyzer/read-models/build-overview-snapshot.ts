@@ -6,7 +6,7 @@ const MODEL_KEY = 'overview_snapshot'
 // ReadModelState 行自体が存在しない。一度でも publish された後にその環境で
 // 使われなくなった場合は state が stale のまま残るため、Pointer の有無で
 // 「この環境で実際に使われているか」を判定し、条件付き必須として扱う。
-const CORE_MODEL_KEYS = new Set(['account_summary', 'label_summary', 'attention_items'])
+const CORE_MODEL_KEYS = new Set(['account_summary_latest', 'label_summary', 'attention_items'])
 
 /** Operational Health の総合状態。 */
 export type OperationalStatus = 'healthy' | 'attention' | 'critical' | 'unknown'

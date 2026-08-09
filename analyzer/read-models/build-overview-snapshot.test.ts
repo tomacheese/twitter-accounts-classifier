@@ -183,7 +183,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
 
   it('read model が delayed なら operationalStatus を unknown にする', async () => {
     await prisma.readModelState.create({
-      data: { modelKey: 'account_summary', schemaVersion: 1, status: 'delayed' },
+      data: { modelKey: 'account_summary_latest', schemaVersion: 1, status: 'delayed' },
     })
 
     const result = await buildOverviewSnapshot(prisma, {
