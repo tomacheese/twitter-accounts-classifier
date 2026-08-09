@@ -69,6 +69,60 @@ export interface ClaimNextWorkItemInput {
   leaseDurationMs: number
 }
 
+/** deadLetterExhaustedWorkItem の入力。 */
+export interface DeadLetterExhaustedWorkItemInput {
+  /** dead-letter 対象とする処理種別。 */
+  kinds: string[]
+}
+
+const STALE_ATTEMPT_ERROR = 'work item lease expired before completion'
+const EXHAUSTED_ATTEMPTS_ERROR = 'work item lease expired after maximum attempts were exhausted'
+
+/**
+ * maxAttempts を消費済みで lease も切れた WorkItem を processor へ再投入せず dead にする。
+ * 同時に異常終了した直前 attempt の running AnalysisRun を failed に閉じる。
+ * @param prisma - Prisma クライアント
+ * @param input - 対象 kind
+ * @returns dead にした WorkItem。対象がなければ undefined
+ */
+export async function deadLetterExhaustedWorkItem(
+  prisma: PrismaClient,
+  input: DeadLetterExhaustedWorkItemInput,
+): Promise<AnalysisWorkItem | undefined> {
+  const now = new Date()
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT "id" FROM "AnalysisWorkItem"
+       WHERE "kind" = ANY($1)
+         AND "status" IN ('queued', 'leased', 'failed')
+         AND "availableAt" <= $2
+         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < $2)
+         AND "attemptCount" >= "maxAttempts"
+       ORDER BY "priority" DESC, "availableAt" ASC
+       LIMIT 1
+       FOR UPDATE SKIP LOCKED`,
+      input.kinds,
+      now,
+    )
+    const target = rows.at(0)
+    if (!target) return undefined
+
+    await tx.analysisRun.updateMany({
+      where: { workItemId: target.id, status: 'running' },
+      data: { status: 'failed', finishedAt: now, errorSummary: EXHAUSTED_ATTEMPTS_ERROR },
+    })
+    return tx.analysisWorkItem.update({
+      where: { id: target.id },
+      data: {
+        status: 'dead',
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        lastErrorSummary: EXHAUSTED_ATTEMPTS_ERROR,
+      },
+    })
+  })
+}
+
 /**
  * FOR UPDATE SKIP LOCKED で 1 件だけ claim する。
  * lease 期限切れ (leaseExpiresAt < now) の行も再 claim 対象に含めることで、
@@ -93,6 +147,7 @@ export async function claimNextWorkItem(
          AND "status" IN ('queued', 'leased', 'failed')
          AND "availableAt" <= $2
          AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < $2)
+         AND "attemptCount" < "maxAttempts"
        ORDER BY "priority" DESC, "availableAt" ASC
        LIMIT 1
        FOR UPDATE SKIP LOCKED`,
@@ -102,6 +157,10 @@ export async function claimNextWorkItem(
     const target = rows.at(0)
     if (!target) return undefined
 
+    await tx.analysisRun.updateMany({
+      where: { workItemId: target.id, status: 'running' },
+      data: { status: 'failed', finishedAt: now, errorSummary: STALE_ATTEMPT_ERROR },
+    })
     return tx.analysisWorkItem.update({
       where: { id: target.id },
       data: {

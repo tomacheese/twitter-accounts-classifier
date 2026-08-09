@@ -3,6 +3,7 @@ import { getPrismaClient } from '../db/client'
 import {
   enqueueWorkItem,
   claimNextWorkItem,
+  deadLetterExhaustedWorkItem,
   completeWorkItem,
   renewWorkItemLease,
   computeRetryBackoffMs,
@@ -72,6 +73,89 @@ describe.skipIf(!process.env.DATABASE_URL)('claimNextWorkItem / completeWorkItem
     })
     expect(second?.id).toBe(first?.id)
     expect(second?.leaseOwner).toBe('worker-b')
+  })
+
+  it('maxAttempts 到達済みの lease 切れ WorkItem は通常 claim しない', async () => {
+    const item = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'label_metrics',
+        triggerType: 'crawl_run',
+        triggerId: 'crawl-exhausted-claim',
+        status: 'leased',
+        attemptCount: 5,
+        maxAttempts: 5,
+        leaseOwner: 'dead-worker',
+        leaseExpiresAt: new Date(Date.now() - 60_000),
+      },
+    })
+
+    const claimed = await claimNextWorkItem(prisma, {
+      kinds: ['label_metrics'],
+      leaseOwner: 'worker-b',
+      leaseDurationMs: 60_000,
+    })
+
+    expect(claimed).toBeUndefined()
+    const row = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: item.id } })
+    expect(row.attemptCount).toBe(5)
+    expect(row.leaseOwner).toBe('dead-worker')
+  })
+
+  it('maxAttempts 到達済み lease 切れ WorkItem を dead-letter し stale AnalysisRun も閉じる', async () => {
+    const item = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'label_metrics',
+        triggerType: 'crawl_run',
+        triggerId: 'crawl-exhausted-dead',
+        status: 'leased',
+        attemptCount: 5,
+        maxAttempts: 5,
+        leaseOwner: 'dead-worker',
+        leaseExpiresAt: new Date(Date.now() - 60_000),
+      },
+    })
+    const run = await prisma.analysisRun.create({
+      data: { workItemId: item.id, attemptNumber: 5, status: 'running' },
+    })
+
+    const dead = await deadLetterExhaustedWorkItem(prisma, { kinds: ['label_metrics'] })
+
+    expect(dead?.id).toBe(item.id)
+    expect(dead?.status).toBe('dead')
+    expect(dead?.attemptCount).toBe(5)
+    expect(dead?.leaseOwner).toBeNull()
+    const closedRun = await prisma.analysisRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(closedRun.status).toBe('failed')
+    expect(closedRun.finishedAt).not.toBeNull()
+  })
+
+  it('lease 切れを再 claim すると前 attempt の running AnalysisRun を failed に閉じる', async () => {
+    const item = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'label_metrics',
+        triggerType: 'crawl_run',
+        triggerId: 'crawl-stale-analysis-run',
+        status: 'leased',
+        attemptCount: 1,
+        maxAttempts: 5,
+        leaseOwner: 'worker-a',
+        leaseExpiresAt: new Date(Date.now() - 60_000),
+      },
+    })
+    const run = await prisma.analysisRun.create({
+      data: { workItemId: item.id, attemptNumber: 1, status: 'running' },
+    })
+
+    const reclaimed = await claimNextWorkItem(prisma, {
+      kinds: ['label_metrics'],
+      leaseOwner: 'worker-b',
+      leaseDurationMs: 60_000,
+    })
+
+    expect(reclaimed?.attemptCount).toBe(2)
+    const closedRun = await prisma.analysisRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(closedRun.status).toBe('failed')
+    expect(closedRun.finishedAt).not.toBeNull()
   })
 
   it('現在 owner は実行中 WorkItem の lease を延長できる', async () => {
