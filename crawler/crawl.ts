@@ -9,6 +9,7 @@ import {
   getCrawlWarningThreshold,
 } from './config/env'
 import { getPrismaClient, disconnectPrisma } from './db/client'
+import { upsertComponentBuildIdentity } from './build-identity'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
 import {
@@ -1323,6 +1324,7 @@ function toCrawlOpenApiClient(
 
 async function main(): Promise<void> {
   const prisma = getPrismaClient()
+  await upsertComponentBuildIdentity(prisma, 'crawler')
   const cookieIssuer = createCookieIssuerClient({
     baseUrl: getCookieIssuerBaseUrl(),
   })

@@ -972,3 +972,14 @@ model ReadModelState {
   errorCode           String?
   errorSummary        String?
 }
+
+// 各コンポーネントの起動時に自身の build identity を upsert する。
+// component ごとに 1 行のみ保持し、直近起動時の値のみを表示対象とする。
+model ComponentBuildIdentity {
+  component          String    @id
+  applicationVersion String
+  gitRevision        String
+  buildTime          DateTime?
+  startedAt          DateTime
+  updatedAt          DateTime  @updatedAt
+}

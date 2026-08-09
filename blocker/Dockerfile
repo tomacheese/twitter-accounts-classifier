@@ -20,6 +20,10 @@ FROM node:24-bookworm-slim
 
 ARG APPLICATION_VERSION=unknown
 ENV APPLICATION_VERSION=$APPLICATION_VERSION
+ARG GIT_REVISION=unknown
+ENV GIT_REVISION=$GIT_REVISION
+ARG BUILD_TIME=unknown
+ENV BUILD_TIME=$BUILD_TIME
 
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
     && rm -rf /var/lib/apt/lists/*

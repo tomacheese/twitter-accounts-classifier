@@ -2,6 +2,7 @@ import { Logger } from '@book000/node-utils'
 import { createCookieIssuerClient, createOpenApiClient, closeOpenApiClient } from 'twitter-client'
 import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
+import { upsertComponentBuildIdentity } from './build-identity'
 import {
   loadBlockerConfig,
   type BlockerAppConfig,
@@ -97,6 +98,7 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
 async function main(): Promise<void> {
   const prisma = getPrismaClient()
   try {
+    await upsertComponentBuildIdentity(prisma, 'blocker')
     const config = loadBlockerConfig()
     await runBlockCycle({
       config,

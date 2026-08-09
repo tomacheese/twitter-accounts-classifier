@@ -44,6 +44,15 @@ export interface SystemDiagnosticsEnvVar {
   value: string
 }
 
+/** 1 component 分の build identity。 */
+export interface SystemComponentBuildIdentity {
+  component: string
+  applicationVersion: string
+  gitRevision: string
+  buildTime: Date | null
+  updatedAt: Date
+}
+
 /** System 画面の表示内容。 */
 export interface SystemConsoleData {
   identity: SystemIdentity
@@ -51,6 +60,7 @@ export interface SystemConsoleData {
   activePolicy: SystemActivePolicy | null
   readModels: SystemReadModelStatus[]
   diagnosticsEnvVars: SystemDiagnosticsEnvVar[]
+  componentBuildIdentities: SystemComponentBuildIdentity[]
 }
 
 // 秘密情報が含まれうる環境変数を denylist で除くと、追加時に漏れる。
@@ -90,11 +100,13 @@ function redactErrorSummary(errorSummary: string | null): string | null {
  * @returns System コンソール表示用データ
  */
 export async function getSystemConsoleData(prisma: PrismaClient): Promise<SystemConsoleData> {
-  const [overviewReadModelState, latestPolicy, readModelStates] = await Promise.all([
-    prisma.readModelState.findUnique({ where: { modelKey: 'overview_snapshot' } }),
-    prisma.detectionPolicyVersion.findFirst({ orderBy: [{ loadedAt: 'desc' }] }),
-    prisma.readModelState.findMany(),
-  ])
+  const [overviewReadModelState, latestPolicy, readModelStates, componentBuildIdentities] =
+    await Promise.all([
+      prisma.readModelState.findUnique({ where: { modelKey: 'overview_snapshot' } }),
+      prisma.detectionPolicyVersion.findFirst({ orderBy: [{ loadedAt: 'desc' }] }),
+      prisma.readModelState.findMany(),
+      prisma.componentBuildIdentity.findMany(),
+    ])
   const latestSnapshot = overviewReadModelState?.currentGenerationId
     ? await prisma.overviewSnapshot.findUnique({
         where: { generationId: overviewReadModelState.currentGenerationId },
@@ -158,5 +170,12 @@ export async function getSystemConsoleData(prisma: PrismaClient): Promise<System
     diagnosticsEnvVars: DIAGNOSTICS_ENV_VAR_ALLOWLIST.filter(
       (key) => process.env[key] !== undefined,
     ).map((key) => ({ key, value: process.env[key] ?? '' })),
+    componentBuildIdentities: componentBuildIdentities.map((identity) => ({
+      component: identity.component,
+      applicationVersion: identity.applicationVersion,
+      gitRevision: identity.gitRevision,
+      buildTime: identity.buildTime,
+      updatedAt: identity.updatedAt,
+    })),
   }
 }

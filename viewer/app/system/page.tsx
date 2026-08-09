@@ -1,3 +1,4 @@
+import React from 'react'
 import { getPrismaClient } from '@/lib/prisma'
 import { getSystemConsoleData } from '@/lib/queries/system-console'
 import { formatDateTime } from '@/lib/format-date'
@@ -32,6 +33,40 @@ export default async function SystemPage(): Promise<React.ReactElement> {
           <p className="mt-2">
             Version: {data.identity.applicationVersion}, environment: {data.identity.environment}
           </p>
+        </section>
+
+        <section aria-labelledby="component-build-identity-heading">
+          <h2 id="component-build-identity-heading" className="text-lg font-semibold">
+            Component build identity
+          </h2>
+          {data.componentBuildIdentities.length === 0 ? (
+            <p className="mt-2">No component has recorded a build identity yet.</p>
+          ) : (
+            <table className="mt-2 w-full text-left text-sm">
+              <thead>
+                <tr>
+                  <th className="p-2">Component</th>
+                  <th className="p-2">Application version</th>
+                  <th className="p-2">Git revision</th>
+                  <th className="p-2">Build time</th>
+                  <th className="p-2">Updated at</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.componentBuildIdentities.map((identity) => (
+                  <tr key={identity.component} className="border-t dark:border-gray-700">
+                    <td className="p-2 font-mono">{identity.component}</td>
+                    <td className="p-2">{identity.applicationVersion}</td>
+                    <td className="p-2 font-mono">{identity.gitRevision}</td>
+                    <td className="p-2">
+                      {identity.buildTime ? formatDateTime(identity.buildTime) : '—'}
+                    </td>
+                    <td className="p-2">{formatDateTime(identity.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </section>
 
         <section aria-labelledby="component-health-heading">
