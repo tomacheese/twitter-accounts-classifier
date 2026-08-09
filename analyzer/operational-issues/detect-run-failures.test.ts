@@ -71,6 +71,65 @@ describe.skipIf(!process.env.DATABASE_URL)('detectRunFailures', () => {
     })
     expect(issues).toHaveLength(0)
   })
+
+  it('後続の completed run が同じ component の過去 run_failure を resolved にする', async () => {
+    const failedRunId = `block-${randomUUID()}`
+    const completedRunId = `block-${randomUUID()}`
+    const failedAt = new Date('2026-08-09T00:00:00Z')
+    const recoveredAt = new Date('2026-08-09T01:00:00Z')
+
+    await detectRunFailures(prisma, {
+      component: 'block',
+      runId: failedRunId,
+      runStatus: 'failed',
+      errorSummary: 'interrupted',
+      now: failedAt,
+    })
+    const issue = await prisma.operationalIssue.findFirstOrThrow({
+      where: { component: 'block', type: 'run_failure' },
+    })
+
+    await detectRunFailures(prisma, {
+      component: 'block',
+      runId: completedRunId,
+      runStatus: 'completed',
+      errorSummary: null,
+      now: recoveredAt,
+    })
+
+    const resolved = await prisma.operationalIssue.findUniqueOrThrow({ where: { id: issue.id } })
+    expect(resolved.status).toBe('resolved')
+    expect(resolved.resolvedAt).toEqual(recoveredAt)
+    const occurrences = await prisma.operationalIssueOccurrence.findMany({
+      where: { issueId: issue.id, stateTransition: 'resolved' },
+    })
+    expect(occurrences).toHaveLength(1)
+    expect(occurrences[0]?.sourceId).toBe(completedRunId)
+  })
+
+  it('running run は過去 run_failure を resolved にしない', async () => {
+    const failedRunId = `crawl-${randomUUID()}`
+    await detectRunFailures(prisma, {
+      component: 'crawl',
+      runId: failedRunId,
+      runStatus: 'failed',
+      errorSummary: 'boom',
+      now: new Date('2026-08-09T00:00:00Z'),
+    })
+
+    await detectRunFailures(prisma, {
+      component: 'crawl',
+      runId: `crawl-${randomUUID()}`,
+      runStatus: 'running',
+      errorSummary: null,
+      now: new Date('2026-08-09T01:00:00Z'),
+    })
+
+    const issue = await prisma.operationalIssue.findFirstOrThrow({
+      where: { component: 'crawl', type: 'run_failure' },
+    })
+    expect(issue.status).toBe('active')
+  })
 })
 
 describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
