@@ -276,10 +276,15 @@ export async function recordCrawlAccountLabel(
   }
 }
 
+/** recordCrawlAccountLabelsAtomic の入力。1 author 分のルール結果一覧を含む。 */
 export interface RecordCrawlAccountLabelsAtomicParams {
+  /** ルール適用対象の Account ID。 */
   accountId: string
+  /** 呼び出し元の CrawlRun ID。 */
   crawlRunId: string
+  /** 処理中のログインアカウントの username。 */
   username: string
+  /** author 1 件分のルール適用結果一覧。 */
   labels: {
     labelDefinitionId: string
     result: LabelRuleResult
@@ -288,6 +293,7 @@ export interface RecordCrawlAccountLabelsAtomicParams {
   }[]
 }
 
+/** `CrawlAccountLabelRun` への claim に成功した 1 ルール分の結果。 */
 interface ClaimedLabelRow {
   labelDefinitionId: string
   method: string

@@ -76,7 +76,9 @@ ALTER TABLE "LabelMetricSnapshot" ADD COLUMN "staleCount" INTEGER NOT NULL DEFAU
 ALTER TABLE "LabelMetricSnapshot" ADD COLUMN "unknownCount" INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE "LabelMetricSnapshot" ADD COLUMN "staleRatio" DOUBLE PRECISION NOT NULL DEFAULT 0;
 
--- 2. 既存行は sourceCrawlRunId をそのまま snapshot set 識別子として backfill する。
+-- 2. 既存行は行ごとに一意な 'legacy:' + id を snapshot set 識別子として backfill する。
+--    複数行が同じ sourceCrawlRunId を共有し得るため、それをそのまま識別子にすると
+--    後段の一意制約 (triggerWorkItemId, labelDefinitionId) に違反する。
 UPDATE "LabelMetricSnapshot" SET "triggerWorkItemId" = 'legacy:' || "id" WHERE "triggerWorkItemId" IS NULL;
 
 -- 3. backfill 後に NOT NULL を課す。
@@ -97,3 +99,11 @@ CREATE INDEX "AccountSummaryLatest_normalizedDisplayName_gin_idx"
   ON "AccountSummaryLatest" USING GIN ("normalizedDisplayName" gin_trgm_ops);
 CREATE INDEX "AccountSummaryLatest_searchDocument_gin_idx"
   ON "AccountSummaryLatest" USING GIN ("searchDocument" gin_trgm_ops);
+
+-- 旧 kind ('label_metrics'/'finding_generation') の未処理 AnalysisWorkItem は、
+-- この migration 以降どの worker も処理関数を持たないため retry のたびに
+-- Unknown work item kind で失敗し続ける。dead として確定させ、無駄な retry を止める。
+UPDATE "AnalysisWorkItem"
+  SET "status" = 'dead', "lastErrorSummary" = 'kind superseded by label_aggregate_refresh'
+  WHERE "kind" IN ('label_metrics', 'finding_generation')
+    AND "status" IN ('queued', 'leased', 'failed');

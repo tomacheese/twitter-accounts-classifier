@@ -1308,7 +1308,9 @@ describe('runCrawlCycle', () => {
       },
       startOrResumeCrawlRun: vi.fn().mockResolvedValue({
         id: 'run1',
-        latestAccountStatuses: new Map([['w', 'success']]),
+        latestAccountStatuses: new Map([
+          ['w', { status: 'success', classificationStatus: 'success' }],
+        ]),
       }),
     })
 
@@ -1366,11 +1368,11 @@ describe('runCrawlCycle', () => {
       startOrResumeCrawlRun: vi.fn().mockResolvedValue({
         id: 'resumed-run',
         latestAccountStatuses: new Map([
-          ['done', 'success'],
-          ['partial', 'partial'],
-          ['failed', 'failed'],
-          ['unknown', 'running'],
-          ['removed-account', 'failed'],
+          ['done', { status: 'success', classificationStatus: 'success' }],
+          ['partial', { status: 'partial', classificationStatus: 'partial' }],
+          ['failed', { status: 'failed', classificationStatus: 'failed' }],
+          ['unknown', { status: 'running', classificationStatus: 'unknown' }],
+          ['removed-account', { status: 'failed', classificationStatus: 'failed' }],
         ]),
       }),
     })
@@ -1381,7 +1383,7 @@ describe('runCrawlCycle', () => {
     expect(issueCookies).toHaveBeenCalledWith(expect.objectContaining({ username: 'failed' }))
     expect(issueCookies).toHaveBeenCalledWith(expect.objectContaining({ username: 'unknown' }))
     expect(issueCookies).toHaveBeenCalledWith(expect.objectContaining({ username: 'missing' }))
-    // 実際に処理した 3 アカウント分に加え、前回ステータスを引き継いでskipした
+    // 実際に処理した 3 アカウント分に加え、前回ステータスを引き継いで skip した
     // 2 アカウント (done/partial) 分も classificationStatus: 'skipped' として記録される。
     expect(deps.recordCrawlAccountRun).toHaveBeenCalledTimes(5)
     expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
@@ -1402,6 +1404,24 @@ describe('runCrawlCycle', () => {
       }),
     )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('resumed-run', expect.any(Date), 'partial')
+  })
+
+  it('does not re-record an account already recorded as skipped in this crawl run', async () => {
+    const deps = makeDeps({
+      config: {
+        accounts: [{ email: 'done@example.com', username: 'done', password: 'p', otpSecret: null }],
+      },
+      startOrResumeCrawlRun: vi.fn().mockResolvedValue({
+        id: 'resumed-run',
+        latestAccountStatuses: new Map([
+          ['done', { status: 'success', classificationStatus: 'skipped' }],
+        ]),
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.recordCrawlAccountRun).not.toHaveBeenCalled()
   })
 
   it('resumes author processing from the completed timeline snapshot without refetching timelines', async () => {

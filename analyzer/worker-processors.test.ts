@@ -9,6 +9,7 @@ import {
   handleWorkItemSettled,
   processPostCompletionRefresh,
   processAccountSummaryRefresh,
+  processAccountFindingRefresh,
 } from './worker-processors'
 
 const prisma = getPrismaClient()
@@ -325,6 +326,155 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     })
     expect(state?.status).toBe('healthy')
     expect(state?.sourceWatermarkAt?.toISOString()).toBe(observedAt.toISOString())
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () => {
+  beforeEach(async () => {
+    await prisma.reviewFindingOccurrence.deleteMany()
+    await prisma.reviewFinding.deleteMany()
+    await prisma.accountClassificationLatest.deleteMany()
+    await prisma.accountSummaryLatest.deleteMany()
+    await prisma.accountLabelChange.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountLabel.deleteMany()
+    await prisma.accountClassificationObservation.deleteMany()
+    await prisma.analysisWorkItem.deleteMany()
+    await prisma.readModelState.deleteMany()
+    await prisma.labelDefinition.deleteMany()
+    await prisma.block.deleteMany()
+    await prisma.account.deleteMany()
+  })
+
+  it('updates only the finding fields, preserving existing profile/classification fields, and marks account_summary_latest healthy', async () => {
+    const lastCrawledAt = new Date('2026-01-03T00:00:00Z')
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_finding_refresh',
+        screenName: 'erin',
+        displayName: 'Erin',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt,
+      },
+    })
+    const priorClassificationObservedAt = new Date('2026-01-02T00:00:00Z')
+    await prisma.accountSummaryLatest.create({
+      data: {
+        accountId: account.id,
+        normalizedScreenName: 'erin',
+        normalizedDisplayName: 'erin',
+        searchDocument: 'erin erin',
+        profileObservedAt: lastCrawledAt,
+        activeLabelKeys: ['label_a'],
+        activeLabelCount: 1,
+        classificationObservedAt: priorClassificationObservedAt,
+        activeFindingCount: 0,
+        highestFindingSeverity: null,
+        findingObservedAt: null,
+      },
+    })
+
+    const finding = await prisma.reviewFinding.create({
+      data: {
+        fingerprint: `fingerprint-${randomUUID()}`,
+        identityVersion: 1,
+        type: 'label_count_drop',
+        primaryScopeType: 'account',
+        primaryScopeId: account.id,
+        status: 'active',
+        currentSeverity: 'high',
+        maximumSeverity: 'high',
+      },
+    })
+    const sourceObservedAt = new Date('2026-01-04T00:00:00Z')
+    const occurrence = await prisma.reviewFindingOccurrence.create({
+      data: {
+        findingId: finding.id,
+        observedAt: sourceObservedAt,
+        sourceObservedAt,
+        stateTransition: 'active',
+        severity: 'high',
+        sourceType: 'label_metric',
+        sourceId: 'crawl-1',
+        policyHash: 'policy-1',
+        detectorVersion: 'v1',
+        observationKey: 'crawl-1',
+      },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'review_finding_occurrence',
+        triggerId: occurrence.id,
+      },
+    })
+
+    await processAccountFindingRefresh(prisma, workItem)
+
+    const summary = await prisma.accountSummaryLatest.findUnique({
+      where: { accountId: account.id },
+    })
+    expect(summary?.activeFindingCount).toBe(1)
+    expect(summary?.highestFindingSeverity).toBe('high')
+    expect(summary?.findingObservedAt?.toISOString()).toBe(sourceObservedAt.toISOString())
+    // finding 系以外は既存値をそのまま維持する。
+    expect(summary?.activeLabelKeys).toEqual(['label_a'])
+    expect(summary?.classificationObservedAt?.toISOString()).toBe(
+      priorClassificationObservedAt.toISOString(),
+    )
+
+    const state = await prisma.readModelState.findUnique({
+      where: { modelKey: 'account_summary_latest' },
+    })
+    expect(state?.status).toBe('healthy')
+    expect(state?.sourceWatermarkAt?.toISOString()).toBe(sourceObservedAt.toISOString())
+  })
+
+  it('does nothing when the Occurrence belongs to a non-account Finding', async () => {
+    const finding = await prisma.reviewFinding.create({
+      data: {
+        fingerprint: `fingerprint-${randomUUID()}`,
+        identityVersion: 1,
+        type: 'label_count_drop',
+        primaryScopeType: 'label',
+        primaryScopeId: 'label-definition-1',
+        status: 'active',
+        currentSeverity: 'high',
+        maximumSeverity: 'high',
+      },
+    })
+    const sourceObservedAt = new Date('2026-01-04T00:00:00Z')
+    const occurrence = await prisma.reviewFindingOccurrence.create({
+      data: {
+        findingId: finding.id,
+        observedAt: sourceObservedAt,
+        sourceObservedAt,
+        stateTransition: 'active',
+        severity: 'high',
+        sourceType: 'label_metric',
+        sourceId: 'crawl-1',
+        policyHash: 'policy-1',
+        detectorVersion: 'v1',
+        observationKey: 'crawl-1',
+      },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'review_finding_occurrence',
+        triggerId: occurrence.id,
+      },
+    })
+
+    await expect(processAccountFindingRefresh(prisma, workItem)).resolves.toBeUndefined()
+
+    const state = await prisma.readModelState.findUnique({
+      where: { modelKey: 'account_summary_latest' },
+    })
+    expect(state).toBeNull()
   })
 })
 

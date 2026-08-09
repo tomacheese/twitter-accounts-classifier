@@ -1,4 +1,7 @@
+import { Logger } from '@book000/node-utils'
 import type { Prisma, PrismaClient } from '../generated/prisma'
+
+const logger = Logger.configure('analyzer:serialize-label-findings')
 
 const MODEL_KEY = 'label_findings'
 
@@ -24,29 +27,43 @@ export async function runLabelFindingsSerialized(
   prisma: PrismaClient,
   input: RunLabelFindingsSerializedInput,
 ): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`
-      INSERT INTO "ReadModelState" ("modelKey", "schemaVersion", "status")
-      VALUES (${MODEL_KEY}, 1, 'unknown')
-      ON CONFLICT ("modelKey") DO NOTHING
-    `
-    const rows = await tx.$queryRaw<{ sourceWatermarkAt: Date | null }[]>`
-      SELECT "sourceWatermarkAt" FROM "ReadModelState"
-      WHERE "modelKey" = ${MODEL_KEY}
-      FOR UPDATE
-    `
-    const state = rows.at(0)
-    if (state?.sourceWatermarkAt && input.snapshotAt <= state.sourceWatermarkAt) return
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        INSERT INTO "ReadModelState" ("modelKey", "schemaVersion", "status")
+        VALUES (${MODEL_KEY}, 1, 'unknown')
+        ON CONFLICT ("modelKey") DO NOTHING
+      `
+      const rows = await tx.$queryRaw<{ sourceWatermarkAt: Date | null }[]>`
+        SELECT "sourceWatermarkAt" FROM "ReadModelState"
+        WHERE "modelKey" = ${MODEL_KEY}
+        FOR UPDATE
+      `
+      const state = rows.at(0)
+      if (state?.sourceWatermarkAt && input.snapshotAt <= state.sourceWatermarkAt) return
 
-    await input.run(tx)
+      await input.run(tx)
 
-    await tx.readModelState.update({
-      where: { modelKey: MODEL_KEY },
-      data: {
-        status: 'healthy',
-        sourceWatermarkAt: input.snapshotAt,
-        lastSuccessAt: new Date(),
-      },
+      await tx.readModelState.update({
+        where: { modelKey: MODEL_KEY },
+        data: {
+          status: 'healthy',
+          sourceWatermarkAt: input.snapshotAt,
+          lastSuccessAt: new Date(),
+        },
+      })
     })
-  })
+  } catch (error) {
+    // input.run が投げた例外は上のトランザクション自体を rollback させるため、
+    // 同じトランザクション内では failed を記録できない。別トランザクションで記録する。
+    try {
+      await prisma.readModelState.update({
+        where: { modelKey: MODEL_KEY },
+        data: { status: 'failed', lastFailureAt: new Date(), errorSummary: String(error) },
+      })
+    } catch (bookkeepingError) {
+      logger.error(`failed to record label_findings failure`, bookkeepingError as Error)
+    }
+    throw error
+  }
 }

@@ -101,9 +101,16 @@ export async function buildLabelAggregateSnapshotSet(
       where: { triggerWorkItemId: input.triggerWorkItemId },
       select: { observedAt: true },
     })
+    if (!row) {
+      // 直前の count と矛盾する状態。fabricate した時刻で reuse させると
+      // 誤った watermark が下流へ伝播するため、ここで検知して失敗させる。
+      throw new Error(
+        `labelMetricSnapshot count/findFirst mismatch for triggerWorkItemId=${input.triggerWorkItemId}`,
+      )
+    }
     return {
       triggerWorkItemId: input.triggerWorkItemId,
-      snapshotAt: row?.observedAt ?? new Date(),
+      snapshotAt: row.observedAt,
       reused: true,
     }
   }
@@ -120,11 +127,11 @@ export async function buildLabelAggregateSnapshotSet(
       `
       const populationCount = Number(populationRows.at(0)?.count ?? 0)
 
-      // freshness (current/delayed/stale) の集計を JS 側で行に対して個別に判定すると、
-      // GROUP BY に observedAt の生値が必要になり、Account 数に比例して行が増える。
-      // 42 Label × 210 万 Account 規模では現実的な行数に収まらないため、
-      // FILTER 句で current/delayed/stale の件数自体を SQL 側で集計し、
-      // GROUP BY は value/reason/ruleVersion/confidenceBucket の有限な組み合わせのみに保つ。
+      // freshness (current/delayed/stale) を JS 側で行ごとに判定すると、
+      // GROUP BY に observedAt の生値が必要になり、Account 数に比例して行数が
+      // 増えてしまう。FILTER 句で current/delayed/stale の件数自体を SQL 側で
+      // 集計し、GROUP BY は value/reason/ruleVersion/confidenceBucket の
+      // 有限な組み合わせのみに保つ。
       const delayedAfterSeconds = freshnessThresholds.delayedAfterMs / 1000
       const staleAfterSeconds = freshnessThresholds.staleAfterMs / 1000
 
@@ -137,14 +144,14 @@ export async function buildLabelAggregateSnapshotSet(
               COUNT(*) AS "count",
               SUM("confidence") AS "confidenceSum",
               COUNT(*) FILTER (
-                WHERE ${sharedSnapshotAt}::timestamptz - "observedAt" <= make_interval(secs => ${delayedAfterSeconds})
+                WHERE ${sharedSnapshotAt}::timestamp - "observedAt" <= make_interval(secs => ${delayedAfterSeconds})
               ) AS "currentCount",
               COUNT(*) FILTER (
-                WHERE ${sharedSnapshotAt}::timestamptz - "observedAt" > make_interval(secs => ${delayedAfterSeconds})
-                  AND ${sharedSnapshotAt}::timestamptz - "observedAt" <= make_interval(secs => ${staleAfterSeconds})
+                WHERE ${sharedSnapshotAt}::timestamp - "observedAt" > make_interval(secs => ${delayedAfterSeconds})
+                  AND ${sharedSnapshotAt}::timestamp - "observedAt" <= make_interval(secs => ${staleAfterSeconds})
               ) AS "delayedCount",
               COUNT(*) FILTER (
-                WHERE ${sharedSnapshotAt}::timestamptz - "observedAt" > make_interval(secs => ${staleAfterSeconds})
+                WHERE ${sharedSnapshotAt}::timestamp - "observedAt" > make_interval(secs => ${staleAfterSeconds})
               ) AS "staleCount"
             FROM "AccountClassificationLatest"
             WHERE "labelDefinitionId" = ${label.id}
@@ -193,8 +200,19 @@ export async function buildLabelAggregateSnapshotSet(
             input.thresholds,
           )
 
-          await tx.labelMetricSnapshot.create({
-            data: {
+          // 前回 attempt が一部の LabelDefinition だけ commit 済みの状態
+          // (この attempt の後に LabelDefinition が追加された等) で retry されても、
+          // 既存行との一意制約違反で永久に失敗し続けないよう upsert にし、
+          // 既存行にはそのまま触れない (insert-only の方針を保つ)。
+          await tx.labelMetricSnapshot.upsert({
+            where: {
+              triggerWorkItemId_labelDefinitionId: {
+                triggerWorkItemId: input.triggerWorkItemId,
+                labelDefinitionId: label.id,
+              },
+            },
+            update: {},
+            create: {
               sourceCrawlRunId: input.sourceCrawlRunId,
               triggerWorkItemId: input.triggerWorkItemId,
               labelDefinitionId: label.id,

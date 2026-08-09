@@ -3,6 +3,18 @@ set -euo pipefail
 
 # このスクリプトは DATABASE_URL が指すテスト用 DB に対して破壊的に動作する。
 # CI・ローカルとも、本番 DB には向けないこと。
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "ERROR: DATABASE_URL is not set" >&2
+  exit 1
+fi
+case "$DATABASE_URL" in
+  *localhost*|*127.0.0.1*) ;;
+  *)
+    echo "ERROR: DATABASE_URL does not look like a local test database; refusing to run migrate reset" >&2
+    exit 1
+    ;;
+esac
+
 cd "$(dirname "$0")/.."
 
 MIGRATION_DIR="migrations"

@@ -534,13 +534,18 @@ async function runAccountCycleBody(
       })
       // observationId 自体をここで使う必要はない。account_summary_refresh の
       // enqueue は recordLabelsAtomic 内のトランザクションで既に完結している。
-      await deps.recordLabelsAtomic({
+      const observationId = await deps.recordLabelsAtomic({
         accountId: profile.id,
         crawlRunId,
         username: account.username,
         labels: ruleResults,
       })
-      labelsAppliedCount += ruleResults.length
+      // 同じ crawlRunId/username/accountId で再試行された場合、recordLabelsAtomic は
+      // ON CONFLICT DO NOTHING で何も claim できず null を返す。その場合は実際には
+      // 何も永続化していないため、件数を二重に数えない。
+      if (observationId !== null) {
+        labelsAppliedCount += ruleResults.length
+      }
     } catch (error) {
       if (isExpectedAccountLookupError(error)) {
         logger.info(
@@ -1211,29 +1216,34 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
     for (const account of deps.config.accounts) {
-      const previousStatus = latestAccountStatuses.get(account.username)
-      if (previousStatus === 'success' || previousStatus === 'partial') {
-        accountStatuses.push(previousStatus)
-        await deps.recordCrawlAccountRun({
-          crawlRunId,
-          username: account.username,
-          startedAt: new Date(),
-          finishedAt: new Date(),
-          status: previousStatus,
-          recommendedCount: 0,
-          followingCount: 0,
-          trendingCount: 0,
-          replyCount: 0,
-          profileCount: 0,
-          labelsAppliedCount: 0,
-          followingSynced: false,
-          followersSynced: false,
-          blocksSynced: false,
-          warnings: [],
-          errorMessage: null,
-          appVersion: APP_VERSION,
-          classificationStatus: 'skipped',
-        })
+      const previous = latestAccountStatuses.get(account.username)
+      if (previous?.status === 'success' || previous?.status === 'partial') {
+        accountStatuses.push(previous.status)
+        // 同じ crawlRunId の再開 (コンテナ再起動等) を繰り返すたびに、既に完了した
+        // Account 分の skipped 行を際限なく積み増さないよう、直近の試行が既に
+        // skipped であれば書き込み自体を省略する。
+        if (previous.classificationStatus !== 'skipped') {
+          await deps.recordCrawlAccountRun({
+            crawlRunId,
+            username: account.username,
+            startedAt: new Date(),
+            finishedAt: new Date(),
+            status: previous.status,
+            recommendedCount: 0,
+            followingCount: 0,
+            trendingCount: 0,
+            replyCount: 0,
+            profileCount: 0,
+            labelsAppliedCount: 0,
+            followingSynced: false,
+            followersSynced: false,
+            blocksSynced: false,
+            warnings: [],
+            errorMessage: null,
+            appVersion: APP_VERSION,
+            classificationStatus: 'skipped',
+          })
+        }
         continue
       }
 

@@ -88,12 +88,18 @@ export interface CrawlAccountCheckpointParams {
   data: Prisma.InputJsonValue
 }
 
+/** アカウントの最新試行の status と classificationStatus。 */
+export interface LatestAccountStatus {
+  status: string
+  classificationStatus: string
+}
+
 /**
  * 再開する crawl run と、アカウントごとの最新試行の status。
  */
 export interface CrawlRunStartResult {
   id: string
-  latestAccountStatuses: Map<string, string>
+  latestAccountStatuses: Map<string, LatestAccountStatus>
 }
 
 /**
@@ -263,14 +269,19 @@ export async function startOrResumeCrawlRun(
   if (existingRun) {
     const isStale = startedAt.getTime() - existingRun.lastHeartbeatAt.getTime() > staleThresholdMs
     if (!isStale) {
-      const accountRuns = await prisma.$queryRaw<{ username: string; status: string }[]>`
-        SELECT DISTINCT ON ("username") "username", "status"
+      const accountRuns = await prisma.$queryRaw<
+        { username: string; status: string; classificationStatus: string }[]
+      >`
+        SELECT DISTINCT ON ("username") "username", "status", "classificationStatus"
         FROM "CrawlAccountRun"
         WHERE "crawlRunId" = ${existingRun.id}
         ORDER BY "username", "startedAt" DESC, "id" DESC
       `
       const latestAccountStatuses = new Map(
-        accountRuns.map(({ username, status }) => [username, status]),
+        accountRuns.map(({ username, status, classificationStatus }) => [
+          username,
+          { status, classificationStatus },
+        ]),
       )
       return { id: existingRun.id, latestAccountStatuses }
     }
