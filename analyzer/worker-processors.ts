@@ -7,6 +7,7 @@ import { runLabelFindingsSerialized } from './findings/serialize-label-findings'
 import {
   detectAnalysisStageFailure,
   detectRunFailures,
+  detectStalledBlockOutboxEntries,
 } from './operational-issues/detect-run-failures'
 import { refreshReadModelFreshness } from './operational-issues/freshness'
 import { parseIsoDurationMs } from './findings/lifecycle'
@@ -548,6 +549,7 @@ export async function processBlockReconciliation(
     errorSummary: null,
     now: new Date(),
   })
+  await detectStalledBlockOutboxEntries(prisma, new Date())
 
   await publishGeneration(prisma, {
     modelKey: 'block_relation',

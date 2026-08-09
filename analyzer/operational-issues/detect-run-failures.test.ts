@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { getPrismaClient } from '../db/client'
-import { detectAnalysisStageFailure, detectRunFailures } from './detect-run-failures'
+import {
+  detectAnalysisStageFailure,
+  detectRunFailures,
+  detectStalledBlockOutboxEntries,
+} from './detect-run-failures'
 import { randomUUID } from 'node:crypto'
 
 describe.skipIf(!process.env.DATABASE_URL)('detectRunFailures', () => {
@@ -247,5 +251,117 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
       where: { issueId: issue.id, stateTransition: 'resolved' },
     })
     expect(occurrences).toHaveLength(1)
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('detectStalledBlockOutboxEntries', () => {
+  const prisma = getPrismaClient()
+  const staleCreatedAt = new Date(Date.now() - 60 * 60 * 1000)
+
+  beforeEach(async () => {
+    await prisma.blockOutboxEntry.deleteMany()
+    await prisma.blockAccountRun.deleteMany()
+    await prisma.blockRun.deleteMany()
+    await prisma.account.deleteMany()
+    await prisma.labelDefinition.deleteMany()
+    await prisma.operationalIssueOccurrence.deleteMany()
+    await prisma.operationalIssue.deleteMany()
+  })
+
+  /**
+   * @param count - 作成する停滞済み (createdAt が古い) outbox entry の件数
+   */
+  async function createStalledOutboxEntries(count: number): Promise<void> {
+    const blockerId = `blocker-${randomUUID()}`
+    await prisma.account.create({
+      data: {
+        id: blockerId,
+        screenName: 'alice',
+        displayName: 'Alice',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: `spam-${randomUUID()}`, description: '架空のテスト用ラベル' },
+    })
+    const blockRun = await prisma.blockRun.create({
+      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
+    })
+    const accountRun = await prisma.blockAccountRun.create({
+      data: {
+        blockRunId: blockRun.id,
+        username: 'alice',
+        startedAt: new Date(),
+        status: 'running',
+      },
+    })
+
+    for (let i = 0; i < count; i++) {
+      const blockedId = `blocked-${randomUUID()}`
+      await prisma.account.create({
+        data: {
+          id: blockedId,
+          screenName: `bob-${i}`,
+          displayName: 'Bob',
+          followersCount: 0,
+          followingCount: 0,
+          tweetCount: 0,
+          accountCreatedAt: new Date(),
+        },
+      })
+      const entry = await prisma.blockOutboxEntry.create({
+        data: {
+          blockAccountRunId: accountRun.id,
+          blockerId,
+          blockedId,
+          labelDefinitionId: labelDefinition.id,
+          confidence: 0.9,
+          status: 'pending_remote',
+        },
+      })
+      await prisma.blockOutboxEntry.update({
+        where: { id: entry.id },
+        data: { createdAt: staleCreatedAt },
+      })
+    }
+  }
+
+  it('停滞件数が閾値を超えると active な OperationalIssue を作る', async () => {
+    await createStalledOutboxEntries(5)
+
+    await detectStalledBlockOutboxEntries(prisma, new Date())
+
+    const issues = await prisma.operationalIssue.findMany({
+      where: { component: 'block', type: 'outbox_stalled' },
+    })
+    expect(issues).toHaveLength(1)
+    expect(issues[0]?.status).toBe('active')
+  })
+
+  it('停滞件数が閾値未満なら OperationalIssue を作らない', async () => {
+    await createStalledOutboxEntries(1)
+
+    await detectStalledBlockOutboxEntries(prisma, new Date())
+
+    const issues = await prisma.operationalIssue.findMany({
+      where: { component: 'block', type: 'outbox_stalled' },
+    })
+    expect(issues).toHaveLength(0)
+  })
+
+  it('停滞が解消されると active な OperationalIssue を resolved にする', async () => {
+    await createStalledOutboxEntries(5)
+    await detectStalledBlockOutboxEntries(prisma, new Date())
+    await prisma.blockOutboxEntry.updateMany({ data: { status: 'local_persisted' } })
+
+    await detectStalledBlockOutboxEntries(prisma, new Date())
+
+    const issues = await prisma.operationalIssue.findMany({
+      where: { component: 'block', type: 'outbox_stalled' },
+    })
+    expect(issues[0]?.status).toBe('resolved')
   })
 })
