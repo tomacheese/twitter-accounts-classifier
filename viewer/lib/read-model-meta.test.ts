@@ -1,6 +1,12 @@
-import { describe, it, expect } from 'vitest'
-import { getPipelineMeta, getReadModelMeta, overlayHealthWithFreshness } from './read-model-meta'
+import { describe, it, expect, beforeEach } from 'vitest'
+import {
+  getPipelineMeta,
+  getReadModelMeta,
+  getReadModelReadiness,
+  overlayHealthWithFreshness,
+} from './read-model-meta'
 import type { PrismaClient } from '../generated/prisma'
+import { getPrismaClient } from './prisma'
 
 /**
  * getReadModelMeta/getPipelineMeta が読む範囲だけを実装したモック。
@@ -168,5 +174,66 @@ describe('overlayHealthWithFreshness', () => {
       operationalStatus: 'attention',
       qualityStatus: 'watch',
     })
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('getReadModelReadiness', () => {
+  const prisma = getPrismaClient()
+
+  beforeEach(async () => {
+    await prisma.readModelBootstrap.deleteMany()
+    await prisma.readModelPointer.deleteMany({ where: { modelKey: 'label_summary' } })
+    await prisma.readModelState.deleteMany({
+      where: { modelKey: { in: ['label_summary', 'account_summary_latest'] } },
+    })
+    await prisma.readModelGeneration.deleteMany({ where: { modelKey: 'label_summary' } })
+    // rowCount との一致判定は LabelDefinition 全件数を分母にするため、他ファイルのテストが
+    // 残した LabelDefinition が残っていると誤って不一致になる。全件削除して分離する。
+    await prisma.accountLabel.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
+    await prisma.labelAggregate.deleteMany()
+    await prisma.blockAction.deleteMany()
+    await prisma.labelDefinition.deleteMany()
+  })
+
+  it('returns bootstrapping for both sections when ReadModelBootstrap is running', async () => {
+    await prisma.readModelBootstrap.create({
+      data: { modelKey: 'account_summary', status: 'running' },
+    })
+    const readiness = await getReadModelReadiness(prisma)
+    expect(readiness.accounts).toBe('bootstrapping')
+    expect(readiness.labels).toBe('bootstrapping')
+  })
+
+  it('returns ready for labels only when the current generation covers every LabelDefinition', async () => {
+    await prisma.readModelBootstrap.create({
+      data: { modelKey: 'account_summary', status: 'completed' },
+    })
+    await prisma.labelDefinition.createMany({
+      data: [
+        { key: 'label_1', description: 'l1' },
+        { key: 'label_2', description: 'l2' },
+      ],
+    })
+    const generation = await prisma.readModelGeneration.create({
+      data: { modelKey: 'label_summary', schemaVersion: 1, status: 'current', rowCount: 1 },
+    })
+    await prisma.readModelPointer.create({
+      data: { modelKey: 'label_summary', currentGenerationId: generation.id },
+    })
+    await prisma.readModelState.create({
+      data: { modelKey: 'label_summary', schemaVersion: 1, status: 'healthy' },
+    })
+    await prisma.readModelState.create({
+      data: { modelKey: 'account_summary_latest', schemaVersion: 1, status: 'healthy' },
+    })
+
+    const readiness = await getReadModelReadiness(prisma)
+    expect(readiness.accounts).toBe('ready')
+    expect(readiness.labels).toBe('bootstrapping')
+
+    await prisma.readModelGeneration.update({ where: { id: generation.id }, data: { rowCount: 2 } })
+    const readinessAfterFullGeneration = await getReadModelReadiness(prisma)
+    expect(readinessAfterFullGeneration.labels).toBe('ready')
   })
 })

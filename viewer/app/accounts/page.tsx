@@ -13,6 +13,7 @@ import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { LabelFilter } from '../components/label-filter'
 import { ErrorFallback } from '../components/error-fallback'
 import { CursorPagination } from '../components/cursor-pagination'
+import { ReadModelReadinessPanel } from '../components/read-model-readiness-panel'
 
 interface AccountsPageProps {
   searchParams: Promise<{
@@ -227,6 +228,15 @@ async function NewAccountsView({ searchParams }: AccountsPageProps): Promise<Rea
   try {
     const result = await listAccountSummaries(prisma, { view, cursor: params.cursor })
 
+    if (result.readiness !== 'ready') {
+      return (
+        <div className="flex flex-col gap-4">
+          <h1 className="text-2xl font-semibold">Accounts</h1>
+          <ReadModelReadinessPanel status={result.readiness} section="Accounts" />
+        </div>
+      )
+    }
+
     return (
       <div className="flex flex-col gap-4">
         <div>
@@ -265,19 +275,11 @@ async function NewAccountsView({ searchParams }: AccountsPageProps): Promise<Rea
           {result.freshnessStatus === 'healthy'
             ? 'Current'
             : result.freshnessStatus.charAt(0).toUpperCase() + result.freshnessStatus.slice(1)}
-          {result.isPartial && (
-            <p className="mt-2 text-amber-700 dark:text-amber-300">
-              <strong>Partial data.</strong>{' '}
-              {result.partialReason ?? 'The latest crawl did not complete every account.'}
-            </p>
-          )}
         </div>
 
         {result.items.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {result.generationId
-              ? 'No accounts match this view yet.'
-              : 'Account summary is initializing from the latest completed crawl.'}
+            No accounts match this view yet.
           </p>
         ) : (
           <table className="w-full border-collapse text-left text-sm">

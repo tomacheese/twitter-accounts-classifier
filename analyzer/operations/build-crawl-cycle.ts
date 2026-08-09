@@ -6,11 +6,7 @@ import {
   type StageStatus,
 } from './cycle-common'
 
-const ANALYSIS_WORK_ITEM_STAGE_KINDS = [
-  'label_metrics',
-  'finding_generation',
-  'read_model_refresh',
-] as const
+const ANALYSIS_WORK_ITEM_STAGE_KINDS = ['label_aggregate_refresh', 'read_model_refresh'] as const
 
 /**
  * @param crawlRunStatus - CrawlRun.status の値

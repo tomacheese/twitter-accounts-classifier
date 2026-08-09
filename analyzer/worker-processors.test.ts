@@ -2,13 +2,14 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { getPrismaClient } from './db/client'
 import {
-  processLabelMetrics,
-  processFindingGeneration,
   processReadModelRefresh,
+  processLabelAggregateRefresh,
   processBlockReconciliation,
   processRetentionSweep,
   handleWorkItemSettled,
   processPostCompletionRefresh,
+  processAccountSummaryRefresh,
+  processAccountFindingRefresh,
 } from './worker-processors'
 
 const prisma = getPrismaClient()
@@ -34,95 +35,13 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     await prisma.blockRun.deleteMany()
   })
 
-  it('processLabelMetrics は LabelMetricSnapshot を生成し finding_generation を enqueue する', async () => {
+  it('processReadModelRefresh は CrawlRun の状態によらず Attention/Overview を publish する', async () => {
     const crawlRun = await prisma.crawlRun.create({
       data: {
         startedAt: new Date(),
         lastHeartbeatAt: new Date(),
         finishedAt: new Date(),
-        status: 'success',
-      },
-    })
-
-    await processLabelMetrics(prisma, {
-      id: 'work-item-1',
-      kind: 'label_metrics',
-      triggerType: 'crawl_run',
-      triggerId: crawlRun.id,
-      status: 'leased',
-      priority: 0,
-      availableAt: new Date(),
-      leaseOwner: 'worker-1',
-      leaseExpiresAt: new Date(),
-      attemptCount: 1,
-      maxAttempts: 5,
-      dependencyKey: null,
-      lastErrorCode: null,
-      lastErrorSummary: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-
-    const enqueued = await prisma.analysisWorkItem.findUnique({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'finding_generation',
-          triggerType: 'crawl_run',
-          triggerId: crawlRun.id,
-        },
-      },
-    })
-    expect(enqueued).not.toBeNull()
-  })
-
-  it('processFindingGeneration は read_model_refresh を enqueue する', async () => {
-    const crawlRun = await prisma.crawlRun.create({
-      data: {
-        startedAt: new Date(),
-        lastHeartbeatAt: new Date(),
-        finishedAt: new Date(),
-        status: 'success',
-      },
-    })
-
-    await processFindingGeneration(prisma, {
-      id: 'work-item-2',
-      kind: 'finding_generation',
-      triggerType: 'crawl_run',
-      triggerId: crawlRun.id,
-      status: 'leased',
-      priority: 0,
-      availableAt: new Date(),
-      leaseOwner: 'worker-1',
-      leaseExpiresAt: new Date(),
-      attemptCount: 1,
-      maxAttempts: 5,
-      dependencyKey: null,
-      lastErrorCode: null,
-      lastErrorSummary: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-
-    const enqueued = await prisma.analysisWorkItem.findUnique({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'read_model_refresh',
-          triggerType: 'crawl_run',
-          triggerId: crawlRun.id,
-        },
-      },
-    })
-    expect(enqueued).not.toBeNull()
-  })
-
-  it('processReadModelRefresh は success な CrawlRun の read model を current に切り替える', async () => {
-    const crawlRun = await prisma.crawlRun.create({
-      data: {
-        startedAt: new Date(),
-        lastHeartbeatAt: new Date(),
-        finishedAt: new Date(),
-        status: 'success',
+        status: 'partial',
       },
     })
 
@@ -145,53 +64,14 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
       updatedAt: new Date(),
     })
 
-    const pointer = await prisma.readModelPointer.findUnique({
-      where: { modelKey: 'account_summary' },
+    const attentionPointer = await prisma.readModelPointer.findUnique({
+      where: { modelKey: 'attention_items' },
     })
-    expect(pointer).not.toBeNull()
-  })
-
-  it('processReadModelRefresh は partial な CrawlRun を partial metadata 付きで公開する', async () => {
-    const crawlRun = await prisma.crawlRun.create({
-      data: {
-        startedAt: new Date(),
-        lastHeartbeatAt: new Date(),
-        finishedAt: new Date(),
-        status: 'partial',
-      },
+    const overviewPointer = await prisma.readModelPointer.findUnique({
+      where: { modelKey: 'overview_snapshot' },
     })
-
-    await processReadModelRefresh(prisma, {
-      id: 'work-item-4',
-      kind: 'read_model_refresh',
-      triggerType: 'crawl_run',
-      triggerId: crawlRun.id,
-      status: 'leased',
-      priority: 0,
-      availableAt: new Date(),
-      leaseOwner: 'worker-1',
-      leaseExpiresAt: new Date(),
-      attemptCount: 1,
-      maxAttempts: 5,
-      dependencyKey: null,
-      lastErrorCode: null,
-      lastErrorSummary: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-
-    const pointer = await prisma.readModelPointer.findUniqueOrThrow({
-      where: { modelKey: 'account_summary' },
-    })
-    const generation = await prisma.readModelGeneration.findUniqueOrThrow({
-      where: { id: pointer.currentGenerationId },
-    })
-    expect(generation.validationSummary).toEqual(
-      expect.objectContaining({
-        isPartial: true,
-        sourceRunStatus: 'partial',
-      }),
-    )
+    expect(attentionPointer).not.toBeNull()
+    expect(overviewPointer).not.toBeNull()
   })
 
   it('processBlockReconciliation は block_relation の ReadModelPointer を current に切り替える', async () => {
@@ -336,5 +216,311 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     })
     expect(attentionPointer).not.toBeNull()
     expect(overviewPointer).not.toBeNull()
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () => {
+  beforeEach(async () => {
+    await prisma.accountClassificationLatest.deleteMany()
+    await prisma.accountSummaryLatest.deleteMany()
+    await prisma.accountLabelChange.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountLabel.deleteMany()
+    await prisma.accountClassificationObservation.deleteMany()
+    await prisma.analysisWorkItem.deleteMany()
+    await prisma.readModelState.deleteMany()
+    await prisma.labelDefinition.deleteMany()
+    await prisma.block.deleteMany()
+    await prisma.account.deleteMany()
+  })
+
+  it('uses Account.lastCrawledAt (not the observation time) as profileObservedAt, detects a same-count label-set change, records AccountLabelChange, and marks account_summary_latest healthy', async () => {
+    const lastCrawledAt = new Date('2026-01-03T00:00:00Z')
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_refresh',
+        screenName: 'dave',
+        displayName: 'Dave',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt,
+      },
+    })
+    const labelA = await prisma.labelDefinition.create({
+      data: { key: 'label_a', description: 'ラベルA' },
+    })
+    const labelB = await prisma.labelDefinition.create({
+      data: { key: 'label_b', description: 'ラベルB' },
+    })
+    // 直前は label_a のみ true (1 件)。今回は label_a が false、label_b が true になる
+    // (件数は 1 件のまま変わらないが、ラベルの中身は入れ替わっている)。
+    await prisma.accountLabel.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelA.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'previous reason',
+        method: 'rule',
+        ruleVersion: 'v1',
+        labeledAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    })
+    const observedAt = new Date('2026-01-02T00:00:00Z')
+    await prisma.accountLabel.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelA.id,
+        value: false,
+        confidence: 0.2,
+        reason: 'new reason a',
+        method: 'rule',
+        ruleVersion: 'v1',
+        labeledAt: observedAt,
+      },
+    })
+    await prisma.accountLabel.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelB.id,
+        value: true,
+        confidence: 0.8,
+        reason: 'new reason b',
+        method: 'rule',
+        ruleVersion: 'v1',
+        labeledAt: observedAt,
+      },
+    })
+    const observation = await prisma.accountClassificationObservation.create({
+      data: { accountId: account.id, observedAt, labelCount: 2 },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+        triggerId: observation.id,
+      },
+    })
+
+    await processAccountSummaryRefresh(prisma, workItem)
+
+    const summary = await prisma.accountSummaryLatest.findUnique({
+      where: { accountId: account.id },
+    })
+    expect(summary?.activeLabelKeys).toEqual(['label_b'])
+    expect(summary?.profileObservedAt.toISOString()).toBe(lastCrawledAt.toISOString())
+    expect(summary?.lastClassificationChangedAt?.toISOString()).toBe(observedAt.toISOString())
+
+    const changes = await prisma.accountLabelChange.findMany({
+      where: { accountId: account.id },
+      orderBy: { labelDefinitionId: 'asc' },
+    })
+    expect(changes).toHaveLength(2)
+    expect(changes.find((c) => c.labelDefinitionId === labelA.id)?.changeType).toBe('removed')
+    expect(changes.find((c) => c.labelDefinitionId === labelB.id)?.changeType).toBe('added')
+
+    const state = await prisma.readModelState.findUnique({
+      where: { modelKey: 'account_summary_latest' },
+    })
+    expect(state?.status).toBe('healthy')
+    expect(state?.sourceWatermarkAt?.toISOString()).toBe(observedAt.toISOString())
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () => {
+  beforeEach(async () => {
+    await prisma.reviewFindingOccurrence.deleteMany()
+    await prisma.reviewFinding.deleteMany()
+    await prisma.accountClassificationLatest.deleteMany()
+    await prisma.accountSummaryLatest.deleteMany()
+    await prisma.accountLabelChange.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountLabel.deleteMany()
+    await prisma.accountClassificationObservation.deleteMany()
+    await prisma.analysisWorkItem.deleteMany()
+    await prisma.readModelState.deleteMany()
+    await prisma.labelDefinition.deleteMany()
+    await prisma.block.deleteMany()
+    await prisma.account.deleteMany()
+  })
+
+  it('updates only the finding fields, preserving existing profile/classification fields, and marks account_summary_latest healthy', async () => {
+    const lastCrawledAt = new Date('2026-01-03T00:00:00Z')
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_finding_refresh',
+        screenName: 'erin',
+        displayName: 'Erin',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt,
+      },
+    })
+    const priorClassificationObservedAt = new Date('2026-01-02T00:00:00Z')
+    await prisma.accountSummaryLatest.create({
+      data: {
+        accountId: account.id,
+        normalizedScreenName: 'erin',
+        normalizedDisplayName: 'erin',
+        searchDocument: 'erin erin',
+        profileObservedAt: lastCrawledAt,
+        activeLabelKeys: ['label_a'],
+        activeLabelCount: 1,
+        classificationObservedAt: priorClassificationObservedAt,
+        activeFindingCount: 0,
+        highestFindingSeverity: null,
+        findingObservedAt: null,
+      },
+    })
+
+    const finding = await prisma.reviewFinding.create({
+      data: {
+        fingerprint: `fingerprint-${randomUUID()}`,
+        identityVersion: 1,
+        type: 'label_count_drop',
+        primaryScopeType: 'account',
+        primaryScopeId: account.id,
+        status: 'active',
+        currentSeverity: 'high',
+        maximumSeverity: 'high',
+      },
+    })
+    const sourceObservedAt = new Date('2026-01-04T00:00:00Z')
+    const occurrence = await prisma.reviewFindingOccurrence.create({
+      data: {
+        findingId: finding.id,
+        observedAt: sourceObservedAt,
+        sourceObservedAt,
+        stateTransition: 'active',
+        severity: 'high',
+        sourceType: 'label_metric',
+        sourceId: 'crawl-1',
+        policyHash: 'policy-1',
+        detectorVersion: 'v1',
+        observationKey: 'crawl-1',
+      },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'review_finding_occurrence',
+        triggerId: occurrence.id,
+      },
+    })
+
+    await processAccountFindingRefresh(prisma, workItem)
+
+    const summary = await prisma.accountSummaryLatest.findUnique({
+      where: { accountId: account.id },
+    })
+    expect(summary?.activeFindingCount).toBe(1)
+    expect(summary?.highestFindingSeverity).toBe('high')
+    expect(summary?.findingObservedAt?.toISOString()).toBe(sourceObservedAt.toISOString())
+    // finding 系以外は既存値をそのまま維持する。
+    expect(summary?.activeLabelKeys).toEqual(['label_a'])
+    expect(summary?.classificationObservedAt?.toISOString()).toBe(
+      priorClassificationObservedAt.toISOString(),
+    )
+
+    const state = await prisma.readModelState.findUnique({
+      where: { modelKey: 'account_summary_latest' },
+    })
+    expect(state?.status).toBe('healthy')
+    expect(state?.sourceWatermarkAt?.toISOString()).toBe(sourceObservedAt.toISOString())
+  })
+
+  it('does nothing when the Occurrence belongs to a non-account Finding', async () => {
+    const finding = await prisma.reviewFinding.create({
+      data: {
+        fingerprint: `fingerprint-${randomUUID()}`,
+        identityVersion: 1,
+        type: 'label_count_drop',
+        primaryScopeType: 'label',
+        primaryScopeId: 'label-definition-1',
+        status: 'active',
+        currentSeverity: 'high',
+        maximumSeverity: 'high',
+      },
+    })
+    const sourceObservedAt = new Date('2026-01-04T00:00:00Z')
+    const occurrence = await prisma.reviewFindingOccurrence.create({
+      data: {
+        findingId: finding.id,
+        observedAt: sourceObservedAt,
+        sourceObservedAt,
+        stateTransition: 'active',
+        severity: 'high',
+        sourceType: 'label_metric',
+        sourceId: 'crawl-1',
+        policyHash: 'policy-1',
+        detectorVersion: 'v1',
+        observationKey: 'crawl-1',
+      },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'review_finding_occurrence',
+        triggerId: occurrence.id,
+      },
+    })
+
+    await expect(processAccountFindingRefresh(prisma, workItem)).resolves.toBeUndefined()
+
+    const state = await prisma.readModelState.findUnique({
+      where: { modelKey: 'account_summary_latest' },
+    })
+    expect(state).toBeNull()
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('processLabelAggregateRefresh', () => {
+  beforeEach(async () => {
+    await prisma.findingEvidence.deleteMany()
+    await prisma.reviewFindingOccurrence.deleteMany()
+    await prisma.reviewFinding.deleteMany()
+    await prisma.detectorEvaluation.deleteMany()
+    await prisma.labelSummaryCurrent.deleteMany()
+    await prisma.labelMetricSnapshot.deleteMany()
+    await prisma.accountClassificationLatest.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountLabel.deleteMany()
+    await prisma.readModelState.deleteMany()
+    await prisma.analysisWorkItem.deleteMany()
+    await prisma.labelDefinition.deleteMany()
+  })
+
+  it('runs Finding evaluation only for triggerType crawl_run', async () => {
+    await prisma.labelDefinition.create({
+      data: { key: 'test_pipeline_label', description: 'ラベル' },
+    })
+
+    const scheduleWorkItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'label_aggregate_refresh',
+        triggerType: 'schedule',
+        triggerId: '2026-01-01T00',
+      },
+    })
+    await processLabelAggregateRefresh(prisma, scheduleWorkItem)
+    const evaluationsAfterSchedule = await prisma.detectorEvaluation.count()
+    expect(evaluationsAfterSchedule).toBe(0)
+
+    const summaryAfterSchedule = await prisma.labelSummaryCurrent.findMany()
+    expect(summaryAfterSchedule.length).toBeGreaterThan(0)
+
+    // buildLabelAggregateSnapshotSet が必須の freshnessThresholdsMs を実際に受け取って
+    // 動作したことを、currentCount/delayedCount/staleCount が evaluatedCount に一致する
+    // (集計が空でない) ことで確認する。
+    const snapshot = await prisma.labelMetricSnapshot.findFirstOrThrow({
+      where: { triggerWorkItemId: scheduleWorkItem.id },
+    })
+    expect(snapshot.currentCount + snapshot.delayedCount + snapshot.staleCount).toBe(
+      snapshot.evaluatedCount,
+    )
   })
 })

@@ -23,6 +23,8 @@ export const detectionPolicyRuleSchema = z.object({
   cooldown: z.string().optional(),
   delayedAfter: z.string().optional(),
   staleAfter: z.string().optional(),
+  minCoverage: z.number().min(0).max(1).optional(),
+  maxStaleRatio: z.number().min(0).max(1).optional(),
   maxWeeklyReviewSeverityWithoutCorroboration: severitySchema.optional(),
 })
 

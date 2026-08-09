@@ -5,18 +5,23 @@ import { getPrismaClient, getLeasePrismaClient, disconnectPrisma } from './db/cl
 import { initMonitoring, captureException } from './monitoring/sentry'
 import { runWorkerLoopOnce, type WorkerLoopDeps } from './worker-loop'
 import {
-  processLabelMetrics,
-  processFindingGeneration,
   processReadModelRefresh,
+  processLabelAggregateRefresh,
   processWeeklyReviewIngest,
   processBlockReconciliation,
   processRetentionSweep,
   processPostCompletionRefresh,
+  processAccountSummaryRefresh,
+  processAccountFindingRefresh,
   enqueueDailyRetentionSweep,
-  enqueueReadModelBootstrapIfMissing,
+  enqueueHourlyLabelAggregateRefresh,
   refreshReadModelFreshnessFromPolicy,
   handleWorkItemSettled,
 } from './worker-processors'
+import {
+  enqueueAccountSummaryBootstrapIfNeeded,
+  processAccountSummaryBootstrap,
+} from './read-models/account-summary-bootstrap'
 import { getWorkerConcurrency } from './config/env'
 import { DEFAULT_POLICY_PATH, loadPolicy, recordPolicyVersion } from './policy/load-policy'
 import type { PrismaClient } from './generated/prisma'
@@ -51,21 +56,26 @@ export async function main(): Promise<void> {
   await recordPolicyVersion(prisma, loadPolicy(DEFAULT_POLICY_PATH))
   // 一意制約により、同じ日付分は 2 度目以降 no-op になる。
   await enqueueDailyRetentionSweep(prisma, new Date())
-  await enqueueReadModelBootstrapIfMissing(prisma)
+  // 一意制約により、同じ時間 bucket 分は 2 度目以降 no-op になる。
+  await enqueueHourlyLabelAggregateRefresh(prisma, new Date())
   // WorkItem 完了時のみだと、queue が空で何も処理しない期間は
   // 経過時間による delayed/stale への遷移を検出できない。
   await refreshReadModelFreshnessFromPolicy(prisma)
+  // winner-takes-all: 複数 worker が同時に起動しても bootstrap WorkItem は 1 件だけ enqueue される。
+  await enqueueAccountSummaryBootstrapIfNeeded(prisma)
 
   const deps: WorkerLoopDeps = {
     leaseOwner: `${hostname()}-${process.pid}-${randomUUID()}`,
     leasePrisma,
-    processLabelMetrics,
-    processFindingGeneration,
     processReadModelRefresh,
+    processLabelAggregateRefresh,
     processWeeklyReviewIngest,
     processBlockReconciliation,
     processRetentionSweep,
     processPostCompletionRefresh,
+    processAccountSummaryRefresh,
+    processAccountFindingRefresh,
+    processAccountSummaryBootstrap,
     onWorkItemSettled: handleWorkItemSettled,
   }
 

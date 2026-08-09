@@ -1,0 +1,78 @@
+import { Logger } from '@book000/node-utils'
+import type { Prisma, PrismaClient } from '../generated/prisma'
+
+const logger = Logger.configure('analyzer:serialize-label-findings')
+
+const MODEL_KEY = 'label_findings'
+
+/**
+ * runLabelFindingsSerialized の入力。
+ */
+export interface RunLabelFindingsSerializedInput {
+  /** 今回処理対象の snapshot set が確定した時刻。 */
+  snapshotAt: Date
+  /** 直列化して実行する Finding 評価本体。 */
+  run: (tx: Prisma.TransactionClient) => Promise<void>
+}
+
+/**
+ * 複数の CrawlRun 起点 build が並行しても Finding 段の lifecycle 遷移が
+ * snapshotAt の前後関係と食い違わないよう、ReadModelState (modelKey: 'label_findings')
+ * の行ロックで直列化する。より新しい snapshotAt が既に処理済みなら、古い方は
+ * lifecycle を巻き戻さないためスキップする。
+ * @param prisma - Prisma クライアント
+ * @param input - 対象 snapshot set の時刻と実行本体
+ */
+export async function runLabelFindingsSerialized(
+  prisma: PrismaClient,
+  input: RunLabelFindingsSerializedInput,
+): Promise<void> {
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        INSERT INTO "ReadModelState" ("modelKey", "schemaVersion", "status")
+        VALUES (${MODEL_KEY}, 1, 'unknown')
+        ON CONFLICT ("modelKey") DO NOTHING
+      `
+      const rows = await tx.$queryRaw<{ sourceWatermarkAt: Date | null }[]>`
+        SELECT "sourceWatermarkAt" FROM "ReadModelState"
+        WHERE "modelKey" = ${MODEL_KEY}
+        FOR UPDATE
+      `
+      const state = rows.at(0)
+      if (state?.sourceWatermarkAt && input.snapshotAt <= state.sourceWatermarkAt) return
+
+      await input.run(tx)
+
+      await tx.readModelState.update({
+        where: { modelKey: MODEL_KEY },
+        data: {
+          status: 'healthy',
+          sourceWatermarkAt: input.snapshotAt,
+          lastSuccessAt: new Date(),
+        },
+      })
+    })
+  } catch (error) {
+    // input.run が投げた例外は上のトランザクション自体を rollback させるため、
+    // 同じトランザクション内では failed を記録できない。別トランザクションで記録する。
+    // 初回実行の失敗では INSERT ... ON CONFLICT DO NOTHING も rollback され行自体が
+    // 存在しないため、update ではなく upsert で確実に failed を記録する。
+    try {
+      await prisma.readModelState.upsert({
+        where: { modelKey: MODEL_KEY },
+        update: { status: 'failed', lastFailureAt: new Date(), errorSummary: String(error) },
+        create: {
+          modelKey: MODEL_KEY,
+          schemaVersion: 1,
+          status: 'failed',
+          lastFailureAt: new Date(),
+          errorSummary: String(error),
+        },
+      })
+    } catch (bookkeepingError) {
+      logger.error(`failed to record label_findings failure`, bookkeepingError as Error)
+    }
+    throw error
+  }
+}

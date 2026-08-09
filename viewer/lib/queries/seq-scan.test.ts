@@ -28,7 +28,8 @@ function collectSeqScans(node: ExplainPlanNode, targetTable: string): ExplainPla
  * @returns Sort / Incremental Sort ノードの一覧
  */
 function collectSorts(node: ExplainPlanNode): ExplainPlanNode[] {
-  const found = node['Node Type'] === 'Sort' || node['Node Type'] === 'Incremental Sort' ? [node] : []
+  const found =
+    node['Node Type'] === 'Sort' || node['Node Type'] === 'Incremental Sort' ? [node] : []
   return [...found, ...(node.Plans ?? []).flatMap((child) => collectSorts(child))]
 }
 

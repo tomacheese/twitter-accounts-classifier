@@ -1,26 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from './generated/prisma'
-import {
-  getCrawlReadModelPublication,
-  enqueueReadModelBootstrapIfMissing,
-} from './worker-processors'
-
-describe('getCrawlReadModelPublication', () => {
-  it('partial crawl は公開対象だが partial として扱う', () => {
-    expect(getCrawlReadModelPublication('partial')).toEqual({
-      shouldPublish: true,
-      isPartial: true,
-      partialReason: 'crawl completed partially; some accounts may contain older data',
-    })
-  })
-
-  it('failed crawl は read model を公開しない', () => {
-    expect(getCrawlReadModelPublication('failed')).toEqual({
-      shouldPublish: false,
-      isPartial: false,
-    })
-  })
-})
+import { enqueueReadModelBootstrapIfMissing } from './worker-processors'
 
 describe('enqueueReadModelBootstrapIfMissing', () => {
   it('account_summary pointer が無ければ最新 terminal crawl の label_metrics を再キューする', async () => {

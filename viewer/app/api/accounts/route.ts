@@ -41,11 +41,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       items: result.items,
       meta: buildApiResponseMeta({
         ...meta,
-        generationId: result.generationId,
         freshnessStatus: result.freshnessStatus,
         nextCursor: result.nextCursor,
-        isPartial: result.isPartial,
-        partialReason: result.partialReason,
+        readiness: result.readiness,
       }),
     },
     { headers: { 'Cache-Control': 'no-store' } },

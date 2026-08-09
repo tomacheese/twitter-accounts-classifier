@@ -6,6 +6,7 @@ import { getLabelAggregateSnapshot } from '@/lib/queries/dashboard'
 import { listLabelSummaries } from '@/lib/queries/label-summary'
 import { isNewUiSectionEnabled } from '@/lib/feature-flags'
 import { ErrorFallback } from '../components/error-fallback'
+import { ReadModelReadinessPanel } from '../components/read-model-readiness-panel'
 
 // 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
@@ -94,7 +95,16 @@ async function LegacyLabelsPage(): Promise<React.ReactElement> {
 async function NewLabelsView(): Promise<React.ReactElement> {
   const prisma = getPrismaClient()
   try {
-    const items = await listLabelSummaries(prisma)
+    const { items, readiness } = await listLabelSummaries(prisma)
+
+    if (readiness !== 'ready') {
+      return (
+        <div className="flex flex-col gap-4">
+          <h1 className="text-2xl font-semibold">Labels</h1>
+          <ReadModelReadinessPanel status={readiness} section="Labels" />
+        </div>
+      )
+    }
 
     return (
       <div className="flex flex-col gap-6">

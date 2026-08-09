@@ -214,7 +214,10 @@ export async function getAttentionRequiredItems(
       take: RECENT_LIMIT,
     }),
     prisma.crawlAccountRun.findMany({
-      where: { status: { in: ['partial', 'failed'] } },
+      // resume 時に前回ステータスを引き継いで記録する skipped 行は、実際には
+      // 今回何も処理していない (警告自体は元の試行の行で既に計上済み) ため、
+      // 同じ警告を二重に出さないよう対象外にする。
+      where: { status: { in: ['partial', 'failed'] }, classificationStatus: { not: 'skipped' } },
       orderBy: { startedAt: 'desc' },
       take: RECENT_LIMIT,
     }),

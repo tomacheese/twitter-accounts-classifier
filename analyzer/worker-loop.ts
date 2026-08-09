@@ -18,12 +18,13 @@ export const POST_COMPLETION_REFRESH_KIND = 'post_completion_refresh'
 export const WORK_ITEM_COMPLETION_TRIGGER_TYPE = 'work_item_completion'
 
 const HANDLED_KINDS = [
-  'label_metrics',
-  'finding_generation',
+  'label_aggregate_refresh',
   'read_model_refresh',
   'weekly_review_ingest',
   'block_reconciliation',
   'retention_sweep',
+  'account_summary_refresh',
+  'account_summary_bootstrap',
   POST_COMPLETION_REFRESH_KIND,
 ] as const
 
@@ -39,12 +40,10 @@ export interface WorkerLoopDeps {
   leaseDurationMs?: number
   /** lease 更新間隔 (ミリ秒)。テストや特殊運用向け。既定は leaseDurationMs の 1/3。 */
   leaseRenewIntervalMs?: number
-  /** kind: label_metrics の処理関数。 */
-  processLabelMetrics: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
-  /** kind: finding_generation の処理関数。 */
-  processFindingGeneration: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: read_model_refresh の処理関数。 */
   processReadModelRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
+  /** kind: label_aggregate_refresh の処理関数。 */
+  processLabelAggregateRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: weekly_review_ingest の処理関数。 */
   processWeeklyReviewIngest: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: block_reconciliation の処理関数。 */
@@ -53,6 +52,15 @@ export interface WorkerLoopDeps {
   processRetentionSweep: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: post_completion_refresh の処理関数。 */
   processPostCompletionRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
+  /** kind: account_summary_refresh, triggerType: account_classification_observation の処理関数。 */
+  processAccountSummaryRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
+  /** kind: account_summary_refresh, triggerType: review_finding_occurrence の処理関数。 */
+  processAccountFindingRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
+  /** kind: account_summary_bootstrap の処理関数。 */
+  processAccountSummaryBootstrap: (
+    prisma: PrismaClient,
+    workItem: AnalysisWorkItem,
+  ) => Promise<void>
   /**
    * WorkItem の終了状態を確定させた後に呼ばれる後処理。
    * Cycle の再計算は WorkItem の状態が確定した後でなければ最新の Stage 状態を
@@ -84,14 +92,11 @@ async function dispatch(
   deps: WorkerLoopDeps,
 ): Promise<void> {
   switch (workItem.kind) {
-    case 'label_metrics': {
-      return deps.processLabelMetrics(prisma, workItem)
-    }
-    case 'finding_generation': {
-      return deps.processFindingGeneration(prisma, workItem)
-    }
     case 'read_model_refresh': {
       return deps.processReadModelRefresh(prisma, workItem)
+    }
+    case 'label_aggregate_refresh': {
+      return deps.processLabelAggregateRefresh(prisma, workItem)
     }
     case 'weekly_review_ingest': {
       return deps.processWeeklyReviewIngest(prisma, workItem)
@@ -104,6 +109,15 @@ async function dispatch(
     }
     case POST_COMPLETION_REFRESH_KIND: {
       return deps.processPostCompletionRefresh(prisma, workItem)
+    }
+    case 'account_summary_refresh': {
+      if (workItem.triggerType === 'review_finding_occurrence') {
+        return deps.processAccountFindingRefresh(prisma, workItem)
+      }
+      return deps.processAccountSummaryRefresh(prisma, workItem)
+    }
+    case 'account_summary_bootstrap': {
+      return deps.processAccountSummaryBootstrap(prisma, workItem)
     }
     default: {
       throw new Error(`Unknown work item kind: ${workItem.kind}`)
@@ -149,11 +163,16 @@ export async function runWorkerLoopOnce(
     })
       .then((renewed) => {
         if (!renewed) {
-          logger.warn(`failed to renew lease for work item ${workItem.id} (${workItem.kind}): lease lost`)
+          logger.warn(
+            `failed to renew lease for work item ${workItem.id} (${workItem.kind}): lease lost`,
+          )
         }
       })
       .catch((error: unknown) => {
-        logger.error(`lease renewal failed for work item ${workItem.id} (${workItem.kind})`, error as Error)
+        logger.error(
+          `lease renewal failed for work item ${workItem.id} (${workItem.kind})`,
+          error as Error,
+        )
       })
       .finally(() => {
         renewalPromise = undefined

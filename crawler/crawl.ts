@@ -11,7 +11,10 @@ import {
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
-import { ensureLabelDefinitionsForRules, recordCrawlAccountLabel } from './db/label-repository'
+import {
+  ensureLabelDefinitionsForRules,
+  recordCrawlAccountLabelsAtomic,
+} from './db/label-repository'
 import { refreshLabelAggregate } from './db/label-aggregate-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { LabelRuleRegistry } from './labels/registry'
@@ -125,15 +128,17 @@ export interface CrawlDependencies {
   loadFollowGraphLabelIndex: (
     labelDefinitionIds: Map<string, string>,
   ) => Promise<FollowGraphLabelIndex>
-  persistLabel: (params: {
+  recordLabelsAtomic: (params: {
+    accountId: string
     crawlRunId: string
     username: string
-    accountId: string
-    labelDefinitionId: string
-    method: string
-    ruleVersion: string
-    result: { value: boolean; confidence: number; reason: string }
-  }) => Promise<void>
+    labels: {
+      labelDefinitionId: string
+      result: { value: boolean; confidence: number; reason: string }
+      method: string
+      ruleVersion: string
+    }[]
+  }) => Promise<string | null>
   replaceLabelingFollowSample: (accountId: string, result: FollowListResult) => Promise<void>
   syncFollowing: (followerId: string, result: FollowListResult) => Promise<void>
   syncFollowers: (followeeId: string, result: FollowListResult) => Promise<void>
@@ -229,6 +234,31 @@ function summarizeWarningsByType(
     counts[warning.type] = (counts[warning.type] ?? 0) + 1
   }
   return counts
+}
+
+const LABELING_INPUT_WARNING_TYPES = new Set<CrawlWarningType>([
+  'recommended_timeline_failed',
+  'following_timeline_failed',
+  'trending_timeline_failed',
+  'author_processing_failed',
+])
+
+/**
+ * ログインアカウント 1 サイクル分の classification component 状態を導出する。
+ * @param input - 例外の有無・skip の有無・記録された warning 一覧
+ * @returns success/partial/failed/skipped のいずれか
+ */
+export function deriveClassificationStatus(input: {
+  warnings: { type: CrawlWarningType }[]
+  wasSkipped: boolean
+  wasCaughtException: boolean
+}): string {
+  if (input.wasCaughtException) return 'failed'
+  if (input.wasSkipped) return 'skipped'
+  const hasLabelingInputWarning = input.warnings.some((warning) =>
+    LABELING_INPUT_WARNING_TYPES.has(warning.type),
+  )
+  return hasLabelingInputWarning ? 'partial' : 'success'
 }
 
 interface AccountCycleMetrics {
@@ -494,22 +524,27 @@ async function runAccountCycleBody(
         followGraphLabelSignals: followGraphLabelIndex.signalsFor(profile.id),
       }
 
-      for (const { rule, result } of registry.applyAll(bundle)) {
+      const ruleResults = [...registry.applyAll(bundle)].flatMap(({ rule, result }) => {
         const labelDefinitionId = labelDefinitionIds.get(rule.key)
         if (!labelDefinitionId) {
           logger.warn(`No LabelDefinition id found for rule "${rule.key}", skipping persistence`)
-          continue
+          return []
         }
-        await deps.persistLabel({
-          crawlRunId,
-          username: account.username,
-          accountId: profile.id,
-          labelDefinitionId,
-          method: rule.key,
-          ruleVersion: rule.version,
-          result,
-        })
-        labelsAppliedCount++
+        return [{ labelDefinitionId, result, method: rule.key, ruleVersion: rule.version }]
+      })
+      // observationId 自体をここで使う必要はない。account_summary_refresh の
+      // enqueue は recordLabelsAtomic 内のトランザクションで既に完結している。
+      const observationId = await deps.recordLabelsAtomic({
+        accountId: profile.id,
+        crawlRunId,
+        username: account.username,
+        labels: ruleResults,
+      })
+      // 同じ crawlRunId/username/accountId で再試行された場合、recordLabelsAtomic は
+      // ON CONFLICT DO NOTHING で何も claim できず null を返す。その場合は実際には
+      // 何も永続化していないため、件数を二重に数えない。
+      if (observationId !== null) {
+        labelsAppliedCount += ruleResults.length
       }
     } catch (error) {
       if (isExpectedAccountLookupError(error)) {
@@ -1107,6 +1142,11 @@ async function runAccountCycle(
       warnings,
       errorMessage: null,
       appVersion: APP_VERSION,
+      classificationStatus: deriveClassificationStatus({
+        warnings,
+        wasSkipped: false,
+        wasCaughtException: false,
+      }),
     })
 
     // recordCrawlAccountRun の後に実行する: GlitchTip への到達性に関わらず、
@@ -1146,6 +1186,11 @@ async function runAccountCycle(
       warnings: [],
       errorMessage: String(error),
       appVersion: APP_VERSION,
+      classificationStatus: deriveClassificationStatus({
+        warnings: [],
+        wasSkipped: false,
+        wasCaughtException: true,
+      }),
     })
     throw error
   }
@@ -1171,9 +1216,34 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
     for (const account of deps.config.accounts) {
-      const previousStatus = latestAccountStatuses.get(account.username)
-      if (previousStatus === 'success' || previousStatus === 'partial') {
-        accountStatuses.push(previousStatus)
+      const previous = latestAccountStatuses.get(account.username)
+      if (previous?.status === 'success' || previous?.status === 'partial') {
+        accountStatuses.push(previous.status)
+        // 同じ crawlRunId の再開 (コンテナ再起動等) を繰り返すたびに、既に完了した
+        // Account 分の skipped 行を際限なく積み増さないよう、直近の試行が既に
+        // skipped であれば書き込み自体を省略する。
+        if (previous.classificationStatus !== 'skipped') {
+          await deps.recordCrawlAccountRun({
+            crawlRunId,
+            username: account.username,
+            startedAt: new Date(),
+            finishedAt: new Date(),
+            status: previous.status,
+            recommendedCount: 0,
+            followingCount: 0,
+            trendingCount: 0,
+            replyCount: 0,
+            profileCount: 0,
+            labelsAppliedCount: 0,
+            followingSynced: false,
+            followersSynced: false,
+            blocksSynced: false,
+            warnings: [],
+            errorMessage: null,
+            appVersion: APP_VERSION,
+            classificationStatus: 'skipped',
+          })
+        }
         continue
       }
 
@@ -1282,9 +1352,7 @@ async function main(): Promise<void> {
     loadReplyCorpus: () => loadReplyCorpus(prisma),
     loadFollowGraphLabelIndex: (labelDefinitionIds) =>
       buildFollowGraphLabelIndex(prisma, labelDefinitionIds),
-    persistLabel: async (params) => {
-      await recordCrawlAccountLabel(prisma, params)
-    },
+    recordLabelsAtomic: (params) => recordCrawlAccountLabelsAtomic(prisma, params),
     replaceLabelingFollowSample: (accountId, result) =>
       replaceLabelingFollowSampleRecord(prisma, accountId, result),
     syncFollowing: (followerId, result) => syncFollowingEdges(prisma, followerId, result),

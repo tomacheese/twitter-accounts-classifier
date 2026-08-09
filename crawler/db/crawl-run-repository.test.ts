@@ -50,8 +50,8 @@ describe('startOrResumeCrawlRun', () => {
       sqlQuery = query
       requestedRunId = crawlRunId
       return Promise.resolve([
-        { username: 'alice', status: 'failed' },
-        { username: 'bob', status: 'partial' },
+        { username: 'alice', status: 'failed', classificationStatus: 'failed' },
+        { username: 'bob', status: 'partial', classificationStatus: 'partial' },
       ])
     })
     const create = vi.fn()
@@ -66,12 +66,14 @@ describe('startOrResumeCrawlRun', () => {
     expect(result).toEqual({
       id: 'run2',
       latestAccountStatuses: new Map([
-        ['alice', 'failed'],
-        ['bob', 'partial'],
+        ['alice', { status: 'failed', classificationStatus: 'failed' }],
+        ['bob', { status: 'partial', classificationStatus: 'partial' }],
       ]),
     })
     if (!sqlQuery) throw new Error('Expected the latest account status query')
-    expect(sqlQuery.join('')).toContain('SELECT DISTINCT ON ("username") "username", "status"')
+    expect(sqlQuery.join('')).toContain(
+      'SELECT DISTINCT ON ("username") "username", "status", "classificationStatus"',
+    )
     expect(sqlQuery.join('')).toContain('WHERE "crawlRunId" = ')
     expect(sqlQuery.join('')).toContain('ORDER BY "username", "startedAt" DESC, "id" DESC')
     expect(requestedRunId).toBe('run2')
@@ -202,7 +204,7 @@ describe('finishCrawlRun', () => {
     })
   })
 
-  it('enqueues a label_metrics AnalysisWorkItem for the finished run', async () => {
+  it('enqueues a label_aggregate_refresh AnalysisWorkItem for the finished run', async () => {
     const update = vi.fn().mockResolvedValue({})
     const upsert = vi.fn().mockResolvedValue({})
     const tx = { crawlRun: { update }, analysisWorkItem: { upsert } }
@@ -216,7 +218,7 @@ describe('finishCrawlRun', () => {
       expect.objectContaining({
         where: {
           kind_triggerType_triggerId: {
-            kind: 'label_metrics',
+            kind: 'label_aggregate_refresh',
             triggerType: 'crawl_run',
             triggerId: 'run1',
           },
@@ -266,6 +268,7 @@ describe('recordCrawlAccountRun', () => {
       warnings: [],
       errorMessage: null,
       appVersion: 'v1.2.3',
+      classificationStatus: 'success',
     })
 
     expect(create).toHaveBeenCalledWith({
@@ -287,6 +290,7 @@ describe('recordCrawlAccountRun', () => {
         warnings: [],
         errorMessage: null,
         appVersion: 'v1.2.3',
+        classificationStatus: 'success',
       },
     })
   })

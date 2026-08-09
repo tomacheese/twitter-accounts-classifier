@@ -68,6 +68,7 @@ export interface RecordCrawlAccountRunParams {
    * 行を最終確定させたビルドを表す。個々の warning は `CrawlWarning.appVersion` を見る。
    */
   appVersion: string
+  classificationStatus: string
 }
 
 export const CRAWL_ACCOUNT_CHECKPOINT_PHASES = [
@@ -87,12 +88,18 @@ export interface CrawlAccountCheckpointParams {
   data: Prisma.InputJsonValue
 }
 
+/** アカウントの最新試行の status と classificationStatus。 */
+export interface LatestAccountStatus {
+  status: string
+  classificationStatus: string
+}
+
 /**
  * 再開する crawl run と、アカウントごとの最新試行の status。
  */
 export interface CrawlRunStartResult {
   id: string
-  latestAccountStatuses: Map<string, string>
+  latestAccountStatuses: Map<string, LatestAccountStatus>
 }
 
 /**
@@ -133,9 +140,9 @@ export async function finishCrawlRun(
       data: { finishedAt, status, currentUsername: null, currentAccountStartedAt: null },
     })
     // failed で終わった run でも、途中まで取得できたデータの指標更新には価値があるため
-    // 常に enqueue する。完全性の記録は label_metrics 側の責務とする。
+    // 常に enqueue する。完全性の記録は label_aggregate_refresh 側の責務とする。
     await enqueueWorkItem(tx, {
-      kind: 'label_metrics',
+      kind: 'label_aggregate_refresh',
       triggerType: 'crawl_run',
       triggerId: id,
     })
@@ -270,14 +277,19 @@ export async function startOrResumeCrawlRun(
           staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
         },
       })
-      const accountRuns = await prisma.$queryRaw<{ username: string; status: string }[]>`
-        SELECT DISTINCT ON ("username") "username", "status"
+      const accountRuns = await prisma.$queryRaw<
+        { username: string; status: string; classificationStatus: string }[]
+      >`
+        SELECT DISTINCT ON ("username") "username", "status", "classificationStatus"
         FROM "CrawlAccountRun"
         WHERE "crawlRunId" = ${existingRun.id}
         ORDER BY "username", "startedAt" DESC, "id" DESC
       `
       const latestAccountStatuses = new Map(
-        accountRuns.map(({ username, status }) => [username, status]),
+        accountRuns.map(({ username, status, classificationStatus }) => [
+          username,
+          { status, classificationStatus },
+        ]),
       )
       return { id: existingRun.id, latestAccountStatuses }
     }

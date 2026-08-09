@@ -24,17 +24,23 @@ vi.mock('./worker-loop', () => ({
 }))
 
 vi.mock('./worker-processors', () => ({
-  processLabelMetrics: vi.fn(),
-  processFindingGeneration: vi.fn(),
   processReadModelRefresh: vi.fn(),
+  processLabelAggregateRefresh: vi.fn(),
   processWeeklyReviewIngest: vi.fn(),
   processBlockReconciliation: vi.fn(),
   processRetentionSweep: vi.fn(),
   processPostCompletionRefresh: vi.fn(),
+  processAccountSummaryRefresh: vi.fn(),
+  processAccountFindingRefresh: vi.fn(),
   enqueueDailyRetentionSweep: vi.fn().mockResolvedValue(undefined),
-  enqueueReadModelBootstrapIfMissing: vi.fn().mockResolvedValue(undefined),
+  enqueueHourlyLabelAggregateRefresh: vi.fn().mockResolvedValue(undefined),
   refreshReadModelFreshnessFromPolicy: vi.fn().mockResolvedValue(undefined),
   handleWorkItemSettled: vi.fn(),
+}))
+
+vi.mock('./read-models/account-summary-bootstrap', () => ({
+  enqueueAccountSummaryBootstrapIfNeeded: vi.fn().mockResolvedValue(undefined),
+  processAccountSummaryBootstrap: vi.fn(),
 }))
 
 describe('main', () => {

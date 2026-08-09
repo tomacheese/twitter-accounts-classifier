@@ -121,12 +121,7 @@ export async function buildOverviewSnapshot(
     prisma.readModelPointer.findUnique({ where: { modelKey: 'block_relation' } }),
   ])
 
-  const coreStageKeys = new Set([
-    'crawl',
-    'label_metrics',
-    'finding_generation',
-    'read_model_refresh',
-  ])
+  const coreStageKeys = new Set(['crawl', 'label_aggregate_refresh', 'read_model_refresh'])
   const coreStages = (latestCycle?.stages ?? []).filter((stage) =>
     coreStageKeys.has(stage.stageKey),
   )

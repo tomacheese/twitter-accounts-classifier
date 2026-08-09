@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { getPrismaClient } from '../db/client'
-import { generateFindingsForCrawlCycle } from './generate-findings'
+import {
+  generateFindingsForCrawlCycle,
+  generateFindingsForAggregateRefresh,
+} from './generate-findings'
 import { computeFingerprint } from './fingerprint'
 import type { DetectionPolicy, DetectionPolicyRule } from '../policy/schema'
 import { randomUUID } from 'node:crypto'
@@ -64,6 +67,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
   ) {
     await prisma.labelMetricSnapshot.create({
       data: {
+        triggerWorkItemId: crawlRunId,
         sourceCrawlRunId: crawlRunId,
         labelDefinitionId,
         observedAt,
@@ -152,6 +156,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
     await makeSnapshot(run1, 100, new Date('2026-08-01T00:00:00Z'))
     await prisma.labelMetricSnapshot.create({
       data: {
+        triggerWorkItemId: run2,
         sourceCrawlRunId: run2,
         labelDefinitionId,
         observedAt: new Date('2026-08-02T00:00:00Z'),
@@ -386,5 +391,102 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
 
     expect(bioFinding?.status).toBe('resolved')
     expect(screenNameFinding?.status).toBe('active')
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForAggregateRefresh', () => {
+  const prisma = getPrismaClient()
+  let labelDefinitionId: string
+
+  beforeEach(async () => {
+    await prisma.findingEvidence.deleteMany()
+    await prisma.reviewFindingOccurrence.deleteMany()
+    await prisma.reviewFinding.deleteMany()
+    await prisma.detectorEvaluation.deleteMany()
+    await prisma.labelMetricSnapshot.deleteMany()
+
+    const label = await prisma.labelDefinition.upsert({
+      where: { key: 'generate-findings-aggregate-refresh-test-label' },
+      create: { key: 'generate-findings-aggregate-refresh-test-label', description: 'test' },
+      update: {},
+    })
+    labelDefinitionId = label.id
+  })
+
+  async function makeSnapshot(
+    triggerWorkItemId: string,
+    trueCount: number,
+    observedAt: Date,
+    sourceCrawlRunId?: string,
+  ) {
+    await prisma.labelMetricSnapshot.create({
+      data: {
+        triggerWorkItemId,
+        sourceCrawlRunId: sourceCrawlRunId ?? null,
+        labelDefinitionId,
+        observedAt,
+        sourceWatermarkAt: observedAt,
+        evaluatedCount: 1000,
+        trueCount,
+        prevalence: trueCount / 1000,
+        completeness: 'complete',
+        policyHash: 'hash-1',
+        analyzerVersion: 'test',
+      },
+    })
+  }
+
+  it('uses triggerWorkItemId as the DetectorEvaluation/ReviewFindingOccurrence idempotency key', async () => {
+    const run1 = `crawl-${randomUUID()}`
+    await makeSnapshot(
+      `work_item_finding_baseline_${randomUUID()}`,
+      100,
+      new Date('2026-08-01T00:00:00Z'),
+      run1,
+    )
+    await makeSnapshot('work_item_finding_1', 50, new Date('2026-08-02T00:00:00Z'), run1)
+
+    const activateImmediatelyPolicy: DetectionPolicy = {
+      ...policy,
+      rules: [{ ...labelCountDropRule, activationCount: 1 }],
+    }
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await generateFindingsForAggregateRefresh(prisma, {
+        triggerWorkItemId: 'work_item_finding_1',
+        policy: activateImmediatelyPolicy,
+        policyHash: 'hash-1',
+        detectorVersion: 'v1',
+      })
+    }
+
+    const evaluations = await prisma.detectorEvaluation.findMany({
+      where: { sourceId: 'work_item_finding_1' },
+    })
+    expect(evaluations).toHaveLength(1)
+  })
+
+  it('does not select a schedule/weekly/bootstrap snapshot as the previous_cycle baseline', async () => {
+    // sourceCrawlRunId を持たない = crawl 起因ではない snapshot。
+    await makeSnapshot('work_item_finding_schedule', 100, new Date('2026-08-01T00:00:00Z'))
+    const run2 = `crawl-${randomUUID()}`
+    await makeSnapshot('work_item_finding_crawl', 20, new Date('2026-08-02T00:00:00Z'), run2)
+
+    const activateImmediatelyPolicy: DetectionPolicy = {
+      ...policy,
+      rules: [{ ...labelCountDropRule, activationCount: 1, baselineWindow: 'previous_cycle' }],
+    }
+
+    await generateFindingsForAggregateRefresh(prisma, {
+      triggerWorkItemId: 'work_item_finding_crawl',
+      policy: activateImmediatelyPolicy,
+      policyHash: 'hash-1',
+      detectorVersion: 'v1',
+    })
+
+    const findings = await prisma.reviewFinding.findMany({
+      where: { primaryScopeId: labelDefinitionId },
+    })
+    expect(findings).toHaveLength(0)
   })
 })

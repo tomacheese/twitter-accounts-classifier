@@ -43,7 +43,7 @@ vi.mock('./queue/work-item-repository', () => ({
 function makeWorkItem(overrides: Partial<AnalysisWorkItem>): AnalysisWorkItem {
   return {
     id: 'work-item-1',
-    kind: 'label_metrics',
+    kind: 'label_aggregate_refresh',
     triggerType: 'crawl_run',
     triggerId: 'crawl-1',
     status: 'leased',
@@ -65,13 +65,15 @@ function makeWorkItem(overrides: Partial<AnalysisWorkItem>): AnalysisWorkItem {
 function makeDeps() {
   return {
     leaseOwner: 'worker-1',
-    processLabelMetrics: vi.fn().mockResolvedValue(undefined),
-    processFindingGeneration: vi.fn().mockResolvedValue(undefined),
     processReadModelRefresh: vi.fn().mockResolvedValue(undefined),
+    processLabelAggregateRefresh: vi.fn().mockResolvedValue(undefined),
     processWeeklyReviewIngest: vi.fn().mockResolvedValue(undefined),
     processBlockReconciliation: vi.fn().mockResolvedValue(undefined),
     processRetentionSweep: vi.fn().mockResolvedValue(undefined),
     processPostCompletionRefresh: vi.fn().mockResolvedValue(undefined),
+    processAccountSummaryRefresh: vi.fn().mockResolvedValue(undefined),
+    processAccountFindingRefresh: vi.fn().mockResolvedValue(undefined),
+    processAccountSummaryBootstrap: vi.fn().mockResolvedValue(undefined),
     onWorkItemSettled: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -98,16 +100,16 @@ describe('runWorkerLoopOnce', () => {
     const result = await runWorkerLoopOnce(prisma, deps)
 
     expect(result).toBe(false)
-    expect(deps.processLabelMetrics).not.toHaveBeenCalled()
+    expect(deps.processLabelAggregateRefresh).not.toHaveBeenCalled()
   })
 
   it.each([
-    ['label_metrics', 'processLabelMetrics'],
-    ['finding_generation', 'processFindingGeneration'],
+    ['label_aggregate_refresh', 'processLabelAggregateRefresh'],
     ['read_model_refresh', 'processReadModelRefresh'],
     ['weekly_review_ingest', 'processWeeklyReviewIngest'],
     ['block_reconciliation', 'processBlockReconciliation'],
     ['retention_sweep', 'processRetentionSweep'],
+    ['account_summary_bootstrap', 'processAccountSummaryBootstrap'],
     [POST_COMPLETION_REFRESH_KIND, 'processPostCompletionRefresh'],
   ] as const)('kind が %s なら %s だけを呼ぶ', async (kind, depKey) => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({ kind }))
@@ -125,7 +127,7 @@ describe('runWorkerLoopOnce', () => {
   it('処理が例外を投げ、attemptCount が maxAttempts 未満なら failed で記録する', async () => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({ attemptCount: 1, maxAttempts: 5 }))
     const deps = makeDeps()
-    deps.processLabelMetrics.mockRejectedValue(new Error('boom'))
+    deps.processLabelAggregateRefresh.mockRejectedValue(new Error('boom'))
 
     await runWorkerLoopOnce(prisma, deps)
 
@@ -138,7 +140,7 @@ describe('runWorkerLoopOnce', () => {
   it('処理が例外を投げ、attemptCount が maxAttempts 以上なら dead で記録する', async () => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({ attemptCount: 5, maxAttempts: 5 }))
     const deps = makeDeps()
-    deps.processLabelMetrics.mockRejectedValue(new Error('boom'))
+    deps.processLabelAggregateRefresh.mockRejectedValue(new Error('boom'))
 
     await runWorkerLoopOnce(prisma, deps)
 
@@ -152,7 +154,7 @@ describe('runWorkerLoopOnce', () => {
     const error = new Error('boom')
     claimNextWorkItem.mockResolvedValue(makeWorkItem({}))
     const deps = makeDeps()
-    deps.processLabelMetrics.mockRejectedValue(error)
+    deps.processLabelAggregateRefresh.mockRejectedValue(error)
 
     await runWorkerLoopOnce(prisma, deps)
 
@@ -163,7 +165,7 @@ describe('runWorkerLoopOnce', () => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({}))
     const deps = makeDeps()
     let resolveProcessing: (() => void) | undefined
-    deps.processLabelMetrics.mockImplementation(
+    deps.processLabelAggregateRefresh.mockImplementation(
       () =>
         new Promise<void>((resolve) => {
           resolveProcessing = resolve
@@ -219,7 +221,7 @@ describe('runWorkerLoopOnce', () => {
   it('失敗した attempt も AnalysisRun へ failed として記録する', async () => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({ attemptCount: 1, maxAttempts: 5 }))
     const deps = makeDeps()
-    deps.processLabelMetrics.mockRejectedValue(new Error('boom'))
+    deps.processLabelAggregateRefresh.mockRejectedValue(new Error('boom'))
 
     await runWorkerLoopOnce(prisma, deps)
 
@@ -232,7 +234,7 @@ describe('runWorkerLoopOnce', () => {
   it('再試行の待機時刻を completeWorkItem へ渡す', async () => {
     claimNextWorkItem.mockResolvedValue(makeWorkItem({ attemptCount: 2, maxAttempts: 5 }))
     const deps = makeDeps()
-    deps.processLabelMetrics.mockRejectedValue(new Error('boom'))
+    deps.processLabelAggregateRefresh.mockRejectedValue(new Error('boom'))
 
     await runWorkerLoopOnce(prisma, deps)
 
@@ -300,5 +302,35 @@ describe('runWorkerLoopOnce', () => {
     await runWorkerLoopOnce(prisma, deps)
 
     expect(enqueueWorkItem).not.toHaveBeenCalled()
+  })
+
+  it('kind が account_summary_refresh のとき、triggerType が account_classification_observation なら processAccountSummaryRefresh だけを呼ぶ', async () => {
+    claimNextWorkItem.mockResolvedValue(
+      makeWorkItem({
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+      }),
+    )
+    const deps = makeDeps()
+
+    await runWorkerLoopOnce(prisma, deps)
+
+    expect(deps.processAccountSummaryRefresh).toHaveBeenCalledTimes(1)
+    expect(deps.processAccountFindingRefresh).not.toHaveBeenCalled()
+  })
+
+  it('kind が account_summary_refresh のとき、triggerType が review_finding_occurrence なら processAccountFindingRefresh だけを呼ぶ', async () => {
+    claimNextWorkItem.mockResolvedValue(
+      makeWorkItem({
+        kind: 'account_summary_refresh',
+        triggerType: 'review_finding_occurrence',
+      }),
+    )
+    const deps = makeDeps()
+
+    await runWorkerLoopOnce(prisma, deps)
+
+    expect(deps.processAccountFindingRefresh).toHaveBeenCalledTimes(1)
+    expect(deps.processAccountSummaryRefresh).not.toHaveBeenCalled()
   })
 })

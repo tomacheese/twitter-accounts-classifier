@@ -1,6 +1,6 @@
 import { Logger } from '@book000/node-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { runCrawlCycle, type CrawlDependencies } from './crawl'
+import { runCrawlCycle, deriveClassificationStatus, type CrawlDependencies } from './crawl'
 import type { CrawlAccountCheckpointParams } from './db/crawl-run-repository'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
@@ -127,7 +127,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       .mockResolvedValue(new Map([['verified_blue_individual', 'ld1']])),
     loadReplyCorpus: vi.fn().mockResolvedValue([]),
     loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
-    persistLabel: vi.fn().mockResolvedValue(undefined),
+    recordLabelsAtomic: vi.fn().mockResolvedValue('observation1'),
     replaceLabelingFollowSample: vi.fn().mockResolvedValue(undefined),
     syncFollowing: vi.fn().mockResolvedValue(undefined),
     syncFollowers: vi.fn().mockResolvedValue(undefined),
@@ -165,12 +165,12 @@ describe('runCrawlCycle', () => {
     })
     expect(deps.persistAccount).toHaveBeenCalled()
     expect(deps.persistTweets).toHaveBeenCalled()
-    expect(deps.persistLabel).toHaveBeenCalledWith(
+    expect(deps.recordLabelsAtomic).toHaveBeenCalledWith(
       expect.objectContaining({
         crawlRunId: 'run1',
         username: 'v',
         accountId: 'author1',
-        labelDefinitionId: 'ld1',
+        labels: expect.arrayContaining([expect.objectContaining({ labelDefinitionId: 'ld1' })]),
       }),
     )
     expect(deps.closeTrendsScraper).toHaveBeenCalled()
@@ -222,10 +222,10 @@ describe('runCrawlCycle', () => {
 
     // サンプル取得は失敗として記録されるが、
     // フォロー先サンプルはラベリング精度を補強する追加シグナルに過ぎないため、
-    // 投稿者本体の persistAccount・persistLabel は通常どおり実行される。
+    // 投稿者本体の persistAccount・recordLabelsAtomic は通常どおり実行される。
     expect(deps.replaceLabelingFollowSample).not.toHaveBeenCalled()
     expect(deps.persistAccount).toHaveBeenCalled()
-    expect(deps.persistLabel).toHaveBeenCalled()
+    expect(deps.recordLabelsAtomic).toHaveBeenCalled()
     expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'partial',
@@ -360,8 +360,13 @@ describe('runCrawlCycle', () => {
     // 評価しない投稿者向けの軽量な埋め込みプロフィール upsert だけで済ませず、
     // タイムライン投稿者と同じ専用プロフィール取得・ラベル評価を通す。
     expect(getUserByRestId).toHaveBeenCalledWith({ userId: 'reply-author' })
-    expect(deps.persistLabel).toHaveBeenCalledWith(
-      expect.objectContaining({ accountId: 'reply-author', labelDefinitionId: 'ld-hijack' }),
+    expect(deps.recordLabelsAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: 'reply-author',
+        labels: expect.arrayContaining([
+          expect.objectContaining({ labelDefinitionId: 'ld-hijack' }),
+        ]),
+      }),
     )
   })
 
@@ -409,11 +414,15 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    expect(deps.persistLabel).toHaveBeenCalledWith(
+    expect(deps.recordLabelsAtomic).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: 'reply-author',
-        labelDefinitionId: 'ld-hijack',
-        result: expect.objectContaining({ value: true }),
+        labels: expect.arrayContaining([
+          expect.objectContaining({
+            labelDefinitionId: 'ld-hijack',
+            result: expect.objectContaining({ value: true }),
+          }),
+        ]),
       }),
     )
   })
@@ -1326,7 +1335,9 @@ describe('runCrawlCycle', () => {
       },
       startOrResumeCrawlRun: vi.fn().mockResolvedValue({
         id: 'run1',
-        latestAccountStatuses: new Map([['w', 'success']]),
+        latestAccountStatuses: new Map([
+          ['w', { status: 'success', classificationStatus: 'success' }],
+        ]),
       }),
     })
 
@@ -1384,11 +1395,11 @@ describe('runCrawlCycle', () => {
       startOrResumeCrawlRun: vi.fn().mockResolvedValue({
         id: 'resumed-run',
         latestAccountStatuses: new Map([
-          ['done', 'success'],
-          ['partial', 'partial'],
-          ['failed', 'failed'],
-          ['unknown', 'running'],
-          ['removed-account', 'failed'],
+          ['done', { status: 'success', classificationStatus: 'success' }],
+          ['partial', { status: 'partial', classificationStatus: 'partial' }],
+          ['failed', { status: 'failed', classificationStatus: 'failed' }],
+          ['unknown', { status: 'running', classificationStatus: 'unknown' }],
+          ['removed-account', { status: 'failed', classificationStatus: 'failed' }],
         ]),
       }),
     })
@@ -1399,11 +1410,45 @@ describe('runCrawlCycle', () => {
     expect(issueCookies).toHaveBeenCalledWith(expect.objectContaining({ username: 'failed' }))
     expect(issueCookies).toHaveBeenCalledWith(expect.objectContaining({ username: 'unknown' }))
     expect(issueCookies).toHaveBeenCalledWith(expect.objectContaining({ username: 'missing' }))
-    expect(deps.recordCrawlAccountRun).toHaveBeenCalledTimes(3)
+    // 実際に処理した 3 アカウント分に加え、前回ステータスを引き継いで skip した
+    // 2 アカウント (done/partial) 分も classificationStatus: 'skipped' として記録される。
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledTimes(5)
     expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
       expect.objectContaining({ crawlRunId: 'resumed-run', username: 'failed', status: 'success' }),
     )
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        username: 'done',
+        status: 'success',
+        classificationStatus: 'skipped',
+      }),
+    )
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        username: 'partial',
+        status: 'partial',
+        classificationStatus: 'skipped',
+      }),
+    )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('resumed-run', expect.any(Date), 'partial')
+  })
+
+  it('does not re-record an account already recorded as skipped in this crawl run', async () => {
+    const deps = makeDeps({
+      config: {
+        accounts: [{ email: 'done@example.com', username: 'done', password: 'p', otpSecret: null }],
+      },
+      startOrResumeCrawlRun: vi.fn().mockResolvedValue({
+        id: 'resumed-run',
+        latestAccountStatuses: new Map([
+          ['done', { status: 'success', classificationStatus: 'skipped' }],
+        ]),
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.recordCrawlAccountRun).not.toHaveBeenCalled()
   })
 
   it('resumes author processing from the completed timeline snapshot without refetching timelines', async () => {
@@ -2012,5 +2057,45 @@ describe('runCrawlCycle', () => {
       expect.objectContaining({ username: 'second', status: 'success' }),
     )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'failed')
+  })
+})
+
+describe('deriveClassificationStatus', () => {
+  it('returns failed when the account cycle was caught by the exception handler', () => {
+    expect(
+      deriveClassificationStatus({ warnings: [], wasSkipped: false, wasCaughtException: true }),
+    ).toBe('failed')
+  })
+
+  it('returns skipped when the previous status was carried over without running the cycle', () => {
+    expect(
+      deriveClassificationStatus({ warnings: [], wasSkipped: true, wasCaughtException: false }),
+    ).toBe('skipped')
+  })
+
+  it('returns partial when a labeling-input warning occurred', () => {
+    expect(
+      deriveClassificationStatus({
+        warnings: [{ type: 'author_processing_failed' }],
+        wasSkipped: false,
+        wasCaughtException: false,
+      }),
+    ).toBe('partial')
+  })
+
+  it('returns success when only non-labeling warnings occurred', () => {
+    expect(
+      deriveClassificationStatus({
+        warnings: [{ type: 'blocks_sync_failed' }, { type: 'following_sync_failed' }],
+        wasSkipped: false,
+        wasCaughtException: false,
+      }),
+    ).toBe('success')
+  })
+
+  it('returns success when there are no warnings at all', () => {
+    expect(
+      deriveClassificationStatus({ warnings: [], wasSkipped: false, wasCaughtException: false }),
+    ).toBe('success')
   })
 })

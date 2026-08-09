@@ -1,6 +1,11 @@
 import type { PrismaClient } from '../../generated/prisma'
 import type { ReadModelFreshnessStatus } from '../api-response'
 import { decodeCursor, encodeCursor } from '../pagination/keyset-cursor'
+import {
+  getReadModelMeta,
+  getReadModelReadiness,
+  type ReadModelReadinessStatus,
+} from '../read-model-meta'
 
 /** アカウント一覧の表示順を決める view。 */
 export type AccountSummaryView = 'recentlyChanged' | 'all'
@@ -35,13 +40,10 @@ export interface AccountSummaryListItem {
 export interface ListAccountSummariesResult {
   items: AccountSummaryListItem[]
   nextCursor: string | null
-  generationId: string | null
   freshnessStatus: ReadModelFreshnessStatus
-  isPartial: boolean
-  partialReason?: string
+  readiness: ReadModelReadinessStatus
 }
 
-const MODEL_KEY = 'account_summary'
 const DEFAULT_LIMIT = 25
 const MAX_LIMIT = 100
 
@@ -59,53 +61,6 @@ function resolveSeverityCandidates(minSeverity: string): string[] | null {
 }
 
 /**
- * ReadModelPointer が指す現在の generationId と、
- * ReadModelState が持つ鮮度を取得する。
- * AccountSummaryCurrent は generationId ごとに全件書き込まれるため、
- * pointer を介さず直接クエリすると古い generation の残骸行を返しかねない。
- * @param prisma - Prisma クライアント
- * @returns 現在の generationId と鮮度。ReadModelPointer が未生成なら generationId は null
- */
-async function getGenerationState(prisma: PrismaClient): Promise<{
-  generationId: string | null
-  freshnessStatus: ReadModelFreshnessStatus
-  isPartial: boolean
-  partialReason?: string
-}> {
-  const [pointer, state] = await Promise.all([
-    prisma.readModelPointer.findUnique({ where: { modelKey: MODEL_KEY } }),
-    prisma.readModelState.findUnique({ where: { modelKey: MODEL_KEY } }),
-  ])
-  const freshnessStatus: ReadModelFreshnessStatus =
-    state?.status === 'healthy' ||
-    state?.status === 'delayed' ||
-    state?.status === 'stale' ||
-    state?.status === 'failed'
-      ? state.status
-      : 'unknown'
-  const generationId = pointer?.currentGenerationId ?? null
-  if (!generationId) return { generationId: null, freshnessStatus, isPartial: false }
-
-  const generation = await prisma.readModelGeneration.findUnique({
-    where: { id: generationId },
-    select: { validationSummary: true },
-  })
-  const summary = generation?.validationSummary
-  if (typeof summary !== 'object' || summary === null || Array.isArray(summary)) {
-    return { generationId, freshnessStatus, isPartial: false }
-  }
-  const record = summary as Record<string, unknown>
-  const isPartial = record.isPartial === true
-  const partialReason = typeof record.partialReason === 'string' ? record.partialReason : undefined
-  return {
-    generationId,
-    freshnessStatus,
-    isPartial,
-    ...(isPartial && partialReason ? { partialReason } : {}),
-  }
-}
-
-/**
  * `view: 'recentlyChanged'` は `lastClassificationChangedAt` 降順、
  * `view: 'all'` は `normalizedScreenName` 昇順で返す。
  * recentlyChanged は変更日時のある行を新しい順に見せ、未変更 (null) は末尾へ送る。
@@ -118,17 +73,16 @@ export async function listAccountSummaries(
   prisma: PrismaClient,
   input: ListAccountSummariesInput,
 ): Promise<ListAccountSummariesResult> {
-  const { generationId, freshnessStatus, isPartial, partialReason } =
-    await getGenerationState(prisma)
-  if (!generationId) {
+  const readiness = await getReadModelReadiness(prisma)
+  if (readiness.accounts !== 'ready') {
     return {
       items: [],
       nextCursor: null,
-      generationId: null,
-      freshnessStatus,
-      isPartial: false,
+      freshnessStatus: 'unknown',
+      readiness: readiness.accounts,
     }
   }
+  const { freshnessStatus } = await getReadModelMeta(prisma, 'account_summary_latest')
 
   const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
   const labelKeys = input.filters?.labelKeys ?? []
@@ -168,19 +122,15 @@ export async function listAccountSummaries(
     }
   })()
 
-  const rows = await prisma.accountSummaryCurrent.findMany({
+  const rows = await prisma.accountSummaryLatest.findMany({
     where: {
-      generationId,
       ...(labelKeys.length > 0 ? { activeLabelKeys: { hasSome: labelKeys } } : {}),
       ...(severityCandidates ? { highestFindingSeverity: { in: severityCandidates } } : {}),
       ...cursorWhere,
     },
     orderBy:
       input.view === 'recentlyChanged'
-        ? [
-            { lastClassificationChangedAt: { sort: 'desc', nulls: 'last' } },
-            { accountId: 'desc' },
-          ]
+        ? [{ lastClassificationChangedAt: { sort: 'desc', nulls: 'last' } }, { accountId: 'desc' }]
         : [{ normalizedScreenName: 'asc' }, { accountId: 'asc' }],
     take: limit + 1,
   })
@@ -200,10 +150,8 @@ export async function listAccountSummaries(
       : null
 
   return {
-    generationId,
     freshnessStatus,
-    isPartial,
-    ...(partialReason ? { partialReason } : {}),
+    readiness: readiness.accounts,
     nextCursor,
     items: page.map((row) => ({
       accountId: row.accountId,

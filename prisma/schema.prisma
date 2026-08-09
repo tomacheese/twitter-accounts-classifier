@@ -307,6 +307,7 @@ model CrawlAccountRun {
   /// この行を最終的に確定させたビルドを表しており、
   /// 個々の warning を発生させたビルドは warnings 内の各要素が持つ appVersion を参照する。
   appVersion         String    @default("unknown")
+  classificationStatus String    @default("unknown")
 
   @@index([crawlRunId])
   @@index([startedAt])
@@ -338,6 +339,64 @@ model CrawlAccountLabelRun {
   createdAt         DateTime @default(now())
 
   @@unique([crawlRunId, username, accountId, labelDefinitionId, method, ruleVersion])
+}
+
+model AccountSummaryLatest {
+  accountId                   String    @id
+  normalizedScreenName        String
+  normalizedDisplayName       String
+  searchDocument               String
+  profileObservedAt           DateTime
+  activeLabelKeys              String[]
+  activeLabelCount             Int
+  lastClassificationChangedAt DateTime?
+  classificationObservedAt    DateTime?
+  activeFindingCount           Int       @default(0)
+  highestFindingSeverity      String?
+  findingObservedAt           DateTime?
+  updatedAt                   DateTime  @updatedAt
+
+  @@index([lastClassificationChangedAt(sort: Desc), accountId])
+  @@index([highestFindingSeverity, activeFindingCount, accountId])
+  @@index([normalizedScreenName])
+}
+
+model AccountClassificationLatest {
+  accountId           String
+  labelDefinitionId   String
+  value               Boolean
+  confidence          Float
+  reason              String
+  method              String
+  ruleVersion         String
+  observedAt          DateTime
+  sourceObservationId String?
+
+  @@id([accountId, labelDefinitionId])
+  @@index([labelDefinitionId, value, accountId])
+}
+
+model AccountClassificationObservation {
+  id         String   @id @default(cuid())
+  accountId  String
+  crawlRunId String?
+  username   String?
+  observedAt DateTime
+  labelCount Int
+  createdAt  DateTime @default(now())
+
+  @@index([accountId, observedAt(sort: Desc)])
+}
+
+model ReadModelBootstrap {
+  modelKey       String    @id
+  status         String    @default("pending")
+  cursor         String?
+  processedCount Int       @default(0)
+  startedAt      DateTime?
+  updatedAt      DateTime  @updatedAt
+  completedAt    DateTime?
+  errorSummary   String?
 }
 
 model BlockRun {
@@ -675,14 +734,22 @@ model PolicyBacktestFinding {
 
 model LabelMetricSnapshot {
   id                      String   @id @default(cuid())
-  sourceCrawlRunId        String
+  sourceCrawlRunId        String?
+  triggerWorkItemId       String
   labelDefinitionId       String
   observedAt              DateTime
   generatedAt             DateTime @default(now())
   sourceWatermarkAt       DateTime
+  populationCount         Int      @default(0)
   evaluatedCount          Int
   trueCount               Int
   prevalence              Float
+  coverage                Float    @default(0)
+  currentCount            Int      @default(0)
+  delayedCount            Int      @default(0)
+  staleCount              Int      @default(0)
+  unknownCount            Int      @default(0)
+  staleRatio              Float    @default(0)
   trueConfidenceAverage   Float?
   falseConfidenceAverage  Float?
   confidenceBuckets       Json     @default("{}")
@@ -693,7 +760,7 @@ model LabelMetricSnapshot {
   analyzerVersion         String
   analysisRunId           String?
 
-  @@unique([sourceCrawlRunId, labelDefinitionId])
+  @@unique([triggerWorkItemId, labelDefinitionId])
   @@index([labelDefinitionId, observedAt(sort: Desc), id(sort: Desc)])
 }
 

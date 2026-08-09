@@ -30,9 +30,8 @@ describe('AccountsPage', () => {
         },
       ],
       nextCursor: null,
-      generationId: 'generation-1',
       freshnessStatus: 'healthy',
-      isPartial: false,
+      readiness: 'ready',
     })
 
     const html = renderToStaticMarkup(await AccountsPage({ searchParams: Promise.resolve({}) }))
@@ -41,20 +40,16 @@ describe('AccountsPage', () => {
     expect(html).toContain('All accounts')
   })
 
-  it('partial generation と freshness を明示する', async () => {
+  it('freshness を明示する', async () => {
     vi.mocked(listAccountSummaries).mockResolvedValue({
       items: [],
       nextCursor: null,
-      generationId: 'generation-1',
       freshnessStatus: 'delayed',
-      isPartial: true,
-      partialReason: 'crawl completed partially; some accounts may contain older data',
+      readiness: 'ready',
     })
 
     const html = renderToStaticMarkup(await AccountsPage({ searchParams: Promise.resolve({}) }))
 
-    expect(html).toContain('Partial data')
     expect(html).toContain('Delayed')
-    expect(html).toContain('some accounts may contain older data')
   })
 })

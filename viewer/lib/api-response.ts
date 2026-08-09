@@ -1,3 +1,5 @@
+import type { ReadModelReadinessStatus } from './read-model-meta'
+
 /** read model の鮮度。ReadModelState.status に対応する。 */
 export type ReadModelFreshnessStatus = 'healthy' | 'delayed' | 'stale' | 'failed' | 'unknown'
 
@@ -11,6 +13,7 @@ export interface BuildApiResponseMetaInput {
   nextCursor?: string | null
   isPartial?: boolean
   partialReason?: string
+  readiness?: ReadModelReadinessStatus
 }
 
 /** 各 section の response が共通で含めるメタデータ。 */
@@ -23,6 +26,7 @@ export interface ApiResponseMeta {
   nextCursor: string | null
   isPartial: boolean
   partialReason?: string
+  readiness?: ReadModelReadinessStatus
 }
 
 /**
@@ -42,5 +46,6 @@ export function buildApiResponseMeta(input: BuildApiResponseMetaInput): ApiRespo
     nextCursor: input.nextCursor ?? null,
     isPartial: input.isPartial ?? false,
     ...(input.partialReason ? { partialReason: input.partialReason } : {}),
+    ...(input.readiness ? { readiness: input.readiness } : {}),
   }
 }
