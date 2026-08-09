@@ -204,7 +204,7 @@ PANE_LOG="$DIAGNOSTICS_DIR/pane-output.log"
 
 echo "[weekly-analyze] starting weekly crawl review at $(date -Iseconds) in tmux session $SESSION_NAME"
 "$TMUX_BIN" new-session -d -s "$SESSION_NAME" -c "$WORKTREE_DIR" \
-  -e "PATH=$PATH" -e "WEEKLY_ANALYSIS_RUN_ID=$RUN_ID" \
+  -e "PATH=$PATH" -e DATABASE_URL -e "WEEKLY_ANALYSIS_RUN_ID=$RUN_ID" \
   "$CLAUDE_BIN" --permission-mode auto "Use the weekly-crawl-review skill to review this week's labeling output and make any needed fixes."
 "$TMUX_BIN" pipe-pane -t "$SESSION_NAME" -o "cat >> \"$PANE_LOG\""
 echo "[weekly-analyze] launched tmux session $SESSION_NAME at $(date -Iseconds)"
