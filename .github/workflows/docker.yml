@@ -97,3 +97,70 @@ jobs:
     secrets:
       DOCKER_USERNAME: ${{ github.actor }}
       DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+  docker-size-check:
+    name: Docker image size check
+    needs: approval-gate
+    # pull_requestイベント側ではapproval-gateのEnvironment承認が発生しないため、
+    # fork PRのDockerfileでビルドが自動実行されないようpull_request_targetのみで動かす。
+    if: github.event_name == 'pull_request_target' && needs.approval-gate.result == 'success' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # pull_request_targetは既定でbase branchをcheckoutするため、
+          # PRの実際の変更内容を計測するためhead SHAを明示する。
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build images and measure size
+        id: sizes
+        shell: bash
+        run: |
+          {
+            echo "## Docker image size (amd64, uncompressed)"
+            echo ""
+            echo "PR の変更を反映した image を amd64 のみでローカルビルドした際の uncompressed size (\`docker image inspect\`)。GHCR 上の compressed size は merge 後に確認する。"
+            echo ""
+            echo "| service | Dockerfile | size |"
+            echo "| --- | --- | ---: |"
+          } > size-report.md
+
+          declare -A targets=(
+            [crawler]="crawler/Dockerfile"
+            [blocker]="blocker/Dockerfile"
+            [analyzer]="analyzer/Dockerfile"
+            [viewer]="viewer/Dockerfile"
+          )
+          for name in crawler blocker analyzer viewer; do
+            file="${targets[$name]}"
+            tag="docker-size-check-${name}:latest"
+            docker buildx build --load --build-arg TARGETARCH=amd64 -f "$file" -t "$tag" .
+            bytes=$(docker image inspect "$tag" --format='{{.Size}}')
+            human=$(numfmt --to=iec --suffix=B "$bytes")
+            echo "| $name | $file | $human |" >> size-report.md
+            docker rmi "$tag"
+          done
+
+          cat size-report.md
+
+      - name: Find existing comment
+        id: find-comment
+        uses: peter-evans/find-comment@b30e6a3c0ed37e7c023ccd3f1db5c6c0b0c23aad # v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: github-actions[bot]
+          body-includes: Docker image size (amd64, uncompressed)
+
+      - name: Post or update size comment
+        uses: peter-evans/create-or-update-comment@e8674b075228eee787fea43ef493e45ece1004c9 # v5
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          edit-mode: replace
+          body-path: size-report.md
