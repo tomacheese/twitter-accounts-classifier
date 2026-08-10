@@ -19,6 +19,11 @@ analysis_work_item_privileges() {
     "SELECT has_table_privilege('weekly_review', 'public.\"AnalysisWorkItem\"', 'SELECT')::text || ':' || has_table_privilege('weekly_review', 'public.\"AnalysisWorkItem\"', 'INSERT')::text || ':' || has_table_privilege('weekly_review', 'public.\"AnalysisWorkItem\"', 'UPDATE')::text || ':' || has_table_privilege('weekly_review', 'public.\"AnalysisWorkItem\"', 'DELETE')::text"
 }
 
+viewer_component_build_identity_privileges() {
+  psql -At "$DATABASE_URL" -c \
+    "SELECT has_table_privilege('viewer', 'public.\"ComponentBuildIdentity\"', 'SELECT')::text || ':' || has_table_privilege('viewer', 'public.\"ComponentBuildIdentity\"', 'INSERT')::text || ':' || has_table_privilege('viewer', 'public.\"ComponentBuildIdentity\"', 'UPDATE')::text || ':' || has_table_privilege('viewer', 'public.\"ComponentBuildIdentity\"', 'DELETE')::text"
+}
+
 analyzer_component_build_identity_privileges() {
   psql -At "$DATABASE_URL" -c \
     "SELECT has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'SELECT')::text || ':' || has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'INSERT')::text || ':' || has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'UPDATE')::text || ':' || has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'DELETE')::text"
@@ -39,6 +44,7 @@ fi
 test "$(role_state viewer)" = "false:false"
 test "$(role_state analyzer)" = "false:false"
 test -z "$(psql -At "$DATABASE_URL" -c "SELECT rolname FROM pg_roles WHERE rolname = 'weekly_review'")"
+test "$(viewer_component_build_identity_privileges)" = "true:true:true:false"
 test "$(analyzer_component_build_identity_privileges)" = "true:true:true:false"
 
 # 新 compose 相当: password を渡した再実行で LOGIN ロールへ安全に昇格する。
