@@ -29,6 +29,7 @@ export interface AccountOverviewView {
 
 /**
  * タブ切り替え時ではなく初期表示に含める唯一の subview。
+ * Accounts 一覧・Global Search と同じ AccountSummaryLatest を参照する。
  * @param prisma - Prisma クライアント
  * @param accountId - 対象アカウント ID
  * @returns Overview subview のデータ。Account が存在しなければ null
@@ -40,12 +41,7 @@ export async function getAccountOverview(
   const account = await prisma.account.findUnique({ where: { id: accountId } })
   if (!account) return null
 
-  const generationId = await getCurrentGenerationId(prisma)
-  const summary = generationId
-    ? await prisma.accountSummaryCurrent.findUnique({
-        where: { generationId_accountId: { generationId, accountId } },
-      })
-    : null
+  const summary = await prisma.accountSummaryLatest.findUnique({ where: { accountId } })
 
   return {
     accountId: account.id,

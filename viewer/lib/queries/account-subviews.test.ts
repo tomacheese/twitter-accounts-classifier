@@ -12,7 +12,7 @@ import {
 interface MockData {
   pointer?: unknown
   account?: unknown
-  summary?: unknown
+  summaryLatest?: unknown
   classifications?: unknown[]
   labelDefinitions?: unknown[]
   findings?: unknown[]
@@ -29,7 +29,7 @@ function createMockPrisma(data: MockData) {
       findUnique: vi.fn().mockResolvedValue(data.account ?? null),
       findMany: vi.fn().mockResolvedValue(data.counterparts ?? []),
     },
-    accountSummaryCurrent: { findUnique: vi.fn().mockResolvedValue(data.summary ?? null) },
+    accountSummaryLatest: { findUnique: vi.fn().mockResolvedValue(data.summaryLatest ?? null) },
     accountClassificationCurrent: {
       findMany: vi.fn().mockResolvedValue(data.classifications ?? []),
     },
@@ -61,11 +61,10 @@ describe('getAccountOverview', () => {
     expect(await getAccountOverview(prisma, 'account-1')).toBeNull()
   })
 
-  it('read model の行があればラベル・Finding の集計を重ねる', async () => {
+  it('AccountSummaryLatest の行があればラベル・Finding の集計を重ねる', async () => {
     const { prisma } = createMockPrisma({
       account,
-      pointer: { currentGenerationId: 'generation-1' },
-      summary: {
+      summaryLatest: {
         activeLabelKeys: ['spam'],
         activeFindingCount: 2,
         highestFindingSeverity: 'high',
@@ -84,7 +83,7 @@ describe('getAccountOverview', () => {
     })
   })
 
-  it('ReadModelPointer が無ければ集計値は既定値になる', async () => {
+  it('AccountSummaryLatest に行が無ければ集計値は既定値になる', async () => {
     const { prisma } = createMockPrisma({ account })
 
     const result = await getAccountOverview(prisma, 'account-1')
@@ -95,6 +94,14 @@ describe('getAccountOverview', () => {
       highestFindingSeverity: null,
       lastClassificationChangedAt: null,
     })
+  })
+
+  it('ReadModelPointer(account_summary) を参照しない', async () => {
+    const { prisma } = createMockPrisma({ account, summaryLatest: { activeLabelKeys: [] } })
+
+    await getAccountOverview(prisma, 'account-1')
+
+    expect(prisma.readModelPointer.findUnique).not.toHaveBeenCalled()
   })
 })
 
