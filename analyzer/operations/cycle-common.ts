@@ -49,7 +49,11 @@ export function deriveCycleStatus(requiredStages: StageStatus[]): CycleStatus {
   if (requiredStages.includes('stale')) return 'stale'
   if (requiredStages.includes('delayed')) return 'delayed'
   if (requiredStages.includes('unknown')) return 'unknown'
-  return 'scheduled'
+  // ここまで残るのは succeeded と waiting だけの組み合わせである。
+  // 全て waiting なら起点 Stage 自体が未着手であり、scheduled とする。
+  // 一部でも succeeded があれば起点は既に進んでいるため、running とする。
+  if (requiredStages.every((status) => status === 'waiting')) return 'scheduled'
+  return 'running'
 }
 
 /** AnalysisWorkItem から導出した Stage の状態と付随情報。 */
@@ -147,7 +151,8 @@ export async function deriveWorkItemStage(
 }
 
 /**
- * WorkItem が enqueue されていない Stage を、直前 Stage 未完了による `blocked_by_upstream` と root cause の `failed` とで区別する。
+ * WorkItem が enqueue されていない Stage を、直前 Stage の状態に応じて差し替える。
+ * waiting も running 相当として扱うのは、blocked_by_upstream への誤判定を防ぐためである。
  * WorkItem 自体は変更せず、Cycle/Stage の表示状態だけ差し替える。
  * @param stage - deriveWorkItemStage が返した Stage
  * @param upstreamStatus - 直前の必須 Stage の状態
@@ -159,6 +164,9 @@ export function applyUpstreamBlocking(
 ): WorkItemStage {
   if (stage.workItemExists) return stage
   if (upstreamStatus === 'succeeded' || upstreamStatus === 'partial') return stage
+  if (upstreamStatus === 'running' || upstreamStatus === 'waiting') {
+    return { ...stage, status: 'waiting' }
+  }
   return { ...stage, status: 'blocked_by_upstream' }
 }
 

@@ -17,7 +17,13 @@ describe('startOrResumeCrawlRun', () => {
   it('creates a CrawlRun row when no interrupted run exists', async () => {
     const findFirst = vi.fn().mockResolvedValue(null)
     const create = vi.fn().mockResolvedValue({ id: 'run1' })
-    const prisma = { crawlRun: { findFirst, create } } as unknown as PrismaClient
+    const upsert = vi.fn().mockResolvedValue({})
+    const tx = { crawlRun: { create }, analysisWorkItem: { upsert } }
+    const transaction = vi.fn((fn: (transactionClient: unknown) => Promise<unknown>) => fn(tx))
+    const prisma = {
+      crawlRun: { findFirst, create },
+      $transaction: transaction,
+    } as unknown as PrismaClient
     const startedAt = new Date('2026-07-28T00:00:00Z')
 
     const result = await startOrResumeCrawlRun(prisma, startedAt, staleThresholdMs)
@@ -35,6 +41,21 @@ describe('startOrResumeCrawlRun', () => {
         status: 'running',
         staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
       },
+    })
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        kind_triggerType_triggerId: {
+          kind: 'operation_cycle_refresh',
+          triggerType: 'crawl_run',
+          triggerId: 'run1',
+        },
+      },
+      create: {
+        kind: 'operation_cycle_refresh',
+        triggerType: 'crawl_run',
+        triggerId: 'run1',
+      },
+      update: {},
     })
   })
 
@@ -56,8 +77,10 @@ describe('startOrResumeCrawlRun', () => {
     })
     const create = vi.fn()
     const update = vi.fn()
+    const upsert = vi.fn()
     const prisma = {
       crawlRun: { findFirst, create, update },
+      analysisWorkItem: { upsert },
       $queryRaw: queryRaw,
     } as unknown as PrismaClient
 
@@ -78,6 +101,7 @@ describe('startOrResumeCrawlRun', () => {
     expect(sqlQuery.join('')).toContain('ORDER BY "username", "startedAt" DESC, "id" DESC')
     expect(requestedRunId).toBe('run2')
     expect(create).not.toHaveBeenCalled()
+    expect(upsert).not.toHaveBeenCalled()
     expect(update).toHaveBeenCalledWith({
       where: { id: 'run2' },
       data: {
@@ -101,7 +125,7 @@ describe('startOrResumeCrawlRun', () => {
     const deleteCheckpoints = vi.fn().mockReturnValue({})
     const deleteLabelClaims = vi.fn().mockReturnValue({})
     const tx = {
-      crawlRun: { update },
+      crawlRun: { update, create },
       analysisWorkItem: { upsert },
     }
     const transaction = vi.fn((arg: unknown) =>
@@ -138,6 +162,21 @@ describe('startOrResumeCrawlRun', () => {
         staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
       },
     })
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        kind_triggerType_triggerId: {
+          kind: 'operation_cycle_refresh',
+          triggerType: 'crawl_run',
+          triggerId: 'new-run',
+        },
+      },
+      create: {
+        kind: 'operation_cycle_refresh',
+        triggerType: 'crawl_run',
+        triggerId: 'new-run',
+      },
+      update: {},
+    })
   })
 
   it('resumes a running row exactly at the stale threshold boundary (not stale)', async () => {
@@ -147,8 +186,10 @@ describe('startOrResumeCrawlRun', () => {
     const queryRaw = vi.fn().mockResolvedValue([])
     const create = vi.fn()
     const update = vi.fn()
+    const upsert = vi.fn()
     const prisma = {
       crawlRun: { findFirst, create, update },
+      analysisWorkItem: { upsert },
       $queryRaw: queryRaw,
     } as unknown as PrismaClient
 
@@ -156,6 +197,7 @@ describe('startOrResumeCrawlRun', () => {
 
     expect(result.id).toBe('run3')
     expect(create).not.toHaveBeenCalled()
+    expect(upsert).not.toHaveBeenCalled()
     expect(update).toHaveBeenCalledWith({
       where: { id: 'run3' },
       data: {

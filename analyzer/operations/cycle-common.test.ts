@@ -41,8 +41,12 @@ describe('deriveCycleStatus', () => {
     expect(deriveCycleStatus(['succeeded', 'running', 'waiting'])).toBe('running')
   })
 
-  it('未着手の Stage だけが残っていれば scheduled を返す', () => {
-    expect(deriveCycleStatus(['succeeded', 'waiting', 'waiting'])).toBe('scheduled')
+  it('全 Stage が waiting なら scheduled を返す', () => {
+    expect(deriveCycleStatus(['waiting', 'waiting', 'waiting'])).toBe('scheduled')
+  })
+
+  it('起点 Stage が succeeded で後続が waiting のみなら running を返す', () => {
+    expect(deriveCycleStatus(['succeeded', 'waiting', 'waiting'])).toBe('running')
   })
 
   it('起点 Stage が succeeded で後続に skipped があれば partial を返す', () => {
@@ -137,5 +141,35 @@ describe('applyUpstreamBlocking', () => {
     }
     const result = applyUpstreamBlocking(stage, 'failed')
     expect(result.status).toBe('succeeded')
+  })
+
+  it('WorkItem が存在せず直前 Stage が running なら waiting にする', () => {
+    const stage: WorkItemStage = {
+      status: 'failed',
+      attemptCount: 0,
+      errorCode: undefined,
+      errorSummary: 'work item was never enqueued',
+      analysisRunId: undefined,
+      startedAt: undefined,
+      finishedAt: undefined,
+      workItemExists: false,
+    }
+    const result = applyUpstreamBlocking(stage, 'running')
+    expect(result.status).toBe('waiting')
+  })
+
+  it('WorkItem が存在せず直前 Stage が waiting なら waiting を連鎖させる', () => {
+    const stage: WorkItemStage = {
+      status: 'failed',
+      attemptCount: 0,
+      errorCode: undefined,
+      errorSummary: 'work item was never enqueued',
+      analysisRunId: undefined,
+      startedAt: undefined,
+      finishedAt: undefined,
+      workItemExists: false,
+    }
+    const result = applyUpstreamBlocking(stage, 'waiting')
+    expect(result.status).toBe('waiting')
   })
 })

@@ -97,14 +97,22 @@ export async function createWeeklyAnalysisRun(
   startedAt: Date,
   staleThresholdMs: number,
 ): Promise<WeeklyAnalysisRunRecord> {
-  const run = await prisma.weeklyAnalysisRun.create({
-    data: {
-      startedAt,
-      lastHeartbeatAt: startedAt,
-      staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
-      status: 'running',
-      sampledAccountIds: [],
-    },
+  const run = await prisma.$transaction(async (tx) => {
+    const created = await tx.weeklyAnalysisRun.create({
+      data: {
+        startedAt,
+        lastHeartbeatAt: startedAt,
+        staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
+        status: 'running',
+        sampledAccountIds: [],
+      },
+    })
+    await enqueueWorkItem(tx, {
+      kind: 'operation_cycle_refresh',
+      triggerType: 'weekly_analysis_run',
+      triggerId: created.id,
+    })
+    return created
   })
   return toRecord(run)
 }

@@ -140,13 +140,21 @@ export async function startOrResumeBlockRun(
     await finishBlockRun(prisma, existingRun.id, existingRun.lastHeartbeatAt, 'failed')
   }
 
-  const run = await prisma.blockRun.create({
-    data: {
-      startedAt,
-      lastHeartbeatAt: startedAt,
-      status: 'running',
-      staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
-    },
+  const run = await prisma.$transaction(async (tx) => {
+    const created = await tx.blockRun.create({
+      data: {
+        startedAt,
+        lastHeartbeatAt: startedAt,
+        status: 'running',
+        staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
+      },
+    })
+    await enqueueWorkItem(tx, {
+      kind: 'operation_cycle_refresh',
+      triggerType: 'block_run',
+      triggerId: created.id,
+    })
+    return created
   })
   return { id: run.id, completedUsernames: [] }
 }

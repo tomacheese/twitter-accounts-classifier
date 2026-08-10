@@ -8,6 +8,7 @@ import {
   processLabelAggregateRefresh,
   processBlockReconciliation,
   processRetentionSweep,
+  processOperationCycleRefresh,
   handleWorkItemSettled,
   processPostCompletionRefresh,
   processAccountSummaryRefresh,
@@ -15,6 +16,34 @@ import {
 } from './worker-processors'
 
 const prisma = getPrismaClient()
+
+/**
+ * @param overrides - AnalysisWorkItem へ上書きするフィールド
+ * @returns テスト用の operation_cycle_refresh WorkItem
+ */
+function makeCycleRefreshWorkItem(overrides: {
+  triggerType: string
+  triggerId: string
+}): Parameters<typeof processOperationCycleRefresh>[1] {
+  return {
+    id: 'work-item-cycle-refresh',
+    kind: 'operation_cycle_refresh',
+    triggerType: overrides.triggerType,
+    triggerId: overrides.triggerId,
+    status: 'leased',
+    priority: 0,
+    availableAt: new Date(),
+    leaseOwner: 'worker-1',
+    leaseExpiresAt: new Date(),
+    attemptCount: 1,
+    maxAttempts: 5,
+    dependencyKey: null,
+    lastErrorCode: null,
+    lastErrorSummary: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+}
 
 describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
   beforeEach(async () => {
@@ -35,6 +64,7 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     await prisma.crawlRun.deleteMany()
     await prisma.blockAccountRun.deleteMany()
     await prisma.blockRun.deleteMany()
+    await prisma.weeklyAnalysisRun.deleteMany()
   })
 
   it('processReadModelRefresh は CrawlRun の状態によらず Attention/Overview を publish する', async () => {
@@ -218,6 +248,64 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     })
     expect(attentionPointer).not.toBeNull()
     expect(overviewPointer).not.toBeNull()
+  })
+
+  describe('processOperationCycleRefresh', () => {
+    it('triggerType が crawl_run なら対象 CrawlRun の実在確認だけで完了する', async () => {
+      const crawlRun = await prisma.crawlRun.create({
+        data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
+      })
+
+      await expect(
+        processOperationCycleRefresh(
+          prisma,
+          makeCycleRefreshWorkItem({ triggerType: 'crawl_run', triggerId: crawlRun.id }),
+        ),
+      ).resolves.toBeUndefined()
+    })
+
+    it('triggerType が block_run なら対象 BlockRun の実在確認だけで完了する', async () => {
+      const blockRun = await prisma.blockRun.create({
+        data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
+      })
+
+      await expect(
+        processOperationCycleRefresh(
+          prisma,
+          makeCycleRefreshWorkItem({ triggerType: 'block_run', triggerId: blockRun.id }),
+        ),
+      ).resolves.toBeUndefined()
+    })
+
+    it('triggerType が weekly_analysis_run なら対象 WeeklyAnalysisRun の実在確認だけで完了する', async () => {
+      const weeklyAnalysisRun = await prisma.weeklyAnalysisRun.create({
+        data: {
+          startedAt: new Date(),
+          lastHeartbeatAt: new Date(),
+          status: 'running',
+          sampledAccountIds: [],
+        },
+      })
+
+      await expect(
+        processOperationCycleRefresh(
+          prisma,
+          makeCycleRefreshWorkItem({
+            triggerType: 'weekly_analysis_run',
+            triggerId: weeklyAnalysisRun.id,
+          }),
+        ),
+      ).resolves.toBeUndefined()
+    })
+
+    it('未知の triggerType なら例外を投げる', async () => {
+      await expect(
+        processOperationCycleRefresh(
+          prisma,
+          makeCycleRefreshWorkItem({ triggerType: 'unknown', triggerId: 'x' }),
+        ),
+      ).rejects.toThrow('unsupported trigger type for operation_cycle_refresh: unknown')
+    })
   })
 })
 

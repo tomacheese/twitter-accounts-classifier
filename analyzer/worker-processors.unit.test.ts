@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from './generated/prisma'
-import { enqueueReadModelBootstrapIfMissing, processAccountSummaryRefresh } from './worker-processors'
+import {
+  enqueueReadModelBootstrapIfMissing,
+  processAccountSummaryRefresh,
+} from './worker-processors'
 
 describe('enqueueReadModelBootstrapIfMissing', () => {
   it('account_summary pointer が無ければ最新 terminal crawl の label_metrics を再キューする', async () => {
@@ -46,7 +49,6 @@ describe('enqueueReadModelBootstrapIfMissing', () => {
     expect(upsert).not.toHaveBeenCalled()
   })
 })
-
 
 describe('processAccountSummaryRefresh transaction budget', () => {
   it('passes an explicit 30 second timeout to the write transaction', async () => {
