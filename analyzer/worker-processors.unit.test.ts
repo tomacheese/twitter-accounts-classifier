@@ -84,7 +84,7 @@ describe('processAccountSummaryRefresh transaction budget', () => {
 
     expect(transaction).toHaveBeenCalledWith(
       expect.any(Function),
-      expect.objectContaining({ timeout: 30_000 }),
+      expect.objectContaining({ timeout: 60_000 }),
     )
   })
 })

@@ -15,8 +15,9 @@ BEGIN
     WHERE rolname = 'weekly_review'
       AND 'client_connection_check_interval=5s' = ANY(COALESCE(rolconfig, ARRAY[]::text[]))
       AND 'statement_timeout=120s' = ANY(COALESCE(rolconfig, ARRAY[]::text[]))
+      AND 'max_parallel_workers_per_gather=0' = ANY(COALESCE(rolconfig, ARRAY[]::text[]))
   ) THEN
-    RAISE EXCEPTION 'weekly_review runtime timeouts are not configured';
+    RAISE EXCEPTION 'weekly_review runtime guardrails are not configured';
   END IF;
 
   IF NOT has_database_privilege('weekly_review', current_database(), 'CONNECT') THEN
