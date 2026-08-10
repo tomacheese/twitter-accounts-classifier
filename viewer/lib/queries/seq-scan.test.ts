@@ -7,6 +7,7 @@ const prisma = getPrismaClient()
 interface ExplainPlanNode {
   'Node Type': string
   'Relation Name'?: string
+  'Index Name'?: string
   Plans?: ExplainPlanNode[]
 }
 
@@ -31,6 +32,16 @@ function collectSorts(node: ExplainPlanNode): ExplainPlanNode[] {
   const found =
     node['Node Type'] === 'Sort' || node['Node Type'] === 'Incremental Sort' ? [node] : []
   return [...found, ...(node.Plans ?? []).flatMap((child) => collectSorts(child))]
+}
+
+/**
+ * @param node - 探索対象のプランノード
+ * @param indexName - 検知対象の index 名
+ * @returns 指定した index を使っているノード (Index Scan 系) の一覧
+ */
+function collectIndexUsages(node: ExplainPlanNode, indexName: string): ExplainPlanNode[] {
+  const found = node['Index Name'] === indexName ? [node] : []
+  return [...found, ...(node.Plans ?? []).flatMap((child) => collectIndexUsages(child, indexName))]
 }
 
 /**
@@ -168,6 +179,108 @@ describe.skipIf(!process.env.DATABASE_URL)(
         SELECT "accountId" FROM "AccountSummaryLatest"
         WHERE "normalizedDisplayName" ILIKE '%display 42%'
       `)
+      expect(collectSeqScans(plan, 'AccountSummaryLatest')).toEqual([])
+    })
+  },
+)
+
+// activeLabelKeys の GIN index は、テーブルが小さいと planner が Seq Scan の方を
+// 安く見積もるため使われない。production 相当の選択性差を再現するには他の describe
+// ブロックの行数よりずっと多い行数が要るため、別の describe ブロックへ分離し、
+// 他のテストのテーブル統計量を汚染しないようにする。
+const LABEL_FILTER_ROW_COUNT = 2000
+const RARE_LABEL_COUNT = 3
+const COMMON_LABEL_COUNT = 800
+
+describe.skipIf(!process.env.DATABASE_URL)(
+  'listAccountSummaries label filter (activeLabelKeys GIN index)',
+  () => {
+    beforeAll(async () => {
+      await prisma.accountSummaryLatest.createMany({
+        data: Array.from({ length: LABEL_FILTER_ROW_COUNT }, (_, index) => ({
+          accountId: `account-label-filter-test-${index}`,
+          normalizedScreenName: `screen_label_filter_${index}`,
+          normalizedDisplayName: `Display ${index}`,
+          searchDocument: `screen_label_filter_${index} display ${index}`,
+          profileObservedAt: new Date(),
+          activeLabelKeys:
+            index < RARE_LABEL_COUNT
+              ? ['rare-label-test']
+              : index < RARE_LABEL_COUNT + COMMON_LABEL_COUNT
+                ? ['common-label-test']
+                : [],
+          activeLabelCount: index < RARE_LABEL_COUNT + COMMON_LABEL_COUNT ? 1 : 0,
+          activeFindingCount: 0,
+          updatedAt: new Date(),
+        })),
+      })
+      await prisma.$executeRawUnsafe('ANALYZE "AccountSummaryLatest"')
+    })
+
+    afterAll(async () => {
+      await prisma.accountSummaryLatest.deleteMany({
+        where: { accountId: { startsWith: 'account-label-filter-test-' } },
+      })
+    })
+
+    it('rare label は Seq Scan を行わず GIN index を使う', async () => {
+      const plan = await explain(`
+        SELECT "accountId" FROM "AccountSummaryLatest"
+        WHERE "activeLabelKeys" && ARRAY['rare-label-test']
+        ORDER BY "normalizedScreenName" ASC, "accountId" ASC
+        LIMIT 25
+      `)
+
+      expect(collectSeqScans(plan, 'AccountSummaryLatest')).toEqual([])
+      expect(collectIndexUsages(plan, 'AccountSummaryLatest_activeLabelKeys_gin_idx')).not.toEqual(
+        [],
+      )
+    })
+
+    it('common label は Seq Scan を行わない', async () => {
+      const plan = await explain(`
+        SELECT "accountId" FROM "AccountSummaryLatest"
+        WHERE "activeLabelKeys" && ARRAY['common-label-test']
+        ORDER BY "normalizedScreenName" ASC, "accountId" ASC
+        LIMIT 25
+      `)
+
+      expect(collectSeqScans(plan, 'AccountSummaryLatest')).toEqual([])
+    })
+
+    it('filter なし (view: all) は Seq Scan を行わない', async () => {
+      const plan = await explain(`
+        SELECT "accountId" FROM "AccountSummaryLatest"
+        ORDER BY "normalizedScreenName" ASC, "accountId" ASC
+        LIMIT 25
+      `)
+
+      expect(collectSeqScans(plan, 'AccountSummaryLatest')).toEqual([])
+    })
+
+    it('view: recentlyChanged では Seq Scan を行わない', async () => {
+      const plan = await explain(`
+        SELECT "accountId" FROM "AccountSummaryLatest"
+        WHERE "activeLabelKeys" && ARRAY['rare-label-test']
+        ORDER BY "lastClassificationChangedAt" DESC NULLS LAST, "accountId" DESC
+        LIMIT 25
+      `)
+
+      expect(collectSeqScans(plan, 'AccountSummaryLatest')).toEqual([])
+    })
+
+    it('cursor pagination (2 ページ目) でも Seq Scan を行わない', async () => {
+      const plan = await explain(`
+        SELECT "accountId" FROM "AccountSummaryLatest"
+        WHERE "activeLabelKeys" && ARRAY['rare-label-test']
+          AND (
+            "normalizedScreenName" > 'screen_label_filter_0'
+            OR ("normalizedScreenName" = 'screen_label_filter_0' AND "accountId" > 'account-label-filter-test-0')
+          )
+        ORDER BY "normalizedScreenName" ASC, "accountId" ASC
+        LIMIT 25
+      `)
+
       expect(collectSeqScans(plan, 'AccountSummaryLatest')).toEqual([])
     })
   },
