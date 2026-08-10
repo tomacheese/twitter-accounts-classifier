@@ -1,8 +1,11 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
+import type { PrismaClient } from '../generated/prisma'
 import { getPrismaClient } from '../db/client'
 import {
   upsertAccountSummaryLatest,
   upsertAccountClassificationLatest,
+  markAccountSummaryLatestFailed,
+  touchAccountSummaryLatestState,
 } from './account-summary-latest'
 
 describe.skipIf(!process.env.DATABASE_URL)('upsertAccountSummaryLatest', () => {
@@ -191,5 +194,32 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
       },
     })
     expect(row?.value).toBe(true)
+  })
+})
+
+function createMockPrisma() {
+  const upsert = vi.fn().mockResolvedValue(undefined)
+  const prisma = { readModelState: { upsert } } as unknown as PrismaClient
+  return { prisma, upsert }
+}
+
+describe('touchAccountSummaryLatestState', () => {
+  it('過去に失敗を記録していても、成功時に errorSummary/errorCode をクリアする', async () => {
+    const { prisma, upsert } = createMockPrisma()
+
+    await markAccountSummaryLatestFailed(prisma, 'boom')
+    await touchAccountSummaryLatestState(prisma, new Date('2026-01-01T00:00:00Z'))
+
+    const secondCall = upsert.mock.calls[1][0] as { update: Record<string, unknown> }
+    expect(secondCall.update).toMatchObject({ errorSummary: null, errorCode: null })
+  })
+
+  it('create 分岐でも errorSummary/errorCode を明示的に null にする', async () => {
+    const { prisma, upsert } = createMockPrisma()
+
+    await touchAccountSummaryLatestState(prisma, new Date('2026-01-01T00:00:00Z'))
+
+    const call = upsert.mock.calls[0][0] as { create: Record<string, unknown> }
+    expect(call.create).toMatchObject({ errorSummary: null, errorCode: null })
   })
 })

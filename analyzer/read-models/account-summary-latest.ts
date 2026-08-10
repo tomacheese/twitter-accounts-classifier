@@ -151,6 +151,8 @@ const ACCOUNT_SUMMARY_LATEST_MODEL_KEY = 'account_summary_latest'
  * generation を持たないためレイアウトは `publishGeneration` と異なるが、
  * 経過時間からの delayed/stale 判定 (`refreshReadModelFreshness`) が
  * 汎用的にこの行も拾えるようにする。
+ * 過去の失敗を記録した errorSummary/errorCode が healthy 復帰後も残らないよう、
+ * 成功時に明示的に null へクリアする。
  * @param prisma - Prisma クライアント
  * @param sourceWatermarkAt - この更新が反映した観測時刻
  */
@@ -166,11 +168,15 @@ export async function touchAccountSummaryLatestState(
       status: 'healthy',
       sourceWatermarkAt,
       lastSuccessAt: new Date(),
+      errorCode: null,
+      errorSummary: null,
     },
     update: {
       status: 'healthy',
       sourceWatermarkAt,
       lastSuccessAt: new Date(),
+      errorCode: null,
+      errorSummary: null,
     },
   })
 }
