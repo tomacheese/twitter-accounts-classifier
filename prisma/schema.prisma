@@ -282,6 +282,7 @@ model CrawlRun {
   accountRuns             CrawlAccountRun[]
   checkpoints             CrawlAccountCheckpoint[]
   accountLabelRuns        CrawlAccountLabelRun[]
+  authorCheckpoints       CrawlAuthorCheckpoint[]
 
   @@index([startedAt])
   @@index([status, startedAt(sort: Desc), id(sort: Desc)])
@@ -343,6 +344,25 @@ model CrawlAccountLabelRun {
   createdAt         DateTime @default(now())
 
   @@unique([crawlRunId, username, accountId, labelDefinitionId, method, ruleVersion])
+}
+
+model CrawlAuthorCheckpoint {
+  id                 String   @id @default(cuid())
+  crawlRunId         String
+  crawlRun           CrawlRun @relation(fields: [crawlRunId], references: [id])
+  username           String
+  authorId           String
+  status             String
+  profileCount       Int      @default(0)
+  labelsAppliedCount Int      @default(0)
+  warnings           Json     @default("[]")
+  durationMs         Int?
+  retryWaitMs        Int?
+  appVersion         String   @default("unknown")
+  completedAt        DateTime @default(now())
+
+  @@unique([crawlRunId, username, authorId])
+  @@index([crawlRunId, username])
 }
 
 model AccountSummaryLatest {

@@ -141,8 +141,9 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       .mockResolvedValue(new Map([['verified_blue_individual', 'ld1']])),
     loadReplyCorpus: vi.fn().mockResolvedValue([]),
     loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
-    recordLabelsAtomic: vi.fn().mockResolvedValue('observation1'),
-    replaceLabelingFollowSample: vi.fn().mockResolvedValue(undefined),
+    persistAuthorResultAtomic: vi.fn().mockResolvedValue({ observationId: 'observation1' }),
+    recordCrawlAuthorCheckpoint: vi.fn().mockResolvedValue(undefined),
+    loadCrawlAuthorCheckpoints: vi.fn().mockResolvedValue(new Map()),
     syncFollowing: vi.fn().mockResolvedValue(undefined),
     syncFollowers: vi.fn().mockResolvedValue(undefined),
     syncBlocks: vi.fn().mockResolvedValue(undefined),
@@ -179,11 +180,11 @@ describe('runCrawlCycle', () => {
     })
     expect(deps.persistAccount).toHaveBeenCalled()
     expect(deps.persistTweets).toHaveBeenCalled()
-    expect(deps.recordLabelsAtomic).toHaveBeenCalledWith(
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({
         crawlRunId: 'run1',
         username: 'v',
-        accountId: 'author1',
+        authorId: 'author1',
         labels: expect.arrayContaining([expect.objectContaining({ labelDefinitionId: 'ld1' })]),
       }),
     )
@@ -192,15 +193,15 @@ describe('runCrawlCycle', () => {
     expect(deps.setCurrentAccount).toHaveBeenCalledWith('run1', 'v', expect.any(Date))
   })
 
-  it('投稿者ごとにフォロー先サンプルを取得し、replaceLabelingFollowSample へ渡す', async () => {
+  it('投稿者ごとにフォロー先サンプルを取得し、persistAuthorResultAtomic へ渡す', async () => {
     const deps = makeDeps()
     await runCrawlCycle(deps)
 
-    expect(deps.replaceLabelingFollowSample).toHaveBeenCalled()
-    const [accountId, result] = (deps.replaceLabelingFollowSample as ReturnType<typeof vi.fn>).mock
-      .calls[0]
-    expect(typeof accountId).toBe('string')
-    expect(result).toEqual({ ids: [], authors: [], reachedEnd: true })
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        followSample: { ids: [], authors: [], reachedEnd: true },
+      }),
+    )
   })
 
   it('フォロー先サンプルの取得に失敗しても、投稿者本体のラベリングは継続する', async () => {
@@ -236,10 +237,15 @@ describe('runCrawlCycle', () => {
 
     // サンプル取得は失敗として記録されるが、
     // フォロー先サンプルはラベリング精度を補強する追加シグナルに過ぎないため、
-    // 投稿者本体の persistAccount・recordLabelsAtomic は通常どおり実行される。
-    expect(deps.replaceLabelingFollowSample).not.toHaveBeenCalled()
-    expect(deps.persistAccount).toHaveBeenCalled()
-    expect(deps.recordLabelsAtomic).toHaveBeenCalled()
+    // 投稿者本体の persistAuthorResultAtomic は通常どおり実行される。
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        followSample: null,
+        warnings: expect.arrayContaining([
+          expect.objectContaining({ type: 'labeling_follow_sample_failed' }),
+        ]),
+      }),
+    )
     expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'partial',
@@ -314,16 +320,16 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    expect(deps.persistAccount).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'reply-author' }),
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({ authorId: 'reply-author' }),
     )
-    const persistAccountCalls = (deps.persistAccount as ReturnType<typeof vi.fn>).mock.calls.map(
-      (call: unknown[]) => (call[0] as { id: string }).id,
-    )
+    const persistAuthorCalls = (
+      deps.persistAuthorResultAtomic as ReturnType<typeof vi.fn>
+    ).mock.calls.map((call: unknown[]) => (call[0] as { authorId: string }).authorId)
     const persistTweetsCallOrder = (deps.persistTweets as ReturnType<typeof vi.fn>).mock
       .invocationCallOrder[0]
-    const replyAuthorCallOrder = (deps.persistAccount as ReturnType<typeof vi.fn>).mock
-      .invocationCallOrder[persistAccountCalls.indexOf('reply-author')]
+    const replyAuthorCallOrder = (deps.persistAuthorResultAtomic as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[persistAuthorCalls.indexOf('reply-author')]
     expect(replyAuthorCallOrder).toBeLessThan(persistTweetsCallOrder)
     expect(deps.persistTweets).toHaveBeenCalledWith(
       expect.arrayContaining([
@@ -374,9 +380,9 @@ describe('runCrawlCycle', () => {
     // 評価しない投稿者向けの軽量な埋め込みプロフィール upsert だけで済ませず、
     // タイムライン投稿者と同じ専用プロフィール取得・ラベル評価を通す。
     expect(getUserByRestId).toHaveBeenCalledWith({ userId: 'reply-author' })
-    expect(deps.recordLabelsAtomic).toHaveBeenCalledWith(
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({
-        accountId: 'reply-author',
+        authorId: 'reply-author',
         labels: expect.arrayContaining([
           expect.objectContaining({ labelDefinitionId: 'ld-hijack' }),
         ]),
@@ -428,9 +434,9 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    expect(deps.recordLabelsAtomic).toHaveBeenCalledWith(
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({
-        accountId: 'reply-author',
+        authorId: 'reply-author',
         labels: expect.arrayContaining([
           expect.objectContaining({
             labelDefinitionId: 'ld-hijack',
@@ -663,7 +669,9 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    expect(deps.persistAccount).toHaveBeenCalledWith(expect.objectContaining({ id: 'author-ok' }))
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({ authorId: 'author-ok' }),
+    )
     // author-bad は専用取得に失敗しているが、
     // tweet-bad の accountId 外部キーが Account 行を要求するため、
     // 埋め込みのタイムラインプロフィールがフォールバックとして永続化される。
@@ -864,8 +872,13 @@ describe('runCrawlCycle', () => {
     expect(bundleForAuthor?.recentTweets).not.toContainEqual(
       expect.objectContaining({ id: 'parent1' }),
     )
-    expect(deps.persistTweets).toHaveBeenCalledWith(
-      expect.arrayContaining([expect.objectContaining({ id: 'parent1', accountId: 'stranger1' })]),
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorId: 'author1',
+        recentTweets: expect.arrayContaining([
+          expect.objectContaining({ id: 'parent1', accountId: 'stranger1' }),
+        ]),
+      }),
     )
 
     applyAllSpy.mockRestore()
@@ -1402,8 +1415,8 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    // 'w' はチェックポイントで既にスキップされるため、実際に処理された 'v' の分だけ呼ばれる
-    expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledTimes(1)
+    // author 単位の checkpoint 完了ごとの呼び出しと、アカウント単位の既存の呼び出しが加算される。
+    expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledTimes(2)
     expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledWith('run1')
   })
 
@@ -1557,6 +1570,56 @@ describe('runCrawlCycle', () => {
     expect(getHomeLatestTimeline).not.toHaveBeenCalled()
     expect(getSearchTimeline).not.toHaveBeenCalled()
     expect(resumedCycle.createTrendsScraper).not.toHaveBeenCalled()
+    expect(resumedCycle.completeCrawlAccountCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'authors' }),
+    )
+  })
+
+  it('resumes author processing from the completed replies checkpoint without refetching replies', async () => {
+    const checkpoints = new Map<string, unknown>()
+    const firstCycle = makeDeps({
+      completeCrawlAccountCheckpoint: vi.fn((params: CrawlAccountCheckpointParams) => {
+        checkpoints.set(params.phase, params.data)
+        return Promise.resolve(undefined)
+      }),
+    })
+    await runCrawlCycle(firstCycle)
+
+    const getTweetDetail = vi.fn()
+    const resumedCycle = makeDeps({
+      loadCrawlAccountCheckpoints: vi.fn().mockResolvedValue(
+        new Map([
+          ['timelines', checkpoints.get('timelines')],
+          ['replies', checkpoints.get('replies')],
+        ]),
+      ),
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn(),
+            getHomeLatestTimeline: vi.fn(),
+            getSearchTimeline: vi.fn(),
+            getTweetDetail,
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(resumedCycle)
+
+    expect(getTweetDetail).not.toHaveBeenCalled()
     expect(resumedCycle.completeCrawlAccountCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({ phase: 'authors' }),
     )
@@ -2117,6 +2180,209 @@ describe('runCrawlCycle', () => {
     )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'failed')
   })
+
+  it('does not reprocess an author whose CrawlAuthorCheckpoint already committed, when a second runCrawlCycle call resumes before clearCrawlAccountCheckpoints has run', async () => {
+    const persistAuthorResultAtomic = vi.fn().mockResolvedValue({ observationId: 'observation1' })
+    const checkpoints = new Map<string, unknown>()
+    const loadCrawlAuthorCheckpoints = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(
+          new Map(
+            checkpoints.has('author1')
+              ? [
+                  [
+                    'author1',
+                    { status: 'success', profileCount: 1, labelsAppliedCount: 1, warnings: [] },
+                  ],
+                ]
+              : [],
+          ),
+        ),
+      )
+    const recordCrawlAuthorCheckpoint = vi
+      .fn()
+      .mockImplementation((params: { authorId: string }) => {
+        checkpoints.set(params.authorId, params)
+        return Promise.resolve()
+      })
+    persistAuthorResultAtomic.mockImplementation((params: { authorId: string }) => {
+      checkpoints.set(params.authorId, params)
+      return Promise.resolve({ observationId: 'observation1' })
+    })
+    const deps = makeDeps({
+      persistAuthorResultAtomic,
+      recordCrawlAuthorCheckpoint,
+      loadCrawlAuthorCheckpoints,
+    })
+
+    await runCrawlCycle(deps)
+    expect(persistAuthorResultAtomic).toHaveBeenCalledTimes(1)
+
+    persistAuthorResultAtomic.mockClear()
+    await runCrawlCycle(deps)
+    expect(persistAuthorResultAtomic).not.toHaveBeenCalled()
+  })
+
+  it('persists context tweets from fetchRecentTweets by upserting their fallback author first', async () => {
+    const persistAuthorResultAtomic = vi.fn().mockResolvedValue({ observationId: 'observation1' })
+    const getUserTweetsAndReplies = vi.fn().mockResolvedValue({
+      data: {
+        data: [rawTweet('context-tweet1', rawUser('context-author1'), null)],
+      },
+    })
+    const deps = makeDeps({
+      persistAuthorResultAtomic,
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi
+              .fn()
+              .mockResolvedValue({ data: { data: [rawTweet('tweet1', rawUser('author1'))] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies,
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorId: 'author1',
+        recentTweets: expect.arrayContaining([
+          expect.objectContaining({ id: 'context-tweet1', accountId: 'context-author1' }),
+        ]),
+        recentTweetsFallbackAuthors: expect.arrayContaining([
+          expect.objectContaining({ id: 'context-author1' }),
+        ]),
+      }),
+    )
+  })
+
+  it('keeps processing an author when the labeling follow sample fetch fails, recording a warning without failing the author', async () => {
+    const persistAuthorResultAtomic = vi.fn().mockResolvedValue({ observationId: 'observation1' })
+    const recordCrawlAuthorCheckpoint = vi.fn().mockResolvedValue(undefined)
+    const getFollowing = vi.fn().mockRejectedValue(new Error('boom'))
+    const deps = makeDeps({
+      persistAuthorResultAtomic,
+      recordCrawlAuthorCheckpoint,
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi
+              .fn()
+              .mockResolvedValue({ data: { data: [rawTweet('tweet1', rawUser('author1'))] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing,
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(recordCrawlAuthorCheckpoint).not.toHaveBeenCalled()
+    expect(persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorId: 'author1',
+        followSample: null,
+        warnings: expect.arrayContaining([
+          expect.objectContaining({ type: 'labeling_follow_sample_failed', authorId: 'author1' }),
+        ]),
+      }),
+    )
+  })
+
+  it('skips replies and author-unit processing entirely when a legacy single authors checkpoint exists', async () => {
+    const persistAuthorResultAtomic = vi.fn()
+    const loadCrawlAuthorCheckpoints = vi.fn()
+    const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [] } })
+    const deps = makeDeps({
+      persistAuthorResultAtomic,
+      loadCrawlAuthorCheckpoints,
+      loadCrawlAccountCheckpoints: vi.fn().mockResolvedValue(
+        new Map([
+          [
+            'authors',
+            {
+              recommendedCount: 1,
+              followingCount: 0,
+              trendingCount: 0,
+              replyCount: 0,
+              profileCount: 1,
+              labelsAppliedCount: 0,
+              warnings: [],
+            },
+          ],
+          [
+            'timelines',
+            {
+              recommended: { tweets: [], authors: [] },
+              following: { tweets: [], authors: [] },
+              trending: { tweets: [], authors: [] },
+              warnings: [],
+            },
+          ],
+        ]),
+      ),
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail,
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn(),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn(),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(getTweetDetail).not.toHaveBeenCalled()
+    expect(persistAuthorResultAtomic).not.toHaveBeenCalled()
+    expect(loadCrawlAuthorCheckpoints).not.toHaveBeenCalled()
+  })
 })
 
 describe('deriveClassificationStatus', () => {
@@ -2185,7 +2451,7 @@ describe('runCrawlCycle checkpoint phase timing', () => {
     const completeCrawlAccountCheckpoint = deps.completeCrawlAccountCheckpoint as ReturnType<
       typeof vi.fn
     >
-    for (const phase of ['timelines', 'authors', 'following', 'followers', 'blocks']) {
+    for (const phase of ['timelines', 'replies', 'authors', 'following', 'followers', 'blocks']) {
       expect(completeCrawlAccountCheckpoint).toHaveBeenCalledWith(
         expect.objectContaining({
           phase,
