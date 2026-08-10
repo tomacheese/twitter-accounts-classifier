@@ -338,16 +338,88 @@ describe('runCrawlCycle', () => {
     )
   })
 
+  it('skips fetchAccountProfile when a valid embedded profile exists for the author', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+    const getUserByRestId = vi.fn().mockResolvedValue({ data: author })
+
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId,
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(getUserByRestId).not.toHaveBeenCalled()
+  })
+
+  it('falls back to fetchAccountProfile when the embedded profile has an empty screenName/displayName', async () => {
+    const author = rawUser('author1', '')
+    const tweet = rawTweet('tweet1', author)
+    const getUserByRestId = vi.fn().mockResolvedValue({ data: rawUser('author1') })
+
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId,
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(getUserByRestId).toHaveBeenCalledWith({ userId: 'author1' })
+  })
+
   it("evaluates and persists labels for a third-party account that only hijacks replies on someone else's high-engagement tweet", async () => {
     const author = rawUser('author1')
-    const replyAuthor = rawUser('reply-author', 'replier')
+    // embedded profile を screenName 空で無効化し、専用プロフィール取得が実際に呼ばれることを検証できるようにする。
+    const replyAuthorEmbedded = rawUser('reply-author', '')
+    const replyAuthorFetched = rawUser('reply-author', 'replier')
     const tweet = rawTweet('tweet1', author)
-    const reply = rawTweet('reply1', replyAuthor, 'tweet1')
+    const reply = rawTweet('reply1', replyAuthorEmbedded, 'tweet1')
 
     const getUserByRestId = vi
       .fn()
       .mockImplementation(({ userId }: { userId: string }) =>
-        Promise.resolve({ data: userId === 'reply-author' ? replyAuthor : author }),
+        Promise.resolve({ data: userId === 'reply-author' ? replyAuthorFetched : author }),
       )
 
     const deps = makeDeps({
@@ -633,7 +705,8 @@ describe('runCrawlCycle', () => {
 
   it('skips an author whose profile fetch throws but still persists the other authors and all tweets', async () => {
     const authorOk = rawUser('author-ok')
-    const authorBad = rawUser('author-bad')
+    // embedded profile を screenName 空で無効化し、専用プロフィール取得の失敗経路を検証できるようにする。
+    const authorBad = rawUser('author-bad', '')
     const tweetOk = rawTweet('tweet-ok', authorOk)
     const tweetBad = rawTweet('tweet-bad', authorBad)
 
@@ -1134,9 +1207,10 @@ describe('runCrawlCycle', () => {
             getTweetApi: () => ({
               getHomeTimeline: vi.fn().mockResolvedValue({
                 data: {
+                  // embedded profile を screenName 空で無効化し、専用プロフィール取得の失敗経路を検証できるようにする。
                   data: [
-                    rawTweet('tweet1', rawUser('author1')),
-                    rawTweet('tweet2', rawUser('author2')),
+                    rawTweet('tweet1', rawUser('author1', '')),
+                    rawTweet('tweet2', rawUser('author2', '')),
                   ],
                 },
               }),
@@ -1809,7 +1883,8 @@ describe('runCrawlCycle', () => {
 
   it('records a structured author_processing_failed warning when an author fails for a non-routine reason', async () => {
     const authorOk = rawUser('author-ok')
-    const authorBad = rawUser('author-bad')
+    // embedded profile を screenName 空で無効化し、専用プロフィール取得の失敗経路を検証できるようにする。
+    const authorBad = rawUser('author-bad', '')
     const tweetOk = rawTweet('tweet-ok', authorOk)
     const tweetBad = rawTweet('tweet-bad', authorBad)
 
@@ -1862,7 +1937,8 @@ describe('runCrawlCycle', () => {
   it.each([401, 403, 429, 500])(
     'records safe HTTP diagnostics and a partial run for author ResponseError %i',
     async (status) => {
-      const author = rawUser('author1')
+      // embedded profile を screenName 空で無効化し、専用プロフィール取得の失敗経路を検証できるようにする。
+      const author = rawUser('author1', '')
       const tweet = rawTweet('tweet1', author)
       const error = responseError(
         status,

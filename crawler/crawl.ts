@@ -518,10 +518,23 @@ async function runAuthorUnitPhase(
     const authorWarnings: CrawlWarning[] = []
 
     try {
-      const profile = await withTwitterRetry(
-        () => fetchAccountProfile(userApi, authorId),
-        retryOptions(deps, trackAuthorRetryWait),
-      )
+      // embedded profile (timeline/reply レスポンス内の author) は追加の API 呼び出しなしで
+      // 取得済みのプロフィールであり、screenName/displayName が非空なら信頼できるとみなして
+      // 専用 fetch を省略する。型システム上フィールドは揃うが、freshness・完全性の
+      // 完全な同値性は保証されない運用上の判断であり、将来不完全なケースが観測されたら
+      // 追加の妥当性確認を検討する。
+      const embeddedProfile = extraAuthors.get(authorId)
+      const hasValidEmbeddedProfile =
+        embeddedProfile !== undefined &&
+        embeddedProfile.screenName !== '' &&
+        embeddedProfile.displayName !== ''
+
+      const profile = hasValidEmbeddedProfile
+        ? embeddedProfile
+        : await withTwitterRetry(
+            () => fetchAccountProfile(userApi, authorId),
+            retryOptions(deps, trackAuthorRetryWait),
+          )
 
       const { tweets: recentTweets, authors: fallbackAuthors } = await guardTimelineFetch(() =>
         withTwitterRetry(
