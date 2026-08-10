@@ -49,7 +49,11 @@ export function deriveCycleStatus(requiredStages: StageStatus[]): CycleStatus {
   if (requiredStages.includes('stale')) return 'stale'
   if (requiredStages.includes('delayed')) return 'delayed'
   if (requiredStages.includes('unknown')) return 'unknown'
-  return 'scheduled'
+  // ここまで残るのは succeeded と waiting だけの組み合わせである。
+  // 全て waiting なら起点 Stage 自体が未着手であり、scheduled とする。
+  // 一部でも succeeded があれば起点は既に進んでいるため、running とする。
+  if (requiredStages.every((status) => status === 'waiting')) return 'scheduled'
+  return 'running'
 }
 
 /** AnalysisWorkItem から導出した Stage の状態と付随情報。 */
@@ -148,12 +152,7 @@ export async function deriveWorkItemStage(
 
 /**
  * WorkItem が enqueue されていない Stage を、直前 Stage の状態に応じて差し替える。
- * 直前 Stage が `running` または (その waiting 伝播を受けた) `waiting` なら
- * まだ開始条件を満たしていないだけの `waiting`、それ以外の未完了 (`failed` 等) なら
- * root cause の `failed` と区別するための `blocked_by_upstream` とする。
- * `waiting` も running 相当として扱うのは、3 Stage 以上の Cycle で running な起点から
- * 2 つ以上先の Stage まで waiting を連鎖させ、途中の Stage で誤って
- * blocked_by_upstream に落ちないようにするため。
+ * waiting も running 相当として扱うのは、blocked_by_upstream への誤判定を防ぐためである。
  * WorkItem 自体は変更せず、Cycle/Stage の表示状態だけ差し替える。
  * @param stage - deriveWorkItemStage が返した Stage
  * @param upstreamStatus - 直前の必須 Stage の状態
