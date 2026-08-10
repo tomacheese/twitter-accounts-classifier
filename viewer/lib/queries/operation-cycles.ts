@@ -129,6 +129,12 @@ export interface BlockOperationCycleDetailView extends OperationCycleDetailView 
   accountRuns: BlockAccountRunView[]
 }
 
+/** Weekly Review Cycle 専用の詳細表示。 */
+export interface WeeklyReviewOperationCycleDetailView extends OperationCycleDetailView {
+  /** Claude Code が生成した人間向け日本語サマリ。未生成なら null。 */
+  findings: string | null
+}
+
 interface OperationCycleDetailRecord extends OperationCycleDetailView {
   sourceId: string
 }
@@ -191,9 +197,16 @@ export async function getCrawlCycleDetail(
 export async function getWeeklyReviewCycleDetail(
   prisma: PrismaClient,
   cycleId: string,
-): Promise<OperationCycleDetailView | null> {
+): Promise<WeeklyReviewOperationCycleDetailView | null> {
   const detail = await getCycleDetail(prisma, cycleId)
-  return detail?.kind === 'weekly_review' ? detail : null
+  if (detail?.kind !== 'weekly_review') return null
+
+  const run = await prisma.weeklyAnalysisRun.findUnique({
+    where: { id: detail.sourceId },
+    select: { findings: true },
+  })
+
+  return { ...detail, findings: run?.findings ?? null }
 }
 
 /**

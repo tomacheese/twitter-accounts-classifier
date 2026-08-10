@@ -11,15 +11,18 @@ function createMockPrisma(overrides: {
   cycles?: unknown[]
   cycle?: unknown
   blockAccountRuns?: unknown[]
+  weeklyAnalysisRun?: unknown
 }) {
   const findMany = vi.fn().mockResolvedValue(overrides.cycles ?? [])
   const findUnique = vi.fn().mockResolvedValue(overrides.cycle ?? null)
   const queryRaw = vi.fn().mockResolvedValue(overrides.blockAccountRuns ?? [])
+  const weeklyAnalysisRunFindUnique = vi.fn().mockResolvedValue(overrides.weeklyAnalysisRun ?? null)
   const prisma = {
     operationCycle: { findMany, findUnique },
+    weeklyAnalysisRun: { findUnique: weeklyAnalysisRunFindUnique },
     $queryRaw: queryRaw,
   } as unknown as PrismaClient
-  return { prisma, findMany, findUnique, queryRaw }
+  return { prisma, findMany, findUnique, queryRaw, weeklyAnalysisRunFindUnique }
 }
 
 describe('listOperationCycles', () => {
@@ -103,6 +106,31 @@ describe('getWeeklyReviewCycleDetail', () => {
   it('kind: weekly_review でなければ null を返す', async () => {
     const { prisma } = createMockPrisma({ cycle: baseCycle })
     expect(await getWeeklyReviewCycleDetail(prisma, 'cycle-1')).toBeNull()
+  })
+
+  it('sourceId から WeeklyAnalysisRun.findings を取得して返す', async () => {
+    const cycle = { ...baseCycle, kind: 'weekly_review', sourceId: 'weekly-run-1' }
+    const { prisma, weeklyAnalysisRunFindUnique } = createMockPrisma({
+      cycle,
+      weeklyAnalysisRun: { findings: '週次レビューの日本語サマリ' },
+    })
+
+    const detail = await getWeeklyReviewCycleDetail(prisma, 'cycle-1')
+
+    expect(detail?.findings).toBe('週次レビューの日本語サマリ')
+    expect(weeklyAnalysisRunFindUnique.mock.calls[0]?.[0]).toEqual({
+      where: { id: 'weekly-run-1' },
+      select: { findings: true },
+    })
+  })
+
+  it('WeeklyAnalysisRun が見つからない、または findings が null なら null を返す', async () => {
+    const cycle = { ...baseCycle, kind: 'weekly_review', sourceId: 'weekly-run-1' }
+    const { prisma } = createMockPrisma({ cycle })
+
+    const detail = await getWeeklyReviewCycleDetail(prisma, 'cycle-1')
+
+    expect(detail?.findings).toBeNull()
   })
 })
 

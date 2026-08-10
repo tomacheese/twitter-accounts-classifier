@@ -1,3 +1,4 @@
+import React from 'react'
 import { notFound } from 'next/navigation'
 import { getPrismaClient } from '@/lib/prisma'
 import { getWeeklyReviewCycleDetail } from '@/lib/queries/operation-cycles'
@@ -36,5 +37,17 @@ export default async function WeeklyReviewCycleDetailPage({
   }
   if (!detail) notFound()
 
-  return <OperationCycleDetail detail={detail} />
+  return (
+    <div className="flex flex-col gap-6">
+      <OperationCycleDetail detail={detail} />
+      <section aria-labelledby="weekly-review-findings-heading">
+        <h2 id="weekly-review-findings-heading" className="text-lg font-semibold">
+          Findings
+        </h2>
+        <p className="mt-2 whitespace-pre-wrap text-gray-800 dark:text-gray-300">
+          {detail.findings ?? 'No findings recorded.'}
+        </p>
+      </section>
+    </div>
+  )
 }
