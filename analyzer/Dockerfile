@@ -17,6 +17,9 @@ RUN test -f /app/analyzer/dist/policy/detection-policy.json
 # analyzer は twitter-client に依存しないため cycletls は含まれず、prune は不要。
 RUN pnpm --filter analyzer deploy --prod /app/deploy/analyzer
 
+# typescript は @prisma/client の optional peer dependency として解決されるだけで、実行時には使われない。
+RUN find /app/deploy/analyzer/node_modules/.pnpm -maxdepth 1 -type d -name 'typescript@*' -exec rm -rf {} +
+
 FROM node:24-bookworm-slim
 
 ARG APPLICATION_VERSION=unknown

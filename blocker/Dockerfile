@@ -33,6 +33,9 @@ RUN set -eu; \
     if [ ! -f "$cycletls_pkg/dist/$keep" ]; then echo "cycletls binary $keep not found" >&2; exit 1; fi; \
     find "$cycletls_pkg/dist" -maxdepth 1 -type f ! -name "$keep" ! -name 'index.js' ! -name 'index.d.ts' -delete
 
+# typescript は @prisma/client の optional peer dependency として解決されるだけで、実行時には使われない。
+RUN find /app/deploy/blocker/node_modules/.pnpm -maxdepth 1 -type d -name 'typescript@*' -exec rm -rf {} +
+
 FROM node:24-bookworm-slim
 
 ARG APPLICATION_VERSION=unknown

@@ -33,6 +33,9 @@ RUN set -eu; \
     if [ ! -f "$cycletls_pkg/dist/$keep" ]; then echo "cycletls binary $keep not found" >&2; exit 1; fi; \
     find "$cycletls_pkg/dist" -maxdepth 1 -type f ! -name "$keep" ! -name 'index.js' ! -name 'index.d.ts' -delete
 
+# typescript は @prisma/client の optional peer dependency として解決されるだけで、実行時には使われない。
+RUN find /app/deploy/crawler/node_modules/.pnpm -maxdepth 1 -type d -name 'typescript@*' -exec rm -rf {} +
+
 # 最終 stage へ COPY する前に削除しておかないと、devDependency を含む symlink 構成の node_modules が layer に残ってしまう。
 RUN rm -rf /app/crawler/node_modules
 
