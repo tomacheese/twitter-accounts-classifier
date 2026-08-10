@@ -319,7 +319,16 @@ export function AccountSubviewTabs({ accountId }: AccountSubviewTabsProps): Reac
       .then(async (response) => {
         if (!response.ok) throw new Error(`Unexpected status: ${String(response.status)}`)
         const body = (await response.json()) as { data: SubviewDataByKey[typeof tab] }
-        setCache((previous) => ({ ...previous, [tab]: body.data }))
+        // NextResponse.json() を経由すると Date は ISO 文字列になるため、
+        // getTime() を呼ぶ classification だけここで Date に復元する。
+        const data =
+          tab === 'classification'
+            ? (body.data as AccountClassificationEntryView[]).map((entry) => ({
+                ...entry,
+                lastChangedAt: new Date(entry.lastChangedAt),
+              }))
+            : body.data
+        setCache((previous) => ({ ...previous, [tab]: data }))
       })
       .catch(() => {
         setErrorTab(tab)
