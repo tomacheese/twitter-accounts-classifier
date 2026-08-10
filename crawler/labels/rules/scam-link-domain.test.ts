@@ -100,9 +100,7 @@ describe('scamLinkDomainRule', () => {
   })
 
   it('is false when expandedUrls is empty', () => {
-    expect(scamLinkDomainRule.evaluate(makeBundle([tweet({ expandedUrls: [] })])).value).toBe(
-      false,
-    )
+    expect(scamLinkDomainRule.evaluate(makeBundle([tweet({ expandedUrls: [] })])).value).toBe(false)
   })
 
   it('is false when expandedUrls is undefined', () => {
