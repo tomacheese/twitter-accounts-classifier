@@ -79,10 +79,10 @@ async function main(): Promise<void> {
     const elapsedMinutes = (Date.now() - start) / 60_000
 
     console.log(
-      `Processed ${result.accountsProcessed} accounts, persisted ${result.labelsPersisted} labels`,
+      `Scanned ${result.accountsScanned} accounts, requested ${result.accountsRequested} for reclassification`,
     )
     console.log(
-      `Elapsed: ${elapsedMinutes.toFixed(2)} min (${(result.accountsProcessed / elapsedMinutes).toFixed(1)} accounts/min)`,
+      `Elapsed: ${elapsedMinutes.toFixed(2)} min (${(result.accountsScanned / elapsedMinutes).toFixed(1)} accounts/min)`,
     )
   } finally {
     await prisma.$disconnect()
