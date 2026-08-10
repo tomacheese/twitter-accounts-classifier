@@ -119,6 +119,35 @@ describe('AccountSubviewTabs (classification タブの取得)', () => {
   })
 })
 
+describe('AccountSubviewTabs (technical タブの取得)', () => {
+  it('freshnessStatus と sourceWatermarkAt を表示する', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams())
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => ({
+          data: {
+            accountId: 'account-1',
+            firstSeenAt: '2026-01-01T00:00:00.000Z',
+            lastCrawledAt: '2026-01-02T00:00:00.000Z',
+            updatedAt: '2026-01-03T00:00:00.000Z',
+            freshnessStatus: 'healthy',
+            sourceWatermarkAt: '2026-01-04T00:00:00.000Z',
+          },
+        }),
+      }),
+    )
+
+    render(<AccountSubviewTabs accountId="account-1" />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Technical' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('healthy')).not.toBeNull()
+    })
+  })
+})
+
 describe('ClassificationView', () => {
   it('Active → Recently changed (7 日以内) → Remaining false の順に表示する', () => {
     const now = new Date('2026-08-09T00:00:00.000Z')

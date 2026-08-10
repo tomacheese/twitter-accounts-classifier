@@ -1,15 +1,6 @@
 import type { PrismaClient } from '../../generated/prisma'
-
-const MODEL_KEY = 'account_summary'
-
-/**
- * @param prisma - Prisma クライアント
- * @returns account_summary read model の現在の generationId
- */
-async function getCurrentGenerationId(prisma: PrismaClient): Promise<string | null> {
-  const pointer = await prisma.readModelPointer.findUnique({ where: { modelKey: MODEL_KEY } })
-  return pointer?.currentGenerationId ?? null
-}
+import type { ReadModelFreshnessStatus } from '../api-response'
+import { getReadModelMeta } from '../read-model-meta'
 
 /** Account 詳細の Overview subview。 */
 export interface AccountOverviewView {
@@ -217,10 +208,13 @@ export interface AccountTechnicalView {
   firstSeenAt: Date
   lastCrawledAt: Date
   updatedAt: Date
-  generationId: string | null
+  freshnessStatus: ReadModelFreshnessStatus
+  sourceWatermarkAt: Date | null
 }
 
 /**
+ * account_summary_latest は generation を持たないため、旧 generationId 表示の代わりに
+ * freshness/watermark を表示する。
  * @param prisma - Prisma クライアント
  * @param accountId - 対象アカウント ID
  * @returns デバッグ・技術情報。Account が存在しなければ null
@@ -232,13 +226,14 @@ export async function getAccountTechnical(
   const account = await prisma.account.findUnique({ where: { id: accountId } })
   if (!account) return null
 
-  const generationId = await getCurrentGenerationId(prisma)
+  const meta = await getReadModelMeta(prisma, 'account_summary_latest')
 
   return {
     accountId: account.id,
     firstSeenAt: account.firstSeenAt,
     lastCrawledAt: account.lastCrawledAt,
     updatedAt: account.updatedAt,
-    generationId,
+    freshnessStatus: meta.freshnessStatus,
+    sourceWatermarkAt: meta.sourceDataAt,
   }
 }

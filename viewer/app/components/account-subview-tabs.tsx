@@ -246,8 +246,10 @@ function TechnicalView({ data }: { data: AccountTechnicalView }): React.ReactEle
       <dd>{formatDateTime(data.lastCrawledAt)}</dd>
       <dt className="text-gray-500 dark:text-gray-400">Updated at</dt>
       <dd>{formatDateTime(data.updatedAt)}</dd>
-      <dt className="text-gray-500 dark:text-gray-400">Read model generation</dt>
-      <dd>{data.generationId ?? '—'}</dd>
+      <dt className="text-gray-500 dark:text-gray-400">Read model freshness</dt>
+      <dd>{data.freshnessStatus}</dd>
+      <dt className="text-gray-500 dark:text-gray-400">Source watermark</dt>
+      <dd>{data.sourceWatermarkAt ? formatDateTime(data.sourceWatermarkAt) : '—'}</dd>
     </dl>
   )
 }

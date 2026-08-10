@@ -19,6 +19,7 @@ interface MockData {
   blocks?: unknown[]
   counterparts?: unknown[]
   changes?: unknown[]
+  readModelState?: unknown
 }
 
 function createMockPrisma(data: MockData) {
@@ -37,6 +38,8 @@ function createMockPrisma(data: MockData) {
     reviewFinding: { findMany: vi.fn().mockResolvedValue(data.findings ?? []) },
     block: { findMany: blockFindMany },
     accountLabelChange: { findMany: vi.fn().mockResolvedValue(data.changes ?? []) },
+    readModelState: { findUnique: vi.fn().mockResolvedValue(data.readModelState ?? null) },
+    detectionPolicyVersion: { findFirst: vi.fn().mockResolvedValue(null) },
   } as unknown as PrismaClient
   return { prisma, blockFindMany }
 }
@@ -300,14 +303,35 @@ describe('getAccountTechnical', () => {
     expect(await getAccountTechnical(prisma, 'account-1')).toBeNull()
   })
 
-  it('現在の generationId を併せて返す', async () => {
+  it('account_summary_latest の freshness/watermark を併せて返す', async () => {
+    // reconcileFreshness は lastSuccessAt からの経過時間でも degrade させるため、
+    // 「healthy かつ degrade されない」ことを確認するには直近の時刻を使う必要がある。
+    const sourceWatermarkAt = new Date('2026-01-04T00:00:00Z')
     const { prisma } = createMockPrisma({
       account,
-      pointer: { currentGenerationId: 'generation-1' },
+      readModelState: {
+        status: 'healthy',
+        lastSuccessAt: new Date(),
+        sourceWatermarkAt,
+        currentGenerationId: null,
+        policyHash: null,
+      },
     })
 
     const result = await getAccountTechnical(prisma, 'account-1')
 
-    expect(result).toMatchObject({ accountId: 'account-1', generationId: 'generation-1' })
+    expect(result).toMatchObject({
+      accountId: 'account-1',
+      freshnessStatus: 'healthy',
+      sourceWatermarkAt,
+    })
+  })
+
+  it('account_summary_latest が未記録なら freshnessStatus は unknown になる', async () => {
+    const { prisma } = createMockPrisma({ account })
+
+    const result = await getAccountTechnical(prisma, 'account-1')
+
+    expect(result).toMatchObject({ freshnessStatus: 'unknown', sourceWatermarkAt: null })
   })
 })
