@@ -611,6 +611,39 @@ export async function processRetentionSweep(
 }
 
 /**
+ * kind: operation_cycle_refresh の処理関数。
+ * Cycle の実際の構築は handleWorkItemSettled() の triggerType 分岐 (既存) に委ねるため、
+ * ここでは起点 Run が実在することの確認だけを行う。
+ * 起点 Run 開始直後に Operations へ Cycle を反映させるためだけに存在する WorkItem。
+ * @param prisma - Prisma クライアント
+ * @param workItem - `kind: 'operation_cycle_refresh'` の WorkItem
+ */
+export async function processOperationCycleRefresh(
+  prisma: PrismaClient,
+  workItem: AnalysisWorkItem,
+): Promise<void> {
+  switch (workItem.triggerType) {
+    case 'crawl_run': {
+      await prisma.crawlRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
+      return
+    }
+    case 'block_run': {
+      await prisma.blockRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
+      return
+    }
+    case 'weekly_analysis_run': {
+      await prisma.weeklyAnalysisRun.findUniqueOrThrow({ where: { id: workItem.triggerId } })
+      return
+    }
+    default: {
+      throw new Error(
+        `unsupported trigger type for operation_cycle_refresh: ${workItem.triggerType}`,
+      )
+    }
+  }
+}
+
+/**
  * 読み取りモデルの鮮度しきい値を policy から取り出して評価する。
  * WorkItem が完了した直後だけでなく、queue が空で何も処理しない
  * pass でも呼ぶことで、経過時間だけで delayed/stale へ落ちるようにする。

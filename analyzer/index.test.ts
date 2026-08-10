@@ -35,6 +35,7 @@ vi.mock('./worker-processors', () => ({
   processWeeklyReviewIngest: vi.fn(),
   processBlockReconciliation: vi.fn(),
   processRetentionSweep: vi.fn(),
+  processOperationCycleRefresh: vi.fn(),
   processPostCompletionRefresh: vi.fn(),
   processAccountSummaryRefresh: vi.fn(),
   processAccountFindingRefresh: vi.fn(),
