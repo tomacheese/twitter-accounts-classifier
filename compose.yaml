@@ -100,8 +100,9 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      # viewer は読み取り専用の viewer ロール (scripts/db/create-viewer-role.sql) で接続する。
-      # crawler ロールで接続すると、DB 側で強制している SELECT のみの制約が意味を持たなくなる。
+      # viewer は原則読み取り専用の viewer ロール (scripts/db/create-viewer-role.sql) で接続する。
+      # ComponentBuildIdentity の起動情報 upsert だけは INSERT/UPDATE を限定許可する。
+      # crawler ロールで接続すると、DB 側の最小権限制約が意味を持たなくなる。
       DATABASE_URL: postgresql://viewer:${VIEWER_DB_PASSWORD:?VIEWER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
       # Docker sets HOSTNAME to the container ID by default; Next.js's
       # standalone server.js binds to that literal value instead of all
