@@ -3,9 +3,12 @@ import type { PrismaClient } from '../generated/prisma'
 import {
   clearCrawlAccountCheckpoints,
   completeCrawlAccountCheckpoint,
+  CRAWL_ACCOUNT_CHECKPOINT_PHASES,
   finishCrawlRun,
   loadCrawlAccountCheckpoints,
+  loadCrawlAuthorCheckpoints,
   recordCrawlAccountRun,
+  recordCrawlAuthorCheckpoint,
   setCurrentAccount,
   startOrResumeCrawlRun,
   touchCrawlRunHeartbeat,
@@ -296,6 +299,19 @@ describe('recordCrawlAccountRun', () => {
   })
 })
 
+describe('CRAWL_ACCOUNT_CHECKPOINT_PHASES', () => {
+  it('includes the replies phase between timelines and authors', () => {
+    expect(CRAWL_ACCOUNT_CHECKPOINT_PHASES).toEqual([
+      'timelines',
+      'replies',
+      'authors',
+      'following',
+      'followers',
+      'blocks',
+    ])
+  })
+})
+
 describe('crawl account checkpoints', () => {
   it('loads only recognized completed phases for an account', async () => {
     const findMany = vi.fn().mockResolvedValue([
@@ -360,12 +376,17 @@ describe('crawl account checkpoints', () => {
       PrismaClient['crawlAccountCheckpoint']['deleteMany']
     >
     const labelClaimOperation = {} as ReturnType<PrismaClient['crawlAccountLabelRun']['deleteMany']>
+    const authorCheckpointOperation = {} as ReturnType<
+      PrismaClient['crawlAuthorCheckpoint']['deleteMany']
+    >
     const deleteCheckpoints = vi.fn().mockReturnValue(checkpointOperation)
     const deleteLabelClaims = vi.fn().mockReturnValue(labelClaimOperation)
+    const deleteAuthorCheckpoints = vi.fn().mockReturnValue(authorCheckpointOperation)
     const transaction = vi.fn().mockResolvedValue([])
     const prisma = {
       crawlAccountCheckpoint: { deleteMany: deleteCheckpoints },
       crawlAccountLabelRun: { deleteMany: deleteLabelClaims },
+      crawlAuthorCheckpoint: { deleteMany: deleteAuthorCheckpoints },
       $transaction: transaction,
     } as unknown as PrismaClient
 
@@ -373,6 +394,114 @@ describe('crawl account checkpoints', () => {
 
     expect(deleteCheckpoints).toHaveBeenCalledWith({ where: { crawlRunId: 'run1' } })
     expect(deleteLabelClaims).toHaveBeenCalledWith({ where: { crawlRunId: 'run1' } })
-    expect(transaction).toHaveBeenCalledWith([checkpointOperation, labelClaimOperation])
+    expect(deleteAuthorCheckpoints).toHaveBeenCalledWith({ where: { crawlRunId: 'run1' } })
+    expect(transaction).toHaveBeenCalledWith([
+      checkpointOperation,
+      labelClaimOperation,
+      authorCheckpointOperation,
+    ])
+  })
+})
+
+describe('crawl author checkpoints', () => {
+  it('upserts an author checkpoint by crawl run, account, and author', async () => {
+    const upsert = vi.fn().mockResolvedValue({})
+    const prisma = {
+      crawlAuthorCheckpoint: { upsert },
+    } as unknown as PrismaClient
+
+    await recordCrawlAuthorCheckpoint(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      authorId: 'author1',
+      status: 'success',
+      profileCount: 1,
+      labelsAppliedCount: 2,
+      warnings: [],
+      durationMs: 100,
+      retryWaitMs: 0,
+      appVersion: 'test',
+    })
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        crawlRunId_username_authorId: {
+          crawlRunId: 'run1',
+          username: 'someuser',
+          authorId: 'author1',
+        },
+      },
+      create: {
+        crawlRunId: 'run1',
+        username: 'someuser',
+        authorId: 'author1',
+        status: 'success',
+        profileCount: 1,
+        labelsAppliedCount: 2,
+        warnings: [],
+        durationMs: 100,
+        retryWaitMs: 0,
+        appVersion: 'test',
+      },
+      update: {
+        status: 'success',
+        profileCount: 1,
+        labelsAppliedCount: 2,
+        warnings: [],
+        durationMs: 100,
+        retryWaitMs: 0,
+        appVersion: 'test',
+        completedAt: expect.any(Date),
+      },
+    })
+  })
+
+  it('loads author checkpoints keyed by authorId', async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        authorId: 'author1',
+        status: 'success',
+        profileCount: 1,
+        labelsAppliedCount: 2,
+        warnings: [],
+      },
+      {
+        authorId: 'author2',
+        status: 'unavailable',
+        profileCount: 0,
+        labelsAppliedCount: 0,
+        warnings: [{ type: 'author_processing_failed', message: 'm', errorMessage: 'e' }],
+      },
+    ])
+    const prisma = {
+      crawlAuthorCheckpoint: { findMany },
+    } as unknown as PrismaClient
+
+    const result = await loadCrawlAuthorCheckpoints(prisma, 'run1', 'someuser')
+
+    expect(result).toEqual(
+      new Map([
+        ['author1', { status: 'success', profileCount: 1, labelsAppliedCount: 2, warnings: [] }],
+        [
+          'author2',
+          {
+            status: 'unavailable',
+            profileCount: 0,
+            labelsAppliedCount: 0,
+            warnings: [{ type: 'author_processing_failed', message: 'm', errorMessage: 'e' }],
+          },
+        ],
+      ]),
+    )
+    expect(findMany).toHaveBeenCalledWith({
+      where: { crawlRunId: 'run1', username: 'someuser' },
+      select: {
+        authorId: true,
+        status: true,
+        profileCount: true,
+        labelsAppliedCount: true,
+        warnings: true,
+      },
+    })
   })
 })
