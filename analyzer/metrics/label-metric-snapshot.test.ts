@@ -85,7 +85,7 @@ describe('buildLabelAggregateSnapshotSet transaction options', () => {
 
     expect(transaction).toHaveBeenCalledWith(
       expect.any(Function),
-      expect.objectContaining({ isolationLevel: 'RepeatableRead', timeout: 120_000 }),
+      expect.objectContaining({ isolationLevel: 'RepeatableRead', timeout: 300_000 }),
     )
   })
 })

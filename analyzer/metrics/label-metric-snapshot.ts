@@ -259,7 +259,7 @@ export async function buildLabelAggregateSnapshotSet(
     },
     {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-      timeout: 120_000,
+      timeout: 300_000,
     },
   )
 
