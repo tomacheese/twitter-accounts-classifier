@@ -75,7 +75,9 @@ describe('missing block target', () => {
   it('does not increment failedCount for a missing target', async () => {
     const { client, deps } = fakeDeps()
     const candidate = { accountId: 'missing-1', labelDefinitionId: 'label-spam', confidence: 0.95 }
-    vi.mocked(client.createBlock).mockRejectedValue(new BlockTargetNotFoundError(candidate.accountId))
+    vi.mocked(client.createBlock).mockRejectedValue(
+      new BlockTargetNotFoundError(candidate.accountId),
+    )
     vi.mocked(deps.selectBlockCandidates).mockResolvedValue([candidate])
 
     const summary = await runBlockAccountCycle(deps as never, baseAccount(), 'run-1')
