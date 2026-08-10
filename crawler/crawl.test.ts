@@ -1415,9 +1415,7 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    // 'w' はチェックポイントで既にスキップされるため、実際に処理された 'v' の分だけ呼ばれる。
-    // 'v' には author 単位の checkpoint 完了ごとの呼び出し (author1 の 1 件) と、
-    // アカウント単位の既存の呼び出しがそれぞれ加算される。
+    // author 単位の checkpoint 完了ごとの呼び出しと、アカウント単位の既存の呼び出しが加算される。
     expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledTimes(2)
     expect(deps.touchCrawlRunHeartbeat).toHaveBeenCalledWith('run1')
   })
@@ -1572,6 +1570,56 @@ describe('runCrawlCycle', () => {
     expect(getHomeLatestTimeline).not.toHaveBeenCalled()
     expect(getSearchTimeline).not.toHaveBeenCalled()
     expect(resumedCycle.createTrendsScraper).not.toHaveBeenCalled()
+    expect(resumedCycle.completeCrawlAccountCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'authors' }),
+    )
+  })
+
+  it('resumes author processing from the completed replies checkpoint without refetching replies', async () => {
+    const checkpoints = new Map<string, unknown>()
+    const firstCycle = makeDeps({
+      completeCrawlAccountCheckpoint: vi.fn((params: CrawlAccountCheckpointParams) => {
+        checkpoints.set(params.phase, params.data)
+        return Promise.resolve(undefined)
+      }),
+    })
+    await runCrawlCycle(firstCycle)
+
+    const getTweetDetail = vi.fn()
+    const resumedCycle = makeDeps({
+      loadCrawlAccountCheckpoints: vi.fn().mockResolvedValue(
+        new Map([
+          ['timelines', checkpoints.get('timelines')],
+          ['replies', checkpoints.get('replies')],
+        ]),
+      ),
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn(),
+            getHomeLatestTimeline: vi.fn(),
+            getSearchTimeline: vi.fn(),
+            getTweetDetail,
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(resumedCycle)
+
+    expect(getTweetDetail).not.toHaveBeenCalled()
     expect(resumedCycle.completeCrawlAccountCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({ phase: 'authors' }),
     )
@@ -2133,7 +2181,7 @@ describe('runCrawlCycle', () => {
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'failed')
   })
 
-  it('does not reprocess an author whose CrawlAuthorCheckpoint already committed, even across two runCrawlCycle calls', async () => {
+  it('does not reprocess an author whose CrawlAuthorCheckpoint already committed, when a second runCrawlCycle call resumes before clearCrawlAccountCheckpoints has run', async () => {
     const persistAuthorResultAtomic = vi.fn().mockResolvedValue({ observationId: 'observation1' })
     const checkpoints = new Map<string, unknown>()
     const loadCrawlAuthorCheckpoints = vi
@@ -2162,7 +2210,6 @@ describe('runCrawlCycle', () => {
       checkpoints.set(params.authorId, params)
       return Promise.resolve({ observationId: 'observation1' })
     })
-    const getUserByRestId = vi.fn().mockResolvedValue({ data: rawUser('author1') })
     const deps = makeDeps({
       persistAuthorResultAtomic,
       recordCrawlAuthorCheckpoint,
@@ -2173,7 +2220,6 @@ describe('runCrawlCycle', () => {
     expect(persistAuthorResultAtomic).toHaveBeenCalledTimes(1)
 
     persistAuthorResultAtomic.mockClear()
-    getUserByRestId.mockClear()
     await runCrawlCycle(deps)
     expect(persistAuthorResultAtomic).not.toHaveBeenCalled()
   })
@@ -2405,7 +2451,7 @@ describe('runCrawlCycle checkpoint phase timing', () => {
     const completeCrawlAccountCheckpoint = deps.completeCrawlAccountCheckpoint as ReturnType<
       typeof vi.fn
     >
-    for (const phase of ['timelines', 'authors', 'following', 'followers', 'blocks']) {
+    for (const phase of ['timelines', 'replies', 'authors', 'following', 'followers', 'blocks']) {
       expect(completeCrawlAccountCheckpoint).toHaveBeenCalledWith(
         expect.objectContaining({
           phase,

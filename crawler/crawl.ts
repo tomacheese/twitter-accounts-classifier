@@ -475,8 +475,7 @@ async function runAuthorUnitPhase(
   // Tweet.accountId は Account への必須外部キーであるため、
   // 専用のプロフィール取得が行われないか失敗した投稿者についても、
   // 埋め込みプロフィールをフォールバックとして必ず upsert する。
-  // fetchRecentTweets が返す文脈 Tweet の fallback profile は author 単位の
-  // transaction (persistAuthorResultAtomic) 側で扱うため、ここには含めない。
+  // 文脈 Tweet の fallback profile は persistAuthorResultAtomic 側で扱うため、ここには含めない。
   const extraAuthors = new Map<string, AccountProfileInput>()
   for (const author of [
     ...recommended.authors,
@@ -496,8 +495,7 @@ async function runAuthorUnitPhase(
   const warnings: CrawlWarning[] = []
   const succeededAuthorIds = new Set<string>()
   let labelsAppliedCount = 0
-  // 再起動を跨いで author checkpoint が積み重なっても、集計は再起動回数に依存しない
-  // よう、前回までの checkpoint 分をまず合算する。
+  // 集計を再起動回数に依存させないため、前回までの checkpoint 分をまず合算する。
   for (const [authorId, checkpoint] of existingCheckpoints) {
     if (checkpoint.status === 'success') succeededAuthorIds.add(authorId)
     labelsAppliedCount += checkpoint.labelsAppliedCount
@@ -505,7 +503,10 @@ async function runAuthorUnitPhase(
   }
 
   for (const [authorIndex, authorId] of uniqueAuthorIds.entries()) {
-    if (existingCheckpoints.has(authorId)) continue
+    const existingCheckpoint = existingCheckpoints.get(authorId)
+    // failed は一時的な障害に起因することがあるため、再起動を跨いだ再試行を許す。
+    // success・unavailable は永続的な終了状態として skip する。
+    if (existingCheckpoint && existingCheckpoint.status !== 'failed') continue
     // 最初のアカウントの前は待つ対象がないため、sleep はスキップする。
     if (authorIndex > 0) {
       await deps.sleep(deps.limits.authorFetchDelayMs)
@@ -648,9 +649,8 @@ async function runAuthorUnitPhase(
         appVersion: APP_VERSION,
       })
       succeededAuthorIds.add(authorId)
-      // 同じ crawlRunId/username/accountId で再試行された場合、persistAuthorResultAtomic は
-      // ON CONFLICT DO NOTHING で何も claim できず null を返す。その場合は実際には
-      // 何も永続化していないため、件数を二重に数えない。
+      // 再試行時は ON CONFLICT DO NOTHING で何も claim できず null が返る。
+      // 実際には何も永続化していないため、件数を二重に数えない。
       if (observationId !== null) labelsAppliedCount += ruleResults.length
       warnings.push(...authorWarnings)
     } catch (error) {
@@ -658,18 +658,27 @@ async function runAuthorUnitPhase(
         logger.info(
           `Skipping author ${authorId}: account is unavailable (suspended, deleted, or protected)`,
         )
-        await deps.recordCrawlAuthorCheckpoint({
-          crawlRunId,
-          username: account.username,
-          authorId,
-          status: 'unavailable',
-          profileCount: 0,
-          labelsAppliedCount: 0,
-          warnings: [],
-          durationMs: Date.now() - authorStartedAt,
-          retryWaitMs: authorRetryWait.ms,
-          appVersion: APP_VERSION,
-        })
+        // checkpoint 書き込み自体の失敗で phase 全体を止めない。失敗しても次回の resume でこの author が再試行されるだけである。
+        try {
+          await deps.recordCrawlAuthorCheckpoint({
+            crawlRunId,
+            username: account.username,
+            authorId,
+            status: 'unavailable',
+            profileCount: 0,
+            labelsAppliedCount: 0,
+            warnings: authorWarnings,
+            durationMs: Date.now() - authorStartedAt,
+            retryWaitMs: authorRetryWait.ms,
+            appVersion: APP_VERSION,
+          })
+        } catch (checkpointError) {
+          logger.error(
+            `Failed to record author checkpoint for ${authorId}`,
+            checkpointError as Error,
+          )
+        }
+        warnings.push(...authorWarnings)
       } else {
         const diagnostics = getResponseErrorDiagnostics(error)
         const message = diagnostics
@@ -688,19 +697,26 @@ async function runAuthorUnitPhase(
           ...diagnostics,
           appVersion: APP_VERSION,
         }
-        await deps.recordCrawlAuthorCheckpoint({
-          crawlRunId,
-          username: account.username,
-          authorId,
-          status: 'failed',
-          profileCount: 0,
-          labelsAppliedCount: 0,
-          warnings: [warning],
-          durationMs: Date.now() - authorStartedAt,
-          retryWaitMs: authorRetryWait.ms,
-          appVersion: APP_VERSION,
-        })
-        warnings.push(warning)
+        try {
+          await deps.recordCrawlAuthorCheckpoint({
+            crawlRunId,
+            username: account.username,
+            authorId,
+            status: 'failed',
+            profileCount: 0,
+            labelsAppliedCount: 0,
+            warnings: [...authorWarnings, warning],
+            durationMs: Date.now() - authorStartedAt,
+            retryWaitMs: authorRetryWait.ms,
+            appVersion: APP_VERSION,
+          })
+        } catch (checkpointError) {
+          logger.error(
+            `Failed to record author checkpoint for ${authorId}`,
+            checkpointError as Error,
+          )
+        }
+        warnings.push(...authorWarnings, warning)
       }
     }
 
@@ -718,6 +734,9 @@ async function runAuthorUnitPhase(
     await deps.persistAccount(profile)
   }
 
+  // author 単位の transaction 内でも同じ id の Tweet を書き込むことがあるが、
+  // upsertTweet は既存 DB 行との OR 結合で isPromoted 等を合成するため、
+  // 書き込み順に関わらず最終的に正しい値へ収束する。
   await deps.persistTweets(mergeTweetAdFlags([...allTweets, ...repliesResult.replyTweets]))
   logger.info(
     `Crawl cycle complete for ${account.username}: ${allTweets.length} timeline tweets, ${repliesResult.replyTweets.length} replies, ${uniqueAuthorIds.length} profiles`,

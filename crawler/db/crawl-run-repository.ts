@@ -254,9 +254,9 @@ export interface CrawlAuthorCheckpointRecord {
 }
 
 /**
- * 同じ author を再度処理しても `@@unique([crawlRunId, username, authorId])` により
- * 別行を作らず既存行を置き換える。自前で transaction を開かないため、
- * 呼び出し元は `tx as unknown as PrismaClient` を渡して外側の transaction に合成できる。
+ * 同じ author を再度処理しても既存行を置き換えるだけで別行を作らない。
+ * 自前で transaction を開かないため、呼び出し元が `tx as unknown as PrismaClient` を渡せば、
+ * 外側の transaction に合成できる。
  * @param prisma - Prisma クライアント (または transaction client)
  * @param params - author checkpoint の識別子と記録内容
  */
@@ -294,14 +294,24 @@ export async function loadCrawlAuthorCheckpoints(
       warnings: true,
     },
   })
+  const knownStatuses: ReadonlySet<CrawlAuthorCheckpointStatus> = new Set([
+    'success',
+    'unavailable',
+    'failed',
+  ])
   return new Map(
     checkpoints.map((checkpoint) => [
       checkpoint.authorId,
       {
-        status: checkpoint.status as CrawlAuthorCheckpointStatus,
+        // 想定外の値が入っていた場合、再起動時に再試行させる方が安全なため failed にフォールバックする。
+        status: knownStatuses.has(checkpoint.status as CrawlAuthorCheckpointStatus)
+          ? (checkpoint.status as CrawlAuthorCheckpointStatus)
+          : 'failed',
         profileCount: checkpoint.profileCount,
         labelsAppliedCount: checkpoint.labelsAppliedCount,
-        warnings: checkpoint.warnings as unknown as CrawlWarning[],
+        warnings: Array.isArray(checkpoint.warnings)
+          ? (checkpoint.warnings as unknown as CrawlWarning[])
+          : [],
       },
     ]),
   )

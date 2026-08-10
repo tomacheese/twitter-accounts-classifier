@@ -10,8 +10,10 @@ const logger = Logger.configure('labeling-follow-sample-repository')
 // アカウントごとに個別に upsert する。
 // upsert に失敗したアカウントの id は戻り値から除外し、
 // 呼び出し元が LabelingFollowSample の外部キー違反を避けられるようにする。
+// 1 件ごとの失敗を握り潰す前提のため、Postgres が transaction 全体を abort 状態にしてしまう
+// transaction client を渡してはならない。
 /**
- * @param prisma - Prisma クライアント (または transaction client)
+ * @param prisma - Prisma クライアント。transaction 内でこの関数を使ってはならない
  * @param result - 取得したフォロー先一覧（1ページ・上限件数分）
  * @returns Account の upsert に成功した followee ID の集合
  */
@@ -38,8 +40,8 @@ export async function upsertFollowSampleAuthors(
  * 呼び出しごとに既存行を削除してから今回取得した分だけを挿入し直す。
  * `Follow` の蓄積型 upsert とは異なり、
  * フォロー解除された相手が古いサンプルとして残り続けることを避けるため。
- * 自前で transaction を開始しないため、呼び出し元は `tx as unknown as PrismaClient`
- * を渡して外側の transaction に合成できる。
+ * 自前で transaction を開始しないため、呼び出し元が `tx as unknown as PrismaClient` を渡せば、
+ * 外側の transaction に合成できる。
  * @param prisma - Prisma クライアント (または transaction client)
  * @param accountId - サンプル取得対象のラベリング対象アカウント
  * @param followeeIds - Account の upsert に成功した followee ID 一覧

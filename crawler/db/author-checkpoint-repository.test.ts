@@ -191,4 +191,65 @@ describe('persistAuthorResultAtomic', () => {
       skipDuplicates: true,
     })
   })
+
+  it('opens the transaction with an extended budget for the combined write', async () => {
+    const txClient = {
+      account: { upsert: vi.fn().mockResolvedValue({}) },
+      tweet: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) },
+      crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
+    }
+    const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
+    const prisma = { $transaction: transaction } as unknown as PrismaClient
+
+    await persistAuthorResultAtomic(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      authorId: 'author1',
+      profile: profile('author1'),
+      recentTweets: [],
+      recentTweetsFallbackAuthors: [],
+      followSample: null,
+      labels: [],
+      warnings: [],
+      durationMs: 10,
+      retryWaitMs: 0,
+      appVersion: 'test',
+    })
+
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 30_000,
+      timeout: 30_000,
+    })
+  })
+
+  it('upserts each fallback author only once even if it appears against multiple context tweets', async () => {
+    const accountUpsert = vi.fn().mockResolvedValue({})
+    const txClient = {
+      account: { upsert: accountUpsert },
+      tweet: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) },
+      crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
+    }
+    const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
+    const prisma = { $transaction: transaction } as unknown as PrismaClient
+
+    await persistAuthorResultAtomic(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      authorId: 'author1',
+      profile: profile('author1'),
+      recentTweets: [tweet('tweet1', 'context1'), tweet('tweet2', 'context1')],
+      recentTweetsFallbackAuthors: [profile('context1'), profile('context1')],
+      followSample: null,
+      labels: [],
+      warnings: [],
+      durationMs: 10,
+      retryWaitMs: 0,
+      appVersion: 'test',
+    })
+
+    // author1 (自分) 用に 1 回 + context1 用に 1 回のみ。重複したままだと 3 回目が呼ばれる。
+    expect(accountUpsert).toHaveBeenCalledTimes(2)
+  })
 })

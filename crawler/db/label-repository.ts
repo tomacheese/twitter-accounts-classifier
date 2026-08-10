@@ -307,8 +307,8 @@ interface ClaimedLabelRow {
  * `AccountLabel`/`AccountLabelLatest` へ書き込んでから、claim が 1 件でも
  * 成功していれば `AccountClassificationObservation` を 1 行作成する。
  * 全 claim が空振り (再開時の重複呼び出し) の場合は observation を作らず null を返す。
- * 自前で transaction を開始しないため、呼び出し元は `tx as unknown as PrismaClient`
- * を渡して外側の transaction に合成できる。
+ * 自前で transaction を開始しないため、呼び出し元が `tx as unknown as PrismaClient` を渡せば、
+ * 外側の transaction に合成できる。
  * @param prisma - Prisma クライアント (または transaction client)
  * @param params - 対象アカウントと author 分のルール結果一覧
  * @returns 作成した `AccountClassificationObservation` の id。全 claim 空振りなら null
