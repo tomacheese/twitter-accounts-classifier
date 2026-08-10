@@ -4,6 +4,7 @@ import type { LabelRule } from '../labels/types'
 import {
   ensureLabelDefinition,
   ensureLabelDefinitionsForRules,
+  filterAccountIdsWithExistingLabels,
   recordAccountLabelsBulk,
   recordCrawlAccountLabel,
   recordCrawlAccountLabelsAtomic,
@@ -409,5 +410,26 @@ describe('recordCrawlAccountLabelsAtomic transaction budget', () => {
       maxWait: 15_000,
       timeout: 15_000,
     })
+  })
+})
+
+describe('filterAccountIdsWithExistingLabels', () => {
+  it('AccountLabelLatest に行がある accountId だけを返す', async () => {
+    const findMany = vi.fn().mockResolvedValue([{ accountId: 'acct-1' }, { accountId: 'acct-3' }])
+    const prisma = { accountLabelLatest: { findMany } } as unknown as PrismaClient
+
+    const result = await filterAccountIdsWithExistingLabels(prisma, ['acct-1', 'acct-2', 'acct-3'])
+
+    expect(result).toEqual(new Set(['acct-1', 'acct-3']))
+  })
+
+  it('空配列を渡した場合はクエリを発行せず空集合を返す', async () => {
+    const findMany = vi.fn()
+    const prisma = { accountLabelLatest: { findMany } } as unknown as PrismaClient
+
+    const result = await filterAccountIdsWithExistingLabels(prisma, [])
+
+    expect(result).toEqual(new Set())
+    expect(findMany).not.toHaveBeenCalled()
   })
 })
