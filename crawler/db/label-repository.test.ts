@@ -6,6 +6,7 @@ import {
   ensureLabelDefinitionsForRules,
   recordAccountLabelsBulk,
   recordCrawlAccountLabel,
+  recordCrawlAccountLabelsAtomic,
 } from './label-repository'
 
 vi.mock('node:crypto', () => ({ randomUUID: () => 'mock-id' }))
@@ -334,5 +335,32 @@ describe('recordCrawlAccountLabel', () => {
     expect(sqlText).toContain('"sourceKind", "sourceId", "sourceUsername"')
     expect(values).toContain('run1')
     expect(values).toContain('viewer')
+  })
+})
+
+describe('recordCrawlAccountLabelsAtomic transaction budget', () => {
+  it('extends the transaction timeout beyond the Prisma default', async () => {
+    const tx = { $queryRaw: vi.fn().mockResolvedValue([]) }
+    const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(tx))
+    const prisma = { $transaction: transaction } as unknown as PrismaClient
+
+    await recordCrawlAccountLabelsAtomic(prisma, {
+      accountId: 'u1',
+      crawlRunId: 'crawl-1',
+      username: 'login_account',
+      labels: [
+        {
+          labelDefinitionId: 'ld1',
+          result: { value: true, confidence: 1, reason: 'test' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 15_000,
+      timeout: 15_000,
+    })
   })
 })
