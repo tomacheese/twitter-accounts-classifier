@@ -32,7 +32,11 @@ describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
       if (sql.includes('COUNT(DISTINCT')) return Promise.resolve([{ count: 1n }])
       return Promise.resolve([])
     })
+    const executeRaw = vi.fn((strings: TemplateStringsArray) =>
+      Promise.resolve(strings.length - strings.length),
+    )
     const fakeTx = {
+      $executeRaw: executeRaw,
       $queryRaw: queryRaw,
       labelMetricSnapshot: { upsert: vi.fn(() => Promise.resolve({})) },
     }
@@ -53,6 +57,12 @@ describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
     })
 
     expect(queryRaw).toHaveBeenCalledTimes(3)
+    const firstQuery = queryRaw.mock.calls[0][0]
+    const secondQuery = queryRaw.mock.calls[1][0]
+    expect(firstQuery.join('?')).toContain('SELECT now() AS now')
+    expect(secondQuery.join('?')).toContain('COUNT(DISTINCT')
+    expect(executeRaw).toHaveBeenCalledTimes(1)
+    expect(executeRaw.mock.calls[0][0].join('?')).toContain("SET LOCAL work_mem = '256MB'")
   })
 })
 

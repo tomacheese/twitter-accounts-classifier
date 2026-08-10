@@ -10,6 +10,15 @@ BEGIN
     RAISE EXCEPTION 'role weekly_review does not exist';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_roles
+    WHERE rolname = 'weekly_review'
+      AND 'client_connection_check_interval=5s' = ANY(COALESCE(rolconfig, ARRAY[]::text[]))
+      AND 'statement_timeout=120s' = ANY(COALESCE(rolconfig, ARRAY[]::text[]))
+  ) THEN
+    RAISE EXCEPTION 'weekly_review runtime timeouts are not configured';
+  END IF;
+
   IF NOT has_database_privilege('weekly_review', current_database(), 'CONNECT') THEN
     RAISE EXCEPTION 'weekly_review lacks CONNECT on database %', current_database();
   END IF;

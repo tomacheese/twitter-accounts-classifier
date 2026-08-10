@@ -21,6 +21,28 @@ export function isWeeklyAnalysisRunStatus(value: string): value is WeeklyAnalysi
   return (WEEKLY_ANALYSIS_RUN_STATUSES as readonly string[]).includes(value)
 }
 
+/**
+ * 同じ weekly review DB ロール・同じ run-scoped application_name で残っている
+ * active backend を cancel する。cleanup 自身の接続は除外する。
+ * @param prisma - Prisma クライアント
+ * @param applicationName - run ごとに付与した PostgreSQL application_name
+ * @returns cancel に成功した backend 数
+ */
+export async function cancelWeeklyAnalysisRunBackends(
+  prisma: PrismaClient,
+  applicationName: string,
+): Promise<number> {
+  const rows = await prisma.$queryRaw<{ cancelled: boolean }[]>`
+    SELECT pg_cancel_backend(pid) AS cancelled
+    FROM pg_stat_activity
+    WHERE pid <> pg_backend_pid()
+      AND usename = current_user
+      AND application_name = ${applicationName}
+      AND state = 'active'
+  `
+  return rows.filter((row) => row.cancelled).length
+}
+
 export interface WeeklyAnalysisRunRecord {
   id: string
   startedAt: Date

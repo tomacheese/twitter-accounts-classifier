@@ -19,6 +19,9 @@ $$;
 
 GRANT USAGE ON SCHEMA public TO weekly_review;
 
+ALTER ROLE weekly_review SET client_connection_check_interval = '5s';
+ALTER ROLE weekly_review SET statement_timeout = '120s';
+
 -- 過去の個別GRANTや設定変更で増えた直接write権限を一度除去する。
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
   ON ALL TABLES IN SCHEMA public

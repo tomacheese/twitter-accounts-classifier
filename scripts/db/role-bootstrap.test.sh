@@ -24,6 +24,18 @@ viewer_component_build_identity_privileges() {
     "SELECT has_table_privilege('viewer', 'public.\"ComponentBuildIdentity\"', 'SELECT')::text || ':' || has_table_privilege('viewer', 'public.\"ComponentBuildIdentity\"', 'INSERT')::text || ':' || has_table_privilege('viewer', 'public.\"ComponentBuildIdentity\"', 'UPDATE')::text || ':' || has_table_privilege('viewer', 'public.\"ComponentBuildIdentity\"', 'DELETE')::text"
 }
 
+role_config_has() {
+  local role="$1"
+  local expected="$2"
+  psql -At "$DATABASE_URL" -v role="$role" -v expected="$expected" <<'SQL'
+SELECT COALESCE((
+  SELECT (:'expected' = ANY(COALESCE(rolconfig, ARRAY[]::text[])))::text
+  FROM pg_roles
+  WHERE rolname = :'role'
+), 'false');
+SQL
+}
+
 analyzer_component_build_identity_privileges() {
   psql -At "$DATABASE_URL" -c \
     "SELECT has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'SELECT')::text || ':' || has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'INSERT')::text || ':' || has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'UPDATE')::text || ':' || has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'DELETE')::text"
@@ -46,6 +58,9 @@ test "$(role_state analyzer)" = "false:false"
 test -z "$(psql -At "$DATABASE_URL" -c "SELECT rolname FROM pg_roles WHERE rolname = 'weekly_review'")"
 test "$(viewer_component_build_identity_privileges)" = "true:true:true:false"
 test "$(analyzer_component_build_identity_privileges)" = "true:true:true:false"
+test "$(role_config_has crawler client_connection_check_interval=5s)" = "true"
+test "$(role_config_has viewer client_connection_check_interval=5s)" = "true"
+test "$(role_config_has analyzer client_connection_check_interval=5s)" = "true"
 
 # 新 compose 相当: password を渡した再実行で LOGIN ロールへ安全に昇格する。
 (
@@ -68,6 +83,8 @@ psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "CREATE ROLE weekly_review NOLOGIN"
 )
 
 test "$(analysis_work_item_privileges)" = "true:true:false:false"
+test "$(role_config_has weekly_review client_connection_check_interval=5s)" = "true"
+test "$(role_config_has weekly_review statement_timeout=120s)" = "true"
 
 # grant sync が途中で落ちても、REVOKE だけが残って write allowlist を壊さないことを検証する。
 psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c 'GRANT UPDATE ON TABLE "AnalysisWorkItem" TO weekly_review'

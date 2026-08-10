@@ -14,6 +14,14 @@ BEGIN
     RAISE EXCEPTION 'role viewer does not exist';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_roles
+    WHERE rolname = 'viewer'
+      AND 'client_connection_check_interval=5s' = ANY(COALESCE(rolconfig, ARRAY[]::text[]))
+  ) THEN
+    RAISE EXCEPTION 'viewer client_connection_check_interval must be 5s';
+  END IF;
+
   IF NOT has_database_privilege('viewer', current_database(), 'CONNECT') THEN
     RAISE EXCEPTION 'viewer lacks CONNECT on database %', current_database();
   END IF;

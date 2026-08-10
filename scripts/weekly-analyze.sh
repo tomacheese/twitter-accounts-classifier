@@ -64,11 +64,36 @@ if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
   exit 1
 fi
 export WEEKLY_ANALYSIS_RUN_ID="$RUN_ID"
+RUN_DB_APPLICATION_NAME="weekly-crawl-review-$RUN_ID"
+RUN_DATABASE_URL="${DATABASE_URL:-}"
+if [ -z "$RUN_DATABASE_URL" ]; then
+  echo "[weekly-analyze] DATABASE_URL is required for weekly review" >&2
+  exit 1
+fi
+DATABASE_URL="$(weekly_analyze_database_url_with_application_name \
+  "$RUN_DATABASE_URL" "$RUN_DB_APPLICATION_NAME")"
+export DATABASE_URL
+PGAPPNAME="$RUN_DB_APPLICATION_NAME"
+export PGAPPNAME
+RUN_BACKENDS_CLEANED=0
+
+cleanup_run_backends() {
+  [ "${RUN_BACKENDS_CLEANED:-0}" = "1" ] && return 0
+  if "$TSX_BIN" "$RUN_CLI" cancel-backends \
+    --application-name "$RUN_DB_APPLICATION_NAME" >/dev/null; then
+    RUN_BACKENDS_CLEANED=1
+    return 0
+  fi
+  return 1
+}
 
 # スーパーバイザー自身が予期せず異常終了した場合でも WeeklyAnalysisRun を running のまま
 # 放置しないよう、終了時に status を確認しまだ running であれば失敗として終端させる。
 finalize_run_on_unexpected_exit() {
   EXIT_CODE=$?
+  if ! cleanup_run_backends; then
+    echo "[weekly-analyze] failed to cancel residual PostgreSQL backends during supervisor exit" >&2
+  fi
   RUN_STATUS_JSON="$("$TSX_BIN" "$RUN_CLI" get --id "$RUN_ID" 2>/dev/null || true)"
   RUN_STATUS="$(printf '%s' "$RUN_STATUS_JSON" | "$JQ_BIN" -r '.status // empty' 2>/dev/null || true)"
   if [ "$RUN_STATUS" = "running" ]; then
@@ -204,7 +229,7 @@ PANE_LOG="$DIAGNOSTICS_DIR/pane-output.log"
 
 echo "[weekly-analyze] starting weekly crawl review at $(date -Iseconds) in tmux session $SESSION_NAME"
 "$TMUX_BIN" new-session -d -s "$SESSION_NAME" -c "$WORKTREE_DIR" \
-  -e "PATH=$PATH" -e DATABASE_URL -e "WEEKLY_ANALYSIS_RUN_ID=$RUN_ID" \
+  -e "PATH=$PATH" -e DATABASE_URL -e "WEEKLY_ANALYSIS_RUN_ID=$RUN_ID" -e "PGAPPNAME=$PGAPPNAME" \
   "$CLAUDE_BIN" --permission-mode auto "Use the weekly-crawl-review skill to review this week's labeling output and make any needed fixes."
 "$TMUX_BIN" pipe-pane -t "$SESSION_NAME" -o "cat >> \"$PANE_LOG\""
 echo "[weekly-analyze] launched tmux session $SESSION_NAME at $(date -Iseconds)"
@@ -247,6 +272,11 @@ while "$TMUX_BIN" has-session -t "$SESSION_NAME" 2>/dev/null; do
   fi
   sleep 5
 done
+
+echo "[weekly-analyze] cancelling residual PostgreSQL backends for $RUN_DB_APPLICATION_NAME"
+if ! cleanup_run_backends; then
+  echo "[weekly-analyze] failed to cancel residual PostgreSQL backends; server-side disconnect checks remain as fallback" >&2
+fi
 
 # 成功・失敗いずれの終了でも診断情報を残す。worktree の状態は失敗調査に必要だが、
 # 成功時まで残すと使い捨てのはずの worktree が無期限に積み上がってしまう。

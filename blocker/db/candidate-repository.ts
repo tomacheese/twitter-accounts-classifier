@@ -11,12 +11,10 @@ export interface BlockCandidate {
 }
 
 /**
- * `AccountLabelLatest` は確信度を保持していないため、`AccountLabel` の履歴から確信度を
- * 導出する必要がある。ただし `prisma/schema.prisma` が `AccountLabel` について警告している
- * とおり、この履歴テーブルは際限なく増え続けるため、`relabel.ts` の
- * `loadLatestRuleVersions` のように無条件で全件を `DISTINCT ON` すると本番の応答時間を
- * 守れない。ここでは対象ラベル (`rule.targetLabels`) に絞った `relevant_labels` を先に
- * 求め、それで `AccountLabel` 側を絞り込むことでスキャン範囲を対象ラベル関連の行のみに限定する。
+ * 最新ラベル値と confidence は `AccountLabelLatest` に保持されているため、
+ * 増え続ける `AccountLabel` 履歴は参照しない。対象ラベル (`rule.targetLabels`) と
+ * confidence 閾値で `AccountLabelLatest` を直接絞り込み、アカウントごとに最も高い
+ * confidence のラベルだけを候補判定へ渡す。
  * @param prisma - Prisma クライアント
  * @param blockerId - このブロック実行を行うログインアカウントの `Account.id`
  * @param rule - 適用するブロックルール (ラベルごとの確信度閾値)
@@ -40,25 +38,17 @@ export async function selectBlockCandidates(
       FROM "LabelDefinition" ld
       JOIN rule_thresholds rt ON rt.label_key = ld.key
     ),
-    latest_confidence AS (
-      SELECT DISTINCT ON ("accountId", "labelDefinitionId")
-        "accountId", "labelDefinitionId", "confidence"
-      FROM "AccountLabel"
-      WHERE "labelDefinitionId" IN (SELECT id FROM relevant_labels)
-      ORDER BY "accountId", "labelDefinitionId", "labeledAt" DESC, "id" DESC
-    ),
     best_label_per_account AS (
-      SELECT DISTINCT ON (lc."accountId")
-        lc."accountId", lc."labelDefinitionId", lc."confidence"
-      FROM latest_confidence lc
-      JOIN relevant_labels rl ON rl.id = lc."labelDefinitionId"
-      JOIN "AccountLabelLatest" all_latest
-        ON all_latest."accountId" = lc."accountId"
-        AND all_latest."labelDefinitionId" = lc."labelDefinitionId"
-      WHERE all_latest.value = true
-        AND lc."confidence" >= rl.threshold
-        AND lc."accountId" != ${blockerId}
-      ORDER BY lc."accountId", lc."confidence" DESC
+      SELECT DISTINCT ON (all_latest."accountId")
+        all_latest."accountId",
+        all_latest."labelDefinitionId",
+        all_latest."confidence"
+      FROM "AccountLabelLatest" all_latest
+      JOIN relevant_labels rl ON rl.id = all_latest."labelDefinitionId"
+      WHERE all_latest."value" = true
+        AND all_latest."confidence" >= rl.threshold
+        AND all_latest."accountId" != ${blockerId}
+      ORDER BY all_latest."accountId", all_latest."confidence" DESC
     )
     SELECT b."accountId", b."labelDefinitionId", b."confidence"
     FROM best_label_per_account b

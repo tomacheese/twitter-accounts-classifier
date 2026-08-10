@@ -52,6 +52,7 @@ STALE_SHIMS="$STALE_CASE/home/.local/share/mise/shims"
 export TIMEOUT_MARKER="$STALE_CASE/timeout-called"
 export TMUX_COUNT="$STALE_CASE/tmux-count"
 export TMUX_ARGS="$STALE_CASE/tmux-args"
+export TMUX_DATABASE_URL="$STALE_CASE/tmux-database-url"
 cat > "$STALE_CASE/repo/.env.weekly-review" <<'ENV'
 DATABASE_URL=postgresql://weekly_review:test-password@192.0.2.10:5432/testdb
 ENV
@@ -84,6 +85,7 @@ case "$*" in
     fi
     ;;
   *'weekly-analysis-run.ts fail'*) printf '%s\n' '{"ok":true}' ;;
+  *'weekly-analysis-run.ts cancel-backends'*) printf '%s\n' '{"cancelled":0}' ;;
   *) printf '%s\n' '{}' ;;
 esac
 SCRIPT
@@ -98,6 +100,7 @@ cat > "$STALE_SHIMS/tmux" <<'SCRIPT'
 #!/bin/sh
 if [ "${1:-}" = new-session ]; then
   printf '%s\n' "$*" > "$TMUX_ARGS"
+  printf '%s\n' "${DATABASE_URL:-}" > "$TMUX_DATABASE_URL"
 fi
 if [ "${1:-}" = has-session ]; then
   count=0
@@ -123,12 +126,72 @@ grep -Fq -- "-e PATH=$STALE_SHIMS:" "$TMUX_ARGS" || \
   fail 'tmux session did not receive the cron-repaired PATH explicitly'
 grep -Fq -- '-e DATABASE_URL -e WEEKLY_ANALYSIS_RUN_ID=run1' "$TMUX_ARGS" || \
   fail 'tmux session did not inherit the weekly-review DATABASE_URL by variable name'
+grep -Fq -- '-e PGAPPNAME=weekly-crawl-review-run1' "$TMUX_ARGS" || \
+  fail 'tmux session did not receive the run-scoped PostgreSQL application_name'
+grep -qx 'postgresql://weekly_review:test-password@192.0.2.10:5432/testdb?application_name=weekly-crawl-review-run1' "$TMUX_DATABASE_URL" || \
+  fail 'tmux session did not inherit a run-scoped application_name in DATABASE_URL'
 if grep -Fq -- 'DATABASE_URL=postgresql://' "$TMUX_ARGS"; then
   fail 'tmux invocation exposed the weekly-review DATABASE_URL value in process arguments'
 fi
 
+
+TRAP_CASE="$TMP_ROOT/trap"
+make_case_repo "$TRAP_CASE"
+cat > "$TRAP_CASE/repo/.env.weekly-review" <<'ENV'
+DATABASE_URL=postgresql://weekly_review:test-password@192.0.2.10:5432/testdb
+ENV
+TRAP_SHIMS="$TRAP_CASE/home/.local/share/mise/shims"
+export TRAP_CLEANUP_MARKER="$TRAP_CASE/cleanup-called"
+export TRAP_FAIL_MARKER="$TRAP_CASE/fail-called"
+cat > "$TRAP_SHIMS/claude" <<'SCRIPT'
+#!/bin/sh
+if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then
+  printf '%s\n' '{"loggedIn":true}'
+fi
+SCRIPT
+cat > "$TRAP_SHIMS/pnpm" <<'SCRIPT'
+#!/bin/sh
+[ "$*" = 'install --frozen-lockfile' ] && exit 0
+exit 99
+SCRIPT
+cat > "$TRAP_CASE/repo/crawler/node_modules/.bin/tsx" <<'SCRIPT'
+#!/bin/sh
+case "$*" in
+  *'weekly-analysis-run.ts create'*) printf '%s\n' '{"id":"run1"}' ;;
+  *'weekly-analysis-run.ts list-running'*) printf '%s\n' '[]' ;;
+  *'weekly-analysis-run.ts get'*) printf '%s\n' '{"id":"run1","status":"running"}' ;;
+  *'weekly-analysis-run.ts fail'*) touch "$TRAP_FAIL_MARKER"; printf '%s\n' '{"ok":true}' ;;
+  *'weekly-analysis-run.ts cancel-backends'*) touch "$TRAP_CLEANUP_MARKER"; printf '%s\n' '{"cancelled":0}' ;;
+  *) printf '%s\n' '{}' ;;
+esac
+SCRIPT
+cat > "$TRAP_SHIMS/git" <<'SCRIPT'
+#!/bin/sh
+if [ "${1:-}" = worktree ] && [ "${2:-}" = add ]; then
+  exit 42
+fi
+exit 0
+SCRIPT
+cat > "$TRAP_SHIMS/tmux" <<'SCRIPT'
+#!/bin/sh
+exit 0
+SCRIPT
+chmod +x "$TRAP_SHIMS/claude" "$TRAP_SHIMS/pnpm" "$TRAP_SHIMS/git" "$TRAP_SHIMS/tmux" \
+  "$TRAP_CASE/repo/crawler/node_modules/.bin/tsx"
+set +e
+env HOME="$TRAP_CASE/home" PATH="$TRAP_SHIMS:/usr/local/bin:/usr/bin:/bin" \
+  /bin/sh "$TRAP_CASE/repo/scripts/weekly-analyze.sh"
+TRAP_STATUS=$?
+set -e
+[ "$TRAP_STATUS" -ne 0 ] || fail 'unexpected-exit case unexpectedly succeeded'
+[ -e "$TRAP_FAIL_MARKER" ] || fail 'unexpected-exit trap did not mark WeeklyAnalysisRun failed'
+[ -e "$TRAP_CLEANUP_MARKER" ] || fail 'unexpected-exit trap did not cancel residual PostgreSQL backends'
+
 SUCCESS_CASE="$TMP_ROOT/success"
 make_case_repo "$SUCCESS_CASE"
+cat > "$SUCCESS_CASE/repo/.env.weekly-review" <<'ENV'
+DATABASE_URL=postgresql://weekly_review:test-password@192.0.2.10:5432/testdb
+ENV
 SUCCESS_SHIMS="$SUCCESS_CASE/home/.local/share/mise/shims"
 export SUCCESS_TMUX_COUNT="$SUCCESS_CASE/tmux-count"
 cat > "$SUCCESS_SHIMS/claude" <<'SCRIPT'
@@ -148,6 +211,7 @@ case "$*" in
   *'weekly-analysis-run.ts create'*) printf '%s\n' '{"id":"run1"}' ;;
   *'weekly-analysis-run.ts list-running'*) printf '%s\n' '[]' ;;
   *'weekly-analysis-run.ts get'*) printf '%s\n' '{"id":"run1","status":"success"}' ;;
+  *'weekly-analysis-run.ts cancel-backends'*) printf '%s\n' '{"cancelled":0}' ;;
   *) printf '%s\n' '{}' ;;
 esac
 SCRIPT

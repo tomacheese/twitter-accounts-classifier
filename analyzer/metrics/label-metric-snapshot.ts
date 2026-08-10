@@ -120,6 +120,7 @@ export async function buildLabelAggregateSnapshotSet(
 
   const snapshotAt = await prisma.$transaction(
     async (tx) => {
+      await tx.$executeRaw`SET LOCAL work_mem = '256MB'`
       const nowRows = await tx.$queryRaw<{ now: Date }[]>`SELECT now() AS now`
       const sharedSnapshotAt = nowRows.at(0)?.now ?? new Date()
 

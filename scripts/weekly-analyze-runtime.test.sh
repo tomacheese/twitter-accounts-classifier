@@ -65,4 +65,16 @@ if weekly_analyze_stale_after_passed 'not-a-date' "$NOW_EPOCH"; then
   fail 'invalid stale deadline was treated as stale'
 fi
 
+
+
+
+URL_WITHOUT_QUERY="$(weekly_analyze_database_url_with_application_name \
+  'postgresql://weekly_review:test@example.invalid/testdb' 'weekly-crawl-review-run1')"
+assert_eq "$URL_WITHOUT_QUERY" \
+  'postgresql://weekly_review:test@example.invalid/testdb?application_name=weekly-crawl-review-run1'
+URL_WITH_QUERY="$(weekly_analyze_database_url_with_application_name \
+  'postgresql://weekly_review:test@example.invalid/testdb?connect_timeout=5' 'weekly-crawl-review-run1')"
+assert_eq "$URL_WITH_QUERY" \
+  'postgresql://weekly_review:test@example.invalid/testdb?connect_timeout=5&application_name=weekly-crawl-review-run1'
+
 echo '[weekly-analyze-runtime.test] ok'
