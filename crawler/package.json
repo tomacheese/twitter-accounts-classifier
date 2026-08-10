@@ -27,6 +27,8 @@
     "@book000/node-utils": "^1.0.0",
     "@prisma/client": "^6.0.0",
     "@sentry/node": "^8.0.0",
+    "prisma": "^6.0.0",
+    "tsx": "^4.23.1",
     "twitter-client": "workspace:*",
     "twitter-openapi-typescript": "^0.0.56",
     "zod": "^3.24.0"
@@ -37,8 +39,6 @@
     "eslint": "^9.0.0",
     "npm-run-all2": "^7.0.0",
     "prettier": "^3.0.0",
-    "prisma": "^6.0.0",
-    "tsx": "^4.23.1",
     "typescript": "^5.6.0",
     "vitest": "^2.0.0"
   }
