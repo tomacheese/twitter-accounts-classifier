@@ -341,7 +341,9 @@ describe('recordCrawlAccountLabel', () => {
 
 describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
   it('claims labels and returns an observation id without opening its own transaction', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([{ labelDefinitionId: 'ld1', method: 'rule', ruleVersion: 'v1' }])
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValue([{ labelDefinitionId: 'ld1', method: 'rule', ruleVersion: 'v1' }])
     const create = vi.fn().mockResolvedValue({ id: 'observation1' })
     const upsert = vi.fn().mockResolvedValue({})
     const txClient = {

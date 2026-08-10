@@ -92,7 +92,11 @@ describe('persistAuthorResultAtomic', () => {
     expect(accountUpsert).toHaveBeenCalledTimes(2)
     expect(authorCheckpointUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ authorId: 'author1', status: 'success', profileCount: 1 }),
+        create: expect.objectContaining({
+          authorId: 'author1',
+          status: 'success',
+          profileCount: 1,
+        }),
       }),
     )
   })
@@ -123,7 +127,12 @@ describe('persistAuthorResultAtomic', () => {
       followSample: null,
       labels: [],
       warnings: [
-        { type: 'labeling_follow_sample_failed', message: 'm', authorId: 'author1', errorMessage: 'e' },
+        {
+          type: 'labeling_follow_sample_failed',
+          message: 'm',
+          authorId: 'author1',
+          errorMessage: 'e',
+        },
       ],
       durationMs: 10,
       retryWaitMs: 0,
@@ -147,7 +156,10 @@ describe('persistAuthorResultAtomic', () => {
     const txClient = {
       account: { upsert: accountUpsert },
       tweet: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) },
-      labelingFollowSample: { deleteMany: followSampleDeleteMany, createMany: followSampleCreateMany },
+      labelingFollowSample: {
+        deleteMany: followSampleDeleteMany,
+        createMany: followSampleCreateMany,
+      },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }

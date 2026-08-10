@@ -12,10 +12,7 @@ import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertComponentBuildIdentity } from './build-identity'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
-import {
-  ensureLabelDefinitionsForRules,
-  recordCrawlAccountLabelsAtomic,
-} from './db/label-repository'
+import { ensureLabelDefinitionsForRules } from './db/label-repository'
 import { refreshLabelAggregate } from './db/label-aggregate-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { LabelRuleRegistry } from './labels/registry'
@@ -74,7 +71,11 @@ import {
   syncFollowers as syncFollowersEdges,
   syncFollowing as syncFollowingEdges,
 } from './db/follow-repository'
-import { replaceLabelingFollowSample as replaceLabelingFollowSampleRecord } from './db/labeling-follow-sample-repository'
+import {
+  persistAuthorResultAtomic as persistAuthorResultAtomicRecord,
+  type PersistAuthorResultAtomicParams,
+  type PersistAuthorResultAtomicResult,
+} from './db/author-checkpoint-repository'
 import {
   fetchBlocks,
   createBlockListApiLike,
@@ -91,8 +92,12 @@ import {
   finishCrawlRun as finishCrawlRunRecord,
   recordCrawlAccountRun as recordCrawlAccountRunRecord,
   setCurrentAccount as setCurrentAccountRecord,
+  recordCrawlAuthorCheckpoint as recordCrawlAuthorCheckpointRecord,
+  loadCrawlAuthorCheckpoints as loadCrawlAuthorCheckpointsRecord,
   type CrawlAccountCheckpointParams,
   type CrawlAccountCheckpointPhase,
+  type CrawlAuthorCheckpointParams,
+  type CrawlAuthorCheckpointRecord,
   type CrawlRunStartResult,
   type RecordCrawlAccountRunParams,
   type CrawlWarning,
@@ -129,18 +134,14 @@ export interface CrawlDependencies {
   loadFollowGraphLabelIndex: (
     labelDefinitionIds: Map<string, string>,
   ) => Promise<FollowGraphLabelIndex>
-  recordLabelsAtomic: (params: {
-    accountId: string
-    crawlRunId: string
-    username: string
-    labels: {
-      labelDefinitionId: string
-      result: { value: boolean; confidence: number; reason: string }
-      method: string
-      ruleVersion: string
-    }[]
-  }) => Promise<string | null>
-  replaceLabelingFollowSample: (accountId: string, result: FollowListResult) => Promise<void>
+  persistAuthorResultAtomic: (
+    params: PersistAuthorResultAtomicParams,
+  ) => Promise<PersistAuthorResultAtomicResult>
+  recordCrawlAuthorCheckpoint: (params: CrawlAuthorCheckpointParams) => Promise<void>
+  loadCrawlAuthorCheckpoints: (
+    crawlRunId: string,
+    username: string,
+  ) => Promise<Map<string, CrawlAuthorCheckpointRecord>>
   syncFollowing: (followerId: string, result: FollowListResult) => Promise<void>
   syncFollowers: (followeeId: string, result: FollowListResult) => Promise<void>
   syncBlocks: (blockerId: string, crawlRunId: string, result: BlockListResult) => Promise<void>
@@ -161,6 +162,23 @@ export interface CrawlDependencies {
   touchCrawlRunHeartbeat: (crawlRunId: string) => Promise<void>
   /** テスト時に `withTwitterRetry` のバックオフや author ループの待機を無効化する注入。 */
   sleep: (ms: number) => Promise<void>
+}
+
+/**
+ * 呼び出し元の待機時間累積用アキュムレータへ加算しつつ、
+ * 上位 phase 全体の trackRetryWait へも転送する tracker を作る。
+ * @param trackRetryWait - phase 全体の待機時間を集計する tracker
+ * @param accumulator - この呼び出し元 (例: author 単位) の待機時間だけを集計するアキュムレータ
+ * @returns retryOptions に渡せる tracker 関数
+ */
+function createScopedRetryWaitTracker(
+  trackRetryWait: (ms: number) => void,
+  accumulator: { ms: number },
+): (ms: number) => void {
+  return (ms) => {
+    accumulator.ms += ms
+    trackRetryWait(ms)
+  }
 }
 
 function retryOptions(
@@ -311,6 +329,15 @@ interface TimelineSnapshot {
   warnings: CrawlWarning[]
 }
 
+interface RepliesResult {
+  replyTweets: TweetInput[]
+  replyAuthors: AccountProfileInput[]
+  replyHijackCandidateIds: string[]
+  /** author 単位の判定入力に必要な、reply-hijack 候補として検出した返信そのもの。 */
+  otherRepliesByAuthor: Record<string, TweetInput[]>
+  warnings: CrawlWarning[]
+}
+
 async function fetchTimelineSnapshot(
   deps: CrawlDependencies,
   account: AppConfig['accounts'][number],
@@ -383,36 +410,19 @@ async function fetchTimelineSnapshot(
   return { recommended, following, trending, warnings }
 }
 
-async function runAccountCycleBody(
+async function runRepliesPhase(
   deps: CrawlDependencies,
-  registry: LabelRuleRegistry,
-  labelDefinitionIds: Map<string, string>,
-  duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
-  replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
-  followGraphLabelIndex: FollowGraphLabelIndex,
-  account: AppConfig['accounts'][number],
-  crawlRunId: string,
   timelineSnapshot: TimelineSnapshot,
   client: CrawlOpenApiClient,
   trackRetryWait: (ms: number) => void,
-): Promise<AccountCycleMetrics> {
+): Promise<RepliesResult> {
   const tweetApi = client.getTweetApi()
-  const userApi = client.getUserApi()
-
   const { recommended, following, trending } = timelineSnapshot
-  const warnings = [...timelineSnapshot.warnings]
-
   const allTweets = [...recommended.tweets, ...following.tweets, ...trending.tweets]
   const topTweets = sortByEngagement(allTweets).slice(0, deps.limits.topTweetsForReplies)
 
-  // Tweet.accountId は Account への必須外部キーであるため、
-  // 専用のプロフィール取得が行われないか失敗した投稿者についても、
-  // 埋め込みプロフィールをフォールバックとして必ず upsert する。
-  const extraAuthors = new Map<string, AccountProfileInput>()
-  for (const author of [...recommended.authors, ...following.authors, ...trending.authors]) {
-    extraAuthors.set(author.id, author)
-  }
   const replyTweets: TweetInput[] = []
+  const replyAuthors = new Map<string, AccountProfileInput>()
   // ラベル評価ループをタイムライン投稿者だけに絞ると、
   // 自分ではバズる投稿をしない reply-hijack 系アカウントを一切評価できなくなるため、
   // 候補として別途集める。
@@ -433,55 +443,109 @@ async function runAccountCycleBody(
       existing.push(reply)
       otherRepliesByAuthor.set(reply.accountId, existing)
     }
-    for (const author of authors) extraAuthors.set(author.id, author)
+    for (const author of authors) replyAuthors.set(author.id, author)
   }
 
+  return {
+    replyTweets,
+    replyAuthors: [...replyAuthors.values()],
+    replyHijackCandidateIds: [...replyHijackCandidateIds],
+    otherRepliesByAuthor: Object.fromEntries(otherRepliesByAuthor),
+    warnings: [],
+  }
+}
+
+async function runAuthorUnitPhase(
+  deps: CrawlDependencies,
+  registry: LabelRuleRegistry,
+  labelDefinitionIds: Map<string, string>,
+  duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
+  replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
+  followGraphLabelIndex: FollowGraphLabelIndex,
+  account: AppConfig['accounts'][number],
+  crawlRunId: string,
+  timelineSnapshot: TimelineSnapshot,
+  repliesResult: RepliesResult,
+  client: CrawlOpenApiClient,
+  trackRetryWait: (ms: number) => void,
+): Promise<AccountCycleMetrics> {
+  const userApi = client.getUserApi()
+  const { recommended, following, trending } = timelineSnapshot
+
+  // Tweet.accountId は Account への必須外部キーであるため、
+  // 専用のプロフィール取得が行われないか失敗した投稿者についても、
+  // 埋め込みプロフィールをフォールバックとして必ず upsert する。
+  // fetchRecentTweets が返す文脈 Tweet の fallback profile は author 単位の
+  // transaction (persistAuthorResultAtomic) 側で扱うため、ここには含めない。
+  const extraAuthors = new Map<string, AccountProfileInput>()
+  for (const author of [
+    ...recommended.authors,
+    ...following.authors,
+    ...trending.authors,
+    ...repliesResult.replyAuthors,
+  ]) {
+    extraAuthors.set(author.id, author)
+  }
+  const otherRepliesByAuthor = new Map(Object.entries(repliesResult.otherRepliesByAuthor))
+  const allTweets = [...recommended.tweets, ...following.tweets, ...trending.tweets]
   const uniqueAuthorIds = [
-    ...new Set([...allTweets.map((t) => t.accountId), ...replyHijackCandidateIds]),
+    ...new Set([...allTweets.map((t) => t.accountId), ...repliesResult.replyHijackCandidateIds]),
   ]
-  const profileTweets: TweetInput[] = []
+
+  const existingCheckpoints = await deps.loadCrawlAuthorCheckpoints(crawlRunId, account.username)
+  const warnings: CrawlWarning[] = []
   const succeededAuthorIds = new Set<string>()
   let labelsAppliedCount = 0
+  // 再起動を跨いで author checkpoint が積み重なっても、集計は再起動回数に依存しない
+  // よう、前回までの checkpoint 分をまず合算する。
+  for (const [authorId, checkpoint] of existingCheckpoints) {
+    if (checkpoint.status === 'success') succeededAuthorIds.add(authorId)
+    labelsAppliedCount += checkpoint.labelsAppliedCount
+    warnings.push(...checkpoint.warnings)
+  }
 
   for (const [authorIndex, authorId] of uniqueAuthorIds.entries()) {
+    if (existingCheckpoints.has(authorId)) continue
     // 最初のアカウントの前は待つ対象がないため、sleep はスキップする。
     if (authorIndex > 0) {
       await deps.sleep(deps.limits.authorFetchDelayMs)
     }
+
+    const authorStartedAt = Date.now()
+    const authorRetryWait = { ms: 0 }
+    const trackAuthorRetryWait = createScopedRetryWaitTracker(trackRetryWait, authorRetryWait)
+    const authorWarnings: CrawlWarning[] = []
+
     try {
       const profile = await withTwitterRetry(
         () => fetchAccountProfile(userApi, authorId),
-        retryOptions(deps, trackRetryWait),
+        retryOptions(deps, trackAuthorRetryWait),
       )
-      await deps.persistAccount(profile)
-      succeededAuthorIds.add(authorId)
 
-      const { tweets: recentTweets, authors } = await guardTimelineFetch(() =>
+      const { tweets: recentTweets, authors: fallbackAuthors } = await guardTimelineFetch(() =>
         withTwitterRetry(
           () => fetchRecentTweets(userApi, authorId, deps.limits.recentTweetsPerAccount),
-          retryOptions(deps, trackRetryWait),
+          retryOptions(deps, trackAuthorRetryWait),
         ),
       )
-      profileTweets.push(...recentTweets)
-      for (const author of authors) extraAuthors.set(author.id, author)
 
       // フォロー先サンプルの取得はラベリング精度を補強する追加シグナルに過ぎないため、
       // 失敗してもキーワードベースのラベリングまで止めない。
+      let followSample: FollowListResult | null = null
       try {
-        const followSample = await withTwitterRetry(
+        followSample = await withTwitterRetry(
           () =>
             fetchFollowing(
               client.getUserListApi(),
               authorId,
               deps.limits.followEdgesPerLabeledAccount,
             ),
-          retryOptions(deps, trackRetryWait),
+          retryOptions(deps, trackAuthorRetryWait),
         )
-        await deps.replaceLabelingFollowSample(authorId, followSample)
       } catch (error) {
         const message = `Failed to fetch labeling follow sample for author ${authorId}, continuing without it`
         logger.error(message, error as Error)
-        warnings.push({
+        authorWarnings.push({
           type: 'labeling_follow_sample_failed',
           message,
           authorId,
@@ -491,7 +555,7 @@ async function runAccountCycleBody(
       }
 
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
-      // profileTweets は他者に帰属する会話スレッドの文脈ツイートもそのまま保持するが、
+      // recentTweets は他者に帰属する会話スレッドの文脈ツイートもそのまま保持するが、
       // ラベル評価用のバンドルには含めない。
       // 混入すると authorId 向けの全ルールが誤った recentTweets を読むことになるため。
       const authorOwnRecentTweets = recentTweets.filter((t) => t.accountId === authorId)
@@ -568,25 +632,44 @@ async function runAccountCycleBody(
         }
         return [{ labelDefinitionId, result, method: rule.key, ruleVersion: rule.version }]
       })
-      // observationId 自体をここで使う必要はない。account_summary_refresh の
-      // enqueue は recordLabelsAtomic 内のトランザクションで既に完結している。
-      const observationId = await deps.recordLabelsAtomic({
-        accountId: profile.id,
+
+      const { observationId } = await deps.persistAuthorResultAtomic({
         crawlRunId,
         username: account.username,
+        authorId,
+        profile,
+        recentTweets,
+        recentTweetsFallbackAuthors: fallbackAuthors,
+        followSample,
         labels: ruleResults,
+        warnings: authorWarnings,
+        durationMs: Date.now() - authorStartedAt,
+        retryWaitMs: authorRetryWait.ms,
+        appVersion: APP_VERSION,
       })
-      // 同じ crawlRunId/username/accountId で再試行された場合、recordLabelsAtomic は
+      succeededAuthorIds.add(authorId)
+      // 同じ crawlRunId/username/accountId で再試行された場合、persistAuthorResultAtomic は
       // ON CONFLICT DO NOTHING で何も claim できず null を返す。その場合は実際には
       // 何も永続化していないため、件数を二重に数えない。
-      if (observationId !== null) {
-        labelsAppliedCount += ruleResults.length
-      }
+      if (observationId !== null) labelsAppliedCount += ruleResults.length
+      warnings.push(...authorWarnings)
     } catch (error) {
       if (isExpectedAccountLookupError(error)) {
         logger.info(
           `Skipping author ${authorId}: account is unavailable (suspended, deleted, or protected)`,
         )
+        await deps.recordCrawlAuthorCheckpoint({
+          crawlRunId,
+          username: account.username,
+          authorId,
+          status: 'unavailable',
+          profileCount: 0,
+          labelsAppliedCount: 0,
+          warnings: [],
+          durationMs: Date.now() - authorStartedAt,
+          retryWaitMs: authorRetryWait.ms,
+          appVersion: APP_VERSION,
+        })
       } else {
         const diagnostics = getResponseErrorDiagnostics(error)
         const message = diagnostics
@@ -597,15 +680,36 @@ async function runAccountCycleBody(
         } else {
           logger.error(message, error as Error)
         }
-        warnings.push({
+        const warning: CrawlWarning = {
           type: 'author_processing_failed',
           message,
           authorId,
           errorMessage: toErrorMessage(error),
           ...diagnostics,
           appVersion: APP_VERSION,
+        }
+        await deps.recordCrawlAuthorCheckpoint({
+          crawlRunId,
+          username: account.username,
+          authorId,
+          status: 'failed',
+          profileCount: 0,
+          labelsAppliedCount: 0,
+          warnings: [warning],
+          durationMs: Date.now() - authorStartedAt,
+          retryWaitMs: authorRetryWait.ms,
+          appVersion: APP_VERSION,
         })
+        warnings.push(warning)
       }
+    }
+
+    // author 単位の checkpoint 完了ごとに更新する: 1 author が長時間かかっても、
+    // その間に CrawlRun が stale と誤判定されないようにするため。
+    try {
+      await deps.touchCrawlRunHeartbeat(crawlRunId)
+    } catch (error) {
+      logger.error(`Failed to update heartbeat for crawl run ${crawlRunId}`, error as Error)
     }
   }
 
@@ -614,18 +718,18 @@ async function runAccountCycleBody(
     await deps.persistAccount(profile)
   }
 
-  await deps.persistTweets(mergeTweetAdFlags([...allTweets, ...replyTweets, ...profileTweets]))
+  await deps.persistTweets(mergeTweetAdFlags([...allTweets, ...repliesResult.replyTweets]))
   logger.info(
-    `Crawl cycle complete for ${account.username}: ${allTweets.length} timeline tweets, ${replyTweets.length} replies, ${uniqueAuthorIds.length} profiles`,
+    `Crawl cycle complete for ${account.username}: ${allTweets.length} timeline tweets, ${repliesResult.replyTweets.length} replies, ${uniqueAuthorIds.length} profiles`,
   )
   return {
     recommendedCount: recommended.tweets.length,
     followingCount: following.tweets.length,
     trendingCount: trending.tweets.length,
-    replyCount: replyTweets.length,
+    replyCount: repliesResult.replyTweets.length,
     profileCount: succeededAuthorIds.size,
     labelsAppliedCount,
-    warnings,
+    warnings: [...timelineSnapshot.warnings, ...repliesResult.warnings, ...warnings],
   }
 }
 
@@ -817,6 +921,36 @@ function storeTimelineSnapshot(snapshot: TimelineSnapshot): StoredTimelineSnapsh
   }
 }
 
+interface StoredRepliesResult {
+  replyTweets: StoredTweetInput[]
+  replyAuthors: StoredAccountProfileInput[]
+  replyHijackCandidateIds: string[]
+  otherRepliesByAuthor: Record<string, StoredTweetInput[]>
+  warnings: CrawlWarning[]
+}
+
+function storeTweetInputs(tweets: TweetInput[]): StoredTweetInput[] {
+  return tweets.map(({ createdAt, ...tweet }) => ({ ...tweet, createdAt: createdAt.toISOString() }))
+}
+
+function storeRepliesResult(result: RepliesResult): StoredRepliesResult {
+  return {
+    replyTweets: storeTweetInputs(result.replyTweets),
+    replyAuthors: result.replyAuthors.map(({ accountCreatedAt, ...author }) => ({
+      ...author,
+      accountCreatedAt: accountCreatedAt.toISOString(),
+    })),
+    replyHijackCandidateIds: result.replyHijackCandidateIds,
+    otherRepliesByAuthor: Object.fromEntries(
+      Object.entries(result.otherRepliesByAuthor).map(([authorId, tweets]) => [
+        authorId,
+        storeTweetInputs(tweets),
+      ]),
+    ),
+    warnings: result.warnings,
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -965,6 +1099,54 @@ function restoreTimelineSnapshot(value: unknown): TimelineSnapshot | undefined {
   }
 }
 
+function restoreTweetInputs(value: unknown): TweetInput[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const tweets: TweetInput[] = []
+  for (const value_ of value) {
+    if (!isRecord(value_) || !isStoredTweetInput(value_)) return undefined
+    const createdAt = restoreDate(value_.createdAt)
+    if (!createdAt) return undefined
+    tweets.push({ ...value_, createdAt })
+  }
+  return tweets
+}
+
+function restoreRepliesResult(value: unknown): RepliesResult | undefined {
+  if (!isRecord(value)) return undefined
+  const warnings = restoreWarnings(value.warnings)
+  if (!warnings) return undefined
+  const replyTweets = restoreTweetInputs(value.replyTweets)
+  if (!replyTweets) return undefined
+  if (!Array.isArray(value.replyAuthors)) return undefined
+  const replyAuthors: AccountProfileInput[] = []
+  for (const value_ of value.replyAuthors) {
+    if (!isRecord(value_) || !isStoredAccountProfileInput(value_)) return undefined
+    const accountCreatedAt = restoreDate(value_.accountCreatedAt)
+    if (!accountCreatedAt) return undefined
+    replyAuthors.push({ ...value_, accountCreatedAt })
+  }
+  if (
+    !Array.isArray(value.replyHijackCandidateIds) ||
+    !value.replyHijackCandidateIds.every((id) => typeof id === 'string')
+  ) {
+    return undefined
+  }
+  if (!isRecord(value.otherRepliesByAuthor)) return undefined
+  const otherRepliesByAuthor: Record<string, TweetInput[]> = {}
+  for (const [authorId, tweets] of Object.entries(value.otherRepliesByAuthor)) {
+    const restoredTweets = restoreTweetInputs(tweets)
+    if (!restoredTweets) return undefined
+    otherRepliesByAuthor[authorId] = restoredTweets
+  }
+  return {
+    replyTweets,
+    replyAuthors,
+    replyHijackCandidateIds: value.replyHijackCandidateIds,
+    otherRepliesByAuthor,
+    warnings,
+  }
+}
+
 function restoreAccountCycleMetrics(value: unknown): AccountCycleMetrics | undefined {
   if (!isRecord(value)) return undefined
   const warnings = restoreWarnings(value.warnings)
@@ -1048,17 +1230,26 @@ async function runAccountCycle(
   try {
     const checkpoints = await deps.loadCrawlAccountCheckpoints(crawlRunId, account.username)
     let timelineSnapshot = restoreTimelineSnapshot(checkpoints.get('timelines'))
+    let repliesResult = restoreRepliesResult(checkpoints.get('replies'))
     let metrics = restoreAccountCycleMetrics(checkpoints.get('authors'))
     let following = restoreFollowingCheckpoint(checkpoints.get('following'))
     let followers = restoreFollowersCheckpoint(checkpoints.get('followers'))
     let blocks = restoreBlocksCheckpoint(checkpoints.get('blocks'))
     const needsTimeline = !metrics && !timelineSnapshot
+    const needsReplies = !metrics && !repliesResult
     const needsAuthors = !metrics
     const needsFollowing = !following
     const needsFollowers = !followers
     const needsBlocks = !blocks
 
-    if (needsTimeline || needsAuthors || needsFollowing || needsFollowers || needsBlocks) {
+    if (
+      needsTimeline ||
+      needsReplies ||
+      needsAuthors ||
+      needsFollowing ||
+      needsFollowers ||
+      needsBlocks
+    ) {
       const cookies = await deps.issueCookies({
         username: account.username,
         password: account.password,
@@ -1091,11 +1282,36 @@ async function runAccountCycle(
               }),
             })
           }
+          if (needsReplies) {
+            if (!timelineSnapshot) throw new Error('Missing timeline checkpoint for replies phase')
+            const resolvedTimelineSnapshotForReplies = timelineSnapshot
+            const repliesPhase = await measurePhaseDuration((trackRetryWait) =>
+              runRepliesPhase(
+                deps,
+                resolvedTimelineSnapshotForReplies,
+                openApiContext.client,
+                trackRetryWait,
+              ),
+            )
+            repliesResult = repliesPhase.value
+            await deps.completeCrawlAccountCheckpoint({
+              crawlRunId,
+              username: account.username,
+              phase: 'replies',
+              data: toCheckpointData({
+                ...storeRepliesResult(repliesResult),
+                durationMs: repliesPhase.durationMs,
+                retryWaitMs: repliesPhase.retryWaitMs,
+              }),
+            })
+          }
           if (needsAuthors) {
             if (!timelineSnapshot) throw new Error('Missing timeline checkpoint for author phase')
+            if (!repliesResult) throw new Error('Missing replies checkpoint for author phase')
             const resolvedTimelineSnapshot = timelineSnapshot
+            const resolvedRepliesResult = repliesResult
             const authorsPhase = await measurePhaseDuration((trackRetryWait) =>
-              runAccountCycleBody(
+              runAuthorUnitPhase(
                 deps,
                 registry,
                 labelDefinitionIds,
@@ -1105,6 +1321,7 @@ async function runAccountCycle(
                 account,
                 crawlRunId,
                 resolvedTimelineSnapshot,
+                resolvedRepliesResult,
                 openApiContext.client,
                 trackRetryWait,
               ),
@@ -1432,9 +1649,10 @@ async function main(): Promise<void> {
     loadReplyCorpus: () => loadReplyCorpus(prisma),
     loadFollowGraphLabelIndex: (labelDefinitionIds) =>
       buildFollowGraphLabelIndex(prisma, labelDefinitionIds),
-    recordLabelsAtomic: (params) => recordCrawlAccountLabelsAtomic(prisma, params),
-    replaceLabelingFollowSample: (accountId, result) =>
-      replaceLabelingFollowSampleRecord(prisma, accountId, result),
+    persistAuthorResultAtomic: (params) => persistAuthorResultAtomicRecord(prisma, params),
+    recordCrawlAuthorCheckpoint: (params) => recordCrawlAuthorCheckpointRecord(prisma, params),
+    loadCrawlAuthorCheckpoints: (crawlRunId, username) =>
+      loadCrawlAuthorCheckpointsRecord(prisma, crawlRunId, username),
     syncFollowing: (followerId, result) => syncFollowingEdges(prisma, followerId, result),
     syncFollowers: (followeeId, result) => syncFollowersEdges(prisma, followeeId, result),
     syncBlocks: (blockerId, crawlRunId, result) =>

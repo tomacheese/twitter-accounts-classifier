@@ -79,7 +79,8 @@ export async function replaceLabelingFollowSample(
   if (followeeIds.length === 0) return
 
   await prisma.$transaction(
-    (tx) => replaceLabelingFollowSampleWithinTx(tx as unknown as PrismaClient, accountId, followeeIds),
+    (tx) =>
+      replaceLabelingFollowSampleWithinTx(tx as unknown as PrismaClient, accountId, followeeIds),
     // Postgres データ用ボリュームは HDD 上にあり (compose.yaml 参照)、チェックポイントの書き込みが数秒滞留することがある。
     // 既定の 5 秒タイムアウトでは短すぎるため、吸収できる値に伸ばす。
     { maxWait: 15_000, timeout: 15_000 },
