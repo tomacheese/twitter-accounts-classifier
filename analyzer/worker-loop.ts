@@ -25,6 +25,7 @@ const HANDLED_KINDS = [
   'weekly_review_ingest',
   'block_reconciliation',
   'retention_sweep',
+  'operation_cycle_refresh',
   'account_summary_refresh',
   'account_summary_bootstrap',
   POST_COMPLETION_REFRESH_KIND,
@@ -52,6 +53,8 @@ export interface WorkerLoopDeps {
   processBlockReconciliation: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: retention_sweep の処理関数。 */
   processRetentionSweep: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
+  /** kind: operation_cycle_refresh の処理関数。 */
+  processOperationCycleRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: post_completion_refresh の処理関数。 */
   processPostCompletionRefresh: (prisma: PrismaClient, workItem: AnalysisWorkItem) => Promise<void>
   /** kind: account_summary_refresh, triggerType: account_classification_observation の処理関数。 */
@@ -109,6 +112,9 @@ async function dispatch(
     }
     case 'retention_sweep': {
       return deps.processRetentionSweep(prisma, workItem)
+    }
+    case 'operation_cycle_refresh': {
+      return deps.processOperationCycleRefresh(prisma, workItem)
     }
     case POST_COMPLETION_REFRESH_KIND: {
       return deps.processPostCompletionRefresh(prisma, workItem)

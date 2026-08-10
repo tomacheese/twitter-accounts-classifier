@@ -74,6 +74,7 @@ function makeDeps() {
     processWeeklyReviewIngest: vi.fn().mockResolvedValue(undefined),
     processBlockReconciliation: vi.fn().mockResolvedValue(undefined),
     processRetentionSweep: vi.fn().mockResolvedValue(undefined),
+    processOperationCycleRefresh: vi.fn().mockResolvedValue(undefined),
     processPostCompletionRefresh: vi.fn().mockResolvedValue(undefined),
     processAccountSummaryRefresh: vi.fn().mockResolvedValue(undefined),
     processAccountFindingRefresh: vi.fn().mockResolvedValue(undefined),
@@ -133,6 +134,7 @@ describe('runWorkerLoopOnce', () => {
     ['weekly_review_ingest', 'processWeeklyReviewIngest'],
     ['block_reconciliation', 'processBlockReconciliation'],
     ['retention_sweep', 'processRetentionSweep'],
+    ['operation_cycle_refresh', 'processOperationCycleRefresh'],
     ['account_summary_bootstrap', 'processAccountSummaryBootstrap'],
     [POST_COMPLETION_REFRESH_KIND, 'processPostCompletionRefresh'],
   ] as const)('kind が %s なら %s だけを呼ぶ', async (kind, depKey) => {
