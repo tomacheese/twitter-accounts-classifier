@@ -223,10 +223,19 @@ async function LegacyAccountsPage({
 async function NewAccountsView({ searchParams }: AccountsPageProps): Promise<React.ReactElement> {
   const params = await searchParams
   const view: AccountSummaryView = params.view === 'recentlyChanged' ? 'recentlyChanged' : 'all'
+  const labelKeys = params.label
+    ? Array.isArray(params.label)
+      ? params.label
+      : [params.label]
+    : undefined
 
   const prisma = getPrismaClient()
   try {
-    const result = await listAccountSummaries(prisma, { view, cursor: params.cursor })
+    const result = await listAccountSummaries(prisma, {
+      view,
+      cursor: params.cursor,
+      filters: labelKeys ? { labelKeys } : undefined,
+    })
 
     if (result.readiness !== 'ready') {
       return (
