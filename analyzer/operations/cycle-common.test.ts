@@ -153,4 +153,19 @@ describe('applyUpstreamBlocking', () => {
     const result = applyUpstreamBlocking(stage, 'running')
     expect(result.status).toBe('waiting')
   })
+
+  it('WorkItem が存在せず直前 Stage が waiting なら waiting を連鎖させる', () => {
+    const stage: WorkItemStage = {
+      status: 'failed',
+      attemptCount: 0,
+      errorCode: undefined,
+      errorSummary: 'work item was never enqueued',
+      analysisRunId: undefined,
+      startedAt: undefined,
+      finishedAt: undefined,
+      workItemExists: false,
+    }
+    const result = applyUpstreamBlocking(stage, 'waiting')
+    expect(result.status).toBe('waiting')
+  })
 })

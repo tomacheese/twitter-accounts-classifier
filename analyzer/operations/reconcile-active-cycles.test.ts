@@ -114,7 +114,11 @@ describe.skipIf(!process.env.DATABASE_URL)('reconcileActiveOperationCycles', () 
     const updatedCycle = await prisma.operationCycle.findUniqueOrThrow({
       where: { sourceType_sourceId: { sourceType: 'crawl_run', sourceId: crawlRun.id } },
     })
-    expect(updatedCycle.status).toBe('running')
+    // 起点 Stage が succeeded で残りが waiting のみの場合、deriveCycleStatus は
+    // scheduled を返す (cycle-common.test.ts で保証済みの既存仕様)。
+    // ここで検証したいのは古い running のまま固まっていないことなので、
+    // 直前に確認した running から値が変わっている ('running' 以外) ことを見る。
+    expect(updatedCycle.status).toBe('scheduled')
 
     const crawlStage = await prisma.operationStage.findUniqueOrThrow({
       where: { cycleId_stageKey: { cycleId: updatedCycle.id, stageKey: 'crawl' } },
@@ -122,7 +126,9 @@ describe.skipIf(!process.env.DATABASE_URL)('reconcileActiveOperationCycles', () 
     expect(crawlStage.status).toBe('succeeded')
 
     const labelStage = await prisma.operationStage.findUniqueOrThrow({
-      where: { cycleId_stageKey: { cycleId: updatedCycle.id, stageKey: 'label_aggregate_refresh' } },
+      where: {
+        cycleId_stageKey: { cycleId: updatedCycle.id, stageKey: 'label_aggregate_refresh' },
+      },
     })
     expect(labelStage.status).toBe('waiting')
   })
