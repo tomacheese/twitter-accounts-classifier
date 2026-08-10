@@ -58,7 +58,13 @@ describe('cancelWeeklyAnalysisRunBackends', () => {
 describe('createWeeklyAnalysisRun', () => {
   it('creates a running row with lastHeartbeatAt and staleAfterAt from startedAt', async () => {
     const create = vi.fn().mockResolvedValue(toRow())
-    const prisma = { weeklyAnalysisRun: { create } } as unknown as PrismaClient
+    const upsert = vi.fn().mockResolvedValue({})
+    const tx = { weeklyAnalysisRun: { create }, analysisWorkItem: { upsert } }
+    const transaction = vi.fn((fn: (transactionClient: unknown) => Promise<unknown>) => fn(tx))
+    const prisma = {
+      weeklyAnalysisRun: { create },
+      $transaction: transaction,
+    } as unknown as PrismaClient
     const startedAt = new Date('2026-08-05T00:00:00Z')
 
     const run = await createWeeklyAnalysisRun(prisma, startedAt, 7_200_000)
@@ -72,6 +78,21 @@ describe('createWeeklyAnalysisRun', () => {
         status: 'running',
         sampledAccountIds: [],
       },
+    })
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        kind_triggerType_triggerId: {
+          kind: 'operation_cycle_refresh',
+          triggerType: 'weekly_analysis_run',
+          triggerId: 'run1',
+        },
+      },
+      create: {
+        kind: 'operation_cycle_refresh',
+        triggerType: 'weekly_analysis_run',
+        triggerId: 'run1',
+      },
+      update: {},
     })
   })
 })
