@@ -43,6 +43,7 @@ import { selfDuplicateReplyRule } from './rules/self-duplicate-reply'
 import { replyFarmingRule } from './rules/reply-farming'
 import { replyFloodingRule } from './rules/reply-flooding'
 import { replyHijackSwarmRule } from './rules/reply-hijack-swarm'
+import { scamLinkDomainRule } from './rules/scam-link-domain'
 
 /**
  * クローラーに登録される全ラベルルールの正規リスト。
@@ -94,4 +95,5 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   replyFarmingRule,
   replyFloodingRule,
   replyHijackSwarmRule,
+  scamLinkDomainRule,
 ]
