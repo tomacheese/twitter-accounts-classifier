@@ -365,6 +365,9 @@ model CrawlAuthorCheckpoint {
   @@index([crawlRunId, username])
 }
 
+// activeLabelKeys (text[]) への GIN index は raw SQL で作成する。
+// Prisma の schema DSL では USING GIN を表現できないため、
+// migration 20260810210740_add_account_summary_latest_active_label_keys_gin_idx で管理する。
 model AccountSummaryLatest {
   accountId                   String    @id
   normalizedScreenName        String
