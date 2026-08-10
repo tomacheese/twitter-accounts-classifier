@@ -337,6 +337,30 @@ describe('RelationsView', () => {
 
     expect(onLoadMore).toHaveBeenCalledTimes(1)
   })
+
+  it('loadMoreError が true でも既存の items は表示し続け、インラインでエラーを示す', () => {
+    render(
+      <RelationsView
+        items={[
+          {
+            blockId: 'block-1',
+            direction: 'blocker',
+            counterpartAccountId: 'account-2',
+            counterpartScreenName: 'bob',
+            status: 'active',
+          },
+        ]}
+        totalCount={2}
+        hasMore={true}
+        onLoadMore={vi.fn()}
+        loadingMore={false}
+        loadMoreError={true}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'bob' })).not.toBeNull()
+    expect(screen.getByText('Failed to load more.')).not.toBeNull()
+  })
 })
 
 describe('AccountSubviewTabs (relations タブの追加取得)', () => {
@@ -396,5 +420,46 @@ describe('AccountSubviewTabs (relations タブの追加取得)', () => {
     })
     expect(screen.getByRole('link', { name: 'bob' })).not.toBeNull()
     expect(fetchMock.mock.calls[1][0]).toContain('cursor=cursor-1')
+  })
+
+  it('Load more が失敗しても既存の items は表示し続ける', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams())
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => ({
+          data: {
+            items: [
+              {
+                blockId: 'block-1',
+                direction: 'blocker',
+                counterpartAccountId: 'account-2',
+                counterpartScreenName: 'bob',
+                status: 'active',
+              },
+            ],
+            nextCursor: 'cursor-1',
+            totalCount: 2,
+          },
+        }),
+      })
+      .mockResolvedValueOnce({ ok: false, json: () => ({}) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AccountSubviewTabs accountId="account-1" />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Relations' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'bob' })).not.toBeNull()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to load more.')).not.toBeNull()
+    })
+    expect(screen.getByRole('link', { name: 'bob' })).not.toBeNull()
+    expect(screen.queryByText('Failed to load this section.')).toBeNull()
   })
 })

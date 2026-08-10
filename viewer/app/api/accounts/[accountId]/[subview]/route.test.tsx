@@ -109,4 +109,32 @@ describe('GET /api/accounts/[accountId]/[subview]', () => {
       limit: undefined,
     })
   })
+
+  it('relations の limit が数値でなければ undefined として渡す', async () => {
+    getAccountRelations.mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 })
+
+    await GET(new Request('http://localhost/api?limit=abc'), {
+      params: Promise.resolve({ accountId: 'account-1', subview: 'relations' }),
+    })
+
+    expect(getAccountRelations).toHaveBeenCalledWith(
+      expect.anything(),
+      'account-1',
+      expect.objectContaining({ limit: undefined }),
+    )
+  })
+
+  it('relations の limit が 0 以下なら undefined として渡す', async () => {
+    getAccountRelations.mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 })
+
+    await GET(new Request('http://localhost/api?limit=-5'), {
+      params: Promise.resolve({ accountId: 'account-1', subview: 'relations' }),
+    })
+
+    expect(getAccountRelations).toHaveBeenCalledWith(
+      expect.anything(),
+      'account-1',
+      expect.objectContaining({ limit: undefined }),
+    )
+  })
 })

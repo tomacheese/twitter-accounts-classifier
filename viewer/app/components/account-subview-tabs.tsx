@@ -186,12 +186,14 @@ export function RelationsView({
   hasMore,
   onLoadMore,
   loadingMore,
+  loadMoreError = false,
 }: {
   items: AccountRelationView[]
-  totalCount: number
+  totalCount: number | undefined
   hasMore: boolean
   onLoadMore: () => void
   loadingMore: boolean
+  loadMoreError?: boolean
 }): React.ReactElement {
   if (items.length === 0 && !hasMore) return <EmptyState message="No block relation recorded." />
   return (
@@ -215,8 +217,13 @@ export function RelationsView({
         ))}
       </ul>
       <p className="text-xs text-gray-400 dark:text-gray-500">
-        Showing {items.length} of {totalCount}
+        {totalCount === undefined
+          ? `Showing ${items.length}`
+          : `Showing ${items.length} of ${totalCount}`}
       </p>
+      {loadMoreError && (
+        <p className="text-xs text-red-600 dark:text-red-400">Failed to load more.</p>
+      )}
       {hasMore && (
         <button
           type="button"
@@ -291,11 +298,13 @@ function SubviewContent({
   cache,
   onLoadMoreRelations,
   loadingMoreRelations,
+  loadMoreRelationsError,
 }: {
   activeTab: LazySubviewKey
   cache: Partial<SubviewDataByKey>
   onLoadMoreRelations: () => void
   loadingMoreRelations: boolean
+  loadMoreRelationsError: boolean
 }): React.ReactElement | null {
   switch (activeTab) {
     case 'classification': {
@@ -315,6 +324,7 @@ function SubviewContent({
           hasMore={data.nextCursor !== null}
           onLoadMore={onLoadMoreRelations}
           loadingMore={loadingMoreRelations}
+          loadMoreError={loadMoreRelationsError}
         />
       ) : null
     }
@@ -354,6 +364,7 @@ export function AccountSubviewTabs({ accountId }: AccountSubviewTabsProps): Reac
   const [loadingTab, setLoadingTab] = useState<LazySubviewKey | null>(null)
   const [errorTab, setErrorTab] = useState<LazySubviewKey | null>(null)
   const [loadingMoreRelations, setLoadingMoreRelations] = useState(false)
+  const [loadMoreRelationsError, setLoadMoreRelationsError] = useState(false)
 
   const fetchTab = (tab: LazySubviewKey): void => {
     setLoadingTab(tab)
@@ -392,6 +403,7 @@ export function AccountSubviewTabs({ accountId }: AccountSubviewTabsProps): Reac
     const current = cache.relations
     if (!current?.nextCursor || loadingMoreRelations) return
     setLoadingMoreRelations(true)
+    setLoadMoreRelationsError(false)
     fetch(
       `${buildSubviewUrl(accountId, 'relations')}?cursor=${encodeURIComponent(current.nextCursor)}`,
     )
@@ -406,13 +418,13 @@ export function AccountSubviewTabs({ accountId }: AccountSubviewTabsProps): Reac
             relations: {
               items: [...previousRelations.items, ...body.data.items],
               nextCursor: body.data.nextCursor,
-              totalCount: body.data.totalCount,
+              totalCount: body.data.totalCount ?? previousRelations.totalCount,
             },
           }
         })
       })
       .catch(() => {
-        setErrorTab('relations')
+        setLoadMoreRelationsError(true)
       })
       .finally(() => {
         setLoadingMoreRelations(false)
@@ -465,6 +477,7 @@ export function AccountSubviewTabs({ accountId }: AccountSubviewTabsProps): Reac
           cache={cache}
           onLoadMoreRelations={loadMoreRelations}
           loadingMoreRelations={loadingMoreRelations}
+          loadMoreRelationsError={loadMoreRelationsError}
         />
       )}
     </div>

@@ -15,6 +15,7 @@ interface MockData {
   account?: unknown
   summaryLatest?: unknown
   classifications?: unknown[]
+  classificationLastChanges?: unknown[]
   labelDefinitions?: unknown[]
   findings?: unknown[]
   blocks?: unknown[]
@@ -41,7 +42,10 @@ function createMockPrisma(data: MockData) {
     labelDefinition: { findMany: vi.fn().mockResolvedValue(data.labelDefinitions ?? []) },
     reviewFinding: { findMany: vi.fn().mockResolvedValue(data.findings ?? []) },
     block: { findMany: blockFindMany, count: blockCount },
-    accountLabelChange: { findMany: vi.fn().mockResolvedValue(data.changes ?? []) },
+    accountLabelChange: {
+      findMany: vi.fn().mockResolvedValue(data.changes ?? []),
+      groupBy: vi.fn().mockResolvedValue(data.classificationLastChanges ?? []),
+    },
     readModelState: { findUnique: vi.fn().mockResolvedValue(data.readModelState ?? null) },
     detectionPolicyVersion: { findFirst: vi.fn().mockResolvedValue(null) },
   } as unknown as PrismaClient
@@ -121,8 +125,28 @@ describe('getAccountClassification', () => {
     expect(await getAccountClassification(prisma, 'account-1')).toEqual([])
   })
 
-  it('labelDefinitionId を LabelDefinition.key へ解決し、observedAt を lastChangedAt として返す', async () => {
-    const observedAt = new Date('2026-01-01T00:00:00Z')
+  it('labelDefinitionId を LabelDefinition.key へ解決する', async () => {
+    const { prisma } = createMockPrisma({
+      classifications: [
+        {
+          labelDefinitionId: 'label-1',
+          value: true,
+          confidence: 0.9,
+          reason: 'matched',
+          observedAt: new Date('2026-01-01T00:00:00Z'),
+        },
+      ],
+      labelDefinitions: [{ id: 'label-1', key: 'spam' }],
+    })
+
+    const result = await getAccountClassification(prisma, 'account-1')
+
+    expect(result[0].labelKey).toBe('spam')
+  })
+
+  it('AccountLabelChange の最新 changedAt を lastChangedAt として返す (observedAt ではない)', async () => {
+    const observedAt = new Date('2026-08-09T00:00:00Z')
+    const changedAt = new Date('2026-07-01T00:00:00Z')
     const { prisma } = createMockPrisma({
       classifications: [
         {
@@ -134,11 +158,38 @@ describe('getAccountClassification', () => {
         },
       ],
       labelDefinitions: [{ id: 'label-1', key: 'spam' }],
+      classificationLastChanges: [{ labelDefinitionId: 'label-1', _max: { changedAt } }],
     })
 
     const result = await getAccountClassification(prisma, 'account-1')
 
-    expect(result[0]).toMatchObject({ labelKey: 'spam', lastChangedAt: observedAt })
+    expect(result[0].lastChangedAt).toEqual(changedAt)
+  })
+
+  it('AccountLabelChange が存在しないラベルは、直近変化扱いされない古い日時にフォールバックする', async () => {
+    const now = new Date('2026-08-09T00:00:00Z')
+    vi.useFakeTimers().setSystemTime(now)
+    const { prisma } = createMockPrisma({
+      classifications: [
+        {
+          labelDefinitionId: 'label-1',
+          value: false,
+          confidence: 0.5,
+          reason: 'stable',
+          observedAt: now,
+        },
+      ],
+      labelDefinitions: [{ id: 'label-1', key: 'spam' }],
+      classificationLastChanges: [],
+    })
+
+    const result = await getAccountClassification(prisma, 'account-1')
+    vi.useRealTimers()
+
+    const RECENTLY_CHANGED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+    expect(now.getTime() - result[0].lastChangedAt.getTime()).toBeGreaterThan(
+      RECENTLY_CHANGED_WINDOW_MS,
+    )
   })
 
   it('対応する LabelDefinition が無ければ labelDefinitionId をそのまま返す', async () => {
@@ -308,6 +359,19 @@ describe('getAccountRelations', () => {
     await getAccountRelations(prisma, 'account-1', { limit: 10 })
 
     expect(blockFindMany.mock.calls[0][0]).toMatchObject({ take: 11 })
+  })
+
+  it('cursor 指定時は block.count を呼ばず totalCount は undefined になる', async () => {
+    const { prisma, blockCount } = createMockPrisma({ blocks: [], blockCount: 0 })
+    const cursor = encodeCursor({
+      sortValues: ['2026-01-01T00:00:00.000Z', 'block-25'],
+      filterHash: JSON.stringify({ accountId: 'account-1' }),
+    })
+
+    const result = await getAccountRelations(prisma, 'account-1', { cursor })
+
+    expect(blockCount).not.toHaveBeenCalled()
+    expect(result.totalCount).toBeUndefined()
   })
 })
 

@@ -75,12 +75,22 @@ export async function getAccountClassification(
   })
   const keyById = new Map(labelDefinitions.map((label) => [label.id, label.key]))
 
+  // observedAt はクロールごとに更新されるため、真の変化時刻には AccountLabelChange を使う。
+  const latestChanges = await prisma.accountLabelChange.groupBy({
+    by: ['labelDefinitionId'],
+    where: { accountId },
+    _max: { changedAt: true },
+  })
+  const lastChangedAtByLabel = new Map(
+    latestChanges.map((change) => [change.labelDefinitionId, change._max.changedAt]),
+  )
+
   return rows.map((row) => ({
     labelKey: keyById.get(row.labelDefinitionId) ?? row.labelDefinitionId,
     value: row.value,
     confidence: row.confidence,
     reason: row.reason,
-    lastChangedAt: row.observedAt,
+    lastChangedAt: lastChangedAtByLabel.get(row.labelDefinitionId) ?? new Date(0),
   }))
 }
 
@@ -137,7 +147,8 @@ export interface GetAccountRelationsOptions {
 export interface ListAccountRelationsResult {
   items: AccountRelationView[]
   nextCursor: string | null
-  totalCount: number
+  /** 先頭ページのみ算出する。2 ページ目以降の Load more では再計算しない。 */
+  totalCount: number | undefined
 }
 
 const DEFAULT_RELATION_LIMIT = 25
@@ -175,7 +186,7 @@ export async function getAccountRelations(
       orderBy: [{ firstSeenAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
     }),
-    prisma.block.count({ where: accountFilter }),
+    cursorFilter ? Promise.resolve(undefined) : prisma.block.count({ where: accountFilter }),
   ])
 
   const hasMore = blocks.length > limit
@@ -260,8 +271,7 @@ export interface AccountTechnicalView {
 }
 
 /**
- * account_summary_latest は generation を持たないため、旧 generationId 表示の代わりに
- * freshness/watermark を表示する。
+ * account_summary_latest は generation を持たないため、generationId ではなく freshness/watermark を表示する。
  * @param prisma - Prisma クライアント
  * @param accountId - 対象アカウント ID
  * @returns デバッグ・技術情報。Account が存在しなければ null

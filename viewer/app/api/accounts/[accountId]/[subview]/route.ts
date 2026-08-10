@@ -37,7 +37,6 @@ function isSubviewKey(value: string): value is SubviewKey {
 
 /**
  * `overview` 以外の subview を tab 切り替え時に遅延取得するための Route Handler。
- * `relations` のみ cursor/limit クエリパラメータでページングする。
  * @param request - `relations` の場合に `cursor`/`limit` を読む
  * @param context - route params (`accountId`, `subview`)
  * @returns subview のデータ。未知の subview なら 400、対象が存在しなければ 404
@@ -56,8 +55,8 @@ export async function GET(request: Request, context: RouteParams): Promise<NextR
   if (subview === 'relations') {
     const { searchParams } = new URL(request.url)
     const cursor = searchParams.get('cursor') ?? undefined
-    const limitParam = searchParams.get('limit')
-    const limit = limitParam ? Number(limitParam) : undefined
+    const limitParam = Number(searchParams.get('limit'))
+    const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : undefined
     const data = await getAccountRelations(prisma, accountId, { cursor, limit })
     return NextResponse.json({ data }, { headers: { 'Cache-Control': 'no-store' } })
   }
