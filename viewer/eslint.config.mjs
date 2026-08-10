@@ -33,7 +33,13 @@ const config = [
     },
   },
   {
-    ignores: ['.next/**', 'node_modules/**', 'generated/**', 'next-env.d.ts'],
+    ignores: [
+      '.next/**',
+      'node_modules/**',
+      'generated/**',
+      'next-env.d.ts',
+      'vitest.config.mts.timestamp-*.mjs',
+    ],
   },
   {
     // postcss.config.js must stay CommonJS: postcss/autoprefixer's config

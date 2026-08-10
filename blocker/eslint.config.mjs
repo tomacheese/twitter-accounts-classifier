@@ -11,6 +11,12 @@ export default [
     },
   },
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'generated/**'],
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'coverage/**',
+      'generated/**',
+      'vitest.config.mts.timestamp-*.mjs',
+    ],
   },
 ]
