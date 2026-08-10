@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
 import type { FollowListResult } from '../twitter/follows'
-import { replaceLabelingFollowSample } from './labeling-follow-sample-repository'
+import {
+  replaceLabelingFollowSample,
+  replaceLabelingFollowSampleWithinTx,
+} from './labeling-follow-sample-repository'
 
 function makeResult(ids: string[]): FollowListResult {
   return {
@@ -110,5 +113,35 @@ describe('replaceLabelingFollowSample', () => {
 
     expect(deleteMany).not.toHaveBeenCalled()
     expect(createMany).not.toHaveBeenCalled()
+  })
+})
+
+describe('replaceLabelingFollowSampleWithinTx', () => {
+  it('自前で transaction を開かずにサンプル行を置き換える', async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 0 })
+    const createMany = vi.fn().mockResolvedValue({ count: 2 })
+    const txClient = {
+      labelingFollowSample: { deleteMany, createMany },
+    } as unknown as PrismaClient
+
+    await replaceLabelingFollowSampleWithinTx(txClient, 'alice', ['bob', 'carol'])
+
+    expect(deleteMany).toHaveBeenCalledWith({ where: { accountId: 'alice' } })
+    expect(createMany).toHaveBeenCalledWith({
+      data: [
+        { accountId: 'alice', followeeId: 'bob' },
+        { accountId: 'alice', followeeId: 'carol' },
+      ],
+      skipDuplicates: true,
+    })
+  })
+
+  it('followeeId が0件の場合は何もしない', async () => {
+    const deleteMany = vi.fn()
+    const txClient = { labelingFollowSample: { deleteMany } } as unknown as PrismaClient
+
+    await replaceLabelingFollowSampleWithinTx(txClient, 'alice', [])
+
+    expect(deleteMany).not.toHaveBeenCalled()
   })
 })

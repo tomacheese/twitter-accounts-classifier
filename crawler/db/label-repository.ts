@@ -307,6 +307,89 @@ interface ClaimedLabelRow {
  * `AccountLabel`/`AccountLabelLatest` へ書き込んでから、claim が 1 件でも
  * 成功していれば `AccountClassificationObservation` を 1 行作成する。
  * 全 claim が空振り (再開時の重複呼び出し) の場合は observation を作らず null を返す。
+ * 自前で transaction を開始しないため、呼び出し元は `tx as unknown as PrismaClient`
+ * を渡して外側の transaction に合成できる。
+ * @param prisma - Prisma クライアント (または transaction client)
+ * @param params - 対象アカウントと author 分のルール結果一覧
+ * @returns 作成した `AccountClassificationObservation` の id。全 claim 空振りなら null
+ */
+export async function recordCrawlAccountLabelsAtomicWithinTx(
+  prisma: PrismaClient,
+  params: RecordCrawlAccountLabelsAtomicParams,
+): Promise<string | null> {
+  if (params.labels.length === 0) return null
+
+  const claimIds = params.labels.map(() => randomUUID())
+  const labelDefinitionIds = params.labels.map((label) => label.labelDefinitionId)
+  const methods = params.labels.map((label) => label.method)
+  const ruleVersions = params.labels.map((label) => label.ruleVersion)
+
+  const claimedRows = await prisma.$queryRaw<
+    { labelDefinitionId: string; method: string; ruleVersion: string }[]
+  >`
+    INSERT INTO "CrawlAccountLabelRun"
+      ("id", "crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion")
+    SELECT * FROM UNNEST(
+      ${claimIds}::text[],
+      ARRAY(SELECT ${params.crawlRunId} FROM generate_series(1, ${params.labels.length})),
+      ARRAY(SELECT ${params.username} FROM generate_series(1, ${params.labels.length})),
+      ARRAY(SELECT ${params.accountId} FROM generate_series(1, ${params.labels.length})),
+      ${labelDefinitionIds}::text[],
+      ${methods}::text[],
+      ${ruleVersions}::text[]
+    ) AS u("id", "crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion")
+    ON CONFLICT ("crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion") DO NOTHING
+    RETURNING "labelDefinitionId", "method", "ruleVersion"
+  `
+  if (claimedRows.length === 0) return null
+
+  const claimedKeys = new Set(
+    claimedRows.map((row) => `${row.labelDefinitionId} ${row.method} ${row.ruleVersion}`),
+  )
+  const claimedLabels: ClaimedLabelRow[] = params.labels
+    .filter((label) =>
+      claimedKeys.has(`${label.labelDefinitionId} ${label.method} ${label.ruleVersion}`),
+    )
+    .map((label) => ({
+      labelDefinitionId: label.labelDefinitionId,
+      method: label.method,
+      ruleVersion: label.ruleVersion,
+      result: label.result,
+    }))
+
+  await recordAccountLabelsBulk(prisma, {
+    accountId: params.accountId,
+    labels: claimedLabels,
+    sourceKind: 'crawl',
+    sourceId: params.crawlRunId,
+    sourceUsername: params.username,
+  })
+
+  const observation = await prisma.accountClassificationObservation.create({
+    data: {
+      accountId: params.accountId,
+      crawlRunId: params.crawlRunId,
+      username: params.username,
+      observedAt: new Date(),
+      labelCount: claimedLabels.length,
+    },
+  })
+
+  // Observation の commit と WorkItem の enqueue が別トランザクションだと、
+  // 片方だけ成功する状態 (refresh が永久に走らない、または存在しない
+  // Observation を指す WorkItem) が生まれる。同一トランザクション内で
+  // enqueue することで、Observation が確定した時点で refresh も必ず予約される。
+  await enqueueWorkItem(prisma, {
+    kind: 'account_summary_refresh',
+    triggerType: 'account_classification_observation',
+    triggerId: observation.id,
+  })
+
+  return observation.id
+}
+
+/**
+ * {@link recordCrawlAccountLabelsAtomicWithinTx} を自前の transaction でラップする薄い wrapper。
  * @param prisma - Prisma クライアント
  * @param params - 対象アカウントと author 分のルール結果一覧
  * @returns 作成した `AccountClassificationObservation` の id。全 claim 空振りなら null
@@ -315,75 +398,8 @@ export async function recordCrawlAccountLabelsAtomic(
   prisma: PrismaClient,
   params: RecordCrawlAccountLabelsAtomicParams,
 ): Promise<string | null> {
-  if (params.labels.length === 0) return null
-
-  return prisma.$transaction(async (tx) => {
-    const claimIds = params.labels.map(() => randomUUID())
-    const labelDefinitionIds = params.labels.map((label) => label.labelDefinitionId)
-    const methods = params.labels.map((label) => label.method)
-    const ruleVersions = params.labels.map((label) => label.ruleVersion)
-
-    const claimedRows = await tx.$queryRaw<
-      { labelDefinitionId: string; method: string; ruleVersion: string }[]
-    >`
-      INSERT INTO "CrawlAccountLabelRun"
-        ("id", "crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion")
-      SELECT * FROM UNNEST(
-        ${claimIds}::text[],
-        ARRAY(SELECT ${params.crawlRunId} FROM generate_series(1, ${params.labels.length})),
-        ARRAY(SELECT ${params.username} FROM generate_series(1, ${params.labels.length})),
-        ARRAY(SELECT ${params.accountId} FROM generate_series(1, ${params.labels.length})),
-        ${labelDefinitionIds}::text[],
-        ${methods}::text[],
-        ${ruleVersions}::text[]
-      ) AS u("id", "crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion")
-      ON CONFLICT ("crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion") DO NOTHING
-      RETURNING "labelDefinitionId", "method", "ruleVersion"
-    `
-    if (claimedRows.length === 0) return null
-
-    const claimedKeys = new Set(
-      claimedRows.map((row) => `${row.labelDefinitionId} ${row.method} ${row.ruleVersion}`),
-    )
-    const claimedLabels: ClaimedLabelRow[] = params.labels
-      .filter((label) =>
-        claimedKeys.has(`${label.labelDefinitionId} ${label.method} ${label.ruleVersion}`),
-      )
-      .map((label) => ({
-        labelDefinitionId: label.labelDefinitionId,
-        method: label.method,
-        ruleVersion: label.ruleVersion,
-        result: label.result,
-      }))
-
-    await recordAccountLabelsBulk(tx as unknown as PrismaClient, {
-      accountId: params.accountId,
-      labels: claimedLabels,
-      sourceKind: 'crawl',
-      sourceId: params.crawlRunId,
-      sourceUsername: params.username,
-    })
-
-    const observation = await tx.accountClassificationObservation.create({
-      data: {
-        accountId: params.accountId,
-        crawlRunId: params.crawlRunId,
-        username: params.username,
-        observedAt: new Date(),
-        labelCount: claimedLabels.length,
-      },
-    })
-
-    // Observation の commit と WorkItem の enqueue が別トランザクションだと、
-    // 片方だけ成功する状態 (refresh が永久に走らない、または存在しない
-    // Observation を指す WorkItem) が生まれる。同一トランザクション内で
-    // enqueue することで、Observation が確定した時点で refresh も必ず予約される。
-    await enqueueWorkItem(tx, {
-      kind: 'account_summary_refresh',
-      triggerType: 'account_classification_observation',
-      triggerId: observation.id,
-    })
-
-    return observation.id
-  }, { maxWait: 15_000, timeout: 15_000 })
+  return prisma.$transaction(
+    (tx) => recordCrawlAccountLabelsAtomicWithinTx(tx as unknown as PrismaClient, params),
+    { maxWait: 15_000, timeout: 15_000 },
+  )
 }

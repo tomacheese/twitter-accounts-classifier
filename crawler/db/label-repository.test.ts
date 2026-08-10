@@ -7,6 +7,7 @@ import {
   recordAccountLabelsBulk,
   recordCrawlAccountLabel,
   recordCrawlAccountLabelsAtomic,
+  recordCrawlAccountLabelsAtomicWithinTx,
 } from './label-repository'
 
 vi.mock('node:crypto', () => ({ randomUUID: () => 'mock-id' }))
@@ -335,6 +336,50 @@ describe('recordCrawlAccountLabel', () => {
     expect(sqlText).toContain('"sourceKind", "sourceId", "sourceUsername"')
     expect(values).toContain('run1')
     expect(values).toContain('viewer')
+  })
+})
+
+describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
+  it('claims labels and returns an observation id without opening its own transaction', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ labelDefinitionId: 'ld1', method: 'rule', ruleVersion: 'v1' }])
+    const create = vi.fn().mockResolvedValue({ id: 'observation1' })
+    const upsert = vi.fn().mockResolvedValue({})
+    const txClient = {
+      $queryRaw: queryRaw,
+      accountClassificationObservation: { create },
+      accountLabel: { upsert },
+      accountLabelLatest: { upsert },
+      analysisWorkItem: { upsert },
+    } as unknown as PrismaClient
+
+    const observationId = await recordCrawlAccountLabelsAtomicWithinTx(txClient, {
+      accountId: 'u1',
+      crawlRunId: 'crawl-1',
+      username: 'login_account',
+      labels: [
+        {
+          labelDefinitionId: 'ld1',
+          result: { value: true, confidence: 1, reason: 'test' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+
+    expect(observationId).toBe('observation1')
+  })
+
+  it('returns null without creating an observation when there are no labels', async () => {
+    const txClient = { $queryRaw: vi.fn() } as unknown as PrismaClient
+
+    const observationId = await recordCrawlAccountLabelsAtomicWithinTx(txClient, {
+      accountId: 'u1',
+      crawlRunId: 'crawl-1',
+      username: 'login_account',
+      labels: [],
+    })
+
+    expect(observationId).toBeNull()
   })
 })
 
