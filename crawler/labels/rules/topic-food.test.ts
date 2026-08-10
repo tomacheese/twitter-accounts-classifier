@@ -45,6 +45,16 @@ describe('topicFoodRule', () => {
     ).toBe(true)
   })
 
+  it('is true for a bio mentioning ラーメン', () => {
+    expect(topicFoodRule.evaluate(makeBundle({ bio: '家系ラーメンが大好きです' })).value).toBe(true)
+  })
+
+  it('is false for a bio mentioning ラーメンズ (comedy duo), not the food', () => {
+    expect(
+      topicFoodRule.evaluate(makeBundle({ bio: 'ラーメンズ好き。愛車はロードバイク。' })).value,
+    ).toBe(false)
+  })
+
   it('is false for an unrelated bio', () => {
     expect(
       topicFoodRule.evaluate(makeBundle({ bio: '毎日の出来事をつぶやいています' })).value,
