@@ -147,7 +147,9 @@ export async function deriveWorkItemStage(
 }
 
 /**
- * WorkItem が enqueue されていない Stage を、直前 Stage 未完了による `blocked_by_upstream` と root cause の `failed` とで区別する。
+ * WorkItem が enqueue されていない Stage を、直前 Stage の状態に応じて差し替える。
+ * 直前 Stage が `running` ならまだ開始条件を満たしていないだけの `waiting`、
+ * それ以外の未完了 (`failed` 等) なら root cause の `failed` と区別するための `blocked_by_upstream` とする。
  * WorkItem 自体は変更せず、Cycle/Stage の表示状態だけ差し替える。
  * @param stage - deriveWorkItemStage が返した Stage
  * @param upstreamStatus - 直前の必須 Stage の状態
@@ -159,6 +161,7 @@ export function applyUpstreamBlocking(
 ): WorkItemStage {
   if (stage.workItemExists) return stage
   if (upstreamStatus === 'succeeded' || upstreamStatus === 'partial') return stage
+  if (upstreamStatus === 'running') return { ...stage, status: 'waiting' }
   return { ...stage, status: 'blocked_by_upstream' }
 }
 
