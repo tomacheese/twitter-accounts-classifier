@@ -14,6 +14,7 @@ export const topicFinanceRule: LabelRule = {
   key: 'topic_finance',
   description: 'プロフィールで金融/トレーディングを中心的な関心事として挙げている',
   version: '1.3.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && FINANCE_PATTERN.test(bio)

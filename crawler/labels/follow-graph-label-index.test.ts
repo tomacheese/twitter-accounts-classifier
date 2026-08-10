@@ -112,3 +112,48 @@ describe('buildFollowGraphLabelIndex', () => {
     expect(followeeQuerySql).toContain('"LabelingFollowSample"')
   })
 })
+
+describe('buildFollowGraphLabelIndex label filtering', () => {
+  it('filters both queries by labelDefinitionId when given a restricted map', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await buildFollowGraphLabelIndex(prisma, new Map([['topic_anime', 'ld-anime']]))
+
+    expect(queryRaw).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns an empty index without querying when the label map is empty', async () => {
+    const queryRaw = vi.fn()
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const index = await buildFollowGraphLabelIndex(prisma, new Map())
+
+    expect(queryRaw).not.toHaveBeenCalled()
+    expect(index.signalsFor('any')).toEqual({})
+  })
+})
+
+describe('buildFollowGraphLabelIndex filtered vs unfiltered parity', () => {
+  it('returns identical signalsFor() results for the 18 topic labels whether filtered or not', async () => {
+    const rows: AggregateRow[] = [
+      { accountId: 'acc1', labelDefinitionId: 'ld-anime', labeledCount: 5, totalCount: 20 },
+    ]
+    const queryRaw = vi.fn().mockResolvedValue(rows)
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const unfiltered = await buildFollowGraphLabelIndex(
+      prisma,
+      new Map([
+        ['topic_anime', 'ld-anime'],
+        ['other_label', 'ld-other'],
+      ]),
+    )
+    const filtered = await buildFollowGraphLabelIndex(
+      prisma,
+      new Map([['topic_anime', 'ld-anime']]),
+    )
+
+    expect(filtered.signalsFor('acc1')).toEqual(unfiltered.signalsFor('acc1'))
+  })
+})

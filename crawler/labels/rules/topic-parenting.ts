@@ -9,6 +9,7 @@ export const topicParentingRule: LabelRule = {
   key: 'topic_parenting',
   description: 'プロフィールで育児/子育てを中心的な関心事として挙げている',
   version: '1.1.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && PARENTING_PATTERN.test(bio)

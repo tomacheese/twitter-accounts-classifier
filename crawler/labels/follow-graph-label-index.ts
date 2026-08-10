@@ -1,4 +1,4 @@
-import type { PrismaClient } from '../generated/prisma'
+import { Prisma, type PrismaClient } from '../generated/prisma'
 
 /**
  * あるアカウントのフォロー先・フォロワーにおける、特定ラベルの既存付与状況。
@@ -46,6 +46,11 @@ export async function buildFollowGraphLabelIndex(
   const definitionIdToKey = new Map(
     [...labelKeyToDefinitionId.entries()].map(([key, id]) => [id, key]),
   )
+  const targetDefinitionIds = [...definitionIdToKey.keys()]
+
+  if (targetDefinitionIds.length === 0) {
+    return { signalsFor: () => ({}) }
+  }
 
   const followeeRows = await prisma.$queryRaw<AggregateRow[]>`
       SELECT
@@ -59,6 +64,7 @@ export async function buildFollowGraphLabelIndex(
         SELECT "accountId", "followeeId" FROM "LabelingFollowSample"
       ) edges
       JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
+      WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
       GROUP BY edges."accountId", all_latest."labelDefinitionId"
     `
   const followerRows = await prisma.$queryRaw<AggregateRow[]>`
@@ -69,6 +75,7 @@ export async function buildFollowGraphLabelIndex(
         COUNT(*)::int AS "totalCount"
       FROM "Follow" f
       JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = f."followerId"
+      WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
       GROUP BY f."followeeId", all_latest."labelDefinitionId"
     `
 

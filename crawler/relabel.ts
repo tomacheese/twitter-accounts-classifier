@@ -224,7 +224,15 @@ export async function runRelabelBackfill(
   const progressLogIntervalAccounts = options.progressLogIntervalAccounts ?? PROGRESS_LOG_INTERVAL
   const totalAccounts = await prisma.account.count()
   const labelDefinitionIds = await ensureLabelDefinitionsForRules(prisma, registry.getAll())
-  const followGraphLabelIndex = await buildFollowGraphLabelIndex(prisma, labelDefinitionIds)
+  const followGraphLabelDefinitionIds = new Map(
+    [...labelDefinitionIds.entries()].filter(([key]) =>
+      registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
+    ),
+  )
+  const followGraphLabelIndex = await buildFollowGraphLabelIndex(
+    prisma,
+    followGraphLabelDefinitionIds,
+  )
   const latestRuleVersions = await loadLatestRuleVersions(prisma)
   const replyCorpus = await loadReplyCorpus(prisma)
   const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)

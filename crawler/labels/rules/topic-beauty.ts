@@ -11,6 +11,7 @@ export const topicBeautyRule: LabelRule = {
   key: 'topic_beauty',
   description: 'プロフィールで美容・コスメ・スキンケアを中心的な関心事として挙げている',
   version: '1.0.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && BEAUTY_PATTERN.test(bio)

@@ -26,6 +26,7 @@ export const topicCryptoRule: LabelRule = {
   key: 'topic_crypto',
   description: 'プロフィールで暗号資産/web3 を中心的な関心事として挙げている',
   version: '1.2.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const match = bio === null ? null : CRYPTO_PATTERN.exec(bio)

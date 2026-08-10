@@ -192,10 +192,11 @@ describe('runRelabelBackfill', () => {
 
     const result = await runRelabelBackfill(prisma, registry)
 
-    // $queryRaw が呼ばれるのは、フォローグラフ集約2本と loadLatestRuleVersions の1本のみ。
+    // 登録ルールが usesFollowGraphSignal を宣言していないため follow-graph 集約クエリは発行されず、
+    // $queryRaw が呼ばれるのは loadLatestRuleVersions の1本のみ。
     // 唯一のアカウントが既に最新のため、
     // fetchTweetsForAccounts のバッチ取得クエリはそもそも発行されない。
-    expect(queryRaw).toHaveBeenCalledTimes(3)
+    expect(queryRaw).toHaveBeenCalledTimes(1)
     // tweet.findMany は共有の返信コーパス読み込みでのみ使われ、アカウント単位では使われない。
     expect(tweetFindMany).toHaveBeenCalledTimes(1)
     expect(result).toEqual({ accountsProcessed: 1, labelsPersisted: 0 })
@@ -359,6 +360,7 @@ describe('runRelabelBackfill', () => {
       key: 'topic_food',
       description: 'test rule topic_food',
       version: '1.0.0',
+      usesFollowGraphSignal: true,
       evaluate: (bundle: AccountFeatureBundle) => ({
         value: bundle.followGraphLabelSignals?.topic_food !== undefined,
         confidence: 1,

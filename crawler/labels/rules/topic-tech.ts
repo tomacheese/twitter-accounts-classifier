@@ -25,6 +25,7 @@ export const topicTechRule: LabelRule = {
   key: 'topic_tech',
   description: 'プロフィールで技術/ソフトウェア開発を中心的な関心事として挙げている',
   version: '1.3.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && TECH_PATTERN.test(bio)

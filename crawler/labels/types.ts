@@ -118,5 +118,10 @@ export interface LabelRule {
   key: string
   description: string
   version: string
+  /**
+   * `hasFollowGraphTopicSignal()` を呼び follow-graph signal を利用するルールが明示的に true を宣言する。
+   * `buildFollowGraphLabelIndex()` の呼び出し元がこのフラグで対象ラベルを絞り込む。
+   */
+  usesFollowGraphSignal?: boolean
   evaluate(bundle: AccountFeatureBundle): LabelRuleResult
 }

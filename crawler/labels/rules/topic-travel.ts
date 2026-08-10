@@ -13,6 +13,7 @@ export const topicTravelRule: LabelRule = {
   key: 'topic_travel',
   description: 'プロフィールで旅行を中心的な関心事として挙げている',
   version: '1.1.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && TRAVEL_PATTERN.test(bio)

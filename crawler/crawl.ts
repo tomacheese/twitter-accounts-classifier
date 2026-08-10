@@ -1521,7 +1521,14 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   // 開始前に実行すると生存中でも古い heartbeat の CrawlRun が残って見える。また前処理が
   // 失敗した場合に running 行を確定できない。
   try {
-    const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(labelDefinitionIds)
+    const followGraphLabelDefinitionIds = new Map(
+      [...labelDefinitionIds.entries()].filter(([key]) =>
+        registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
+      ),
+    )
+    const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(
+      followGraphLabelDefinitionIds,
+    )
     // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
     // アカウントごとではなくサイクルごとに 1 回だけ構築する。
     const replyCorpus = await deps.loadReplyCorpus()
