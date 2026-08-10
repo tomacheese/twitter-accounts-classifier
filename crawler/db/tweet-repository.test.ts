@@ -70,7 +70,77 @@ describe('upsertTweets error isolation', () => {
     ])
 
     expect(upsert).toHaveBeenCalledTimes(3)
-    expect(results.map((t) => t.id)).toEqual(['t1', 't3'])
+    expect(results.map((r) => r.tweet.id)).toEqual(['t1', 't3'])
+  })
+})
+
+describe('upsertTweet bundle-relevant change detection', () => {
+  it('returns changed: true for a brand-new tweet', async () => {
+    const upsert = vi.fn().mockResolvedValue({ ...sampleTweet })
+    const findUnique = vi.fn().mockResolvedValue(null)
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    const { changed } = await upsertTweet(prisma, sampleTweet)
+
+    expect(changed).toBe(true)
+  })
+
+  it('returns changed: false when the merged result matches the existing row exactly', async () => {
+    const existing = {
+      isPromoted: false,
+      isPaidPromotion: false,
+      expandedUrls: [],
+      hasAiGeneratedMedia: false,
+      aiGeneratedDetectionSource: null,
+      foreignVideoSourceCount: null,
+      quotedTweetId: null,
+      quotedTweetAuthorId: null,
+      quotedTweetHasVideo: null,
+      fullText: sampleTweet.fullText,
+      createdAt: sampleTweet.createdAt,
+      retweetCount: sampleTweet.retweetCount,
+      likeCount: sampleTweet.likeCount,
+      isReply: sampleTweet.isReply,
+      isRetweet: sampleTweet.isRetweet,
+      inReplyToTweetId: sampleTweet.inReplyToTweetId,
+    }
+    const findUnique = vi.fn().mockResolvedValue(existing)
+    const upsert = vi.fn().mockResolvedValue({ id: sampleTweet.id, ...existing })
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    const { changed } = await upsertTweet(prisma, { ...sampleTweet, hasAiGeneratedMedia: null })
+
+    expect(changed).toBe(false)
+  })
+
+  it('returns changed: true when merge preserves a previously-true isPaidPromotion the input lost', async () => {
+    const existing = {
+      isPromoted: false,
+      isPaidPromotion: true,
+      expandedUrls: [],
+      hasAiGeneratedMedia: null,
+      aiGeneratedDetectionSource: null,
+      foreignVideoSourceCount: null,
+      quotedTweetId: null,
+      quotedTweetAuthorId: null,
+      quotedTweetHasVideo: null,
+      fullText: 'old text',
+      createdAt: sampleTweet.createdAt,
+      retweetCount: 0,
+      likeCount: 0,
+      isReply: false,
+      isRetweet: false,
+      inReplyToTweetId: null,
+    }
+    const findUnique = vi.fn().mockResolvedValue(existing)
+    const upsert = vi
+      .fn()
+      .mockResolvedValue({ id: sampleTweet.id, ...existing, fullText: sampleTweet.fullText })
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    const { changed } = await upsertTweet(prisma, { ...sampleTweet, isPaidPromotion: false })
+
+    expect(changed).toBe(true)
   })
 })
 
