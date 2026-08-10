@@ -49,7 +49,7 @@ function makePrisma(
   const executeRaw = vi.fn().mockResolvedValue(0)
   const blockStateChangeCreateMany = vi.fn().mockResolvedValue({ count: 0 })
   const tx = {
-    account: { upsert: accountUpsert },
+    account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null) },
     block: {
       createMany: blockCreateMany,
       updateMany: blockUpdateMany,
@@ -62,7 +62,7 @@ function makePrisma(
     .fn()
     .mockImplementation((fn: (transactionClient: typeof tx) => Promise<void>) => fn(tx))
   const prisma = {
-    account: { upsert: accountUpsert },
+    account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null) },
     $transaction,
   } as unknown as PrismaClient
   return {

@@ -126,9 +126,7 @@ export async function upsertTweet(
     inReplyToTweetId: input.inReplyToTweetId,
     isPromoted: input.isPromoted || (existing?.isPromoted ?? false),
     isPaidPromotion: input.isPaidPromotion || (existing?.isPaidPromotion ?? false),
-    expandedUrls: [
-      ...new Set([...(input.expandedUrls ?? []), ...(existing?.expandedUrls ?? [])]),
-    ],
+    expandedUrls: [...new Set([...(input.expandedUrls ?? []), ...(existing?.expandedUrls ?? [])])],
     hasAiGeneratedMedia: input.hasAiGeneratedMedia ?? existing?.hasAiGeneratedMedia ?? null,
     aiGeneratedDetectionSource:
       input.aiGeneratedDetectionSource ?? existing?.aiGeneratedDetectionSource ?? null,

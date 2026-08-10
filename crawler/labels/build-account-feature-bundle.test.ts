@@ -89,8 +89,16 @@ describe('buildAccountFeatureBundle', () => {
 
   it('reply ツイートの重複ネットワーク規模を templatedReplyNetworkSize に反映する', () => {
     const duplicateReplyIndex = buildDuplicateReplyIndex([
-      { accountId: 'other-1', fullText: 'おはようございます、今日も一日頑張りましょう', inReplyToTweetId: 'target-1' },
-      { accountId: 'other-2', fullText: 'おはようございます、今日も一日頑張りましょう', inReplyToTweetId: 'target-2' },
+      {
+        accountId: 'other-1',
+        fullText: 'おはようございます、今日も一日頑張りましょう',
+        inReplyToTweetId: 'target-1',
+      },
+      {
+        accountId: 'other-2',
+        fullText: 'おはようございます、今日も一日頑張りましょう',
+        inReplyToTweetId: 'target-2',
+      },
     ])
     const bundle = buildAccountFeatureBundle(
       makeAccount(),

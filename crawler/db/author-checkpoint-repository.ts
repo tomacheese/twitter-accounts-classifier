@@ -1,6 +1,11 @@
+import { Logger } from '@book000/node-utils'
 import { mergeTweetAdFlags } from 'twitter-client'
-import type { PrismaClient } from '../generated/prisma'
-import type { LabelRuleResult } from '../labels/types'
+import type { PrismaClient, Tweet } from '../generated/prisma'
+import type { LabelRuleRegistry } from '../labels/registry'
+import type { buildDuplicateReplyIndex } from '../labels/duplicate-reply-index'
+import type { buildReplyHijackIndex } from '../labels/reply-hijack-index'
+import type { FollowGraphLabelIndex } from '../labels/follow-graph-label-index'
+import { buildAccountFeatureBundle } from '../labels/build-account-feature-bundle'
 import type { FollowListResult } from '../twitter/follows'
 import { upsertAccount, type AccountProfileInput } from './account-repository'
 import { upsertTweet, type TweetInput } from './tweet-repository'
@@ -11,6 +16,8 @@ import {
 import { recordCrawlAccountLabelsAtomicWithinTx } from './label-repository'
 import { recordCrawlAuthorCheckpoint, type CrawlWarning } from './crawl-run-repository'
 
+const logger = Logger.configure('author-checkpoint-repository')
+
 export interface PersistAuthorResultAtomicParams {
   crawlRunId: string
   username: string
@@ -18,16 +25,22 @@ export interface PersistAuthorResultAtomicParams {
   profile: AccountProfileInput
   /** `fetchRecentTweets` が返す Tweet 全件 (author 自身の Tweet と文脈 Tweet の両方)。 */
   recentTweets: TweetInput[]
+  /**
+   * authorId 自身の Tweet であることが確定しており、fallback profile 解決が不要な追加分
+   * (timeline 上で観測された自身の投稿・他アカウント処理中に見つかった自身のリプライ)。
+   * これらも同一 transaction 内で merge・評価することで、ラベル評価が merge 前の値を
+   * 見てしまう状態を作らない。
+   */
+  additionalOwnTweets: TweetInput[]
   /** `recentTweets` に含まれる文脈 Tweet の `accountId` FK を満たすための fallback profile。 */
   recentTweetsFallbackAuthors: AccountProfileInput[]
   /** remote fetch に失敗した場合は null。null の場合サンプル書き込みは skip する。 */
   followSample: FollowListResult | null
-  labels: {
-    labelDefinitionId: string
-    result: LabelRuleResult
-    method: string
-    ruleVersion: string
-  }[]
+  registry: LabelRuleRegistry
+  labelDefinitionIds: Map<string, string>
+  duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
+  replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
+  followGraphLabelIndex: FollowGraphLabelIndex
   warnings: CrawlWarning[]
   durationMs: number
   retryWaitMs: number
@@ -36,16 +49,20 @@ export interface PersistAuthorResultAtomicParams {
 
 export interface PersistAuthorResultAtomicResult {
   observationId: string | null
+  labelsAppliedCount: number
 }
 
 /**
  * 1 author 分のローカル副作用 (Account profile・recent tweets・labeling follow sample・label 評価・author checkpoint) を 1 つの transaction にまとめて記録する。
  * remote fetch はこの関数の呼び出し前に完了している前提であり、ここでは行わない。
+ * ラベル評価は upsertAccount/upsertTweet が返す merge 後の値を使って行う。
+ * fetch 直後の生データを直接評価すると、
+ * DB 側が既存の強い evidence を merge で保持していてもその cycle の評価だけ弱い値を見て陰性に戻ることがあるため。
  * labeling follow sample の remote fetch 失敗は non-fatal として扱うため、
  * `followSample` が null であれば該当の書き込みのみ skip し、checkpoint は通常どおり 'success' で記録する。
  * @param prisma - Prisma クライアント
  * @param params - author 1 件分の永続化対象
- * @returns ラベル claim が成功していれば作成した observation の id、全 claim 空振りなら null
+ * @returns ラベル claim が成功していれば作成した observation の id、全 claim 空振りなら null。および今回永続化したラベル件数
  */
 export async function persistAuthorResultAtomic(
   prisma: PrismaClient,
@@ -70,13 +87,13 @@ export async function persistAuthorResultAtomic(
   const fallbackAuthorsById = new Map(
     params.recentTweetsFallbackAuthors.map((author) => [author.id, author]),
   )
-  const dedupedRecentTweets = mergeTweetAdFlags(params.recentTweets)
+  const dedupedTweets = mergeTweetAdFlags([...params.recentTweets, ...params.additionalOwnTweets])
 
   return prisma.$transaction(
     async (tx) => {
       const txClient = tx as unknown as PrismaClient
 
-      await upsertAccount(txClient, params.profile)
+      const { account } = await upsertAccount(txClient, params.profile)
       // `recentTweets` には他者に帰属する会話コンテキストの Tweet が混在するため、
       // Tweet.accountId の FK を満たすには対応する Account を先に用意しておく必要がある。
       for (const fallbackAuthor of fallbackAuthorsById.values()) {
@@ -86,21 +103,40 @@ export async function persistAuthorResultAtomic(
       // `upsertTweets` の 1 件ずつ握り潰すエラー処理は、Postgres の transaction 内では機能しない。
       // 1 文が失敗すると transaction 全体が abort 状態になり、後続の全文が意味不明なエラーで失敗するため、
       // ここでは個別に呼んでエラーをそのまま伝播させる。
-      for (const tweet of dedupedRecentTweets) {
-        await upsertTweet(txClient, tweet)
+      const upsertedTweets: Tweet[] = []
+      for (const tweet of dedupedTweets) {
+        const { tweet: upserted } = await upsertTweet(txClient, tweet)
+        upsertedTweets.push(upserted)
       }
 
       if (followeeIds.length > 0) {
         await replaceLabelingFollowSampleWithinTx(txClient, params.authorId, followeeIds)
       }
 
+      const authorOwnTweets = upsertedTweets.filter((tweet) => tweet.accountId === params.authorId)
+      const bundle = buildAccountFeatureBundle(
+        account,
+        authorOwnTweets,
+        params.duplicateReplyIndex,
+        params.replyHijackIndex,
+        params.followGraphLabelIndex,
+      )
+      const ruleResults = params.registry.applyAll(bundle).flatMap(({ rule, result }) => {
+        const labelDefinitionId = params.labelDefinitionIds.get(rule.key)
+        if (!labelDefinitionId) {
+          logger.warn(`No LabelDefinition id found for rule "${rule.key}", skipping persistence`)
+          return []
+        }
+        return [{ labelDefinitionId, result, method: rule.key, ruleVersion: rule.version }]
+      })
+
       const observationId = await recordCrawlAccountLabelsAtomicWithinTx(txClient, {
         accountId: params.profile.id,
         crawlRunId: params.crawlRunId,
         username: params.username,
-        labels: params.labels,
+        labels: ruleResults,
       })
-      const labelsAppliedCount = observationId === null ? 0 : params.labels.length
+      const labelsAppliedCount = observationId === null ? 0 : ruleResults.length
 
       await recordCrawlAuthorCheckpoint(txClient, {
         crawlRunId: params.crawlRunId,
@@ -115,11 +151,11 @@ export async function persistAuthorResultAtomic(
         appVersion: params.appVersion,
       })
 
-      return { observationId }
+      return { observationId, labelsAppliedCount }
     },
-    // 1 author 分の profile・tweets・follow sample・label 評価・checkpoint をまとめて
-    // 書き込むため、単独の書き込みより往復回数が多い。既存の 15 秒予算は
-    // より小さな transaction 向けに設定された値のため、ここでは伸ばしておく。
+    // 1 author 分の profile・tweets・follow sample・label 評価・checkpoint をまとめて書き込むため、
+    // 単独の書き込みより往復回数が多い。
+    // 既存の 15 秒予算はより小さな transaction 向けに設定された値のため、ここでは伸ばしておく。
     { maxWait: 30_000, timeout: 30_000 },
   )
 }
