@@ -297,7 +297,7 @@ export async function processAccountSummaryRefresh(
         update: {},
       })
     }
-  })
+  }, { timeout: 30_000 })
 
   await touchAccountSummaryLatestState(prisma, observation.observedAt)
 }
