@@ -198,4 +198,25 @@ describe('botRule', () => {
     )
     expect(result.value).toBe(true)
   })
+
+  it('is false for a high-velocity, never-reply account whose posting intervals are irregular (e.g. an official brand/media account on a content calendar)', () => {
+    const oneYearAgo = new Date('2025-01-01T00:00:00Z')
+    const base = new Date('2026-01-01T00:00:00Z').getTime()
+    const irregularOffsetsMs = [0, 30e3, 60e3, 90e3, 5000e3, 5030e3, 5060e3, 9000e3, 9030e3, 9060e3]
+    const tweets: AccountFeatureBundle['recentTweets'] = irregularOffsetsMs.map((offset, i) => ({
+      id: `t${i}`,
+      fullText: 'announcement',
+      createdAt: new Date(base + offset),
+      retweetCount: 0,
+      likeCount: 0,
+      isReply: false,
+      isRetweet: false,
+      isPromoted: false,
+      isPaidPromotion: false,
+    }))
+    const result = botRule.evaluate(
+      makeBundle({ tweetCount: 200_000, accountCreatedAt: oneYearAgo }, tweets),
+    )
+    expect(result.value).toBe(false)
+  })
 })
