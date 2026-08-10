@@ -29,6 +29,13 @@ vi.mock('./worker-loop', () => ({
   runWorkerLoopOnce: (...args: unknown[]): unknown => runWorkerLoopOnce(...args),
 }))
 
+const reconcileActiveOperationCycles = vi.fn().mockResolvedValue(undefined)
+
+vi.mock('./operations/reconcile-active-cycles', () => ({
+  reconcileActiveOperationCycles: (...args: unknown[]): unknown =>
+    reconcileActiveOperationCycles(...args),
+}))
+
 vi.mock('./worker-processors', () => ({
   processReadModelRefresh: vi.fn(),
   processLabelAggregateRefresh: vi.fn(),
@@ -62,6 +69,7 @@ describe('main', () => {
       mainPrisma,
       expect.objectContaining({ leasePrisma }),
     )
+    expect(reconcileActiveOperationCycles).toHaveBeenCalledWith(mainPrisma)
   })
 
   it('起動時に適用中 policy を記録する', async () => {
