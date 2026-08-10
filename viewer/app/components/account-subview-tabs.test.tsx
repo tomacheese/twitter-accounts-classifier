@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   AccountClassificationEntryView,
@@ -32,6 +32,7 @@ const {
 
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
 })
 
 describe('buildSubviewUrl', () => {
@@ -77,6 +78,44 @@ describe('AccountSubviewTabs', () => {
     const html = renderToStaticMarkup(<AccountSubviewTabs accountId="account-1" />)
 
     expect(html).not.toContain('aria-selected="true"')
+  })
+})
+
+describe('AccountSubviewTabs (classification タブの取得)', () => {
+  it('fetch が返す ISO 文字列の lastChangedAt を Date として扱い、例外なく描画する', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams())
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => ({
+          data: [
+            {
+              labelKey: 'active_1',
+              value: true,
+              confidence: 0.9,
+              reason: 'x',
+              lastChangedAt: '2026-08-09T00:00:00.000Z',
+            },
+            {
+              labelKey: 'old_false',
+              value: false,
+              confidence: 0.5,
+              reason: 'x',
+              lastChangedAt: '2026-08-01T00:00:00.000Z',
+            },
+          ],
+        }),
+      }),
+    )
+
+    render(<AccountSubviewTabs accountId="account-1" />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Classification' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('active_1')).not.toBeNull()
+    })
+    expect(screen.queryByText('Failed to load this section.')).toBeNull()
   })
 })
 

@@ -40,6 +40,54 @@ describe('AccountsPage', () => {
     expect(html).toContain('All accounts')
   })
 
+  it('label 検索パラメータを listAccountSummaries の filters.labelKeys に渡す', async () => {
+    vi.mocked(listAccountSummaries).mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      freshnessStatus: 'healthy',
+      readiness: 'ready',
+    })
+
+    await AccountsPage({ searchParams: Promise.resolve({ label: 'bot' }) })
+
+    expect(listAccountSummaries).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ filters: { labelKeys: ['bot'] } }),
+    )
+  })
+
+  it('label 検索パラメータが複数指定された場合はすべて filters.labelKeys に渡す', async () => {
+    vi.mocked(listAccountSummaries).mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      freshnessStatus: 'healthy',
+      readiness: 'ready',
+    })
+
+    await AccountsPage({ searchParams: Promise.resolve({ label: ['bot', 'spam'] }) })
+
+    expect(listAccountSummaries).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ filters: { labelKeys: ['bot', 'spam'] } }),
+    )
+  })
+
+  it('label 検索パラメータが無ければ filters を渡さない', async () => {
+    vi.mocked(listAccountSummaries).mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      freshnessStatus: 'healthy',
+      readiness: 'ready',
+    })
+
+    await AccountsPage({ searchParams: Promise.resolve({}) })
+
+    expect(listAccountSummaries).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ filters: undefined }),
+    )
+  })
+
   it('freshness を明示する', async () => {
     vi.mocked(listAccountSummaries).mockResolvedValue({
       items: [],
