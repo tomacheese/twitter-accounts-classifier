@@ -26,9 +26,10 @@ interface MockData {
 
 function createMockPrisma(data: MockData) {
   const blockFindMany = vi.fn().mockResolvedValue(data.blocks ?? [])
-  const blockCount = vi.fn().mockResolvedValue(data.blockCount ?? (data.blocks?.length ?? 0))
+  const blockCount = vi.fn().mockResolvedValue(data.blockCount ?? data.blocks?.length ?? 0)
+  const readModelPointerFindUnique = vi.fn().mockResolvedValue(data.pointer ?? null)
   const prisma = {
-    readModelPointer: { findUnique: vi.fn().mockResolvedValue(data.pointer ?? null) },
+    readModelPointer: { findUnique: readModelPointerFindUnique },
     account: {
       findUnique: vi.fn().mockResolvedValue(data.account ?? null),
       findMany: vi.fn().mockResolvedValue(data.counterparts ?? []),
@@ -44,7 +45,7 @@ function createMockPrisma(data: MockData) {
     readModelState: { findUnique: vi.fn().mockResolvedValue(data.readModelState ?? null) },
     detectionPolicyVersion: { findFirst: vi.fn().mockResolvedValue(null) },
   } as unknown as PrismaClient
-  return { prisma, blockFindMany, blockCount }
+  return { prisma, blockFindMany, blockCount, readModelPointerFindUnique }
 }
 
 const account = {
@@ -103,11 +104,14 @@ describe('getAccountOverview', () => {
   })
 
   it('ReadModelPointer(account_summary) を参照しない', async () => {
-    const { prisma } = createMockPrisma({ account, summaryLatest: { activeLabelKeys: [] } })
+    const { prisma, readModelPointerFindUnique } = createMockPrisma({
+      account,
+      summaryLatest: { activeLabelKeys: [] },
+    })
 
     await getAccountOverview(prisma, 'account-1')
 
-    expect(prisma.readModelPointer.findUnique).not.toHaveBeenCalled()
+    expect(readModelPointerFindUnique).not.toHaveBeenCalled()
   })
 })
 
@@ -157,11 +161,11 @@ describe('getAccountClassification', () => {
   })
 
   it('ReadModelPointer(account_summary) を参照しない', async () => {
-    const { prisma } = createMockPrisma({ classifications: [] })
+    const { prisma, readModelPointerFindUnique } = createMockPrisma({ classifications: [] })
 
     await getAccountClassification(prisma, 'account-1')
 
-    expect(prisma.readModelPointer.findUnique).not.toHaveBeenCalled()
+    expect(readModelPointerFindUnique).not.toHaveBeenCalled()
   })
 })
 

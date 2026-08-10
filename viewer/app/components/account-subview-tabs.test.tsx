@@ -266,7 +266,7 @@ describe('RelationsView', () => {
         ]}
         totalCount={1}
         hasMore={false}
-        onLoadMore={() => {}}
+        onLoadMore={vi.fn()}
         loadingMore={false}
       />,
     )
@@ -289,7 +289,7 @@ describe('RelationsView', () => {
         ]}
         totalCount={2005}
         hasMore={true}
-        onLoadMore={() => {}}
+        onLoadMore={vi.fn()}
         loadingMore={false}
       />,
     )
@@ -303,7 +303,7 @@ describe('RelationsView', () => {
         items={[]}
         totalCount={0}
         hasMore={true}
-        onLoadMore={() => {}}
+        onLoadMore={vi.fn()}
         loadingMore={false}
       />,
     )
@@ -314,7 +314,7 @@ describe('RelationsView', () => {
         items={[]}
         totalCount={0}
         hasMore={false}
-        onLoadMore={() => {}}
+        onLoadMore={vi.fn()}
         loadingMore={false}
       />,
     )

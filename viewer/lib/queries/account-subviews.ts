@@ -194,11 +194,11 @@ export async function getAccountRelations(
   })
   const screenNameById = new Map(counterparts.map((account) => [account.id, account.screenName]))
 
-  const items = page.map((block) => {
+  const items: AccountRelationView[] = page.map((block) => {
     const counterpartAccountId = block.blockerId === accountId ? block.blockedId : block.blockerId
     return {
       blockId: block.id,
-      direction: (block.blockerId === accountId ? 'blocker' : 'blocked') as 'blocker' | 'blocked',
+      direction: block.blockerId === accountId ? 'blocker' : 'blocked',
       counterpartAccountId,
       counterpartScreenName: screenNameById.get(counterpartAccountId) ?? counterpartAccountId,
       status: block.status,
