@@ -71,18 +71,13 @@ export interface AccountClassificationEntryView {
 /**
  * @param prisma - Prisma クライアント
  * @param accountId - 対象アカウント ID
- * @returns 現在の generation における全ラベルの分類結果
+ * @returns AccountClassificationLatest における全ラベルの分類結果
  */
 export async function getAccountClassification(
   prisma: PrismaClient,
   accountId: string,
 ): Promise<AccountClassificationEntryView[]> {
-  const generationId = await getCurrentGenerationId(prisma)
-  if (!generationId) return []
-
-  const rows = await prisma.accountClassificationCurrent.findMany({
-    where: { generationId, accountId },
-  })
+  const rows = await prisma.accountClassificationLatest.findMany({ where: { accountId } })
   const labelDefinitions = await prisma.labelDefinition.findMany({
     where: { id: { in: rows.map((row) => row.labelDefinitionId) } },
   })
@@ -93,7 +88,7 @@ export async function getAccountClassification(
     value: row.value,
     confidence: row.confidence,
     reason: row.reason,
-    lastChangedAt: row.lastChangedAt,
+    lastChangedAt: row.observedAt,
   }))
 }
 

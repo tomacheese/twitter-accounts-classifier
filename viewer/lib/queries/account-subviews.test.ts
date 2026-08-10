@@ -30,7 +30,7 @@ function createMockPrisma(data: MockData) {
       findMany: vi.fn().mockResolvedValue(data.counterparts ?? []),
     },
     accountSummaryLatest: { findUnique: vi.fn().mockResolvedValue(data.summaryLatest ?? null) },
-    accountClassificationCurrent: {
+    accountClassificationLatest: {
       findMany: vi.fn().mockResolvedValue(data.classifications ?? []),
     },
     labelDefinition: { findMany: vi.fn().mockResolvedValue(data.labelDefinitions ?? []) },
@@ -106,21 +106,21 @@ describe('getAccountOverview', () => {
 })
 
 describe('getAccountClassification', () => {
-  it('ReadModelPointer が無ければ空配列を返す', async () => {
+  it('AccountClassificationLatest に行が無ければ空配列を返す', async () => {
     const { prisma } = createMockPrisma({})
     expect(await getAccountClassification(prisma, 'account-1')).toEqual([])
   })
 
-  it('labelDefinitionId を LabelDefinition.key へ解決する', async () => {
+  it('labelDefinitionId を LabelDefinition.key へ解決し、observedAt を lastChangedAt として返す', async () => {
+    const observedAt = new Date('2026-01-01T00:00:00Z')
     const { prisma } = createMockPrisma({
-      pointer: { currentGenerationId: 'generation-1' },
       classifications: [
         {
           labelDefinitionId: 'label-1',
           value: true,
           confidence: 0.9,
           reason: 'matched',
-          lastChangedAt: new Date('2026-01-01T00:00:00Z'),
+          observedAt,
         },
       ],
       labelDefinitions: [{ id: 'label-1', key: 'spam' }],
@@ -128,19 +128,18 @@ describe('getAccountClassification', () => {
 
     const result = await getAccountClassification(prisma, 'account-1')
 
-    expect(result[0].labelKey).toBe('spam')
+    expect(result[0]).toMatchObject({ labelKey: 'spam', lastChangedAt: observedAt })
   })
 
   it('対応する LabelDefinition が無ければ labelDefinitionId をそのまま返す', async () => {
     const { prisma } = createMockPrisma({
-      pointer: { currentGenerationId: 'generation-1' },
       classifications: [
         {
           labelDefinitionId: 'label-missing',
           value: false,
           confidence: 0.1,
           reason: 'no match',
-          lastChangedAt: new Date('2026-01-01T00:00:00Z'),
+          observedAt: new Date('2026-01-01T00:00:00Z'),
         },
       ],
       labelDefinitions: [],
@@ -149,6 +148,14 @@ describe('getAccountClassification', () => {
     const result = await getAccountClassification(prisma, 'account-1')
 
     expect(result[0].labelKey).toBe('label-missing')
+  })
+
+  it('ReadModelPointer(account_summary) を参照しない', async () => {
+    const { prisma } = createMockPrisma({ classifications: [] })
+
+    await getAccountClassification(prisma, 'account-1')
+
+    expect(prisma.readModelPointer.findUnique).not.toHaveBeenCalled()
   })
 })
 
