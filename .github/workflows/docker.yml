@@ -80,6 +80,8 @@ jobs:
       - name: Approval granted
         run: echo "Approval gate passed"
 
+  # reusable-docker.yml が APPLICATION_VERSION / GIT_REVISION / BUILD_TIME を
+  # checkout 済み source から各 Docker build の build args へ注入する。
   docker-ci:
     name: Docker CI
     needs: approval-gate
