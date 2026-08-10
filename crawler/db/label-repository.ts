@@ -385,5 +385,5 @@ export async function recordCrawlAccountLabelsAtomic(
     })
 
     return observation.id
-  })
+  }, { maxWait: 15_000, timeout: 15_000 })
 }
