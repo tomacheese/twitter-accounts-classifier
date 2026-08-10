@@ -306,7 +306,19 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
       },
     })
 
-    await processAccountSummaryRefresh(prisma, workItem)
+    const originalTransaction = prisma.$transaction.bind(prisma)
+    let transactionOptions: unknown
+    prisma.$transaction = ((callback: unknown, options: unknown) => {
+      transactionOptions = options
+      return originalTransaction(callback as never, options as never)
+    }) as typeof prisma.$transaction
+    try {
+      await processAccountSummaryRefresh(prisma, workItem)
+    } finally {
+      prisma.$transaction = originalTransaction
+    }
+
+    expect(transactionOptions).toEqual({ timeout: 60_000 })
 
     const summary = await prisma.accountSummaryLatest.findUnique({
       where: { accountId: account.id },

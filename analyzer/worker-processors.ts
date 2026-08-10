@@ -40,6 +40,7 @@ import {
 const logger = Logger.configure('analyzer:worker-processors')
 
 const APP_VERSION = process.env.APPLICATION_VERSION ?? 'unknown'
+const ACCOUNT_SUMMARY_REFRESH_TRANSACTION_TIMEOUT_MS = 60_000
 
 /** label_aggregate_refresh の失敗種別。 */
 export type LabelAggregateRefreshErrorCode =
@@ -224,80 +225,83 @@ export async function processAccountSummaryRefresh(
     ? !isSameLabelKeySet(existing.activeLabelKeys, activeLabelKeys)
     : activeLabelKeys.length > 0
 
-  await prisma.$transaction(async (tx) => {
-    await upsertAccountSummaryLatest(tx as unknown as PrismaClient, [
-      {
-        accountId: observation.accountId,
-        normalizedScreenName: account.screenName.toLowerCase(),
-        normalizedDisplayName: account.displayName.toLowerCase(),
-        searchDocument: `${account.screenName} ${account.displayName}`.toLowerCase(),
-        // profileObservedAt には Account の実際のプロフィール取得時刻 (lastCrawledAt) を使う。
-        // classification observation の時刻を流用すると、プロフィールを再取得していない
-        // refresh でも profile が最新化されたかのように見えてしまう。
-        profileObservedAt: account.lastCrawledAt,
-        activeLabelKeys,
-        activeLabelCount: activeLabelKeys.length,
-        lastClassificationChangedAt: changed
-          ? observation.observedAt
-          : (existing?.lastClassificationChangedAt ?? null),
-        classificationObservedAt: observation.observedAt,
-        activeFindingCount: existing?.activeFindingCount ?? 0,
-        highestFindingSeverity: existing?.highestFindingSeverity ?? null,
-        findingObservedAt: existing?.findingObservedAt ?? null,
-      },
-    ])
-    await upsertAccountClassificationLatest(
-      tx as unknown as PrismaClient,
-      labels.map((label) => ({
-        accountId: label.accountId,
-        labelDefinitionId: label.labelDefinitionId,
-        value: label.value,
-        confidence: label.confidence,
-        reason: label.reason,
-        method: label.method,
-        ruleVersion: label.ruleVersion,
-        observedAt: observation.observedAt,
-        sourceObservationId: observation.id,
-      })),
-    )
-
-    for (const label of labels) {
-      const previous = previousByLabelDefinitionId.get(label.labelDefinitionId)
-      let changeType: string | undefined
-      if (previous === undefined) {
-        if (label.value) changeType = 'added'
-      } else if (previous.value !== label.value) {
-        changeType = label.value ? 'added' : 'removed'
-      } else if (previous.confidence !== label.confidence || previous.reason !== label.reason) {
-        changeType = 'updated'
-      }
-      if (!changeType) continue
-
-      await (tx as unknown as PrismaClient).accountLabelChange.upsert({
-        where: {
-          accountId_labelDefinitionId_changedAt: {
-            accountId: label.accountId,
-            labelDefinitionId: label.labelDefinitionId,
-            changedAt: label.labeledAt,
-          },
+  await prisma.$transaction(
+    async (tx) => {
+      await upsertAccountSummaryLatest(tx as unknown as PrismaClient, [
+        {
+          accountId: observation.accountId,
+          normalizedScreenName: account.screenName.toLowerCase(),
+          normalizedDisplayName: account.displayName.toLowerCase(),
+          searchDocument: `${account.screenName} ${account.displayName}`.toLowerCase(),
+          // profileObservedAt には Account の実際のプロフィール取得時刻 (lastCrawledAt) を使う。
+          // classification observation の時刻を流用すると、プロフィールを再取得していない
+          // refresh でも profile が最新化されたかのように見えてしまう。
+          profileObservedAt: account.lastCrawledAt,
+          activeLabelKeys,
+          activeLabelCount: activeLabelKeys.length,
+          lastClassificationChangedAt: changed
+            ? observation.observedAt
+            : (existing?.lastClassificationChangedAt ?? null),
+          classificationObservedAt: observation.observedAt,
+          activeFindingCount: existing?.activeFindingCount ?? 0,
+          highestFindingSeverity: existing?.highestFindingSeverity ?? null,
+          findingObservedAt: existing?.findingObservedAt ?? null,
         },
-        create: {
+      ])
+      await upsertAccountClassificationLatest(
+        tx as unknown as PrismaClient,
+        labels.map((label) => ({
           accountId: label.accountId,
           labelDefinitionId: label.labelDefinitionId,
-          changeType,
-          previousValue: previous?.value ?? null,
-          newValue: label.value,
-          previousConfidence: previous?.confidence ?? null,
-          newConfidence: label.confidence,
-          previousReason: previous?.reason ?? null,
-          newReason: label.reason,
-          sourceId: observation.crawlRunId,
-          changedAt: label.labeledAt,
-        },
-        update: {},
-      })
-    }
-  }, { timeout: 30_000 })
+          value: label.value,
+          confidence: label.confidence,
+          reason: label.reason,
+          method: label.method,
+          ruleVersion: label.ruleVersion,
+          observedAt: observation.observedAt,
+          sourceObservationId: observation.id,
+        })),
+      )
+
+      for (const label of labels) {
+        const previous = previousByLabelDefinitionId.get(label.labelDefinitionId)
+        let changeType: string | undefined
+        if (previous === undefined) {
+          if (label.value) changeType = 'added'
+        } else if (previous.value !== label.value) {
+          changeType = label.value ? 'added' : 'removed'
+        } else if (previous.confidence !== label.confidence || previous.reason !== label.reason) {
+          changeType = 'updated'
+        }
+        if (!changeType) continue
+
+        await (tx as unknown as PrismaClient).accountLabelChange.upsert({
+          where: {
+            accountId_labelDefinitionId_changedAt: {
+              accountId: label.accountId,
+              labelDefinitionId: label.labelDefinitionId,
+              changedAt: label.labeledAt,
+            },
+          },
+          create: {
+            accountId: label.accountId,
+            labelDefinitionId: label.labelDefinitionId,
+            changeType,
+            previousValue: previous?.value ?? null,
+            newValue: label.value,
+            previousConfidence: previous?.confidence ?? null,
+            newConfidence: label.confidence,
+            previousReason: previous?.reason ?? null,
+            newReason: label.reason,
+            sourceId: observation.crawlRunId,
+            changedAt: label.labeledAt,
+          },
+          update: {},
+        })
+      }
+    },
+    { timeout: ACCOUNT_SUMMARY_REFRESH_TRANSACTION_TIMEOUT_MS },
+  )
 
   await touchAccountSummaryLatestState(prisma, observation.observedAt)
 }
