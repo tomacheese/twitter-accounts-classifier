@@ -8,12 +8,14 @@ import {
   getCrawlStaleThresholdMultiplier,
   getCrawlWarningThreshold,
 } from './config/env'
+import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertComponentBuildIdentity } from './build-identity'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
-import { ensureLabelDefinitionsForRules } from './db/label-repository'
+import { ensureLabelDefinitionsForRules, filterAccountIdsWithExistingLabels } from './db/label-repository'
 import { refreshLabelAggregate } from './db/label-aggregate-repository'
+import { requestAccountRelabel } from './db/analysis-work-item-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
@@ -1636,6 +1638,39 @@ function toCrawlOpenApiClient(
   }
 }
 
+/**
+ * profile 更新を永続化し、classification-relevant な変化があった既存ラベル済み account のみ再評価を要求する persistAccount 実装を作る。
+ * @param prisma - Prisma クライアント
+ * @returns CrawlDependencies['persistAccount'] に渡せる関数
+ */
+export function createPersistAccountFn(prisma: PrismaClient): CrawlDependencies['persistAccount'] {
+  return async (input) => {
+    const { account, changed } = await upsertAccount(prisma, input)
+    if (!changed) return
+    const relabelable = await filterAccountIdsWithExistingLabels(prisma, [account.id])
+    if (relabelable.has(account.id)) {
+      await requestAccountRelabel(prisma, account.id)
+    }
+  }
+}
+
+/**
+ * tweet 更新を永続化し、classification-relevant な変化があった既存ラベル済み account のみ再評価を要求する persistTweets 実装を作る。
+ * @param prisma - Prisma クライアント
+ * @returns CrawlDependencies['persistTweets'] に渡せる関数
+ */
+export function createPersistTweetsFn(prisma: PrismaClient): CrawlDependencies['persistTweets'] {
+  return async (inputs) => {
+    const results = await upsertTweets(prisma, inputs)
+    const changedAccountIds = [
+      ...new Set(results.filter((result) => result.changed).map((result) => result.tweet.accountId)),
+    ]
+    if (changedAccountIds.length === 0) return
+    const relabelable = await filterAccountIdsWithExistingLabels(prisma, changedAccountIds)
+    await Promise.all([...relabelable].map((accountId) => requestAccountRelabel(prisma, accountId)))
+  }
+}
+
 async function main(): Promise<void> {
   const prisma = getPrismaClient()
   await upsertComponentBuildIdentity(prisma, 'crawler')
@@ -1658,12 +1693,8 @@ async function main(): Promise<void> {
     createTrendsScraper: (cookies) => createRealTrendsScraper(cookies),
     closeTrendsScraper: (context) =>
       closeRealTrendsScraper(context as Parameters<typeof closeRealTrendsScraper>[0]),
-    persistAccount: async (input) => {
-      await upsertAccount(prisma, input)
-    },
-    persistTweets: async (inputs) => {
-      await upsertTweets(prisma, inputs)
-    },
+    persistAccount: createPersistAccountFn(prisma),
+    persistTweets: createPersistTweetsFn(prisma),
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: () => loadReplyCorpus(prisma),
     loadFollowGraphLabelIndex: (labelDefinitionIds) =>
