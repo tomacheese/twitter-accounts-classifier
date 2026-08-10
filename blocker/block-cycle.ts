@@ -1,5 +1,10 @@
 import { Logger } from '@book000/node-utils'
-import { withTwitterRetry, type IssuedCookies, type OpenApiClientContext } from 'twitter-client'
+import {
+  BlockTargetNotFoundError,
+  withTwitterRetry,
+  type IssuedCookies,
+  type OpenApiClientContext,
+} from 'twitter-client'
 import type { PrismaClient } from './generated/prisma'
 import type { BlockerAccountConfig } from './config/load-config'
 import type { BlockLimits } from './config/block-limits'
@@ -15,6 +20,7 @@ import {
   markOutboxRemoteSucceeded,
   markOutboxLocalPersisted,
   markOutboxRemoteFailed,
+  markOutboxRemoteSkipped,
   type OutboxEntryRef,
 } from './db/outbox-repository'
 import { captureException } from './monitoring/sentry'
@@ -39,6 +45,7 @@ export interface BlockAccountCycleDependencies {
   markOutboxRemoteSucceeded: typeof markOutboxRemoteSucceeded
   markOutboxLocalPersisted: typeof markOutboxLocalPersisted
   markOutboxRemoteFailed: typeof markOutboxRemoteFailed
+  markOutboxRemoteSkipped: typeof markOutboxRemoteSkipped
   prisma: PrismaClient
   limits: BlockLimits
   sleepImpl?: (ms: number) => Promise<void>
@@ -75,7 +82,7 @@ export async function resolveOwnAccountId(
  * @param blockAccountRunId - 記録先の `BlockAccountRun` ID
  * @param blockerId - ブロックを実行するアカウント
  * @param candidate - ブロック対象と根拠ラベル・確信度
- * @returns ブロックに成功したかどうか
+ * @returns 成功時は true、通常失敗時は false、対象不存在で処理不要なら skipped
  */
 export async function attemptBlock(
   client: OpenApiClientContext,
@@ -83,7 +90,7 @@ export async function attemptBlock(
   blockAccountRunId: string,
   blockerId: string,
   candidate: BlockCandidate,
-): Promise<boolean> {
+): Promise<boolean | 'skipped'> {
   let outboxEntry: OutboxEntryRef
   try {
     outboxEntry = await deps.findOrCreateOutboxEntry(deps.prisma, {
@@ -105,6 +112,21 @@ export async function attemptBlock(
   try {
     await withTwitterRetry(() => client.createBlock(candidate.accountId))
   } catch (error) {
+    if (error instanceof BlockTargetNotFoundError) {
+      await deps.markOutboxRemoteSkipped(deps.prisma, outboxEntry.id)
+      await deps.recordBlockAction(deps.prisma, {
+        blockAccountRunId,
+        blockerId,
+        blockedId: candidate.accountId,
+        labelDefinitionId: candidate.labelDefinitionId,
+        confidence: candidate.confidence,
+        result: 'skipped',
+        errorMessage: error.message,
+        outboxEntryId: outboxEntry.id,
+      })
+      return 'skipped'
+    }
+
     logger.error(
       `Failed to block account ${candidate.accountId} on behalf of ${blockerId}`,
       error as Error,
@@ -236,9 +258,9 @@ export async function runBlockAccountCycle(
 
     for (const [index, candidate] of candidates.entries()) {
       if (index > 0) await sleepImpl(deps.limits.actionDelayMs)
-      const succeeded = await attemptBlock(context, deps, accountRun.id, blockerId, candidate)
-      if (succeeded) blockedCount++
-      else failedCount++
+      const result = await attemptBlock(context, deps, accountRun.id, blockerId, candidate)
+      if (result === true) blockedCount++
+      else if (result === false) failedCount++
     }
 
     await deps.finishBlockAccountRun(deps.prisma, accountRun.id, {

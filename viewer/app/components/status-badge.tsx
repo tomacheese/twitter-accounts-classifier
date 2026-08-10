@@ -2,7 +2,7 @@ import React from 'react'
 import type { CrawlRunStatus } from '@/lib/crawl-run-status'
 import type { HealthStatus } from '@/lib/health-status'
 
-type KnownStatus = CrawlRunStatus | Exclude<HealthStatus, 'unknown'>
+type KnownStatus = CrawlRunStatus | Exclude<HealthStatus, 'unknown'> | 'skipped'
 
 /**
  * `satisfies` により、`HealthStatus`/`CrawlRunStatus` に新しい値が増えたら
@@ -19,6 +19,7 @@ const STATUS_STYLES = {
   stale: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
   failed: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
   not_run: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+  skipped: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
 } satisfies Record<KnownStatus, string>
 
 const FALLBACK_STYLE = 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
@@ -36,6 +37,7 @@ const STATUS_LABELS = {
   stale: 'Stale',
   failed: 'Failed',
   not_run: 'Not run',
+  skipped: 'Skipped',
 } satisfies Record<KnownStatus, string>
 
 /**

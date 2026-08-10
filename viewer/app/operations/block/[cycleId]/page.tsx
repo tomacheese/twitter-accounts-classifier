@@ -37,6 +37,10 @@ const OUTBOX_STATUS_LABEL: Record<string, { label: string; className: string }> 
     label: 'Remote failed',
     className: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
   },
+  remote_skipped: {
+    label: 'Remote skipped',
+    className: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
+  },
 }
 
 /**

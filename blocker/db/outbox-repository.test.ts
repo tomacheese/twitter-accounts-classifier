@@ -4,6 +4,7 @@ import {
   markOutboxRemoteSucceeded,
   markOutboxLocalPersisted,
   markOutboxRemoteFailed,
+  markOutboxRemoteSkipped,
   findStalledOutboxEntries,
   findExistingBlockedIds,
   findOutboxEntryIdsWithBlockAction,
@@ -101,7 +102,7 @@ describe('findOrCreateOutboxEntry', () => {
   })
 })
 
-describe('markOutboxRemoteSucceeded/markOutboxLocalPersisted/markOutboxRemoteFailed', () => {
+describe('outbox status updates', () => {
   it('remote_succeeded に更新する', async () => {
     const prisma = createMockPrismaClient()
 
@@ -158,6 +159,17 @@ describe('markOutboxRemoteSucceeded/markOutboxLocalPersisted/markOutboxRemoteFai
     expect(prisma.blockOutboxEntry.update).toHaveBeenCalledWith({
       where: { id: 'outbox-1' },
       data: { status: 'remote_failed' },
+    })
+  })
+
+  it('remote_skipped に更新する', async () => {
+    const prisma = createMockPrismaClient()
+
+    await markOutboxRemoteSkipped(prisma as never, 'outbox-1')
+
+    expect(prisma.blockOutboxEntry.update).toHaveBeenCalledWith({
+      where: { id: 'outbox-1' },
+      data: { status: 'remote_skipped' },
     })
   })
 })
