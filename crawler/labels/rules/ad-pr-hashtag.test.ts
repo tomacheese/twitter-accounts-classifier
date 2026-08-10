@@ -57,11 +57,11 @@ describe('adPrHashtagRule', () => {
     expect(result.value).toBe(true)
   })
 
-  it('is false when the only isPaidPromotion-flagged tweet is the sole sampled tweet (too little evidence)', () => {
+  it('is true when the only sampled tweet carries isPaidPromotion, even with just one sample', () => {
     const result = adPrHashtagRule.evaluate(
       makeBundle([tweet({ fullText: '新商品を使ってみました！', isPaidPromotion: true })]),
     )
-    expect(result.value).toBe(false)
+    expect(result.value).toBe(true)
   })
 
   it('is false when the only #PR-tagged tweet is a giveaway/campaign-entry post', () => {
@@ -138,5 +138,30 @@ describe('adPrHashtagRule', () => {
       ]),
     )
     expect(result.value).toBe(false)
+  })
+})
+
+describe('adPrHashtagRule campaign exclusion narrowing', () => {
+  it('is true for a gifted-product review whose campaign name happens to contain "キャンペーン"', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: '〇〇キャンペーンでいただいたコスメを紹介します #PR' })]),
+    )
+    expect(result.value).toBe(true)
+  })
+
+  it('remains false for a giveaway-entry post', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: 'このキャンペーンに応募しました!当選しますように #PR' })]),
+    )
+    expect(result.value).toBe(false)
+  })
+})
+
+describe('adPrHashtagRule isPaidPromotion sample threshold removal', () => {
+  it('is true even when only one sampled tweet has isPaidPromotion=true', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: 'こんにちは', isPaidPromotion: true })]),
+    )
+    expect(result.value).toBe(true)
   })
 })
