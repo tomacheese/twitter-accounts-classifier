@@ -47,8 +47,7 @@ export async function buildFollowGraphLabelIndex(
     [...labelKeyToDefinitionId.entries()].map(([key, id]) => [id, key]),
   )
 
-  const [followeeRows, followerRows] = await Promise.all([
-    prisma.$queryRaw<AggregateRow[]>`
+  const followeeRows = await prisma.$queryRaw<AggregateRow[]>`
       SELECT
         edges."accountId",
         all_latest."labelDefinitionId",
@@ -61,8 +60,8 @@ export async function buildFollowGraphLabelIndex(
       ) edges
       JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
       GROUP BY edges."accountId", all_latest."labelDefinitionId"
-    `,
-    prisma.$queryRaw<AggregateRow[]>`
+    `
+  const followerRows = await prisma.$queryRaw<AggregateRow[]>`
       SELECT
         f."followeeId" AS "accountId",
         all_latest."labelDefinitionId",
@@ -71,8 +70,7 @@ export async function buildFollowGraphLabelIndex(
       FROM "Follow" f
       JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = f."followerId"
       GROUP BY f."followeeId", all_latest."labelDefinitionId"
-    `,
-  ])
+    `
 
   const signals = new Map<string, Map<string, FollowGraphLabelSignal>>()
 

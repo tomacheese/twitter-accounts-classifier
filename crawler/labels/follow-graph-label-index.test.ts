@@ -80,6 +80,27 @@ describe('buildFollowGraphLabelIndex', () => {
     expect(index.signalsFor('alice')).toEqual({})
   })
 
+  it('フォロー先方向の集計が完了するまでフォロワー方向の集計を開始しない', async () => {
+    let resolveFollowee: ((rows: AggregateRow[]) => void) | undefined
+    const followeeRows = new Promise<AggregateRow[]>((resolve) => {
+      resolveFollowee = resolve
+    })
+    const queryRaw = vi
+      .fn()
+      .mockImplementationOnce(() => followeeRows)
+      .mockResolvedValueOnce([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+    const labelKeyToDefinitionId = new Map([['topic_food', 'def-topic_food']])
+
+    const building = buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId)
+    await Promise.resolve()
+
+    expect(queryRaw).toHaveBeenCalledTimes(1)
+    resolveFollowee?.([])
+    await building
+    expect(queryRaw).toHaveBeenCalledTimes(2)
+  })
+
   it('フォロー先方向の集計クエリは Follow と LabelingFollowSample の両方を参照する', async () => {
     const queryRaw = vi.fn().mockResolvedValue([])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient

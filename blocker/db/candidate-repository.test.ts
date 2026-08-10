@@ -5,11 +5,7 @@ import { getPrismaClient } from './client'
 
 function fakePrismaReturning(rows: unknown[]) {
   return {
-    $queryRaw: vi.fn().mockImplementation((strings: readonly string[]) => {
-      const sql = strings.join('')
-      expect(sql).toContain('DISTINCT ON')
-      return Promise.resolve(rows)
-    }),
+    $queryRaw: vi.fn().mockResolvedValue(rows),
   }
 }
 
@@ -73,6 +69,22 @@ describe('selectBlockCandidates', () => {
 })
 
 describe('selectBlockCandidates SQL shape', () => {
+  it('uses AccountLabelLatest confidence without scanning AccountLabel history', async () => {
+    const prisma = fakePrismaReturning([])
+
+    await selectBlockCandidates(
+      prisma as never,
+      'blocker-1',
+      { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+      50,
+    )
+
+    const [strings] = prisma.$queryRaw.mock.calls[0]
+    const sql = (strings as readonly string[]).join('')
+    expect(sql).toContain('all_latest."confidence"')
+    expect(sql).not.toContain('FROM "AccountLabel"')
+  })
+
   it('excludes rows via NOT EXISTS against Block, BlockAction, and Follow', async () => {
     const prisma = fakePrismaReturning([])
 
