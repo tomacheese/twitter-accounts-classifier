@@ -7,7 +7,7 @@ WORKDIR /app
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY crawler/package.json crawler/package.json
 COPY viewer/package.json viewer/package.json
-RUN corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile
+RUN corepack enable && corepack prepare pnpm@11.18.0 --activate && pnpm install --frozen-lockfile
 
 COPY prisma ./prisma
 COPY viewer ./viewer

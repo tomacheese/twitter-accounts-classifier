@@ -14,7 +14,7 @@ RUN pnpm --filter analyzer run db:generate
 RUN pnpm --filter analyzer run build
 RUN test -f /app/analyzer/dist/policy/detection-policy.json
 
-# analyzerはtwitter-clientに依存しないためcycletlsは含まれず、pruneは不要。
+# analyzer は twitter-client に依存しないため cycletls は含まれず、prune は不要。
 RUN pnpm --filter analyzer deploy --prod /app/deploy/analyzer
 
 FROM node:24-bookworm-slim

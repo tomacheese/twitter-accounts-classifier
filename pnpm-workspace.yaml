@@ -5,7 +5,7 @@ packages:
   - "blocker"
   - "analyzer"
 
-# pnpm deploy --prod がworkspaceパッケージをsymlinkでなく実体としてコピーするために必要。
+# pnpm deploy --prod が workspace パッケージを symlink でなく実体としてコピーするために必要。
 injectWorkspacePackages: true
 
 overrides:

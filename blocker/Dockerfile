@@ -16,15 +16,12 @@ RUN pnpm --filter twitter-client run build
 RUN pnpm --filter blocker run db:generate
 RUN pnpm --filter blocker run build
 
-# production dependencyのみを自己完結ディレクトリへ切り出す。twitter-clientは
-# workspace:*参照だがpnpm-workspace.yamlのinjectWorkspacePackages: trueにより
-# symlinkでなく実体としてコピーされる。
+# twitter-client は workspace:* 参照だが、pnpm-workspace.yaml の injectWorkspacePackages: true により symlink でなく実体としてコピーされる。
 ARG TARGETARCH
 RUN pnpm --filter blocker deploy --prod /app/deploy/blocker
 
-# cycletlsはLinux/macOS/Windows/FreeBSD向けバイナリを全て同梱しているが、
-# 実行時に使うのは対象archのLinuxバイナリ1本のみ。.pnpm配下の実体ディレクトリを
-# バージョン文字列に依存せず動的に探索し、対象arch以外のバイナリを削除する。
+# cycletls は Linux/macOS/Windows/FreeBSD 向けバイナリを全て同梱しているが、実行時に使うのは対象 arch の Linux バイナリ1本のみ。
+# パッケージパスをバージョン文字列で固定すると pnpm のバージョン更新で壊れるため、動的に探索する。
 RUN set -eu; \
     case "$TARGETARCH" in \
       amd64) keep=index ;; \
@@ -33,6 +30,7 @@ RUN set -eu; \
     esac; \
     cycletls_pkg=$(find /app/deploy/blocker/node_modules/.pnpm -maxdepth 4 -type d -path '*/cycletls@*/node_modules/cycletls' -print -quit); \
     if [ -z "$cycletls_pkg" ]; then echo "cycletls package not found" >&2; exit 1; fi; \
+    if [ ! -f "$cycletls_pkg/dist/$keep" ]; then echo "cycletls binary $keep not found" >&2; exit 1; fi; \
     find "$cycletls_pkg/dist" -maxdepth 1 -type f ! -name "$keep" ! -name 'index.js' ! -name 'index.d.ts' -delete
 
 FROM node:24-bookworm-slim

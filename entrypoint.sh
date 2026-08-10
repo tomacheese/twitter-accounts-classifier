@@ -1,9 +1,7 @@
 #!/bin/sh
 set -eu
 
-# pnpm deployで生成したnode_modules/.binをPATHへ加える。prisma db seedは内部で
-# `tsx ../prisma/seed.ts`を子プロセスとしてspawnするため、prisma本体を直接実行
-# するだけではtsxがPATH解決できず`spawn tsx ENOENT`になる。
+# prisma db seed は内部で tsx ../prisma/seed.ts を子プロセスとして spawn するため、PATH に無いと spawn tsx ENOENT になる。
 export PATH="/app/crawler/node_modules/.bin:$PATH"
 
 # `docker compose run crawler <command>` passes <command> as $@; without this, the

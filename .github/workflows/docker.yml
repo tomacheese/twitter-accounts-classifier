@@ -101,8 +101,8 @@ jobs:
   docker-size-check:
     name: Docker image size check
     needs: approval-gate
-    # pull_requestイベント側ではapproval-gateのEnvironment承認が発生しないため、
-    # fork PRのDockerfileでビルドが自動実行されないようpull_request_targetのみで動かす。
+    # pull_request イベント側では approval-gate の Environment 承認が発生しないため、
+    # fork PR の Dockerfile でビルドが自動実行されないよう pull_request_target のみで動かす。
     if: github.event_name == 'pull_request_target' && needs.approval-gate.result == 'success' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
@@ -111,9 +111,12 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # pull_request_targetは既定でbase branchをcheckoutするため、
-          # PRの実際の変更内容を計測するためhead SHAを明示する。
+          # pull_request_target は既定で base branch を checkout するため、
+          # PR の実際の変更内容を計測するため head SHA を明示する。
           ref: ${{ github.event.pull_request.head.sha }}
+          # このジョブは git 操作を行わないため、fork PR のコードが同じ build context に
+          # 含まれる credential を読み取れないよう永続化を無効化する。
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -125,7 +128,7 @@ jobs:
           {
             echo "## Docker image size (amd64, uncompressed)"
             echo ""
-            echo "PR の変更を反映した image を amd64 のみでローカルビルドした際の uncompressed size (\`docker image inspect\`)。GHCR 上の compressed size は merge 後に確認する。"
+            echo "PR の変更を反映した image を amd64 のみでローカルビルドした際の uncompressed size (\`docker images\`)。GHCR 上の compressed size は merge 後に確認する。"
             echo ""
             echo "| service | Dockerfile | size |"
             echo "| --- | --- | ---: |"
@@ -141,8 +144,9 @@ jobs:
             file="${targets[$name]}"
             tag="docker-size-check-${name}:latest"
             docker buildx build --load --build-arg TARGETARCH=amd64 -f "$file" -t "$tag" .
-            bytes=$(docker image inspect "$tag" --format='{{.Size}}')
-            human=$(numfmt --to=iec --suffix=B "$bytes")
+            # docker image inspect の Size は containerd snapshotter 環境で共有 layer を除いた過小な値を返すため、
+            # docker images の表示サイズを使う。
+            human=$(docker images "$tag" --format '{{.Size}}')
             echo "| $name | $file | $human |" >> size-report.md
             docker rmi "$tag"
           done
