@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   AccountClassificationEntryView,
   AccountLabelChangeView,
-  AccountRelationView,
 } from '@/lib/queries/account-subviews'
 
 const { useRouterMock, usePathnameMock, useSearchParamsMock } = vi.hoisted(() => ({
@@ -254,19 +253,148 @@ describe('HistoryView', () => {
 
 describe('RelationsView', () => {
   it('counterpartScreenName をリンク文字列に表示し、リンク先は counterpartAccountId のままにする', () => {
-    const entries: AccountRelationView[] = [
-      {
-        blockId: 'block-1',
-        direction: 'blocker',
-        counterpartAccountId: 'account-2',
-        counterpartScreenName: 'bob',
-        status: 'active',
-      },
-    ]
-
-    render(<RelationsView entries={entries} />)
+    render(
+      <RelationsView
+        items={[
+          {
+            blockId: 'block-1',
+            direction: 'blocker',
+            counterpartAccountId: 'account-2',
+            counterpartScreenName: 'bob',
+            status: 'active',
+          },
+        ]}
+        totalCount={1}
+        hasMore={false}
+        onLoadMore={() => {}}
+        loadingMore={false}
+      />,
+    )
 
     const link = screen.getByRole('link', { name: 'bob' })
     expect(link.getAttribute('href')).toBe('/accounts/account-2')
+  })
+
+  it('表示中件数と総件数を表示する', () => {
+    render(
+      <RelationsView
+        items={[
+          {
+            blockId: 'block-1',
+            direction: 'blocker',
+            counterpartAccountId: 'account-2',
+            counterpartScreenName: 'bob',
+            status: 'active',
+          },
+        ]}
+        totalCount={2005}
+        hasMore={true}
+        onLoadMore={() => {}}
+        loadingMore={false}
+      />,
+    )
+
+    expect(screen.getByText(/1.*2005/)).not.toBeNull()
+  })
+
+  it('hasMore が true の間だけ Load more ボタンを表示する', () => {
+    const { rerender } = render(
+      <RelationsView
+        items={[]}
+        totalCount={0}
+        hasMore={true}
+        onLoadMore={() => {}}
+        loadingMore={false}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Load more' })).not.toBeNull()
+
+    rerender(
+      <RelationsView
+        items={[]}
+        totalCount={0}
+        hasMore={false}
+        onLoadMore={() => {}}
+        loadingMore={false}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
+  })
+
+  it('Load more ボタンをクリックすると onLoadMore を呼ぶ', () => {
+    const onLoadMore = vi.fn()
+    render(
+      <RelationsView
+        items={[]}
+        totalCount={0}
+        hasMore={true}
+        onLoadMore={onLoadMore}
+        loadingMore={false}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+
+    expect(onLoadMore).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('AccountSubviewTabs (relations タブの追加取得)', () => {
+  it('Load more をクリックすると次ページを取得して既存 items に連結する', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams())
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => ({
+          data: {
+            items: [
+              {
+                blockId: 'block-1',
+                direction: 'blocker',
+                counterpartAccountId: 'account-2',
+                counterpartScreenName: 'bob',
+                status: 'active',
+              },
+            ],
+            nextCursor: 'cursor-1',
+            totalCount: 2,
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => ({
+          data: {
+            items: [
+              {
+                blockId: 'block-2',
+                direction: 'blocked',
+                counterpartAccountId: 'account-3',
+                counterpartScreenName: 'carol',
+                status: 'active',
+              },
+            ],
+            nextCursor: null,
+            totalCount: 2,
+          },
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AccountSubviewTabs accountId="account-1" />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Relations' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'bob' })).not.toBeNull()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'carol' })).not.toBeNull()
+    })
+    expect(screen.getByRole('link', { name: 'bob' })).not.toBeNull()
+    expect(fetchMock.mock.calls[1][0]).toContain('cursor=cursor-1')
   })
 })
