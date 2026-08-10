@@ -53,6 +53,21 @@ describe('startOrResumeBlockRun', () => {
         staleAfterAt: new Date(startedAt.getTime() + 3_600_000),
       },
     })
+    expect(prisma.analysisWorkItem.upsert).toHaveBeenCalledWith({
+      where: {
+        kind_triggerType_triggerId: {
+          kind: 'operation_cycle_refresh',
+          triggerType: 'block_run',
+          triggerId: 'run-1',
+        },
+      },
+      create: {
+        kind: 'operation_cycle_refresh',
+        triggerType: 'block_run',
+        triggerId: 'run-1',
+      },
+      update: {},
+    })
   })
 
   it('resumes the existing running BlockRun when its heartbeat is not stale', async () => {
@@ -93,6 +108,7 @@ describe('startOrResumeBlockRun', () => {
       select: { username: true },
       distinct: ['username'],
     })
+    expect(prisma.analysisWorkItem.upsert).not.toHaveBeenCalled()
   })
 
   it('finalizes a stale running BlockRun as failed and creates a new one', async () => {
@@ -117,6 +133,21 @@ describe('startOrResumeBlockRun', () => {
         status: 'running',
         staleAfterAt: new Date(startedAt.getTime() + 3_600_000),
       },
+    })
+    expect(prisma.analysisWorkItem.upsert).toHaveBeenCalledWith({
+      where: {
+        kind_triggerType_triggerId: {
+          kind: 'operation_cycle_refresh',
+          triggerType: 'block_run',
+          triggerId: 'run-1',
+        },
+      },
+      create: {
+        kind: 'operation_cycle_refresh',
+        triggerType: 'block_run',
+        triggerId: 'run-1',
+      },
+      update: {},
     })
     expect(result).toEqual({ id: 'run-1', completedUsernames: [] })
   })
