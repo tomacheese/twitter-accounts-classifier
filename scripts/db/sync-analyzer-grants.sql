@@ -4,6 +4,8 @@
 -- Block, BlockRun, BlockAccountRun, BlockAction, LabelDefinition, LabelingFollowSample)
 -- は書き込ませない。
 
+BEGIN;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'analyzer') THEN
@@ -59,3 +61,5 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT ON TABLES TO analyzer;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE ALL PRIVILEGES ON SEQUENCES FROM analyzer;
+
+COMMIT;

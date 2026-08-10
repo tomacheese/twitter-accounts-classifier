@@ -2,6 +2,8 @@
 -- Prisma migration を実行するテーブル所有者ロールで、migration 後に毎回実行する。
 -- 方針: public の全テーブルを読める。write は ComponentBuildIdentity の INSERT/UPDATE のみ許可する。
 
+BEGIN;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'viewer') THEN
@@ -42,3 +44,5 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT ON TABLES TO viewer;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE ALL PRIVILEGES ON SEQUENCES FROM viewer;
+
+COMMIT;

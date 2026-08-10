@@ -101,3 +101,31 @@ psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$REPO_ROOT/scripts/db/sync-weekly-re
 test "$(analysis_work_item_privileges)" = "true:true:false:false"
 
 psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "DROP OWNED BY weekly_review; DROP ROLE weekly_review"
+
+# viewer/analyzer の grant sync が途中で失敗しても、REVOKE 済みの中間 ACL を公開しないことを検証する。
+assert_atomic_grant_sync() {
+  local role="$1"
+  local sync_sql="$2"
+  local probe_table="$3"
+  local probe_privilege="$4"
+  local interrupted_sync_sql
+  interrupted_sync_sql="$(mktemp)"
+  trap 'rm -f "$interrupted_sync_sql"' RETURN
+
+  psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c \
+    "GRANT ${probe_privilege} ON TABLE \"${probe_table}\" TO ${role}" >/dev/null
+
+  sed '/^COMMIT;$/i SELECT 1 / 0;' "$sync_sql" > "$interrupted_sync_sql"
+  if psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$interrupted_sync_sql" >/dev/null 2>&1; then
+    echo "${role} grant sync must fail at the injected error" >&2
+    exit 1
+  fi
+
+  test "$(psql -At "$DATABASE_URL" -c "SELECT has_table_privilege('${role}', 'public.\"${probe_table}\"', '${probe_privilege}')::text")" = "true"
+
+  psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$sync_sql" >/dev/null
+  test "$(psql -At "$DATABASE_URL" -c "SELECT has_table_privilege('${role}', 'public.\"${probe_table}\"', '${probe_privilege}')::text")" = "false"
+}
+
+assert_atomic_grant_sync viewer "$REPO_ROOT/scripts/db/sync-viewer-grants.sql" Account DELETE
+assert_atomic_grant_sync analyzer "$REPO_ROOT/scripts/db/sync-analyzer-grants.sql" Account UPDATE
