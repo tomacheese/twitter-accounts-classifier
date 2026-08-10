@@ -166,11 +166,15 @@ export async function touchAccountSummaryLatestState(
       status: 'healthy',
       sourceWatermarkAt,
       lastSuccessAt: new Date(),
+      errorCode: null,
+      errorSummary: null,
     },
     update: {
       status: 'healthy',
       sourceWatermarkAt,
       lastSuccessAt: new Date(),
+      errorCode: null,
+      errorSummary: null,
     },
   })
 }

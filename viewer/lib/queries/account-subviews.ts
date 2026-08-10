@@ -1,15 +1,7 @@
 import type { PrismaClient } from '../../generated/prisma'
-
-const MODEL_KEY = 'account_summary'
-
-/**
- * @param prisma - Prisma クライアント
- * @returns account_summary read model の現在の generationId
- */
-async function getCurrentGenerationId(prisma: PrismaClient): Promise<string | null> {
-  const pointer = await prisma.readModelPointer.findUnique({ where: { modelKey: MODEL_KEY } })
-  return pointer?.currentGenerationId ?? null
-}
+import type { ReadModelFreshnessStatus } from '../api-response'
+import { getReadModelMeta } from '../read-model-meta'
+import { decodeCursor, encodeCursor } from '../pagination/keyset-cursor'
 
 /** Account 詳細の Overview subview。 */
 export interface AccountOverviewView {
@@ -29,6 +21,7 @@ export interface AccountOverviewView {
 
 /**
  * タブ切り替え時ではなく初期表示に含める唯一の subview。
+ * Accounts 一覧・Global Search と同じ AccountSummaryLatest を参照する。
  * @param prisma - Prisma クライアント
  * @param accountId - 対象アカウント ID
  * @returns Overview subview のデータ。Account が存在しなければ null
@@ -40,12 +33,7 @@ export async function getAccountOverview(
   const account = await prisma.account.findUnique({ where: { id: accountId } })
   if (!account) return null
 
-  const generationId = await getCurrentGenerationId(prisma)
-  const summary = generationId
-    ? await prisma.accountSummaryCurrent.findUnique({
-        where: { generationId_accountId: { generationId, accountId } },
-      })
-    : null
+  const summary = await prisma.accountSummaryLatest.findUnique({ where: { accountId } })
 
   return {
     accountId: account.id,
@@ -75,29 +63,34 @@ export interface AccountClassificationEntryView {
 /**
  * @param prisma - Prisma クライアント
  * @param accountId - 対象アカウント ID
- * @returns 現在の generation における全ラベルの分類結果
+ * @returns AccountClassificationLatest における全ラベルの分類結果
  */
 export async function getAccountClassification(
   prisma: PrismaClient,
   accountId: string,
 ): Promise<AccountClassificationEntryView[]> {
-  const generationId = await getCurrentGenerationId(prisma)
-  if (!generationId) return []
-
-  const rows = await prisma.accountClassificationCurrent.findMany({
-    where: { generationId, accountId },
-  })
+  const rows = await prisma.accountClassificationLatest.findMany({ where: { accountId } })
   const labelDefinitions = await prisma.labelDefinition.findMany({
     where: { id: { in: rows.map((row) => row.labelDefinitionId) } },
   })
   const keyById = new Map(labelDefinitions.map((label) => [label.id, label.key]))
+
+  // observedAt はクロールごとに更新されるため、真の変化時刻には AccountLabelChange を使う。
+  const latestChanges = await prisma.accountLabelChange.groupBy({
+    by: ['labelDefinitionId'],
+    where: { accountId },
+    _max: { changedAt: true },
+  })
+  const lastChangedAtByLabel = new Map(
+    latestChanges.map((change) => [change.labelDefinitionId, change._max.changedAt]),
+  )
 
   return rows.map((row) => ({
     labelKey: keyById.get(row.labelDefinitionId) ?? row.labelDefinitionId,
     value: row.value,
     confidence: row.confidence,
     reason: row.reason,
-    lastChangedAt: row.lastChangedAt,
+    lastChangedAt: lastChangedAtByLabel.get(row.labelDefinitionId) ?? new Date(0),
   }))
 }
 
@@ -144,22 +137,67 @@ export interface AccountRelationView {
   status: string
 }
 
-const RELATION_LIMIT = 50
+/** getAccountRelations のページング入力。 */
+export interface GetAccountRelationsOptions {
+  cursor?: string
+  limit?: number
+}
+
+/** getAccountRelations の返り値。 */
+export interface ListAccountRelationsResult {
+  items: AccountRelationView[]
+  nextCursor: string | null
+  /** 先頭ページのみ算出する。2 ページ目以降の Load more では再計算しない。 */
+  totalCount: number | undefined
+}
+
+const DEFAULT_RELATION_LIMIT = 25
+const MAX_RELATION_LIMIT = 100
 
 /**
  * @param prisma - Prisma クライアント
  * @param accountId - 対象アカウント ID
- * @returns このアカウントが関与する Block 関係
+ * @param options - cursor・limit によるページング指定
+ * @returns このアカウントが関与する Block 関係の 1 ページと総件数
  */
 export async function getAccountRelations(
   prisma: PrismaClient,
   accountId: string,
-): Promise<AccountRelationView[]> {
-  const blocks = await prisma.block.findMany({
-    where: { OR: [{ blockerId: accountId }, { blockedId: accountId }] },
-    take: RELATION_LIMIT,
-  })
-  const counterpartIds = blocks.map((block) =>
+  options: GetAccountRelationsOptions = {},
+): Promise<ListAccountRelationsResult> {
+  const accountFilter = { OR: [{ blockerId: accountId }, { blockedId: accountId }] }
+  const limit = Math.min(options.limit ?? DEFAULT_RELATION_LIMIT, MAX_RELATION_LIMIT)
+  const filterHash = JSON.stringify({ accountId })
+  const cursorValues = options.cursor ? decodeCursor(options.cursor, filterHash) : null
+
+  const cursorFilter =
+    cursorValues && cursorValues.length >= 2
+      ? {
+          OR: [
+            { firstSeenAt: { lt: new Date(cursorValues[0]) } },
+            { firstSeenAt: new Date(cursorValues[0]), id: { lt: cursorValues[1] } },
+          ],
+        }
+      : null
+
+  const [blocks, totalCount] = await Promise.all([
+    prisma.block.findMany({
+      where: cursorFilter ? { AND: [accountFilter, cursorFilter] } : accountFilter,
+      orderBy: [{ firstSeenAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+    }),
+    cursorFilter ? Promise.resolve(undefined) : prisma.block.count({ where: accountFilter }),
+  ])
+
+  const hasMore = blocks.length > limit
+  const page = hasMore ? blocks.slice(0, limit) : blocks
+  const last = page.at(-1)
+  const nextCursor =
+    hasMore && last
+      ? encodeCursor({ sortValues: [last.firstSeenAt.toISOString(), last.id], filterHash })
+      : null
+
+  const counterpartIds = page.map((block) =>
     block.blockerId === accountId ? block.blockedId : block.blockerId,
   )
   const counterparts = await prisma.account.findMany({
@@ -167,7 +205,7 @@ export async function getAccountRelations(
   })
   const screenNameById = new Map(counterparts.map((account) => [account.id, account.screenName]))
 
-  return blocks.map((block) => {
+  const items: AccountRelationView[] = page.map((block) => {
     const counterpartAccountId = block.blockerId === accountId ? block.blockedId : block.blockerId
     return {
       blockId: block.id,
@@ -177,6 +215,8 @@ export async function getAccountRelations(
       status: block.status,
     }
   })
+
+  return { items, nextCursor, totalCount }
 }
 
 /** ラベル変化履歴の 1 件。 */
@@ -226,10 +266,12 @@ export interface AccountTechnicalView {
   firstSeenAt: Date
   lastCrawledAt: Date
   updatedAt: Date
-  generationId: string | null
+  freshnessStatus: ReadModelFreshnessStatus
+  sourceWatermarkAt: Date | null
 }
 
 /**
+ * account_summary_latest は generation を持たないため、generationId ではなく freshness/watermark を表示する。
  * @param prisma - Prisma クライアント
  * @param accountId - 対象アカウント ID
  * @returns デバッグ・技術情報。Account が存在しなければ null
@@ -241,13 +283,14 @@ export async function getAccountTechnical(
   const account = await prisma.account.findUnique({ where: { id: accountId } })
   if (!account) return null
 
-  const generationId = await getCurrentGenerationId(prisma)
+  const meta = await getReadModelMeta(prisma, 'account_summary_latest')
 
   return {
     accountId: account.id,
     firstSeenAt: account.firstSeenAt,
     lastCrawledAt: account.lastCrawledAt,
     updatedAt: account.updatedAt,
-    generationId,
+    freshnessStatus: meta.freshnessStatus,
+    sourceWatermarkAt: meta.sourceDataAt,
   }
 }

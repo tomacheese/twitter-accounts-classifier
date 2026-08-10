@@ -10,6 +10,7 @@ import type {
   AccountLabelChangeView,
   AccountRelationView,
   AccountTechnicalView,
+  ListAccountRelationsResult,
 } from '@/lib/queries/account-subviews'
 
 /** タブ切り替えで遅延取得する subview の一覧。 */
@@ -39,7 +40,7 @@ function isLazySubviewKey(value: string | null): value is LazySubviewKey {
 export interface SubviewDataByKey {
   classification: AccountClassificationEntryView[]
   evidence: AccountEvidenceView[]
-  relations: AccountRelationView[]
+  relations: ListAccountRelationsResult
   history: AccountLabelChangeView[]
   technical: AccountTechnicalView
 }
@@ -176,30 +177,64 @@ function EvidenceView({ entries }: { entries: AccountEvidenceView[] }): React.Re
 }
 
 /**
- * @param entries - Relations subview のデータ
+ * @param props - 表示する relation・総件数・追加取得の状態
  * @returns 描画結果
  */
-export function RelationsView({ entries }: { entries: AccountRelationView[] }): React.ReactElement {
-  if (entries.length === 0) return <EmptyState message="No block relation recorded." />
+export function RelationsView({
+  items,
+  totalCount,
+  hasMore,
+  onLoadMore,
+  loadingMore,
+  loadMoreError = false,
+}: {
+  items: AccountRelationView[]
+  totalCount: number | undefined
+  hasMore: boolean
+  onLoadMore: () => void
+  loadingMore: boolean
+  loadMoreError?: boolean
+}): React.ReactElement {
+  if (items.length === 0 && !hasMore) return <EmptyState message="No block relation recorded." />
   return (
-    <ul className="flex flex-col gap-2">
-      {entries.map((entry) => (
-        <li
-          key={entry.blockId}
-          className="rounded-lg border bg-white p-3 text-sm shadow-sm dark:border-gray-700 dark:bg-gray-800"
-        >
-          <Link
-            href={`/accounts/${entry.counterpartAccountId}`}
-            className="text-blue-600 hover:underline dark:text-blue-400"
+    <div className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-2">
+        {items.map((entry) => (
+          <li
+            key={entry.blockId}
+            className="rounded-lg border bg-white p-3 text-sm shadow-sm dark:border-gray-700 dark:bg-gray-800"
           >
-            {entry.counterpartScreenName}
-          </Link>{' '}
-          <span className="text-gray-500 dark:text-gray-400">
-            {entry.direction} · {entry.status}
-          </span>
-        </li>
-      ))}
-    </ul>
+            <Link
+              href={`/accounts/${entry.counterpartAccountId}`}
+              className="text-blue-600 hover:underline dark:text-blue-400"
+            >
+              {entry.counterpartScreenName}
+            </Link>{' '}
+            <span className="text-gray-500 dark:text-gray-400">
+              {entry.direction} · {entry.status}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-gray-400 dark:text-gray-500">
+        {totalCount === undefined
+          ? `Showing ${items.length}`
+          : `Showing ${items.length} of ${totalCount}`}
+      </p>
+      {loadMoreError && (
+        <p className="text-xs text-red-600 dark:text-red-400">Failed to load more.</p>
+      )}
+      {hasMore && (
+        <button
+          type="button"
+          onClick={onLoadMore}
+          disabled={loadingMore}
+          className="self-start rounded border px-3 py-1 text-sm text-blue-600 hover:underline disabled:opacity-50 dark:border-gray-700 dark:text-blue-400"
+        >
+          Load more
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -246,8 +281,10 @@ function TechnicalView({ data }: { data: AccountTechnicalView }): React.ReactEle
       <dd>{formatDateTime(data.lastCrawledAt)}</dd>
       <dt className="text-gray-500 dark:text-gray-400">Updated at</dt>
       <dd>{formatDateTime(data.updatedAt)}</dd>
-      <dt className="text-gray-500 dark:text-gray-400">Read model generation</dt>
-      <dd>{data.generationId ?? '—'}</dd>
+      <dt className="text-gray-500 dark:text-gray-400">Read model freshness</dt>
+      <dd>{data.freshnessStatus}</dd>
+      <dt className="text-gray-500 dark:text-gray-400">Source watermark</dt>
+      <dd>{data.sourceWatermarkAt ? formatDateTime(data.sourceWatermarkAt) : '—'}</dd>
     </dl>
   )
 }
@@ -259,9 +296,15 @@ function TechnicalView({ data }: { data: AccountTechnicalView }): React.ReactEle
 function SubviewContent({
   activeTab,
   cache,
+  onLoadMoreRelations,
+  loadingMoreRelations,
+  loadMoreRelationsError,
 }: {
   activeTab: LazySubviewKey
   cache: Partial<SubviewDataByKey>
+  onLoadMoreRelations: () => void
+  loadingMoreRelations: boolean
+  loadMoreRelationsError: boolean
 }): React.ReactElement | null {
   switch (activeTab) {
     case 'classification': {
@@ -274,7 +317,16 @@ function SubviewContent({
     }
     case 'relations': {
       const data = cache.relations
-      return data ? <RelationsView entries={data} /> : null
+      return data ? (
+        <RelationsView
+          items={data.items}
+          totalCount={data.totalCount}
+          hasMore={data.nextCursor !== null}
+          onLoadMore={onLoadMoreRelations}
+          loadingMore={loadingMoreRelations}
+          loadMoreError={loadMoreRelationsError}
+        />
+      ) : null
     }
     case 'history': {
       const data = cache.history
@@ -311,6 +363,8 @@ export function AccountSubviewTabs({ accountId }: AccountSubviewTabsProps): Reac
   const [cache, setCache] = useState<Partial<SubviewDataByKey>>({})
   const [loadingTab, setLoadingTab] = useState<LazySubviewKey | null>(null)
   const [errorTab, setErrorTab] = useState<LazySubviewKey | null>(null)
+  const [loadingMoreRelations, setLoadingMoreRelations] = useState(false)
+  const [loadMoreRelationsError, setLoadMoreRelationsError] = useState(false)
 
   const fetchTab = (tab: LazySubviewKey): void => {
     setLoadingTab(tab)
@@ -344,6 +398,38 @@ export function AccountSubviewTabs({ accountId }: AccountSubviewTabsProps): Reac
     if (initialTab) fetchTab(initialTab)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const loadMoreRelations = (): void => {
+    const current = cache.relations
+    if (!current?.nextCursor || loadingMoreRelations) return
+    setLoadingMoreRelations(true)
+    setLoadMoreRelationsError(false)
+    fetch(
+      `${buildSubviewUrl(accountId, 'relations')}?cursor=${encodeURIComponent(current.nextCursor)}`,
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Unexpected status: ${String(response.status)}`)
+        const body = (await response.json()) as { data: SubviewDataByKey['relations'] }
+        setCache((previous) => {
+          const previousRelations = previous.relations
+          if (!previousRelations) return previous
+          return {
+            ...previous,
+            relations: {
+              items: [...previousRelations.items, ...body.data.items],
+              nextCursor: body.data.nextCursor,
+              totalCount: body.data.totalCount ?? previousRelations.totalCount,
+            },
+          }
+        })
+      })
+      .catch(() => {
+        setLoadMoreRelationsError(true)
+      })
+      .finally(() => {
+        setLoadingMoreRelations(false)
+      })
+  }
 
   const selectTab = (tab: LazySubviewKey): void => {
     setActiveTab(tab)
@@ -386,7 +472,13 @@ export function AccountSubviewTabs({ accountId }: AccountSubviewTabsProps): Reac
         <p className="text-sm text-red-600 dark:text-red-400">Failed to load this section.</p>
       )}
       {activeTab && loadingTab !== activeTab && errorTab !== activeTab && (
-        <SubviewContent activeTab={activeTab} cache={cache} />
+        <SubviewContent
+          activeTab={activeTab}
+          cache={cache}
+          onLoadMoreRelations={loadMoreRelations}
+          loadingMoreRelations={loadingMoreRelations}
+          loadMoreRelationsError={loadMoreRelationsError}
+        />
       )}
     </div>
   )

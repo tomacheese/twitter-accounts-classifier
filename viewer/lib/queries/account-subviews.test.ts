@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
+import { encodeCursor } from '../pagination/keyset-cursor'
 import {
   getAccountClassification,
   getAccountEvidence,
@@ -12,33 +13,43 @@ import {
 interface MockData {
   pointer?: unknown
   account?: unknown
-  summary?: unknown
+  summaryLatest?: unknown
   classifications?: unknown[]
+  classificationLastChanges?: unknown[]
   labelDefinitions?: unknown[]
   findings?: unknown[]
   blocks?: unknown[]
+  blockCount?: number
   counterparts?: unknown[]
   changes?: unknown[]
+  readModelState?: unknown
 }
 
 function createMockPrisma(data: MockData) {
   const blockFindMany = vi.fn().mockResolvedValue(data.blocks ?? [])
+  const blockCount = vi.fn().mockResolvedValue(data.blockCount ?? data.blocks?.length ?? 0)
+  const readModelPointerFindUnique = vi.fn().mockResolvedValue(data.pointer ?? null)
   const prisma = {
-    readModelPointer: { findUnique: vi.fn().mockResolvedValue(data.pointer ?? null) },
+    readModelPointer: { findUnique: readModelPointerFindUnique },
     account: {
       findUnique: vi.fn().mockResolvedValue(data.account ?? null),
       findMany: vi.fn().mockResolvedValue(data.counterparts ?? []),
     },
-    accountSummaryCurrent: { findUnique: vi.fn().mockResolvedValue(data.summary ?? null) },
-    accountClassificationCurrent: {
+    accountSummaryLatest: { findUnique: vi.fn().mockResolvedValue(data.summaryLatest ?? null) },
+    accountClassificationLatest: {
       findMany: vi.fn().mockResolvedValue(data.classifications ?? []),
     },
     labelDefinition: { findMany: vi.fn().mockResolvedValue(data.labelDefinitions ?? []) },
     reviewFinding: { findMany: vi.fn().mockResolvedValue(data.findings ?? []) },
-    block: { findMany: blockFindMany },
-    accountLabelChange: { findMany: vi.fn().mockResolvedValue(data.changes ?? []) },
+    block: { findMany: blockFindMany, count: blockCount },
+    accountLabelChange: {
+      findMany: vi.fn().mockResolvedValue(data.changes ?? []),
+      groupBy: vi.fn().mockResolvedValue(data.classificationLastChanges ?? []),
+    },
+    readModelState: { findUnique: vi.fn().mockResolvedValue(data.readModelState ?? null) },
+    detectionPolicyVersion: { findFirst: vi.fn().mockResolvedValue(null) },
   } as unknown as PrismaClient
-  return { prisma, blockFindMany }
+  return { prisma, blockFindMany, blockCount, readModelPointerFindUnique }
 }
 
 const account = {
@@ -61,11 +72,10 @@ describe('getAccountOverview', () => {
     expect(await getAccountOverview(prisma, 'account-1')).toBeNull()
   })
 
-  it('read model の行があればラベル・Finding の集計を重ねる', async () => {
+  it('AccountSummaryLatest の行があればラベル・Finding の集計を重ねる', async () => {
     const { prisma } = createMockPrisma({
       account,
-      pointer: { currentGenerationId: 'generation-1' },
-      summary: {
+      summaryLatest: {
         activeLabelKeys: ['spam'],
         activeFindingCount: 2,
         highestFindingSeverity: 'high',
@@ -84,7 +94,7 @@ describe('getAccountOverview', () => {
     })
   })
 
-  it('ReadModelPointer が無ければ集計値は既定値になる', async () => {
+  it('AccountSummaryLatest に行が無ければ集計値は既定値になる', async () => {
     const { prisma } = createMockPrisma({ account })
 
     const result = await getAccountOverview(prisma, 'account-1')
@@ -96,24 +106,34 @@ describe('getAccountOverview', () => {
       lastClassificationChangedAt: null,
     })
   })
+
+  it('ReadModelPointer(account_summary) を参照しない', async () => {
+    const { prisma, readModelPointerFindUnique } = createMockPrisma({
+      account,
+      summaryLatest: { activeLabelKeys: [] },
+    })
+
+    await getAccountOverview(prisma, 'account-1')
+
+    expect(readModelPointerFindUnique).not.toHaveBeenCalled()
+  })
 })
 
 describe('getAccountClassification', () => {
-  it('ReadModelPointer が無ければ空配列を返す', async () => {
+  it('AccountClassificationLatest に行が無ければ空配列を返す', async () => {
     const { prisma } = createMockPrisma({})
     expect(await getAccountClassification(prisma, 'account-1')).toEqual([])
   })
 
   it('labelDefinitionId を LabelDefinition.key へ解決する', async () => {
     const { prisma } = createMockPrisma({
-      pointer: { currentGenerationId: 'generation-1' },
       classifications: [
         {
           labelDefinitionId: 'label-1',
           value: true,
           confidence: 0.9,
           reason: 'matched',
-          lastChangedAt: new Date('2026-01-01T00:00:00Z'),
+          observedAt: new Date('2026-01-01T00:00:00Z'),
         },
       ],
       labelDefinitions: [{ id: 'label-1', key: 'spam' }],
@@ -124,16 +144,63 @@ describe('getAccountClassification', () => {
     expect(result[0].labelKey).toBe('spam')
   })
 
+  it('AccountLabelChange の最新 changedAt を lastChangedAt として返す (observedAt ではない)', async () => {
+    const observedAt = new Date('2026-08-09T00:00:00Z')
+    const changedAt = new Date('2026-07-01T00:00:00Z')
+    const { prisma } = createMockPrisma({
+      classifications: [
+        {
+          labelDefinitionId: 'label-1',
+          value: true,
+          confidence: 0.9,
+          reason: 'matched',
+          observedAt,
+        },
+      ],
+      labelDefinitions: [{ id: 'label-1', key: 'spam' }],
+      classificationLastChanges: [{ labelDefinitionId: 'label-1', _max: { changedAt } }],
+    })
+
+    const result = await getAccountClassification(prisma, 'account-1')
+
+    expect(result[0].lastChangedAt).toEqual(changedAt)
+  })
+
+  it('AccountLabelChange が存在しないラベルは、直近変化扱いされない古い日時にフォールバックする', async () => {
+    const now = new Date('2026-08-09T00:00:00Z')
+    vi.useFakeTimers().setSystemTime(now)
+    const { prisma } = createMockPrisma({
+      classifications: [
+        {
+          labelDefinitionId: 'label-1',
+          value: false,
+          confidence: 0.5,
+          reason: 'stable',
+          observedAt: now,
+        },
+      ],
+      labelDefinitions: [{ id: 'label-1', key: 'spam' }],
+      classificationLastChanges: [],
+    })
+
+    const result = await getAccountClassification(prisma, 'account-1')
+    vi.useRealTimers()
+
+    const RECENTLY_CHANGED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+    expect(now.getTime() - result[0].lastChangedAt.getTime()).toBeGreaterThan(
+      RECENTLY_CHANGED_WINDOW_MS,
+    )
+  })
+
   it('対応する LabelDefinition が無ければ labelDefinitionId をそのまま返す', async () => {
     const { prisma } = createMockPrisma({
-      pointer: { currentGenerationId: 'generation-1' },
       classifications: [
         {
           labelDefinitionId: 'label-missing',
           value: false,
           confidence: 0.1,
           reason: 'no match',
-          lastChangedAt: new Date('2026-01-01T00:00:00Z'),
+          observedAt: new Date('2026-01-01T00:00:00Z'),
         },
       ],
       labelDefinitions: [],
@@ -142,6 +209,14 @@ describe('getAccountClassification', () => {
     const result = await getAccountClassification(prisma, 'account-1')
 
     expect(result[0].labelKey).toBe('label-missing')
+  })
+
+  it('ReadModelPointer(account_summary) を参照しない', async () => {
+    const { prisma, readModelPointerFindUnique } = createMockPrisma({ classifications: [] })
+
+    await getAccountClassification(prisma, 'account-1')
+
+    expect(readModelPointerFindUnique).not.toHaveBeenCalled()
   })
 })
 
@@ -168,8 +243,20 @@ describe('getAccountRelations', () => {
   it('自分が blocker 側か blocked 側かで direction と相手を切り替える', async () => {
     const { prisma } = createMockPrisma({
       blocks: [
-        { id: 'block-1', blockerId: 'account-1', blockedId: 'account-2', status: 'active' },
-        { id: 'block-2', blockerId: 'account-3', blockedId: 'account-1', status: 'missing' },
+        {
+          id: 'block-1',
+          blockerId: 'account-1',
+          blockedId: 'account-2',
+          status: 'active',
+          firstSeenAt: new Date('2026-01-02T00:00:00Z'),
+        },
+        {
+          id: 'block-2',
+          blockerId: 'account-3',
+          blockedId: 'account-1',
+          status: 'missing',
+          firstSeenAt: new Date('2026-01-01T00:00:00Z'),
+        },
       ],
       counterparts: [
         { id: 'account-2', screenName: 'bob' },
@@ -179,7 +266,7 @@ describe('getAccountRelations', () => {
 
     const result = await getAccountRelations(prisma, 'account-1')
 
-    expect(result).toEqual([
+    expect(result.items).toEqual([
       {
         blockId: 'block-1',
         direction: 'blocker',
@@ -199,33 +286,92 @@ describe('getAccountRelations', () => {
 
   it('counterpart の screenName を解決する', async () => {
     const { prisma } = createMockPrisma({
-      blocks: [{ id: 'block-1', blockerId: 'account-1', blockedId: 'account-2', status: 'active' }],
+      blocks: [
+        {
+          id: 'block-1',
+          blockerId: 'account-1',
+          blockedId: 'account-2',
+          status: 'active',
+          firstSeenAt: new Date('2026-01-01T00:00:00Z'),
+        },
+      ],
       counterparts: [{ id: 'account-2', screenName: 'bob' }],
     })
 
     const result = await getAccountRelations(prisma, 'account-1')
 
-    expect(result[0].counterpartScreenName).toBe('bob')
+    expect(result.items[0].counterpartScreenName).toBe('bob')
   })
 
   it('対応する Account が無ければ counterpartAccountId をそのまま使う', async () => {
     const { prisma } = createMockPrisma({
-      blocks: [{ id: 'block-1', blockerId: 'account-1', blockedId: 'account-2', status: 'active' }],
+      blocks: [
+        {
+          id: 'block-1',
+          blockerId: 'account-1',
+          blockedId: 'account-2',
+          status: 'active',
+          firstSeenAt: new Date('2026-01-01T00:00:00Z'),
+        },
+      ],
       counterparts: [],
     })
 
     const result = await getAccountRelations(prisma, 'account-1')
 
-    expect(result[0].counterpartScreenName).toBe('account-2')
+    expect(result.items[0].counterpartScreenName).toBe('account-2')
   })
 
-  it('取得件数に上限を設ける', async () => {
-    const { prisma, blockFindMany } = createMockPrisma({ blocks: [] })
+  it('既定の limit は 25 件で、51 件のうち先頭ページを返し nextCursor を設定する', async () => {
+    const blocks = Array.from({ length: 26 }, (_, i) => ({
+      id: `block-${i}`,
+      blockerId: 'account-1',
+      blockedId: `account-x${i}`,
+      status: 'active',
+      firstSeenAt: new Date(2026, 0, 26 - i),
+    }))
+    const { prisma, blockFindMany } = createMockPrisma({ blocks, blockCount: 51 })
 
-    await getAccountRelations(prisma, 'account-1')
+    const result = await getAccountRelations(prisma, 'account-1')
 
-    const call = blockFindMany.mock.calls[0][0] as { take: number }
-    expect(call.take).toBe(50)
+    expect(blockFindMany.mock.calls[0][0]).toMatchObject({ take: 26 })
+    expect(result.items).toHaveLength(25)
+    expect(result.nextCursor).not.toBeNull()
+    expect(result.totalCount).toBe(51)
+  })
+
+  it('cursor を渡すと firstSeenAt/id より後ろの行を対象にする', async () => {
+    const { prisma, blockFindMany } = createMockPrisma({ blocks: [], blockCount: 0 })
+    const cursor = encodeCursor({
+      sortValues: ['2026-01-01T00:00:00.000Z', 'block-25'],
+      filterHash: JSON.stringify({ accountId: 'account-1' }),
+    })
+
+    await getAccountRelations(prisma, 'account-1', { cursor })
+
+    const call = blockFindMany.mock.calls[0][0] as { where: { AND: unknown[] } }
+    expect(call.where.AND).toHaveLength(2)
+  })
+
+  it('limit を指定すればその件数まで取得する', async () => {
+    const { prisma, blockFindMany } = createMockPrisma({ blocks: [], blockCount: 0 })
+
+    await getAccountRelations(prisma, 'account-1', { limit: 10 })
+
+    expect(blockFindMany.mock.calls[0][0]).toMatchObject({ take: 11 })
+  })
+
+  it('cursor 指定時は block.count を呼ばず totalCount は undefined になる', async () => {
+    const { prisma, blockCount } = createMockPrisma({ blocks: [], blockCount: 0 })
+    const cursor = encodeCursor({
+      sortValues: ['2026-01-01T00:00:00.000Z', 'block-25'],
+      filterHash: JSON.stringify({ accountId: 'account-1' }),
+    })
+
+    const result = await getAccountRelations(prisma, 'account-1', { cursor })
+
+    expect(blockCount).not.toHaveBeenCalled()
+    expect(result.totalCount).toBeUndefined()
   })
 })
 
@@ -286,14 +432,35 @@ describe('getAccountTechnical', () => {
     expect(await getAccountTechnical(prisma, 'account-1')).toBeNull()
   })
 
-  it('現在の generationId を併せて返す', async () => {
+  it('account_summary_latest の freshness/watermark を併せて返す', async () => {
+    // reconcileFreshness は lastSuccessAt からの経過時間でも degrade させるため、
+    // 「healthy かつ degrade されない」ことを確認するには直近の時刻を使う必要がある。
+    const sourceWatermarkAt = new Date('2026-01-04T00:00:00Z')
     const { prisma } = createMockPrisma({
       account,
-      pointer: { currentGenerationId: 'generation-1' },
+      readModelState: {
+        status: 'healthy',
+        lastSuccessAt: new Date(),
+        sourceWatermarkAt,
+        currentGenerationId: null,
+        policyHash: null,
+      },
     })
 
     const result = await getAccountTechnical(prisma, 'account-1')
 
-    expect(result).toMatchObject({ accountId: 'account-1', generationId: 'generation-1' })
+    expect(result).toMatchObject({
+      accountId: 'account-1',
+      freshnessStatus: 'healthy',
+      sourceWatermarkAt,
+    })
+  })
+
+  it('account_summary_latest が未記録なら freshnessStatus は unknown になる', async () => {
+    const { prisma } = createMockPrisma({ account })
+
+    const result = await getAccountTechnical(prisma, 'account-1')
+
+    expect(result).toMatchObject({ freshnessStatus: 'unknown', sourceWatermarkAt: null })
   })
 })

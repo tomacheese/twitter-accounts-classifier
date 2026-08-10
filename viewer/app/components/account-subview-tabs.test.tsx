@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   AccountClassificationEntryView,
   AccountLabelChangeView,
-  AccountRelationView,
 } from '@/lib/queries/account-subviews'
 
 const { useRouterMock, usePathnameMock, useSearchParamsMock } = vi.hoisted(() => ({
@@ -119,6 +118,35 @@ describe('AccountSubviewTabs (classification タブの取得)', () => {
   })
 })
 
+describe('AccountSubviewTabs (technical タブの取得)', () => {
+  it('freshnessStatus と sourceWatermarkAt を表示する', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams())
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => ({
+          data: {
+            accountId: 'account-1',
+            firstSeenAt: '2026-01-01T00:00:00.000Z',
+            lastCrawledAt: '2026-01-02T00:00:00.000Z',
+            updatedAt: '2026-01-03T00:00:00.000Z',
+            freshnessStatus: 'healthy',
+            sourceWatermarkAt: '2026-01-04T00:00:00.000Z',
+          },
+        }),
+      }),
+    )
+
+    render(<AccountSubviewTabs accountId="account-1" />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Technical' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('healthy')).not.toBeNull()
+    })
+  })
+})
+
 describe('ClassificationView', () => {
   it('Active → Recently changed (7 日以内) → Remaining false の順に表示する', () => {
     const now = new Date('2026-08-09T00:00:00.000Z')
@@ -225,19 +253,213 @@ describe('HistoryView', () => {
 
 describe('RelationsView', () => {
   it('counterpartScreenName をリンク文字列に表示し、リンク先は counterpartAccountId のままにする', () => {
-    const entries: AccountRelationView[] = [
-      {
-        blockId: 'block-1',
-        direction: 'blocker',
-        counterpartAccountId: 'account-2',
-        counterpartScreenName: 'bob',
-        status: 'active',
-      },
-    ]
-
-    render(<RelationsView entries={entries} />)
+    render(
+      <RelationsView
+        items={[
+          {
+            blockId: 'block-1',
+            direction: 'blocker',
+            counterpartAccountId: 'account-2',
+            counterpartScreenName: 'bob',
+            status: 'active',
+          },
+        ]}
+        totalCount={1}
+        hasMore={false}
+        onLoadMore={vi.fn()}
+        loadingMore={false}
+      />,
+    )
 
     const link = screen.getByRole('link', { name: 'bob' })
     expect(link.getAttribute('href')).toBe('/accounts/account-2')
+  })
+
+  it('表示中件数と総件数を表示する', () => {
+    render(
+      <RelationsView
+        items={[
+          {
+            blockId: 'block-1',
+            direction: 'blocker',
+            counterpartAccountId: 'account-2',
+            counterpartScreenName: 'bob',
+            status: 'active',
+          },
+        ]}
+        totalCount={2005}
+        hasMore={true}
+        onLoadMore={vi.fn()}
+        loadingMore={false}
+      />,
+    )
+
+    expect(screen.getByText(/1.*2005/)).not.toBeNull()
+  })
+
+  it('hasMore が true の間だけ Load more ボタンを表示する', () => {
+    const { rerender } = render(
+      <RelationsView
+        items={[]}
+        totalCount={0}
+        hasMore={true}
+        onLoadMore={vi.fn()}
+        loadingMore={false}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Load more' })).not.toBeNull()
+
+    rerender(
+      <RelationsView
+        items={[]}
+        totalCount={0}
+        hasMore={false}
+        onLoadMore={vi.fn()}
+        loadingMore={false}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
+  })
+
+  it('Load more ボタンをクリックすると onLoadMore を呼ぶ', () => {
+    const onLoadMore = vi.fn()
+    render(
+      <RelationsView
+        items={[]}
+        totalCount={0}
+        hasMore={true}
+        onLoadMore={onLoadMore}
+        loadingMore={false}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+
+    expect(onLoadMore).toHaveBeenCalledTimes(1)
+  })
+
+  it('loadMoreError が true でも既存の items は表示し続け、インラインでエラーを示す', () => {
+    render(
+      <RelationsView
+        items={[
+          {
+            blockId: 'block-1',
+            direction: 'blocker',
+            counterpartAccountId: 'account-2',
+            counterpartScreenName: 'bob',
+            status: 'active',
+          },
+        ]}
+        totalCount={2}
+        hasMore={true}
+        onLoadMore={vi.fn()}
+        loadingMore={false}
+        loadMoreError={true}
+      />,
+    )
+
+    expect(screen.getByRole('link', { name: 'bob' })).not.toBeNull()
+    expect(screen.getByText('Failed to load more.')).not.toBeNull()
+  })
+})
+
+describe('AccountSubviewTabs (relations タブの追加取得)', () => {
+  it('Load more をクリックすると次ページを取得して既存 items に連結する', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams())
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => ({
+          data: {
+            items: [
+              {
+                blockId: 'block-1',
+                direction: 'blocker',
+                counterpartAccountId: 'account-2',
+                counterpartScreenName: 'bob',
+                status: 'active',
+              },
+            ],
+            nextCursor: 'cursor-1',
+            totalCount: 2,
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => ({
+          data: {
+            items: [
+              {
+                blockId: 'block-2',
+                direction: 'blocked',
+                counterpartAccountId: 'account-3',
+                counterpartScreenName: 'carol',
+                status: 'active',
+              },
+            ],
+            nextCursor: null,
+            totalCount: 2,
+          },
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AccountSubviewTabs accountId="account-1" />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Relations' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'bob' })).not.toBeNull()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'carol' })).not.toBeNull()
+    })
+    expect(screen.getByRole('link', { name: 'bob' })).not.toBeNull()
+    expect(fetchMock.mock.calls[1][0]).toContain('cursor=cursor-1')
+  })
+
+  it('Load more が失敗しても既存の items は表示し続ける', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams())
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => ({
+          data: {
+            items: [
+              {
+                blockId: 'block-1',
+                direction: 'blocker',
+                counterpartAccountId: 'account-2',
+                counterpartScreenName: 'bob',
+                status: 'active',
+              },
+            ],
+            nextCursor: 'cursor-1',
+            totalCount: 2,
+          },
+        }),
+      })
+      .mockResolvedValueOnce({ ok: false, json: () => ({}) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AccountSubviewTabs accountId="account-1" />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Relations' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'bob' })).not.toBeNull()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to load more.')).not.toBeNull()
+    })
+    expect(screen.getByRole('link', { name: 'bob' })).not.toBeNull()
+    expect(screen.queryByText('Failed to load this section.')).toBeNull()
   })
 })
