@@ -2,9 +2,9 @@ import type { PrismaClient } from '../generated/prisma'
 
 /** BlockOutboxEntry.status が取りうる値。 */
 export type OutboxEntryStatus =
-  'pending_remote' | 'remote_succeeded' | 'local_persisted' | 'remote_failed'
+  'pending_remote' | 'remote_succeeded' | 'local_persisted' | 'remote_failed' | 'remote_skipped'
 
-/** 未解決 (まだ local_persisted/remote_failed に至っていない) outbox 状態。 */
+/** 未解決 (まだ終端状態に至っていない) outbox 状態。 */
 const UNRESOLVED_STATUSES: readonly OutboxEntryStatus[] = ['pending_remote', 'remote_succeeded']
 
 /** `findOrCreateOutboxEntry` の入力。 */
@@ -122,6 +122,22 @@ export async function markOutboxRemoteFailed(
   await prisma.blockOutboxEntry.update({
     where: { id: outboxEntryId },
     data: { status: 'remote_failed' },
+  })
+}
+
+/**
+ * ブロック対象が存在しない場合の終端状態として記録する。
+ * `remote_failed` と同様、次回 cycle では pending_remote に戻して再試行できる。
+ * @param prisma - Prisma クライアント
+ * @param outboxEntryId - 対象 entry の ID
+ */
+export async function markOutboxRemoteSkipped(
+  prisma: PrismaClient,
+  outboxEntryId: string,
+): Promise<void> {
+  await prisma.blockOutboxEntry.update({
+    where: { id: outboxEntryId },
+    data: { status: 'remote_skipped' },
   })
 }
 

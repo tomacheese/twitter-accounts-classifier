@@ -179,6 +179,26 @@ class BlocksResponseError extends Error {
   }
 }
 
+export class BlockTargetNotFoundError extends Error {
+  readonly targetUserId: string
+
+  constructor(targetUserId: string) {
+    super(`Block target user not found: ${targetUserId}`)
+    this.name = 'BlockTargetNotFoundError'
+    this.targetUserId = targetUserId
+  }
+}
+
+function isBlockTargetNotFoundResponse(status: number, body: string): boolean {
+  if (status !== 404) return false
+  try {
+    const payload = JSON.parse(body) as { errors?: { code?: number }[] }
+    return payload.errors?.some((error) => error.code === 50) ?? false
+  } catch {
+    return false
+  }
+}
+
 /**
  * `twitter-openapi-typescript` にはブロック一覧エンドポイントに対応するメソッドが存在しないため、`trends-client.ts` が `guide.json` をハンドロールしているのと同じ要領で GraphQL リクエストを自前で組み立てている。
  * ライブラリ自身の GraphQL リクエストと異なり `x-client-transaction-id` を付与していないが、対応には追加調査が必要なため既知のギャップとして残している。
@@ -255,6 +275,9 @@ export async function createBlock(
   })
   if (!response.ok) {
     const body = await response.text().catch(() => '')
+    if (isBlockTargetNotFoundResponse(response.status, body)) {
+      throw new BlockTargetNotFoundError(targetUserId)
+    }
     throw new BlocksResponseError(
       `Failed to create block for user ${targetUserId}: HTTP ${response.status}${body ? ` - ${body}` : ''}`,
       response.status,
