@@ -365,9 +365,9 @@ model CrawlAuthorCheckpoint {
   @@index([crawlRunId, username])
 }
 
-// activeLabelKeys (text[]) への GIN index は raw SQL で作成する。
-// Prisma の schema DSL では USING GIN を表現できないため、
-// migration 20260810210740_add_account_summary_latest_active_label_keys_gin_idx で管理する。
+// activeLabelKeys (text[]) への GIN index は既定の array ops で表現できるため、本来は Prisma の schema DSL でも宣言できる。
+// ただしこの index は CONCURRENTLY 付きで作成する必要があり、生成される migration がそれに対応しないため、実体は migration 20260810210740_add_account_summary_latest_active_label_keys_gin_idx の raw SQL で作成する。
+// ここでの @@index 宣言は、shadow database の diff がこの index を誤って DROP 対象と判断するのを防ぐためのものである。
 model AccountSummaryLatest {
   accountId                   String    @id
   normalizedScreenName        String
@@ -386,6 +386,7 @@ model AccountSummaryLatest {
   @@index([lastClassificationChangedAt(sort: Desc), accountId])
   @@index([highestFindingSeverity, activeFindingCount, accountId])
   @@index([normalizedScreenName])
+  @@index([activeLabelKeys], type: Gin, map: "AccountSummaryLatest_activeLabelKeys_gin_idx")
 }
 
 model AccountClassificationLatest {

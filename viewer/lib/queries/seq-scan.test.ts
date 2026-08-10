@@ -184,10 +184,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
   },
 )
 
-// activeLabelKeys の GIN index は、テーブルが小さいと planner が Seq Scan の方を
-// 安く見積もるため使われない。production 相当の選択性差を再現するには他の describe
-// ブロックの行数よりずっと多い行数が要るため、別の describe ブロックへ分離し、
-// 他のテストのテーブル統計量を汚染しないようにする。
+// activeLabelKeys の GIN index は、テーブルが小さいと planner が Seq Scan の方を安く見積もるため使われない。
+// production 相当の選択性差を再現するには他の describe ブロックの行数よりずっと多い行数が要るため、別の describe ブロックへ分離し、他のテストのテーブル統計量を汚染しないようにする。
 const LABEL_FILTER_ROW_COUNT = 2000
 const RARE_LABEL_COUNT = 3
 const COMMON_LABEL_COUNT = 800
