@@ -323,6 +323,7 @@ describe.skipIf(!process.env.DATABASE_URL)('getReadModelReadiness', () => {
     await prisma.accountLabelLatest.deleteMany()
     await prisma.labelAggregate.deleteMany()
     await prisma.blockAction.deleteMany()
+    await prisma.blockOutboxEntry.deleteMany()
     await prisma.labelDefinition.deleteMany()
   })
 
