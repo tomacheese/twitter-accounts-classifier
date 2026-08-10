@@ -58,6 +58,7 @@ function makeWorkItem(overrides: Partial<AnalysisWorkItem>): AnalysisWorkItem {
     attemptCount: 1,
     maxAttempts: 5,
     dependencyKey: null,
+    staleRequestedAt: null,
     lastErrorCode: null,
     lastErrorSummary: null,
     createdAt: new Date(),
