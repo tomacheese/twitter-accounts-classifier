@@ -48,3 +48,21 @@ weekly_analyze_stale_after_passed() {
   [ -n "$_weekly_analyze_stale_epoch" ] || return 1
   [ "$_weekly_analyze_now_epoch" -gt "$_weekly_analyze_stale_epoch" ]
 }
+
+
+weekly_analyze_database_url_with_application_name() {
+  _weekly_analyze_database_url="$1"
+  _weekly_analyze_application_name="$2"
+  [ -n "$_weekly_analyze_database_url" ] || return 1
+  [ -n "$_weekly_analyze_application_name" ] || {
+    printf '%s\n' "$_weekly_analyze_database_url"
+    return 0
+  }
+
+  case "$_weekly_analyze_database_url" in
+    *\?*) _weekly_analyze_separator='&' ;;
+    *) _weekly_analyze_separator='?' ;;
+  esac
+  printf '%s%sapplication_name=%s\n' \
+    "$_weekly_analyze_database_url" "$_weekly_analyze_separator" "$_weekly_analyze_application_name"
+}

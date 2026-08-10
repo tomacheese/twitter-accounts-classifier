@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
 import {
+  cancelWeeklyAnalysisRunBackends,
   completeWeeklyAnalysisRun,
   createWeeklyAnalysisRun,
   failWeeklyAnalysisRun,
@@ -34,6 +35,25 @@ function toRow(overrides: Record<string, unknown> = {}) {
 function toRecordLike(overrides: Record<string, unknown> = {}) {
   return toRow({ currentPhase: 'sampling', ...overrides })
 }
+
+describe('cancelWeeklyAnalysisRunBackends', () => {
+  it('cancels only active backends for the same user and run-scoped application_name', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ cancelled: true }])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const cancelled = await cancelWeeklyAnalysisRunBackends(prisma, 'weekly-crawl-review-run1')
+
+    expect(cancelled).toBe(1)
+    const [strings, applicationName] = queryRaw.mock.calls[0] ?? []
+    const sql = (strings as readonly string[]).join('?')
+    expect(sql).toContain('pg_cancel_backend')
+    expect(sql).toContain('pid <> pg_backend_pid()')
+    expect(sql).toContain('usename = current_user')
+    expect(sql).toContain('application_name =')
+    expect(sql).toContain("state = 'active'")
+    expect(applicationName).toBe('weekly-crawl-review-run1')
+  })
+})
 
 describe('createWeeklyAnalysisRun', () => {
   it('creates a running row with lastHeartbeatAt and staleAfterAt from startedAt', async () => {

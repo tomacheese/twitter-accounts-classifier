@@ -28,6 +28,14 @@ BEGIN
     RAISE EXCEPTION 'role analyzer does not exist';
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_roles
+    WHERE rolname = 'analyzer'
+      AND 'client_connection_check_interval=5s' = ANY(COALESCE(rolconfig, ARRAY[]::text[]))
+  ) THEN
+    RAISE EXCEPTION 'analyzer client_connection_check_interval must be 5s';
+  END IF;
+
   IF NOT has_database_privilege('analyzer', current_database(), 'CONNECT') THEN
     RAISE EXCEPTION 'analyzer lacks CONNECT on database %', current_database();
   END IF;

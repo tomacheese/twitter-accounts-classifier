@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util'
 import { readFile } from 'node:fs/promises'
 import { PrismaClient } from '../generated/prisma'
 import {
+  cancelWeeklyAnalysisRunBackends,
   completeWeeklyAnalysisRun,
   createWeeklyAnalysisRun,
   failWeeklyAnalysisRun,
@@ -51,6 +52,16 @@ async function main(): Promise<void> {
 
   try {
     switch (command) {
+      case 'cancel-backends': {
+        const { values } = parseArgs({
+          args: rest,
+          options: { 'application-name': { type: 'string' } },
+        })
+        if (!values['application-name']) throw new Error('--application-name is required')
+        const cancelled = await cancelWeeklyAnalysisRunBackends(prisma, values['application-name'])
+        printJson({ cancelled })
+        return
+      }
       case 'create': {
         const run = await createWeeklyAnalysisRun(prisma, new Date(), staleThresholdMs)
         printJson(run)

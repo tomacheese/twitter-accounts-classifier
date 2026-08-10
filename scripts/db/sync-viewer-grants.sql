@@ -17,6 +17,8 @@ $$;
 
 GRANT USAGE ON SCHEMA public TO viewer;
 
+ALTER ROLE viewer SET client_connection_check_interval = '5s';
+
 -- 過去の個別 GRANT や設定変更で増えた write 権限を一度除去する。
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
   ON ALL TABLES IN SCHEMA public

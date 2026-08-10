@@ -19,6 +19,9 @@ $$;
 
 GRANT USAGE ON SCHEMA public TO analyzer;
 
+ALTER ROLE analyzer SET client_connection_check_interval = '5s';
+
+
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
   ON ALL TABLES IN SCHEMA public
   FROM analyzer;
