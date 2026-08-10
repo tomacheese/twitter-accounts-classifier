@@ -1,23 +1,13 @@
-import { Logger } from '@book000/node-utils'
 import type { PrismaClient } from '../generated/prisma'
-import { upsertAccount } from './account-repository'
+import { upsertAccountsBulk } from './account-repository'
 import type { BlockListResult } from '../twitter/blocks'
 import { computeBlockReconciliation, type BlockStatus } from './block-reconciliation'
 
-const logger = Logger.configure('block-repository')
-
-// `upsertFollowAuthors` と同じ理由で、1件の失敗が他アカウントの処理を止めないようアカウントごとに握りつぶす。
-async function upsertBlockAuthors(prisma: PrismaClient, result: BlockListResult): Promise<void> {
-  for (const author of result.authors) {
-    try {
-      await upsertAccount(prisma, author)
-    } catch (error) {
-      logger.error(
-        `Failed to upsert account ${author.id} while syncing block edges`,
-        error as Error,
-      )
-    }
-  }
+async function upsertBlockAuthors(
+  prisma: PrismaClient,
+  result: BlockListResult,
+): Promise<Set<string>> {
+  return upsertAccountsBulk(prisma, result.authors)
 }
 
 /**
@@ -36,16 +26,18 @@ export async function syncBlocks(
   crawlRunId: string,
   result: BlockListResult,
 ): Promise<void> {
-  await upsertBlockAuthors(prisma, result)
+  const upsertedIds = await upsertBlockAuthors(prisma, result)
+  const safeIds = result.ids.filter((id) => upsertedIds.has(id))
   const now = new Date()
-  const isCompleteSync = result.reachedEnd && result.ids.length > 0
-  const fetchedIdSet = new Set(result.ids)
+  const isCompleteSync =
+    result.reachedEnd && safeIds.length > 0 && result.ids.every((id) => upsertedIds.has(id))
+  const fetchedIdSet = new Set(safeIds)
 
   await prisma.$transaction(
     async (tx) => {
-      if (result.ids.length > 0) {
+      if (safeIds.length > 0) {
         await tx.block.createMany({
-          data: result.ids.map((blockedId) => ({
+          data: safeIds.map((blockedId) => ({
             blockerId,
             blockedId,
             firstSeenAt: now,
@@ -56,7 +48,7 @@ export async function syncBlocks(
           skipDuplicates: true,
         })
         await tx.block.updateMany({
-          where: { blockerId, blockedId: { in: result.ids } },
+          where: { blockerId, blockedId: { in: safeIds } },
           data: { lastSeenAt: now },
         })
 
@@ -65,7 +57,7 @@ export async function syncBlocks(
         const rediscovered = await tx.block.findMany({
           where: {
             blockerId,
-            blockedId: { in: result.ids },
+            blockedId: { in: safeIds },
             OR: [{ status: { not: 'active' } }, { consecutiveMissingCount: { gt: 0 } }],
           },
           select: { id: true, status: true },
@@ -99,7 +91,7 @@ export async function syncBlocks(
       if (!isCompleteSync) return
 
       const existingBlocks = await tx.block.findMany({
-        where: { blockerId, blockedId: { notIn: result.ids } },
+        where: { blockerId, blockedId: { notIn: safeIds } },
       })
       const changes = existingBlocks
         .map((block) => {

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
 import type { FollowListResult } from '../twitter/follows'
+import * as accountRepository from './account-repository'
 import {
   replaceLabelingFollowSample,
   replaceLabelingFollowSampleWithinTx,
+  upsertFollowSampleAuthors,
 } from './labeling-follow-sample-repository'
 
 function makeResult(ids: string[]): FollowListResult {
@@ -30,8 +32,11 @@ function makeResult(ids: string[]): FollowListResult {
   }
 }
 
-function makePrisma() {
-  const accountUpsert = vi.fn().mockResolvedValue({})
+function makePrisma(upsertedIds?: Set<string>) {
+  const upsertAccountsBulkSpy = vi.spyOn(accountRepository, 'upsertAccountsBulk')
+  if (upsertedIds) {
+    upsertAccountsBulkSpy.mockResolvedValue(upsertedIds)
+  }
   const deleteMany = vi.fn().mockResolvedValue({ count: 0 })
   const createMany = vi.fn().mockResolvedValue({ count: 0 })
   const tx = {
@@ -41,23 +46,33 @@ function makePrisma() {
     .fn()
     .mockImplementation((fn: (transactionClient: typeof tx) => Promise<void>) => fn(tx))
   const prisma = {
-    account: { upsert: accountUpsert },
     $transaction,
   } as unknown as PrismaClient
-  return { prisma, accountUpsert, deleteMany, createMany, $transaction }
+  return { prisma, upsertAccountsBulkSpy, deleteMany, createMany, $transaction }
 }
 
+describe('upsertFollowSampleAuthors', () => {
+  it('delegates to upsertAccountsBulk and returns its succeeded id set', async () => {
+    const { prisma, upsertAccountsBulkSpy } = makePrisma(new Set(['bob', 'carol']))
+
+    const result = await upsertFollowSampleAuthors(prisma, makeResult(['bob', 'carol']))
+
+    expect(upsertAccountsBulkSpy).toHaveBeenCalledTimes(1)
+    expect(result).toEqual(new Set(['bob', 'carol']))
+  })
+})
+
 describe('replaceLabelingFollowSample', () => {
-  it('取得した各フォロー先について Account 行を upsert する', async () => {
-    const { prisma, accountUpsert } = makePrisma()
+  it('取得した各フォロー先を bulk upsert する', async () => {
+    const { prisma, upsertAccountsBulkSpy } = makePrisma(new Set(['bob', 'carol']))
 
     await replaceLabelingFollowSample(prisma, 'alice', makeResult(['bob', 'carol']))
 
-    expect(accountUpsert).toHaveBeenCalledTimes(2)
+    expect(upsertAccountsBulkSpy).toHaveBeenCalledTimes(1)
   })
 
   it('既存のサンプル行を削除してから今回取得した分だけを挿入する', async () => {
-    const { prisma, deleteMany, createMany } = makePrisma()
+    const { prisma, deleteMany, createMany } = makePrisma(new Set(['bob', 'carol']))
 
     await replaceLabelingFollowSample(prisma, 'alice', makeResult(['bob', 'carol']))
 
@@ -72,7 +87,7 @@ describe('replaceLabelingFollowSample', () => {
   })
 
   it('チェックポイント滞留を吸収できるよう、既定より長いトランザクションタイムアウトを指定する', async () => {
-    const { prisma, $transaction } = makePrisma()
+    const { prisma, $transaction } = makePrisma(new Set(['bob']))
 
     await replaceLabelingFollowSample(prisma, 'alice', makeResult(['bob']))
 
@@ -83,7 +98,7 @@ describe('replaceLabelingFollowSample', () => {
   })
 
   it('フォロー先が0件の場合は削除も挿入も行わず、既存サンプルを残す', async () => {
-    const { prisma, deleteMany, createMany } = makePrisma()
+    const { prisma, deleteMany, createMany } = makePrisma(new Set())
 
     await replaceLabelingFollowSample(prisma, 'alice', makeResult([]))
 
@@ -92,8 +107,7 @@ describe('replaceLabelingFollowSample', () => {
   })
 
   it('1件のフォロー先アカウントの upsert が失敗しても残りの処理を続ける', async () => {
-    const { prisma, accountUpsert, createMany } = makePrisma()
-    accountUpsert.mockRejectedValueOnce(new Error('upsert failed')).mockResolvedValue({})
+    const { prisma, createMany } = makePrisma(new Set(['carol']))
 
     await replaceLabelingFollowSample(prisma, 'alice', makeResult(['bob', 'carol']))
 
@@ -106,8 +120,7 @@ describe('replaceLabelingFollowSample', () => {
   })
 
   it('取得した全フォロー先の upsert が失敗した場合も削除を行わず、既存サンプルを残す', async () => {
-    const { prisma, accountUpsert, deleteMany, createMany } = makePrisma()
-    accountUpsert.mockRejectedValue(new Error('upsert failed'))
+    const { prisma, deleteMany, createMany } = makePrisma(new Set())
 
     await replaceLabelingFollowSample(prisma, 'alice', makeResult(['bob', 'carol']))
 

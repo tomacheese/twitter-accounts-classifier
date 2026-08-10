@@ -1,24 +1,12 @@
-import { Logger } from '@book000/node-utils'
 import type { PrismaClient } from '../generated/prisma'
-import { upsertAccount } from './account-repository'
+import { upsertAccountsBulk } from './account-repository'
 import type { FollowListResult } from '../twitter/follows'
 
-const logger = Logger.configure('follow-repository')
-
-// `./tweet-repository` の `upsertTweets` と同様、
-// アカウントごとに個別に upsert する:1 件の不正なプロフィールで、
-// 残りのバッチや後続の edge 同期まで止めてはならないため。
-async function upsertFollowAuthors(prisma: PrismaClient, result: FollowListResult): Promise<void> {
-  for (const author of result.authors) {
-    try {
-      await upsertAccount(prisma, author)
-    } catch (error) {
-      logger.error(
-        `Failed to upsert account ${author.id} while syncing follow edges`,
-        error as Error,
-      )
-    }
-  }
+async function upsertFollowAuthors(
+  prisma: PrismaClient,
+  result: FollowListResult,
+): Promise<Set<string>> {
+  return upsertAccountsBulk(prisma, result.authors)
 }
 
 /**
@@ -33,14 +21,17 @@ export async function syncFollowing(
   followerId: string,
   result: FollowListResult,
 ): Promise<void> {
-  await upsertFollowAuthors(prisma, result)
+  const upsertedIds = await upsertFollowAuthors(prisma, result)
+  // Account upsert が失敗した id は外部キー制約に違反するため、edge 同期・complete-sync 判定から除外する。
+  const safeIds = result.ids.filter((id) => upsertedIds.has(id))
+  const isCompleteObservation = result.ids.every((id) => upsertedIds.has(id))
   const now = new Date()
 
   await prisma.$transaction(
     async (tx) => {
-      if (result.ids.length > 0) {
+      if (safeIds.length > 0) {
         await tx.follow.createMany({
-          data: result.ids.map((followeeId) => ({
+          data: safeIds.map((followeeId) => ({
             followerId,
             followeeId,
             firstSeenAt: now,
@@ -49,17 +40,16 @@ export async function syncFollowing(
           skipDuplicates: true,
         })
         await tx.follow.updateMany({
-          where: { followerId, followeeId: { in: result.ids } },
+          where: { followerId, followeeId: { in: safeIds } },
           data: { lastSeenAt: now },
         })
       }
 
-      // `reachedEnd` だけでは削除しない: `result.ids` が空だと `notIn: []` が全件一致になり、
-      // 一時的な空応答 (レート制限や認証エラー) だけで記録済みの edge を全消去しかねないため、
-      // 確認済みの id が 1 件以上ある場合のみ削除する。
-      if (result.reachedEnd && result.ids.length > 0) {
+      // `reachedEnd` だけでは削除しない: 一時的な空応答や Account upsert 失敗だけで
+      // 記録済みの edge を全消去しかねないため、全件を確認できた場合のみ削除する。
+      if (result.reachedEnd && safeIds.length > 0 && isCompleteObservation) {
         await tx.follow.deleteMany({
-          where: { followerId, followeeId: { notIn: result.ids } },
+          where: { followerId, followeeId: { notIn: safeIds } },
         })
       }
     },
@@ -79,14 +69,16 @@ export async function syncFollowers(
   followeeId: string,
   result: FollowListResult,
 ): Promise<void> {
-  await upsertFollowAuthors(prisma, result)
+  const upsertedIds = await upsertFollowAuthors(prisma, result)
+  const safeIds = result.ids.filter((id) => upsertedIds.has(id))
+  const isCompleteObservation = result.ids.every((id) => upsertedIds.has(id))
   const now = new Date()
 
   await prisma.$transaction(
     async (tx) => {
-      if (result.ids.length > 0) {
+      if (safeIds.length > 0) {
         await tx.follow.createMany({
-          data: result.ids.map((followerId) => ({
+          data: safeIds.map((followerId) => ({
             followerId,
             followeeId,
             firstSeenAt: now,
@@ -95,15 +87,15 @@ export async function syncFollowers(
           skipDuplicates: true,
         })
         await tx.follow.updateMany({
-          where: { followeeId, followerId: { in: result.ids } },
+          where: { followeeId, followerId: { in: safeIds } },
           data: { lastSeenAt: now },
         })
       }
 
       // `syncFollowing` 側の同じコメントを参照。
-      if (result.reachedEnd && result.ids.length > 0) {
+      if (result.reachedEnd && safeIds.length > 0 && isCompleteObservation) {
         await tx.follow.deleteMany({
-          where: { followeeId, followerId: { notIn: result.ids } },
+          where: { followeeId, followerId: { notIn: safeIds } },
         })
       }
     },
