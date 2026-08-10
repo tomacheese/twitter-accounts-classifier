@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { getAccountOverview, getAccountClassification } = vi.hoisted(() => ({
+const { getAccountOverview, getAccountClassification, getAccountRelations } = vi.hoisted(() => ({
   getAccountOverview: vi.fn(),
   getAccountClassification: vi.fn(),
+  getAccountRelations: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({ getPrismaClient: () => ({}) }))
@@ -10,7 +11,7 @@ vi.mock('@/lib/queries/account-subviews', () => ({
   getAccountOverview,
   getAccountClassification,
   getAccountEvidence: vi.fn(),
-  getAccountRelations: vi.fn(),
+  getAccountRelations,
   getAccountHistory: vi.fn(),
   getAccountTechnical: vi.fn(),
 }))
@@ -80,5 +81,32 @@ describe('GET /api/accounts/[accountId]/[subview]', () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ data: [] })
+  })
+
+  it('relations は cursor/limit クエリパラメータを getAccountRelations に伝える', async () => {
+    getAccountRelations.mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 })
+
+    const response = await GET(new Request('http://localhost/api?cursor=abc&limit=10'), {
+      params: Promise.resolve({ accountId: 'account-1', subview: 'relations' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(getAccountRelations).toHaveBeenCalledWith(expect.anything(), 'account-1', {
+      cursor: 'abc',
+      limit: 10,
+    })
+  })
+
+  it('relations はクエリパラメータが無ければ cursor/limit を undefined で渡す', async () => {
+    getAccountRelations.mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 })
+
+    await GET(new Request('http://localhost/api'), {
+      params: Promise.resolve({ accountId: 'account-1', subview: 'relations' }),
+    })
+
+    expect(getAccountRelations).toHaveBeenCalledWith(expect.anything(), 'account-1', {
+      cursor: undefined,
+      limit: undefined,
+    })
   })
 })
