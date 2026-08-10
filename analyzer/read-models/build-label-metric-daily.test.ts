@@ -17,7 +17,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
       data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
     })
 
-    const now = new Date()
+    const now = new Date('2026-08-10T12:00:00.000Z')
     const earlier = new Date(now.getTime() - 2 * 60 * 60 * 1000)
     const later = new Date(now.getTime() - 60 * 60 * 1000)
     await prisma.labelMetricSnapshot.createMany({
