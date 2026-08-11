@@ -20,9 +20,12 @@ export async function withTimeout<T>(
   timeoutMs: number,
   timeoutMessage: string,
 ): Promise<T> {
-  let timer: NodeJS.Timeout
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new TimeoutError(timeoutMessage)), timeoutMs)
+  // Promise の executor は同期的に実行されるため、この時点で必ず代入済みになる。
+  let timer!: NodeJS.Timeout
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new TimeoutError(timeoutMessage))
+    }, timeoutMs)
   })
   try {
     return await Promise.race([promise, timeoutPromise])

@@ -3,7 +3,11 @@ import { TimeoutError, withTimeout } from './timeout'
 
 describe('withTimeout', () => {
   it('resolves with the inner promise value when it settles before the timeout', async () => {
-    const inner = new Promise<string>((resolve) => setTimeout(() => resolve('ok'), 5))
+    const inner = new Promise<string>((resolve) =>
+      setTimeout(() => {
+        resolve('ok')
+      }, 5),
+    )
 
     const result = await withTimeout(inner, 50, 'should not time out')
 
@@ -12,7 +16,11 @@ describe('withTimeout', () => {
 
   it('rejects with the inner promise error when it rejects before the timeout', async () => {
     const innerError = new Error('inner failure')
-    const inner = new Promise<never>((_, reject) => setTimeout(() => reject(innerError), 5))
+    const inner = new Promise<never>((_resolve, reject) =>
+      setTimeout(() => {
+        reject(innerError)
+      }, 5),
+    )
 
     await expect(withTimeout(inner, 50, 'should not time out')).rejects.toBe(innerError)
   })
@@ -22,9 +30,7 @@ describe('withTimeout', () => {
       // 意図的に永遠に settle しない: cycletls 子プロセスのハングを模する。
     })
 
-    await expect(withTimeout(inner, 5, 'timed out waiting for inner')).rejects.toThrow(
-      TimeoutError,
-    )
+    await expect(withTimeout(inner, 5, 'timed out waiting for inner')).rejects.toThrow(TimeoutError)
     await expect(withTimeout(inner, 5, 'timed out waiting for inner')).rejects.toThrow(
       'timed out waiting for inner',
     )
