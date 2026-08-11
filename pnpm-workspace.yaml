@@ -5,6 +5,9 @@ packages:
   - "blocker"
   - "analyzer"
 
+# pnpm deploy --prod が workspace パッケージを symlink でなく実体としてコピーするために必要。
+injectWorkspacePackages: true
+
 overrides:
   jiti: 2.7.0
 

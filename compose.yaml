@@ -61,7 +61,7 @@ services:
       [
         "sh",
         "-c",
-        "cd /app/crawler && pnpm exec prisma migrate deploy --schema=../prisma/schema.prisma && cd /app && bash scripts/db/run-migration-and-sync-grants.sh",
+        "export PATH=/app/crawler/node_modules/.bin:$PATH && cd /app/crawler && prisma migrate deploy --schema=../prisma/schema.prisma && cd /app && bash scripts/db/run-migration-and-sync-grants.sh",
       ]
     logging: *default-logging
 
