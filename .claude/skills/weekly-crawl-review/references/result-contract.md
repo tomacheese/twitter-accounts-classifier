@@ -1,8 +1,8 @@
 # Structured result contract v2
 
-`WeeklyAnalysisRun.reviewPlan` と `WEEKLY_REVIEW_PLAN_FILE` が planned sample の正本である。structured output は schemaVersion 2 を使用し、plan の sample を 1 件も欠落・追加させない。
+`WeeklyAnalysisRun.reviewPlan` and `WEEKLY_REVIEW_PLAN_FILE` are the sources of truth for planned samples. Structured output must use schemaVersion 2 and must neither omit nor add samples relative to the plan.
 
-`review.judgments` の各要素は以下を持つ。
+Each item in `review.judgments` must contain:
 
 - sampleId
 - accountId
@@ -16,17 +16,17 @@
 - judgeConfidence
 - evidenceReference
 - reviewedBy
-- unavailableReason: 必要な場合
+- unavailableReason: when needed
 
-`review` は strategyVersion、seed、budget、plannedSampleCount、reviewedSampleCount、randomAuditCount、targetedAuditCount、uncertainCount、skippedCount、incompletePhases、judgments を持つ。集計値は judgments から機械的に再計算した値と一致させる。
+`review` must contain strategyVersion, seed, budget, plannedSampleCount, reviewedSampleCount, randomAuditCount, targetedAuditCount, uncertainCount, skippedCount, incompletePhases, and judgments. Aggregate counts must equal values mechanically recomputed from judgments.
 
-finding type は以下を使い分ける。
+Use finding types as follows:
 
-- `possible_false_positive`: classifier=true だが judge=false の再現パターン
-- `possible_false_negative`: classifier=false だが judge=true の再現パターン
-- `rule_behavior_mismatch`: description・実装・テストの意味が一致しない
-- `review_incomplete`: DB timeout、subagent failure、権限拒否などで core review を完遂できない
-- `coverage_gap`: ローカル母集団に繰り返し存在する未カバー topic/behavior
-- `external_threat_gap`: 外部で再現性があり、ローカル feature で観測可能だが既存 rule が未対応
+- `possible_false_positive`: a reproducible pattern where classifier=true but judge=false
+- `possible_false_negative`: a reproducible pattern where classifier=false but judge=true
+- `rule_behavior_mismatch`: semantics differ across description, implementation, and tests
+- `review_incomplete`: a database timeout, subagent failure, permission denial, or similar failure prevents completion of a core review phase
+- `coverage_gap`: an uncovered topic or behavior that repeatedly appears in the local population
+- `external_threat_gap`: reproducible external behavior that is observable through local features but not covered by existing rules
 
-`sampleReference` は Account ID のみを使い、handle や本文を含めない。
+`sampleReference` must contain Account ID only; never include handles or content text.

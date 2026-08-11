@@ -1,14 +1,14 @@
 # Remediation and PR contract
 
-修正は systematic な誤分類・仕様乖離・coverage gap に限定する。単発の曖昧例だけで rule を変更しない。
+Limit remediation to systematic misclassification, specification drift, or coverage gaps. Do not change a rule because of a single ambiguous example.
 
-修正時:
+When remediating:
 
-1. 失敗する unit/regression test を先に追加する。
-2. 最小の rule 修正を行い、ロジックを変更した rule は version を bump する。
-3. 実クロールデータ由来の文字列が test/comment/doc に残っていないことを再確認する。
-4. `pnpm --filter crawler run check` と format を通す。
-5. 変更した label は read-only impact evaluation を行い、変更件数と true→false / false→true の方向を確認する。予想外に広い blast radius は merge しない。
-6. 変更 cohort の sample を再判定し、修正意図と一致することを確認する。
+1. Add a failing unit or regression test first.
+2. Make the smallest rule change that fixes the defect, and bump the version of every rule whose logic changes.
+3. Recheck that no strings derived from real crawl data remain in tests, comments, or documentation.
+4. Run `pnpm --filter crawler run check` and formatting checks.
+5. For each changed label, run a read-only impact evaluation and inspect the number and direction of changes: true-to-false and false-to-true. Do not merge an unexpectedly broad blast radius.
+6. Re-evaluate a sample from the changed cohort and confirm that the result matches the remediation intent.
 
-PR lifecycle は既存 supervisor/state machine を使う。PR 作成前に heartbeat、`record-pr`、review request、auto-merge、`weekly-analysis-wait-pr.sh` を順守する。review/CI 修正は同一 PR で最大 2 cycle とし、それを超えたら run を failed にする。
+Use the existing supervisor and state machine for the PR lifecycle. Before PR creation, follow the heartbeat, `record-pr`, review request, auto-merge, and `weekly-analysis-wait-pr.sh` sequence. Limit review/CI remediation to at most two cycles in the same PR; fail the run if more cycles are required.
