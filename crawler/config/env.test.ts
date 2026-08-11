@@ -5,6 +5,8 @@ import {
   getCrawlStaleThresholdMultiplier,
   getCrawlWarningThreshold,
   getWeeklyAnalysisStaleThresholdSeconds,
+  getTwitterRequestTimeoutMs,
+  getCrawlAccountTimeoutMs,
 } from './env'
 
 const { warnMock } = vi.hoisted(() => ({ warnMock: vi.fn() }))
@@ -197,6 +199,64 @@ describe('getWeeklyAnalysisStaleThresholdSeconds', () => {
     process.env.WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS = '-1'
     expect(() => getWeeklyAnalysisStaleThresholdSeconds()).toThrow(
       'WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS environment variable must be a positive integer',
+    )
+  })
+})
+
+describe('getTwitterRequestTimeoutMs', () => {
+  const originalValue = process.env.TWITTER_REQUEST_TIMEOUT_MS
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env.TWITTER_REQUEST_TIMEOUT_MS
+    } else {
+      process.env.TWITTER_REQUEST_TIMEOUT_MS = originalValue
+    }
+  })
+
+  it('returns 60000 when unset', () => {
+    delete process.env.TWITTER_REQUEST_TIMEOUT_MS
+    expect(getTwitterRequestTimeoutMs()).toBe(60_000)
+  })
+
+  it('returns the configured value', () => {
+    process.env.TWITTER_REQUEST_TIMEOUT_MS = '30000'
+    expect(getTwitterRequestTimeoutMs()).toBe(30_000)
+  })
+
+  it('throws when the value is not a positive integer', () => {
+    process.env.TWITTER_REQUEST_TIMEOUT_MS = '-1'
+    expect(() => getTwitterRequestTimeoutMs()).toThrow(
+      'TWITTER_REQUEST_TIMEOUT_MS environment variable must be a positive integer',
+    )
+  })
+})
+
+describe('getCrawlAccountTimeoutMs', () => {
+  const originalValue = process.env.CRAWL_ACCOUNT_TIMEOUT_MS
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env.CRAWL_ACCOUNT_TIMEOUT_MS
+    } else {
+      process.env.CRAWL_ACCOUNT_TIMEOUT_MS = originalValue
+    }
+  })
+
+  it('returns 1200000 when unset', () => {
+    delete process.env.CRAWL_ACCOUNT_TIMEOUT_MS
+    expect(getCrawlAccountTimeoutMs()).toBe(1_200_000)
+  })
+
+  it('returns the configured value', () => {
+    process.env.CRAWL_ACCOUNT_TIMEOUT_MS = '600000'
+    expect(getCrawlAccountTimeoutMs()).toBe(600_000)
+  })
+
+  it('throws when the value is not a positive integer', () => {
+    process.env.CRAWL_ACCOUNT_TIMEOUT_MS = '-1'
+    expect(() => getCrawlAccountTimeoutMs()).toThrow(
+      'CRAWL_ACCOUNT_TIMEOUT_MS environment variable must be a positive integer',
     )
   })
 })

@@ -81,3 +81,22 @@ export function getCrawlStaleThresholdMultiplier(): number {
 export function getWeeklyAnalysisStaleThresholdSeconds(): number {
   return parsePositiveIntEnv('WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS', 7200)
 }
+
+/**
+ * cycletls 経由の 1 リクエストに設ける Node 側の上限時間 (ミリ秒)。
+ * cycletls 自体の request timeout (既定 7 秒) は Go バイナリ側 HTTP クライアントのものであり、
+ * Node↔Go 間の IPC 自体が固着した場合には効かないため、別途上限を設ける。
+ * @returns 設定された上限時間 (ミリ秒)。未設定時は 60000 (60 秒)
+ */
+export function getTwitterRequestTimeoutMs(): number {
+  return parsePositiveIntEnv('TWITTER_REQUEST_TIMEOUT_MS', 60_000)
+}
+
+/**
+ * 1 account の crawl 処理 (timelines〜blocks の外部通信フェーズ) 全体に設ける上限時間 (ミリ秒)。
+ * 外部通信が固着した場合でも、この上限時間で打ち切って次のアカウント・次のサイクルへ処理を進める。
+ * @returns 設定された上限時間 (ミリ秒)。未設定時は 1200000 (20 分)
+ */
+export function getCrawlAccountTimeoutMs(): number {
+  return parsePositiveIntEnv('CRAWL_ACCOUNT_TIMEOUT_MS', 1_200_000)
+}
