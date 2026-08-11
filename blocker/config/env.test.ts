@@ -4,6 +4,7 @@ import {
   getBlockIntervalSeconds,
   getBlockActionDelayMs,
   getBlockMaxPerAccountPerRun,
+  getBlockTargetNotFoundMaxAttempts,
 } from './env'
 
 const ENV_KEYS = [
@@ -11,6 +12,7 @@ const ENV_KEYS = [
   'BLOCK_INTERVAL_SECONDS',
   'BLOCK_ACTION_DELAY_MS',
   'BLOCK_MAX_PER_ACCOUNT_PER_RUN',
+  'BLOCK_TARGET_NOT_FOUND_MAX_ATTEMPTS',
 ] as const
 
 afterEach(() => {
@@ -53,5 +55,21 @@ describe('getBlockMaxPerAccountPerRun', () => {
   it('rejects a non-positive-integer value', () => {
     process.env.BLOCK_MAX_PER_ACCOUNT_PER_RUN = '-1'
     expect(() => getBlockMaxPerAccountPerRun()).toThrow(/positive integer/)
+  })
+})
+
+describe('getBlockTargetNotFoundMaxAttempts', () => {
+  it('defaults to 3 when unset', () => {
+    expect(getBlockTargetNotFoundMaxAttempts()).toBe(3)
+  })
+
+  it('returns the configured positive integer', () => {
+    process.env.BLOCK_TARGET_NOT_FOUND_MAX_ATTEMPTS = '5'
+    expect(getBlockTargetNotFoundMaxAttempts()).toBe(5)
+  })
+
+  it('rejects a non-positive-integer value', () => {
+    process.env.BLOCK_TARGET_NOT_FOUND_MAX_ATTEMPTS = '-1'
+    expect(() => getBlockTargetNotFoundMaxAttempts()).toThrow(/positive integer/)
   })
 })

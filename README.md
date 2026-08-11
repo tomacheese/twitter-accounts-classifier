@@ -47,6 +47,7 @@ Viewer には認証機構がなく、フォロー・フォロワー・ブロッ�
 | `BLOCK_STALE_THRESHOLD_MULTIPLIER` | - | `running` のまま放置された BlockRun を検出するしきい値の倍率 (ブロック実行間隔の何倍か)。デフォルト 3 |
 | `BLOCK_ACTION_DELAY_MS` | - | 1 件ブロックするごとの待機時間 (ミリ秒)。デフォルト 2000 |
 | `BLOCK_MAX_PER_ACCOUNT_PER_RUN` | - | 1 アカウント・1 サイクルあたりのブロック上限件数。デフォルト 50 |
+| `BLOCK_TARGET_NOT_FOUND_MAX_ATTEMPTS` | - | code 50 (`BlockTargetNotFoundError`) を許容する最大試行回数 (初回を含む)。デフォルト 3 |
 
 ## データ
 

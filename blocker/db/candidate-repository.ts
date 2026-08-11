@@ -19,6 +19,8 @@ export interface BlockCandidate {
  * @param blockerId - このブロック実行を行うログインアカウントの `Account.id`
  * @param rule - 適用するブロックルール (ラベルごとの確信度閾値)
  * @param maxCount - 返す候補の最大件数。確信度が高い候補を優先して残すため降順ソート後にカットする
+ * @param maxAttempts - `remoteSkipCount` がこの値以上の target を terminal skip として除外する
+ * @param cooldownSeconds - `lastRemoteSkippedAt` からこの秒数が経過するまで再試行対象から除外する
  * @returns 確信度降順に並んだブロック候補
  */
 export async function selectBlockCandidates(
@@ -26,6 +28,8 @@ export async function selectBlockCandidates(
   blockerId: string,
   rule: BlockRuleConfig,
   maxCount: number,
+  maxAttempts: number,
+  cooldownSeconds: number,
 ): Promise<BlockCandidate[]> {
   const labels = rule.targetLabels.map((target) => target.label)
   const thresholds = rule.targetLabels.map((target) => target.confidenceThreshold)
@@ -71,7 +75,16 @@ export async function selectBlockCandidates(
       SELECT 1 FROM "BlockOutboxEntry" oe
       WHERE oe."blockerId" = ${blockerId}
         AND oe."blockedId" = b."accountId"
-        AND oe."status" IN ('pending_remote', 'remote_succeeded')
+        AND (
+          oe."status" IN ('pending_remote', 'remote_succeeded')
+          OR (
+            oe."status" = 'remote_skipped'
+            AND (
+              oe."remoteSkipCount" >= ${maxAttempts}
+              OR oe."lastRemoteSkippedAt" + (${cooldownSeconds}::int * interval '1 second') > now()
+            )
+          )
+        )
     )
     ORDER BY b."confidence" DESC
     LIMIT ${maxCount}

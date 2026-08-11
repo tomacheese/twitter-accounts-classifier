@@ -51,6 +51,15 @@ export function getBlockMaxPerAccountPerRun(): number {
 }
 
 /**
+ * code 50 (`BlockTargetNotFoundError`) を許容する最大試行回数 (初回を含む)。
+ * 実在しない target が候補選定の枠を消費し続けるのを防ぐための上限。
+ * @returns 最大試行回数
+ */
+export function getBlockTargetNotFoundMaxAttempts(): number {
+  return parsePositiveIntEnv('BLOCK_TARGET_NOT_FOUND_MAX_ATTEMPTS', 3)
+}
+
+/**
  * `crawler` の `CRAWL_STALE_THRESHOLD_MULTIPLIER` と同じ考え方で、放置判定のしきい値を
  * 「ブロック実行間隔の何倍か」で表す倍率。
  * @returns 放置判定のしきい値倍率
