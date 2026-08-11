@@ -36,6 +36,17 @@ describe('upsertAccount', () => {
     expect((call.update as Record<string, unknown>).lastCrawledAt).toBeInstanceOf(Date)
   })
 
+  it('skips the change-detection lookup and returns changed: false when detectChange is not requested', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: '123' })
+    const findUnique = vi.fn().mockResolvedValue(null)
+    const prisma = { account: { upsert, findUnique } } as unknown as PrismaClient
+
+    const { changed } = await upsertAccount(prisma, sampleInput)
+
+    expect(findUnique).not.toHaveBeenCalled()
+    expect(changed).toBe(false)
+  })
+
   it('returns changed: false when no bundle-relevant field differs from the existing row', async () => {
     const existing = {
       screenName: sampleInput.screenName,
@@ -53,7 +64,7 @@ describe('upsertAccount', () => {
     const upsert = vi.fn().mockResolvedValue({ id: sampleInput.id, ...existing })
     const prisma = { account: { upsert, findUnique } } as unknown as PrismaClient
 
-    const { changed } = await upsertAccount(prisma, sampleInput)
+    const { changed } = await upsertAccount(prisma, sampleInput, { detectChange: true })
 
     expect(changed).toBe(false)
   })
@@ -75,7 +86,7 @@ describe('upsertAccount', () => {
     const upsert = vi.fn().mockResolvedValue({ ...sampleInput })
     const prisma = { account: { upsert, findUnique } } as unknown as PrismaClient
 
-    const { changed } = await upsertAccount(prisma, sampleInput)
+    const { changed } = await upsertAccount(prisma, sampleInput, { detectChange: true })
 
     expect(changed).toBe(true)
   })
@@ -85,7 +96,7 @@ describe('upsertAccount', () => {
     const upsert = vi.fn().mockResolvedValue({ ...sampleInput })
     const prisma = { account: { upsert, findUnique } } as unknown as PrismaClient
 
-    const { changed } = await upsertAccount(prisma, sampleInput)
+    const { changed } = await upsertAccount(prisma, sampleInput, { detectChange: true })
 
     expect(changed).toBe(true)
   })

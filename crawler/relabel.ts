@@ -10,8 +10,8 @@ import { scanForStaleAccounts } from './relabel-worker'
 
 const logger = Logger.configure('relabel')
 
-// 1 ページあたりの scan 件数。relabel-worker.ts の producer と同じ値にする理由はないため、
-// 手動の即時実行用に大きめの値を使う (rule 評価はここでは行わず enqueue のみのため軽量)。
+// 1 ページあたりの scan 件数。rule 評価はここでは行わず enqueue のみのため、
+// relabel-worker.ts の producer と同じ値で問題ない。
 const MANUAL_SCAN_BATCH_SIZE = 5000
 
 export interface RelabelResult {
@@ -37,7 +37,7 @@ export async function runRelabelBackfill(
   let accountsScanned = 0
   let accountsRequested = 0
   for (;;) {
-    const { scanned, requested } = await scanForStaleAccounts(prisma, {
+    const { scanned, requested, wrapped } = await scanForStaleAccounts(prisma, {
       registry,
       labelDefinitionIds,
       batchSize: MANUAL_SCAN_BATCH_SIZE,
@@ -45,7 +45,8 @@ export async function runRelabelBackfill(
     accountsScanned += scanned
     accountsRequested += requested
     logger.info(`Relabel scan progress: ${accountsScanned} scanned, ${accountsRequested} requested`)
-    if (scanned === 0) break
+    // scanned === 0 はテーブルが空、wrapped は先頭まで一巡し終えたことを示す。
+    if (scanned === 0 || wrapped) break
   }
 
   return { accountsScanned, accountsRequested }

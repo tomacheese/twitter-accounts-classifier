@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+import { hostname } from 'node:os'
 import { Logger } from '@book000/node-utils'
 import type { PrismaClient } from './generated/prisma'
 import { LabelRuleRegistry } from './labels/registry'
@@ -8,7 +10,7 @@ import type { FollowGraphLabelIndex } from './labels/follow-graph-label-index'
 import {
   claimNextWorkItem,
   completeAccountRelabelWorkItem,
-  requestAccountRelabel,
+  requestAccountRelabelBulk,
 } from './db/analysis-work-item-repository'
 import { recordAccountLabelsBulk, ensureLabelDefinitionsForRules } from './db/label-repository'
 import { CRAWL_LIMITS } from './config/crawl-limits'
@@ -98,6 +100,13 @@ export async function drainAccountRelabelQueue(
       if (outcome !== 'lease_lost') succeeded++
     } catch (error) {
       logger.error(`Failed to relabel account ${item.triggerId}`, error as Error)
+      captureException(error, { source: 'relabel-worker.drainAccountRelabelQueue' })
+      await prisma.analysisWorkItem
+        .update({
+          where: { id: item.id },
+          data: { lastErrorSummary: String(error).slice(0, 500) },
+        })
+        .catch(() => undefined)
     }
   }
 
@@ -117,6 +126,8 @@ export interface ScanForStaleAccountsOptions {
 export interface ScanForStaleAccountsResult {
   scanned: number
   requested: number
+  /** カーソルがテーブル終端に達し、先頭へ巻き戻して scan したか。 */
+  wrapped: boolean
 }
 
 const SCAN_CURSOR_ID = 'singleton'
@@ -143,17 +154,16 @@ export async function scanForStaleAccounts(
       : {}),
   })
 
-  // テーブル終端に達した (今回何も取れなかった) 場合は先頭に巻き戻す。
-  const targets =
-    accounts.length > 0
-      ? accounts
-      : await prisma.account.findMany({
-          select: { id: true },
-          orderBy: { id: 'asc' },
-          take: options.batchSize,
-        })
+  const wrapped = accounts.length === 0
+  const targets = wrapped
+    ? await prisma.account.findMany({
+        select: { id: true },
+        orderBy: { id: 'asc' },
+        take: options.batchSize,
+      })
+    : accounts
 
-  if (targets.length === 0) return { scanned: 0, requested: 0 }
+  if (targets.length === 0) return { scanned: 0, requested: 0, wrapped: false }
 
   const accountIds = targets.map((account) => account.id)
   const latestRows = await prisma.accountLabelLatest.findMany({
@@ -165,18 +175,16 @@ export async function scanForStaleAccounts(
   )
   const rules = options.registry.getAll()
 
-  let requested = 0
+  const staleAccountIds: string[] = []
   for (const account of targets) {
     const isStale = rules.some((rule) => {
       const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
       if (!labelDefinitionId) return false
       return latestByKey.get(`${account.id}:${labelDefinitionId}`) !== rule.version
     })
-    if (isStale) {
-      await requestAccountRelabel(prisma, account.id)
-      requested++
-    }
+    if (isStale) staleAccountIds.push(account.id)
   }
+  await requestAccountRelabelBulk(prisma, staleAccountIds)
 
   await prisma.relabelScanCursor.upsert({
     where: { id: SCAN_CURSOR_ID },
@@ -184,7 +192,7 @@ export async function scanForStaleAccounts(
     update: { lastScannedAccountId: accountIds.at(-1) },
   })
 
-  return { scanned: targets.length, requested }
+  return { scanned: targets.length, requested: staleAccountIds.length, wrapped }
 }
 
 // producer/worker それぞれの 1 entrypoint loop あたりの上限。
@@ -221,7 +229,7 @@ async function runRelabelWorkerCycle(): Promise<void> {
       replyHijackIndex: buildReplyHijackIndexImpl(replyCorpus),
       followGraphLabelIndex,
       batchSize: RELABEL_WORKER_BATCH_SIZE,
-      leaseOwner: `relabel-worker-${process.pid}`,
+      leaseOwner: `${hostname()}-${process.pid}-${randomUUID()}`,
     })
     logger.info(`Relabel drain: ${drainResult.claimed} claimed, ${drainResult.succeeded} succeeded`)
   } finally {

@@ -9,9 +9,9 @@ export interface UpsertAccountResult {
   changed: boolean
 }
 
-// AccountFeatureBundle.account が参照するフィールドの集合。ラベル評価に影響しうる
-// フィールドだけを変化検知の対象にすることで、無関係なフィールド更新まで
-// account_relabel を要求してしまうのを避ける。
+// AccountFeatureBundle.account が参照するフィールドの集合。
+// ラベル評価に影響しうるフィールドだけを変化検知の対象にし、
+// 無関係なフィールド更新まで account_relabel を要求するのを避ける。
 const BUNDLE_RELEVANT_FIELDS = [
   'screenName',
   'displayName',
@@ -41,24 +41,40 @@ function hasBundleRelevantChange(
   return BUNDLE_RELEVANT_FIELDS.some((field) => existing[field] !== input[field])
 }
 
+export interface UpsertAccountOptions {
+  /**
+   * true の場合のみ upsert 前に既存値を取得して変化検知を行う。
+   * 呼び出し元の大半は `changed` を読まず、
+   * 全 upsert に検知用の追加 SELECT を課すと高頻度な follow/block 同期経路の
+   * ラウンドトリップ数が倍になるため、必要な呼び出し元だけが明示的に opt-in する。
+   */
+  detectChange?: boolean
+}
+
 /**
- * Account を upsert し、ラベル評価に影響しうるフィールドが変化したかどうかも返す。
+ * Account を upsert し、`detectChange` が指定されたときのみラベル評価に
+ * 影響しうるフィールドが変化したかどうかも返す。
  * @param prisma - Prisma クライアント
  * @param input - 正規化済みのアカウントプロフィール
- * @returns upsert 後の Account と変化検知の結果
+ * @param options - 変化検知の要否
+ * @returns upsert 後の Account と変化検知の結果 (`detectChange` 未指定時は常に false)
  */
 export async function upsertAccount(
   prisma: PrismaClient,
   input: AccountProfileInput,
+  options?: UpsertAccountOptions,
 ): Promise<UpsertAccountResult> {
-  const existing = await prisma.account.findUnique({
-    where: { id: input.id },
-    select: Object.fromEntries(BUNDLE_RELEVANT_FIELDS.map((field) => [field, true])) as Record<
-      (typeof BUNDLE_RELEVANT_FIELDS)[number],
-      true
-    >,
-  })
-  const changed = hasBundleRelevantChange(existing, input)
+  const changed = options?.detectChange
+    ? hasBundleRelevantChange(
+        await prisma.account.findUnique({
+          where: { id: input.id },
+          select: Object.fromEntries(
+            BUNDLE_RELEVANT_FIELDS.map((field) => [field, true]),
+          ) as Record<(typeof BUNDLE_RELEVANT_FIELDS)[number], true>,
+        }),
+        input,
+      )
+    : false
 
   const now = new Date()
   const account = await prisma.account.upsert({

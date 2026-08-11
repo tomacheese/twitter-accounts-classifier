@@ -26,10 +26,10 @@ export interface PersistAuthorResultAtomicParams {
   /** `fetchRecentTweets` が返す Tweet 全件 (author 自身の Tweet と文脈 Tweet の両方)。 */
   recentTweets: TweetInput[]
   /**
-   * authorId 自身の Tweet であることが確定しており、fallback profile 解決が不要な追加分
-   * (timeline 上で観測された自身の投稿・他アカウント処理中に見つかった自身のリプライ)。
-   * これらも同一 transaction 内で merge・評価することで、ラベル評価が merge 前の値を
-   * 見てしまう状態を作らない。
+   * authorId 自身の Tweet であることが確定しており、
+   * fallback profile 解決が不要な追加分(timeline 上で観測された自身の投稿・他アカウント処理中に見つかった自身のリプライ)。
+   * これらも同一 transaction 内で merge・評価し、
+   * ラベル評価が merge 前の値を見る状態を避ける。
    */
   additionalOwnTweets: TweetInput[]
   /** `recentTweets` に含まれる文脈 Tweet の `accountId` FK を満たすための fallback profile。 */

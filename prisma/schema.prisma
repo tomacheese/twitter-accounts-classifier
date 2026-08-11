@@ -98,7 +98,7 @@ model Tweet {
   source                     String
   collectedAt                DateTime @default(now())
 
-  @@index([accountId])
+  @@index([accountId, createdAt])
 }
 
 model LabelDefinition {

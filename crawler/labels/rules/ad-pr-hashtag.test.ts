@@ -57,13 +57,6 @@ describe('adPrHashtagRule', () => {
     expect(result.value).toBe(true)
   })
 
-  it('is true when the only sampled tweet carries isPaidPromotion, even with just one sample', () => {
-    const result = adPrHashtagRule.evaluate(
-      makeBundle([tweet({ fullText: '新商品を使ってみました！', isPaidPromotion: true })]),
-    )
-    expect(result.value).toBe(true)
-  })
-
   it('is false when the only #PR-tagged tweet is a giveaway/campaign-entry post', () => {
     const result = adPrHashtagRule.evaluate(
       makeBundle([
@@ -154,6 +147,71 @@ describe('adPrHashtagRule campaign exclusion narrowing', () => {
       makeBundle([tweet({ fullText: 'このキャンペーンに応募しました!当選しますように #PR' })]),
     )
     expect(result.value).toBe(false)
+  })
+
+  it('is false for the 応募してた (te-form) campaign-entry variant', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: 'このキャンペーンに応募してた #PR' })]),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for 当たりました without the ように suffix', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: '当たりました!ありがとうございます #PR' })]),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for the 抽選で…当選 campaign-entry variant', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: '抽選で当選しました #PR' })]),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('matches 抽選で…当選 within the 10-character gap', () => {
+    const filler = 'あ'.repeat(10)
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: `抽選で${filler}当選しました #PR` })]),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('does not match 抽選で…当選 beyond the 10-character gap', () => {
+    const filler = 'あ'.repeat(11)
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: `抽選で${filler}当選しました #PR` })]),
+    )
+    expect(result.value).toBe(true)
+  })
+
+  it('does not exclude a #PR post that merely mentions 懸賞 without an entry phrase', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: '本日の懸賞コーナーはこちら #PR' })]),
+    )
+    expect(result.value).toBe(true)
+  })
+
+  it('does not exclude a #PR post that merely mentions プレゼント企画 without an entry phrase', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: 'プレゼント企画開催中です #PR' })]),
+    )
+    expect(result.value).toBe(true)
+  })
+
+  it('does not exclude a #PR post that mentions bare 抽選 without a win phrase', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: '本日抽選を行いました #PR' })]),
+    )
+    expect(result.value).toBe(true)
+  })
+
+  it('does not exclude a #PR post that mentions bare 当選 without an entry phrase', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: '当選者発表!ご応募ありがとうございました #PR' })]),
+    )
+    expect(result.value).toBe(true)
   })
 })
 

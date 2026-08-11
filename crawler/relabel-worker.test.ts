@@ -98,8 +98,8 @@ describe('scanForStaleAccounts', () => {
     vi.restoreAllMocks()
   })
 
-  it('カーソル位置から bounded 件数だけ scan し、stale な account を requestAccountRelabel する', async () => {
-    const requestSpy = vi.spyOn(workItemRepository, 'requestAccountRelabel').mockResolvedValue()
+  it('カーソル位置から bounded 件数だけ scan し、stale な account を requestAccountRelabelBulk する', async () => {
+    const requestSpy = vi.spyOn(workItemRepository, 'requestAccountRelabelBulk').mockResolvedValue()
     const prisma = {
       relabelScanCursor: {
         findUnique: vi.fn().mockResolvedValue({ id: 'singleton', lastScannedAccountId: null }),
@@ -134,8 +134,8 @@ describe('scanForStaleAccounts', () => {
 
     expect(result.scanned).toBe(2)
     // acct-1 は ruleVersion が古い (1.0.0 != 2.0.0)、acct-2 は行自体がない → どちらも stale
-    expect(requestSpy).toHaveBeenCalledWith(prisma, 'acct-1')
-    expect(requestSpy).toHaveBeenCalledWith(prisma, 'acct-2')
+    expect(requestSpy).toHaveBeenCalledWith(prisma, ['acct-1', 'acct-2'])
     expect(result.requested).toBe(2)
+    expect(result.wrapped).toBe(false)
   })
 })

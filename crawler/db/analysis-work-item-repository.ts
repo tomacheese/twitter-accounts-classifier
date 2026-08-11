@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { AnalysisWorkItem, Prisma, PrismaClient } from '../generated/prisma'
 
 export interface EnqueueWorkItemInput {
@@ -34,11 +35,11 @@ const ACCOUNT_RELABEL_TRIGGER_TYPE = 'account'
 const TERMINAL_STATUSES = ['succeeded', 'failed', 'dead']
 
 /**
- * account_relabel の再 arm 可能な enqueue。通常の enqueueWorkItem と異なり、
- * succeeded/failed/dead だった行も queued に戻し、leased 中は dirty marker
- * (staleRequestedAt) を立てるだけに留める。
- * 1 回の UPDATE 文で完結させることで、既存行の status 確認と書き込みの間に
- * 他の呼び出しが割り込むレースを作らない。
+ * account_relabel の再 arm 可能な enqueue。
+ * 通常の enqueueWorkItem と異なり、succeeded/failed/dead だった行も queued に戻し、
+ * leased 中は dirty marker (staleRequestedAt) を立てるだけに留める。
+ * 既存行の status 確認と書き込みを 1 回の UPDATE 文にまとめ、
+ * 他の呼び出しが割り込むレースを避ける。
  * @param prisma - Prisma クライアント
  * @param accountId - 再評価を要求する account の ID
  */
@@ -53,7 +54,8 @@ export async function requestAccountRelabel(
       "availableAt" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN now() ELSE "availableAt" END,
       "staleRequestedAt" = CASE WHEN "status" = 'leased' THEN now() ELSE "staleRequestedAt" END,
       "leaseOwner" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "leaseOwner" END,
-      "leaseExpiresAt" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "leaseExpiresAt" END
+      "leaseExpiresAt" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "leaseExpiresAt" END,
+      "attemptCount" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN 0 ELSE "attemptCount" END
     WHERE "kind" = ${ACCOUNT_RELABEL_KIND}
       AND "triggerType" = ${ACCOUNT_RELABEL_TRIGGER_TYPE}
       AND "triggerId" = ${accountId}
@@ -78,6 +80,35 @@ export async function requestAccountRelabel(
       (error as { code?: unknown }).code === 'P2002'
     if (!isUniqueConstraintError) throw error
   }
+}
+
+/**
+ * requestAccountRelabel の複数 account 版。1 account ずつ逐次 UPDATE/INSERT する代わりに、
+ * UNNEST で展開した1本の INSERT ... ON CONFLICT 文にまとめてラウンドトリップを1回に抑える。
+ * CASE の意味論は requestAccountRelabel と同じ。
+ * @param prisma - Prisma クライアント
+ * @param accountIds - 再評価を要求する account の ID 一覧
+ */
+export async function requestAccountRelabelBulk(
+  prisma: Prisma.TransactionClient | PrismaClient,
+  accountIds: string[],
+): Promise<void> {
+  if (accountIds.length === 0) return
+
+  const ids = accountIds.map(() => randomUUID())
+  await prisma.$executeRaw`
+    INSERT INTO "AnalysisWorkItem" ("id", "kind", "triggerType", "triggerId")
+    SELECT u."id", ${ACCOUNT_RELABEL_KIND}, ${ACCOUNT_RELABEL_TRIGGER_TYPE}, u."triggerId"
+    FROM UNNEST(${ids}::text[], ${accountIds}::text[]) AS u("id", "triggerId")
+    ON CONFLICT ("kind", "triggerType", "triggerId") DO UPDATE
+    SET
+      "status" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN 'queued' ELSE "status" END,
+      "availableAt" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN now() ELSE "availableAt" END,
+      "staleRequestedAt" = CASE WHEN "status" = 'leased' THEN now() ELSE "staleRequestedAt" END,
+      "leaseOwner" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "leaseOwner" END,
+      "leaseExpiresAt" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "leaseExpiresAt" END,
+      "attemptCount" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN 0 ELSE "attemptCount" END
+  `
 }
 
 export interface ClaimNextWorkItemInput {
@@ -155,7 +186,8 @@ export async function completeAccountRelabelWorkItem(
       "availableAt" = CASE WHEN "staleRequestedAt" IS NOT NULL THEN now() ELSE "availableAt" END,
       "staleRequestedAt" = NULL,
       "leaseOwner" = NULL,
-      "leaseExpiresAt" = NULL
+      "leaseExpiresAt" = NULL,
+      "attemptCount" = 0
     WHERE "id" = ${input.workItemId} AND "leaseOwner" = ${input.leaseOwner}
     RETURNING "status"
   `

@@ -35,7 +35,7 @@ interface ExistingTweetSnapshot {
 }
 
 /**
- * 2 つの URL 配列が要素集合として一致するかを判定する。
+ * 2 つの URL 配列が要素集合として異なるかを判定する。
  * @param a - 比較対象の配列
  * @param b - 比較対象の配列
  * @returns 要素の集合が異なれば true

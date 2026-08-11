@@ -29,11 +29,11 @@ function hasPrDisclosureMarker(fullText: string): boolean {
 // 「キャンペーン」等の語だけで判定すると、商品提供を受けたレビュー投稿の企画名にも同じ語が現れて誤って除外されるため、
 // 投稿者自身が応募者側であることを示す一人称的な行動 (応募した・当選しますように等) に限定する。
 const CAMPAIGN_ENTRY_PATTERN =
-  /(応募し(まし|て)た|当た(ります|りました)ように|抽選で.{0,10}(当たり|当選))/u
+  /(応募し(まし|て)た|当た(りますように|りました)|抽選で.{0,10}(当たり|当選))/u
 
 // isPaidPromotion は X 公式の有償パートナーシップ開示機能によるフラグであり、
 // ヒューリスティックな #PR ハッシュタグ検出と異なりサンプル数で信頼度を割り引く理由がない。
-// そのため 1 件でも true があれば陽性とみなす (旧 MIN_SAMPLE_FOR_PAID_PROMOTION_FLAG は撤廃)。
+// そのため 1 件でも true があれば陽性とみなす。
 
 export const adPrHashtagRule: LabelRule = {
   key: 'ad_pr_hashtag',

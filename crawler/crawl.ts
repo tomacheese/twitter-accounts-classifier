@@ -18,7 +18,10 @@ import {
   filterAccountIdsWithExistingLabels,
 } from './db/label-repository'
 import { refreshLabelAggregate } from './db/label-aggregate-repository'
-import { requestAccountRelabel } from './db/analysis-work-item-repository'
+import {
+  requestAccountRelabel,
+  requestAccountRelabelBulk,
+} from './db/analysis-work-item-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
@@ -1578,7 +1581,7 @@ function toCrawlOpenApiClient(
  */
 export function createPersistAccountFn(prisma: PrismaClient): CrawlDependencies['persistAccount'] {
   return async (input) => {
-    const { account, changed } = await upsertAccount(prisma, input)
+    const { account, changed } = await upsertAccount(prisma, input, { detectChange: true })
     if (!changed) return
     const relabelable = await filterAccountIdsWithExistingLabels(prisma, [account.id])
     if (relabelable.has(account.id)) {
@@ -1602,7 +1605,7 @@ export function createPersistTweetsFn(prisma: PrismaClient): CrawlDependencies['
     ]
     if (changedAccountIds.length === 0) return
     const relabelable = await filterAccountIdsWithExistingLabels(prisma, changedAccountIds)
-    await Promise.all([...relabelable].map((accountId) => requestAccountRelabel(prisma, accountId)))
+    await requestAccountRelabelBulk(prisma, [...relabelable])
   }
 }
 

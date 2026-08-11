@@ -63,13 +63,13 @@ describe('createPersistTweetsFn', () => {
     vi.spyOn(labelRepository, 'filterAccountIdsWithExistingLabels').mockResolvedValue(
       new Set(['acct-1']),
     )
-    const requestSpy = vi.spyOn(workItemRepository, 'requestAccountRelabel').mockResolvedValue()
+    const requestSpy = vi.spyOn(workItemRepository, 'requestAccountRelabelBulk').mockResolvedValue()
 
     const prisma = {} as PrismaClient
     const persistTweets = createPersistTweetsFn(prisma)
     await persistTweets([] as never)
 
     expect(requestSpy).toHaveBeenCalledTimes(1)
-    expect(requestSpy).toHaveBeenCalledWith(prisma, 'acct-1')
+    expect(requestSpy).toHaveBeenCalledWith(prisma, ['acct-1'])
   })
 })

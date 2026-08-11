@@ -14,7 +14,7 @@ When the user hands you one or more specific tweet/account URLs and asks whether
 1. Extract the tweet ID(s)/screen name(s) from the provided URL(s).
 2. Check whether the account(s) and the specific tweet(s) already exist in the database (`Account`/`Tweet` tables via `psql`).
 3. **If the specific tweet or its replies are missing or incomplete**, run `node dist/crawl-tweet.js <tweetId>` inside the crawler container before doing anything else. Do not conclude a rule is "not working" based on data that was never actually crawled — a `false` result caused by a missing tweet looks identical to a `false` result caused by a rule gap, and only actually fetching the data distinguishes them.
-4. Evaluate every registered label rule against the specific account(s) in question. This does not require a full-population `relabel` backfill — write or reuse a scoped evaluation limited to the account(s) at hand (build each account's `AccountFeatureBundle` and call `registry.applyAll(bundle)` directly), since the full backfill is comparatively expensive and this workflow only needs a handful of accounts checked.
+4. Evaluate every registered label rule against the specific account(s) in question. This does not require a full-population `relabel` backfill — write or reuse a scoped evaluation limited to the account(s) at hand (build each account's `AccountFeatureBundle` and call `registry.applyAll(bundle)` directly), since `relabel.js` only enqueues async work for the worker queue rather than returning an immediate result, and this workflow only needs a handful of accounts checked.
 5. Compare the actual rule outputs against what the user expects, and report which case applies:
    - **Data-capture gap**: the pattern's evidence wasn't crawled at all until step 3 crawled it.
    - **Rule-logic gap**: the evidence exists, but no current rule's logic covers this pattern shape, or an existing rule's logic covers it but produces the wrong verdict.
@@ -24,4 +24,4 @@ When the user hands you one or more specific tweet/account URLs and asks whether
 ## Constraints
 
 - Do not touch `data/config.json` or anything containing credentials.
-- Do not run the full `relabel.js` backfill from within this skill — it is a full-population operation with real runtime cost, designed to be run sparingly rather than routinely; the scoped per-account evaluation in step 4 is sufficient for verifying specific reported examples.
+- Do not run `relabel.js` from within this skill — even though it now only enqueues stale `(account, rule)` pairs as `account_relabel` work items rather than evaluating them inline, the actual evaluation still runs asynchronously via the relabel-worker queue on the crawler's next entrypoint loop cycle, so it does not give you an immediate, scoped answer for the account(s) at hand; the scoped per-account evaluation in step 4 is sufficient for verifying specific reported examples.
