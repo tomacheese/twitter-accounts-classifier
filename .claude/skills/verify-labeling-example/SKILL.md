@@ -24,4 +24,4 @@ When the user hands you one or more specific tweet/account URLs and asks whether
 ## Constraints
 
 - Do not touch `data/config.json` or anything containing credentials.
-- Do not run `relabel.js` from within this skill — even though it now only enqueues stale `(account, rule)` pairs as `account_relabel` work items rather than evaluating them inline, the actual evaluation still runs asynchronously via the relabel-worker queue on the crawler's next entrypoint loop cycle, so it does not give you an immediate, scoped answer for the account(s) at hand; the scoped per-account evaluation in step 4 is sufficient for verifying specific reported examples.
+- Do not run `relabel.js` from within this skill — even though it now only enqueues stale `(account, rule)` pairs as `account_relabel` work items rather than evaluating them inline, the actual evaluation still runs asynchronously via the relabel-worker queue on the relabeler service's next poll cycle, so it does not give you an immediate, scoped answer for the account(s) at hand; the scoped per-account evaluation in step 4 is sufficient for verifying specific reported examples.

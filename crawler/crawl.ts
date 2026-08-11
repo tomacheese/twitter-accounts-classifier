@@ -1705,7 +1705,7 @@ async function main(): Promise<void> {
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: (watermark) => loadReplyCorpus(prisma, watermark),
     loadFollowGraphLabelIndex: (labelDefinitionIds, accountIds) =>
-      buildFollowGraphLabelIndex(prisma, labelDefinitionIds, accountIds),
+      buildFollowGraphLabelIndex(prisma, labelDefinitionIds, { accountIds }),
     persistAuthorResultAtomic: (params) => persistAuthorResultAtomicRecord(prisma, params),
     recordCrawlAuthorCheckpoint: (params) => recordCrawlAuthorCheckpointRecord(prisma, params),
     loadCrawlAuthorCheckpoints: (crawlRunId, username) =>

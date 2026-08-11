@@ -21,140 +21,139 @@ import { buildFollowGraphLabelIndex } from './labels/follow-graph-label-index'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { initMonitoring, captureException } from './monitoring/sentry'
+import {
+  getRelabelerProducerBatchSize,
+  getRelabelerWorkerBatchSize,
+  getRelabelerWorkerConcurrency,
+} from './config/env'
 
 const logger = Logger.configure('relabel-worker')
 
 const ACCOUNT_RELABEL_KIND = 'account_relabel'
 const LEASE_DURATION_MS = 5 * 60 * 1000
-// batch 全体を先に claim すると、後半の item ほど lease 期限までの余裕が小さくなり横取りされうる。
-// そのため、この件数単位で claim と処理を繰り返す。
-const CLAIM_CHUNK_SIZE = 100
 
-export interface DrainAccountRelabelQueueOptions {
-  registry: LabelRuleRegistry
-  labelDefinitionIds: Map<string, string>
-  duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
-  replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
-  buildFollowGraphLabelIndex: (accountIds: string[]) => Promise<FollowGraphLabelIndex>
+export interface ClaimAccountRelabelBatchOptions {
   batchSize: number
   leaseOwner: string
 }
 
-export interface DrainAccountRelabelQueueResult {
-  claimed: number
+/**
+ * account_relabel kind の work item を batchSize を上限に claim する。
+ * claim 自体は 1 行の `FOR UPDATE SKIP LOCKED` UPDATE のため、並列化する実益がない。
+ * @param prisma - Prisma クライアント
+ * @param options - 1 cycle あたりの claim 上限件数と lease owner 名
+ * @returns claim できた work item の一覧 (対象が尽きた時点で打ち切るため、batchSize より少ないことがある)
+ */
+export async function claimAccountRelabelBatch(
+  prisma: PrismaClient,
+  options: ClaimAccountRelabelBatchOptions,
+): Promise<AnalysisWorkItem[]> {
+  const items: AnalysisWorkItem[] = []
+  for (let i = 0; i < options.batchSize; i++) {
+    const item = await claimNextWorkItem(prisma, {
+      kinds: [ACCOUNT_RELABEL_KIND],
+      leaseOwner: options.leaseOwner,
+      leaseDurationMs: LEASE_DURATION_MS,
+    })
+    if (!item) break
+    items.push(item)
+  }
+  return items
+}
+
+export interface EvaluateAccountRelabelItemsOptions {
+  registry: LabelRuleRegistry
+  labelDefinitionIds: Map<string, string>
+  duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
+  replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
+  followGraphLabelIndex: FollowGraphLabelIndex
+  concurrency: number
+  leaseOwner: string
+}
+
+export interface EvaluateAccountRelabelItemsResult {
   succeeded: number
 }
 
 /**
- * account_relabel kind の work item を bounded batch で claim し、1 account ずつ評価・永続化する。
- * follow-graph signal の集計は claim できた work item の accountId だけに絞り込むため、
- * chunk ごとに claim してから構築する。
+ * claim 済みの account_relabel work item を、1 account ずつ評価・永続化する。
+ * account 単位の try/catch で例外を吸収しているため、chunk を跨いだ Promise.all 並列化でも、
+ * 1 account の失敗が他の account やチャンクを巻き込むことはない。
  * @param prisma - Prisma クライアント
- * @param options - 評価に使うルールレジストリ・共有インデックス・batch size・lease owner 名
- * @returns claim した件数と succeeded (requeue 含む) にできた件数
+ * @param items - claimAccountRelabelBatch で claim 済みの work item 一覧
+ * @param options - 評価に使うルールレジストリ・共有インデックス・並行度・lease owner 名
+ * @returns succeeded (requeue 含む) にできた件数
  */
-export async function drainAccountRelabelQueue(
+export async function evaluateAccountRelabelItems(
   prisma: PrismaClient,
-  options: DrainAccountRelabelQueueOptions,
-): Promise<DrainAccountRelabelQueueResult> {
-  let claimed = 0
-  let succeeded = 0
-  let queueExhausted = false
-
-  while (claimed < options.batchSize && !queueExhausted) {
-    const chunk: AnalysisWorkItem[] = []
-    const chunkTarget = Math.min(CLAIM_CHUNK_SIZE, options.batchSize - claimed)
-    for (let i = 0; i < chunkTarget; i++) {
-      const item = await claimNextWorkItem(prisma, {
-        kinds: [ACCOUNT_RELABEL_KIND],
-        leaseOwner: options.leaseOwner,
-        leaseDurationMs: LEASE_DURATION_MS,
-      })
-      if (!item) {
-        queueExhausted = true
-        break
-      }
-      chunk.push(item)
-    }
-    if (chunk.length === 0) break
-    claimed += chunk.length
-
-    let followGraphLabelIndex: FollowGraphLabelIndex
+  items: AnalysisWorkItem[],
+  options: EvaluateAccountRelabelItemsOptions,
+): Promise<EvaluateAccountRelabelItemsResult> {
+  async function evaluateOne(item: AnalysisWorkItem): Promise<boolean> {
     try {
-      followGraphLabelIndex = await options.buildFollowGraphLabelIndex(
-        chunk.map((item) => item.triggerId),
-      )
-    } catch (error) {
-      // 何も記録しないと、claim 済みの item が理由不明のまま lease 切れを待つだけになる。
-      logger.error('Failed to build follow-graph label index for relabel chunk', error as Error)
-      captureException(error, {
-        source: 'relabel-worker.drainAccountRelabelQueue',
-        chunkSize: chunk.length,
-        triggerIds: chunk.map((item) => item.triggerId),
-      })
-      await Promise.all(
-        chunk.map((item) =>
-          prisma.analysisWorkItem
-            .update({
-              where: { id: item.id },
-              data: { lastErrorSummary: String(error).slice(0, 500) },
-            })
-            .catch(() => undefined),
-        ),
-      )
-      // DB 障害など他 chunk にも及ぶ失敗である可能性が高いため、以降の chunk は試行せず中断する。
-      break
-    }
-
-    for (const item of chunk) {
-      try {
-        const account = await prisma.account.findUnique({ where: { id: item.triggerId } })
-        if (account) {
-          const recentTweets = await prisma.tweet.findMany({
-            where: { accountId: account.id },
-            orderBy: { createdAt: 'desc' },
-            take: CRAWL_LIMITS.recentTweetsPerAccount,
-          })
-          const bundle = buildAccountFeatureBundle(
-            account,
-            recentTweets,
-            options.duplicateReplyIndex,
-            options.replyHijackIndex,
-            followGraphLabelIndex,
-          )
-          const labelsToPersist = options.registry.applyAll(bundle).flatMap(({ rule, result }) => {
-            const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
-            if (!labelDefinitionId) return []
-            return [{ labelDefinitionId, method: rule.key, ruleVersion: rule.version, result }]
-          })
-          if (labelsToPersist.length > 0) {
-            await recordAccountLabelsBulk(prisma, {
-              accountId: account.id,
-              sourceKind: 'relabel',
-              labels: labelsToPersist,
-            })
-          }
-        }
-        // account が既に削除されている場合、これ以上評価しようがないため succeeded 扱いで終端する。
-        const outcome = await completeAccountRelabelWorkItem(prisma, {
-          workItemId: item.id,
-          leaseOwner: options.leaseOwner,
+      const account = await prisma.account.findUnique({ where: { id: item.triggerId } })
+      if (account) {
+        const recentTweets = await prisma.tweet.findMany({
+          where: { accountId: account.id },
+          orderBy: { createdAt: 'desc' },
+          take: CRAWL_LIMITS.recentTweetsPerAccount,
         })
-        if (outcome !== 'lease_lost') succeeded++
-      } catch (error) {
-        logger.error(`Failed to relabel account ${item.triggerId}`, error as Error)
-        captureException(error, { source: 'relabel-worker.drainAccountRelabelQueue' })
-        await prisma.analysisWorkItem
-          .update({
-            where: { id: item.id },
-            data: { lastErrorSummary: String(error).slice(0, 500) },
+        const bundle = buildAccountFeatureBundle(
+          account,
+          recentTweets,
+          options.duplicateReplyIndex,
+          options.replyHijackIndex,
+          options.followGraphLabelIndex,
+        )
+        const labelsToPersist = options.registry.applyAll(bundle).flatMap(({ rule, result }) => {
+          const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
+          if (!labelDefinitionId) return []
+          return [{ labelDefinitionId, method: rule.key, ruleVersion: rule.version, result }]
+        })
+        if (labelsToPersist.length > 0) {
+          await recordAccountLabelsBulk(prisma, {
+            accountId: account.id,
+            sourceKind: 'relabel',
+            labels: labelsToPersist,
           })
-          .catch(() => undefined)
+        }
       }
+      // account が既に削除されている場合、これ以上評価しようがないため succeeded 扱いで終端する。
+      const outcome = await completeAccountRelabelWorkItem(prisma, {
+        workItemId: item.id,
+        leaseOwner: options.leaseOwner,
+      })
+      return outcome !== 'lease_lost'
+    } catch (error) {
+      logger.error(`Failed to relabel account ${item.triggerId}`, error as Error)
+      captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
+      await prisma.analysisWorkItem
+        .update({
+          where: { id: item.id },
+          data: { lastErrorSummary: String(error).slice(0, 500) },
+        })
+        .catch(() => undefined)
+      return false
     }
   }
 
-  return { claimed, succeeded }
+  const concurrency = Math.max(1, options.concurrency)
+  const chunks: AnalysisWorkItem[][] = Array.from({ length: concurrency }, () => [])
+  for (const [index, item] of items.entries()) {
+    chunks[index % concurrency].push(item)
+  }
+
+  const chunkResults = await Promise.all(
+    chunks.map(async (chunk) => {
+      let succeeded = 0
+      for (const item of chunk) {
+        if (await evaluateOne(item)) succeeded++
+      }
+      return succeeded
+    }),
+  )
+
+  return { succeeded: chunkResults.reduce((sum, count) => sum + count, 0) }
 }
 
 interface StaleAccountRow {
@@ -239,49 +238,90 @@ export async function scanForStaleAccounts(
   return { scanned: targets.length, requested: staleAccountIds.length, wrapped }
 }
 
-// producer/worker それぞれの 1 entrypoint loop あたりの上限。
-// crawl loop の周期を重ねても新規ルールの backfill が長期化しない値を選んでいる。
-const RELABEL_PRODUCER_BATCH_SIZE = 5000
-const RELABEL_WORKER_BATCH_SIZE = 2000
-
 /**
- * entrypoint.sh の crawl loop から毎周期呼ばれる 1 サイクル分の実行。
- * producer (incremental scan) を 1 ページ進めたのち、worker (queue drain) を bounded 件数だけ処理する。
+ * 1 cycle 分の producer (incremental scan) + worker (claim → bounded index 構築 → evaluate) を実行する。
+ * DB クライアントの確保・解放を呼び出し元の runRelabelWorkerCycle に委ねているのは、
+ * テストで prisma を差し替えられるようにするため。
+ * @param prisma - Prisma クライアント
  */
-async function runRelabelWorkerCycle(): Promise<void> {
-  const prisma = getPrismaClient()
+export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<void> {
+  const registry = new LabelRuleRegistry()
+  for (const rule of ALL_LABEL_RULES) registry.register(rule)
+  const labelDefinitionIds = await ensureLabelDefinitionsForRules(prisma, registry.getAll())
+
+  const scanResult = await scanForStaleAccounts(prisma, {
+    registry,
+    labelDefinitionIds,
+    batchSize: getRelabelerProducerBatchSize(),
+  })
+  logger.info(
+    `Relabel scan: ${scanResult.scanned} accounts scanned, ${scanResult.requested} requested`,
+  )
+
+  const leaseOwner = `${hostname()}-${process.pid}-${randomUUID()}`
+  const concurrency = getRelabelerWorkerConcurrency()
+  const claimed = await claimAccountRelabelBatch(prisma, {
+    batchSize: getRelabelerWorkerBatchSize() * concurrency,
+    leaseOwner,
+  })
+  if (claimed.length === 0) {
+    logger.info('Relabel drain: 0 claimed, skipping index construction')
+    return
+  }
+
   try {
-    const registry = new LabelRuleRegistry()
-    for (const rule of ALL_LABEL_RULES) registry.register(rule)
-    const labelDefinitionIds = await ensureLabelDefinitionsForRules(prisma, registry.getAll())
-
-    const scanResult = await scanForStaleAccounts(prisma, {
-      registry,
-      labelDefinitionIds,
-      batchSize: RELABEL_PRODUCER_BATCH_SIZE,
-    })
-    logger.info(
-      `Relabel scan: ${scanResult.scanned} accounts scanned, ${scanResult.requested} requested`,
-    )
-
+    const accountIds = claimed.map((item) => item.triggerId)
     // CrawlRun に紐づかないため、既存の全件対象の挙動を維持するよう現在時刻を watermark として渡す。
     const replyCorpus = await loadReplyCorpus(prisma, new Date())
+    // follow-graph signal を使わないルールのラベルまで集計対象に含めると、
+    // 対象 account 数が同じでも不要な JOIN 対象ラベルが増えてクエリコストが膨らむ。
     const followGraphLabelDefinitionIds = new Map(
       [...labelDefinitionIds.entries()].filter(([key]) =>
         registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
       ),
     )
-    const drainResult = await drainAccountRelabelQueue(prisma, {
+    const followGraphLabelIndex = await buildFollowGraphLabelIndex(
+      prisma,
+      followGraphLabelDefinitionIds,
+      { accountIds },
+    )
+    const evaluateResult = await evaluateAccountRelabelItems(prisma, claimed, {
       registry,
       labelDefinitionIds,
       duplicateReplyIndex: buildDuplicateReplyIndexImpl(replyCorpus),
       replyHijackIndex: buildReplyHijackIndexImpl(replyCorpus),
-      buildFollowGraphLabelIndex: (accountIds) =>
-        buildFollowGraphLabelIndex(prisma, followGraphLabelDefinitionIds, accountIds),
-      batchSize: RELABEL_WORKER_BATCH_SIZE,
-      leaseOwner: `${hostname()}-${process.pid}-${randomUUID()}`,
+      followGraphLabelIndex,
+      concurrency,
+      leaseOwner,
     })
-    logger.info(`Relabel drain: ${drainResult.claimed} claimed, ${drainResult.succeeded} succeeded`)
+    logger.info(`Relabel drain: ${claimed.length} claimed, ${evaluateResult.succeeded} succeeded`)
+  } catch (error) {
+    // index 構築が失敗すると claim 済みの全件が評価前に取り残されるため、次回 scan での
+    // 原因調査に使えるよう、release はせず lastErrorSummary だけ書き残して rethrow する。
+    logger.error('Relabel drain failed before evaluation', error as Error)
+    captureException(error, { source: 'relabel-worker.runRelabelWorkerCycleOnce' })
+    await Promise.all(
+      claimed.map((item) =>
+        prisma.analysisWorkItem
+          .update({
+            where: { id: item.id },
+            data: { lastErrorSummary: String(error).slice(0, 500) },
+          })
+          .catch(() => undefined),
+      ),
+    )
+    throw error
+  }
+}
+
+/**
+ * relabeler-entrypoint.sh のループから毎周期呼ばれる 1 サイクル分の実行。
+ * DB クライアントの確保・解放を担い、実処理は runRelabelWorkerCycleOnce に委譲する。
+ */
+async function runRelabelWorkerCycle(): Promise<void> {
+  const prisma = getPrismaClient()
+  try {
+    await runRelabelWorkerCycleOnce(prisma)
   } finally {
     await disconnectPrisma()
   }

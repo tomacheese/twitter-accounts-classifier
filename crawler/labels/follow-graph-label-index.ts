@@ -29,33 +29,42 @@ interface AggregateRow {
   totalCount: number
 }
 
+export interface BuildFollowGraphLabelIndexOptions {
+  /** 指定時、シグナルを構築する対象 (集計クエリの WHERE 対象) をこの account 群に限定する。省略時は全 account が対象。 */
+  accountIds?: string[]
+}
+
 /**
  * フォロー先方向は `Follow` と `LabelingFollowSample` の両方を、
  * フォロワー方向は `Follow` を、それぞれ `AccountLabelLatest` と突き合わせる集約クエリで、
  * アカウント単位のグラフ探索を行わずにラベルごとの既存付与状況を組み立てる。
- * `accountIds` で対象 account を絞り込み、集計対象行数を account 数に比例させる。
  * 参照するのは呼び出し時点までに永続化済みの `AccountLabelLatest` の値であり、
  * 同一実行中に先行して確定したラベルも含まれうる。
  * @param prisma - 問い合わせに使う Prisma クライアント
  * @param labelKeyToDefinitionId - ルールキーから LabelDefinition の id へのマップ (`ensureLabelDefinitionsForRules` の戻り値)
- * @param accountIds - signal を構築する対象 account の id 一覧。空の場合はクエリを発行しない
+ * @param options - 集計対象を絞り込むオプション
  * @returns アカウントごとにシグナルを読み出せるインデックス
  */
 export async function buildFollowGraphLabelIndex(
   prisma: PrismaClient,
   labelKeyToDefinitionId: Map<string, string>,
-  accountIds: string[],
+  options?: BuildFollowGraphLabelIndexOptions,
 ): Promise<FollowGraphLabelIndex> {
   const definitionIdToKey = new Map(
     [...labelKeyToDefinitionId.entries()].map(([key, id]) => [id, key]),
   )
   const targetDefinitionIds = [...definitionIdToKey.keys()]
 
-  if (targetDefinitionIds.length === 0 || accountIds.length === 0) {
+  if (targetDefinitionIds.length === 0) {
     return { signalsFor: () => ({}) }
   }
 
-  const followeeRows = await prisma.$queryRaw<AggregateRow[]>`
+  const accountIds = options?.accountIds
+
+  // Prisma.sql/Prisma.empty による条件付き SQL 合成は $queryRaw モックの呼び出し引数に断片が反映されず、
+  // テストで WHERE 句の有無を検証できない。そのため accountIds の有無で完全に別クエリに分岐させている。
+  const followeeRows = accountIds
+    ? await prisma.$queryRaw<AggregateRow[]>`
       SELECT
         edges."accountId",
         all_latest."labelDefinitionId",
@@ -71,7 +80,23 @@ export async function buildFollowGraphLabelIndex(
         AND edges."accountId" = ANY(${accountIds})
       GROUP BY edges."accountId", all_latest."labelDefinitionId"
     `
-  const followerRows = await prisma.$queryRaw<AggregateRow[]>`
+    : await prisma.$queryRaw<AggregateRow[]>`
+      SELECT
+        edges."accountId",
+        all_latest."labelDefinitionId",
+        COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
+        COUNT(*)::int AS "totalCount"
+      FROM (
+        SELECT "followerId" AS "accountId", "followeeId" FROM "Follow"
+        UNION
+        SELECT "accountId", "followeeId" FROM "LabelingFollowSample"
+      ) edges
+      JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
+      WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
+      GROUP BY edges."accountId", all_latest."labelDefinitionId"
+    `
+  const followerRows = accountIds
+    ? await prisma.$queryRaw<AggregateRow[]>`
       SELECT
         f."followeeId" AS "accountId",
         all_latest."labelDefinitionId",
@@ -81,6 +106,17 @@ export async function buildFollowGraphLabelIndex(
       JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = f."followerId"
       WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
         AND f."followeeId" = ANY(${accountIds})
+      GROUP BY f."followeeId", all_latest."labelDefinitionId"
+    `
+    : await prisma.$queryRaw<AggregateRow[]>`
+      SELECT
+        f."followeeId" AS "accountId",
+        all_latest."labelDefinitionId",
+        COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
+        COUNT(*)::int AS "totalCount"
+      FROM "Follow" f
+      JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = f."followerId"
+      WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
       GROUP BY f."followeeId", all_latest."labelDefinitionId"
     `
 

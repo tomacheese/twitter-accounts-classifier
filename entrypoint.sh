@@ -29,10 +29,6 @@ while true; do
   if ! node dist/crawl.js; then
     echo "[entrypoint] crawl cycle exited with an error, will retry after the interval" >&2
   fi
-  echo "[entrypoint] starting relabel-worker cycle at $(date -Iseconds)"
-  if ! node dist/relabel-worker.js; then
-    echo "[entrypoint] relabel-worker cycle exited with an error, will retry after the interval" >&2
-  fi
   echo "[entrypoint] sleeping for ${INTERVAL_SECONDS}s"
   sleep "${INTERVAL_SECONDS}"
 done
