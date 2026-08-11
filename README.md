@@ -43,6 +43,8 @@ Viewer には認証機構がなく、フォロー・フォロワー・ブロッ�
 | `CRAWL_STALE_THRESHOLD_MULTIPLIER` | - | `running` のまま放置された CrawlRun を検出するしきい値の倍率 (クロール間隔の何倍か)。デフォルト 3 |
 | `GLITCHTIP_DSN` | - | GlitchTip (エラートラッキング) の DSN。未設定なら送信しない |
 | `CRAWL_WARNING_THRESHOLD` | - | 1 アカウントの crawl 1 回あたり、GlitchTip へ集約通知する warning 件数の閾値。デフォルト 5 |
+| `TWITTER_REQUEST_TIMEOUT_MS` | - | cycletls 経由の Twitter/X への 1 リクエストに設ける Node 側の上限時間 (ミリ秒)。デフォルト 60000 (60 秒) |
+| `CRAWL_ACCOUNT_TIMEOUT_MS` | - | 1 account の crawl 処理 (外部通信フェーズ全体) に設ける上限時間 (ミリ秒)。デフォルト 1200000 (20 分) |
 | `BLOCK_INTERVAL_SECONDS` | - | ブロック実行の間隔 (秒)。デフォルト 21600 |
 | `BLOCK_STALE_THRESHOLD_MULTIPLIER` | - | `running` のまま放置された BlockRun を検出するしきい値の倍率 (ブロック実行間隔の何倍か)。デフォルト 3 |
 | `BLOCK_ACTION_DELAY_MS` | - | 1 件ブロックするごとの待機時間 (ミリ秒)。デフォルト 2000 |
