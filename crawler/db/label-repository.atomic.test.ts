@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { getPrismaClient } from './client'
-import { recordCrawlAccountLabelsAtomic } from './label-repository'
+import { recordAccountLabelsBulk, recordCrawlAccountLabelsAtomic } from './label-repository'
 
 // node:crypto の randomUUID は label-repository.test.ts でモックされているが、
 // このファイルは実 DB を使うため、そちらの影響を受けないよう別ファイルに分離する
@@ -122,5 +122,80 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
       where: { kind: 'account_summary_refresh' },
     })
     expect(workItemCount).toBe(1)
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('recordAccountLabelsBulk', () => {
+  const prisma = getPrismaClient()
+
+  beforeEach(async () => {
+    await prisma.analysisWorkItem.deleteMany()
+    await prisma.accountClassificationObservation.deleteMany()
+    await prisma.accountLabel.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
+    await prisma.crawlAccountLabelRun.deleteMany()
+    await prisma.crawlRun.deleteMany()
+    await prisma.labelDefinition.deleteMany()
+    await prisma.block.deleteMany()
+    await prisma.account.deleteMany()
+  })
+
+  it('creates a new AccountLabel history row and advances labeledAt when only method changes', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_3',
+        screenName: 'carol',
+        displayName: 'Carol',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'test_label_3', description: 'テスト用ラベル3' },
+    })
+    const label = {
+      labelDefinitionId: labelDefinition.id,
+      result: { value: true, confidence: 0.9, reason: 'test reason' },
+      ruleVersion: 'v1',
+    }
+
+    await recordAccountLabelsBulk(prisma, {
+      accountId: account.id,
+      sourceKind: 'crawl',
+      sourceUsername: 'login_account',
+      labels: [{ ...label, method: 'rule' }],
+    })
+    const firstLatest = await prisma.accountLabelLatest.findUniqueOrThrow({
+      where: {
+        accountId_labelDefinitionId: {
+          accountId: account.id,
+          labelDefinitionId: labelDefinition.id,
+        },
+      },
+    })
+
+    await recordAccountLabelsBulk(prisma, {
+      accountId: account.id,
+      sourceKind: 'crawl',
+      sourceUsername: 'login_account',
+      labels: [{ ...label, method: 'llm' }],
+    })
+
+    const historyCount = await prisma.accountLabel.count({
+      where: { accountId: account.id, labelDefinitionId: labelDefinition.id },
+    })
+    expect(historyCount).toBe(2)
+    const secondLatest = await prisma.accountLabelLatest.findUniqueOrThrow({
+      where: {
+        accountId_labelDefinitionId: {
+          accountId: account.id,
+          labelDefinitionId: labelDefinition.id,
+        },
+      },
+    })
+    expect(secondLatest.method).toBe('llm')
+    expect(secondLatest.labeledAt.getTime()).toBeGreaterThan(firstLatest.labeledAt.getTime())
   })
 })

@@ -94,8 +94,9 @@ interface RecordAccountLabelsBulkRow {
 /**
  * 1アカウント分の評価結果をまとめて記録する: ラベルごとに `$queryRaw` を逐次発行する代わりに、
  * 列単位の配列を `UNNEST` で展開し、
- * `AccountLabel` への INSERT と `AccountLabelLatest` への UPSERT を1ラウンドトリップにまとめる。
- * UPSERT ガードの意味論は `recordCrawlAccountLabel` と同じ。
+ * `AccountLabel` への INSERT と `AccountLabelLatest` への UPSERT を 1 ラウンドトリップにまとめる。
+ * `AccountLabelLatest` への UPSERT は値・confidence・reason・method・ruleVersion が不変なら行わない
+ * (`recordCrawlAccountLabel` は claim 成立時に無条件で UPSERT する点が異なる)。
  * @param prisma - Prisma クライアント
  * @param params - 記録対象のアカウントと評価結果一覧
  * @returns 作成された `AccountLabel` 履歴行。`labels` と同じ順序とは限らないため、

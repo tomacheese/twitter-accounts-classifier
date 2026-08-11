@@ -489,13 +489,15 @@ async function runAuthorUnitPhase(
   const allTweets = [...recommended.tweets, ...following.tweets, ...trending.tweets]
   const timelineAuthorIds = new Set(allTweets.map((t) => t.accountId))
 
-  // reply-only candidate は timeline 投稿者と比べて母数が非常に多いため、
-  // 実際に reply_hijack_swarm の構造条件を満たしうる候補だけに絞り込む。
-  // 対象アカウントの reply 先が複数ある場合、いずれか1件でも条件を満たせば候補として残す
-  // (どの reply が最終的にラベル判定に使われるかは deep classification 側の責務のため)。
+  // accountId ごとの effective index は screening と reply_hijack_swarm 評価の両方から
+  // 参照されるため、corpus 全体の再構築コストを避けてここで 1 回だけキャッシュする。
+  const effectiveReplyHijackIndexCache = new Map<string, ReturnType<typeof buildReplyHijackIndex>>()
+
   function buildEffectiveReplyHijackIndex(
     accountId: string,
   ): ReturnType<typeof buildReplyHijackIndex> {
+    const cached = effectiveReplyHijackIndexCache.get(accountId)
+    if (cached) return cached
     const ownReplies = otherRepliesByAuthor.get(accountId) ?? []
     const ownReplyEntries: ReplyHijackCorpusEntry[] = ownReplies.map((t) => ({
       accountId,
@@ -503,9 +505,15 @@ async function runAuthorUnitPhase(
       inReplyToTweetId: t.inReplyToTweetId,
       createdAt: t.createdAt,
     }))
-    return buildReplyHijackIndex([...replyCorpus, ...ownReplyEntries])
+    const index = buildReplyHijackIndex([...replyCorpus, ...ownReplyEntries])
+    effectiveReplyHijackIndexCache.set(accountId, index)
+    return index
   }
 
+  // reply-only candidate は timeline 投稿者と比べて母数が非常に多いため、
+  // 実際に reply_hijack_swarm の構造条件を満たしうる候補だけに絞り込む。
+  // 対象アカウントの reply 先が複数ある場合、いずれか 1 件でも条件を満たせば候補として残す
+  // (どの reply が最終的にラベル判定に使われるかは deep classification 側の責務のため)。
   function isScreeningEligible(accountId: string): boolean {
     const candidateReplies = otherRepliesByAuthor.get(accountId) ?? []
     const effectiveIndex = buildEffectiveReplyHijackIndex(accountId)
@@ -552,11 +560,8 @@ async function runAuthorUnitPhase(
     const authorWarnings: CrawlWarning[] = []
 
     try {
-      // embedded profile (timeline/reply レスポンス内の author) は追加の API 呼び出しなしで
-      // 取得済みのプロフィールであり、screenName/displayName が非空なら信頼できるとみなして
-      // 専用 fetch を省略する。型システム上フィールドは揃うが、freshness・完全性の
-      // 完全な同値性は保証されない運用上の判断であり、将来不完全なケースが観測されたら
-      // 追加の妥当性確認を検討する。
+      // embedded profile は追加の API 呼び出しなしで得られるため、
+      // screenName/displayName が非空なら専用 fetch を省く。
       const embeddedProfile = extraAuthors.get(authorId)
       const hasValidEmbeddedProfile =
         embeddedProfile !== undefined &&

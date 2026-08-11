@@ -213,8 +213,8 @@ export async function processAccountSummaryBootstrap(
                 chunkWatermarkAt ?? new Date(),
               ),
               tx.labelDefinition.findMany({ select: { id: true, key: true } }),
-              // relabel は AccountClassificationObservation を作らないため、この行が無い
-              // アカウントは AccountLabelLatest.labeledAt のみに基づく freshness にフォールバックする。
+              // relabel は AccountClassificationObservation を作らないため、
+              // 該当行が無いアカウントは labeledAt のみに基づく freshness にフォールバックする。
               tx.accountClassificationObservation.groupBy({
                 by: ['accountId'],
                 where: { accountId: { in: accountIds } },
@@ -278,9 +278,7 @@ export async function processAccountSummaryBootstrap(
               profileObservedAt: account.lastCrawledAt,
               activeLabelKeys,
               activeLabelCount: activeLabelKeys.length,
-              // 増分更新側 (processAccountSummaryRefresh) は実際の変化検出結果を使うが、
-              // bootstrap 側はここで無条件に classificationObservedAt と同値にしており、
-              // その非対称は本 PR のスコープ外の既存差異として維持する。
+              // bootstrap は変化検出を行わないため、classificationObservedAt と同値を書く。
               lastClassificationChangedAt: classificationObservedAt,
               classificationObservedAt,
               activeFindingCount: finding?.count ?? 0,

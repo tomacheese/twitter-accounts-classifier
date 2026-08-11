@@ -42,15 +42,12 @@ interface UpsertAccountsBulkRow {
 }
 
 // row-local (行内容に起因する決定的なエラー): NOT NULL 制約違反・チェック制約違反・型不一致等。
-const ROW_LOCAL_SQLSTATE_PREFIXES = ['22', '23502', '23514']
-
-// systemic (一時的・システム全体のエラー): 接続断・デッドロック・シリアライズ失敗等。
 // このホワイトリストに載らない SQLSTATE は systemic 側として扱う (安全側に倒す)。
-const SYSTEMIC_SQLSTATE_PREFIXES = ['08', '40001', '40P01']
+const ROW_LOCAL_SQLSTATE_PREFIXES = ['22', '23502', '23514']
 
 /**
  * Prisma の raw query エラーから実際の Postgres SQLSTATE を抽出する。
- * raw query 失敗時、Prisma 6.19.3 の top-level `error.code` は Prisma 独自のラッパーコード
+ * raw query 失敗時の top-level `error.code` は Prisma 独自のラッパーコード
  * (`P2010`: "Raw query failed") になり、実際の SQLSTATE は `error.meta.code` に入る。
  * top-level コードをそのまま SQLSTATE と誤認しないよう、ここで明示的に抽出する。
  * @param error - `upsertAccountsBulk()` の raw query 呼び出しで発生した例外
@@ -66,13 +63,15 @@ function isRowLocalSqlState(sqlState: string): boolean {
   return ROW_LOCAL_SQLSTATE_PREFIXES.some((prefix) => sqlState.startsWith(prefix))
 }
 
-function isSystemicSqlState(sqlState: string): boolean {
-  return SYSTEMIC_SQLSTATE_PREFIXES.some((prefix) => sqlState.startsWith(prefix))
-}
-
-/** 分割の再帰段数に上限を設け、想定外の無限再帰を防ぐ。 */
-function maxBisectionDepth(batchSize: number): number {
-  return Math.ceil(Math.log2(Math.max(batchSize, 1))) * 4
+/**
+ * 分割の再帰段数に上限を設け、想定外の無限再帰を防ぐ。
+ * 再帰中に縮小していく現在のスライス長ではなく、最初のバッチサイズから 1 件に到達するまでに
+ * 必要な段数を基準にする。縮小後のスライス長を基準にすると上限が段数の増加より速く縮み、
+ * 1 件まで分割し切る前にガードが働いて正常な行まで巻き込んで捨ててしまうため。
+ * @param initialBatchSize - bisection を開始した時点のバッチサイズ
+ */
+function maxBisectionDepth(initialBatchSize: number): number {
+  return Math.ceil(Math.log2(Math.max(initialBatchSize, 1))) * 4
 }
 
 async function upsertAccountsBulkQuery(
@@ -146,6 +145,7 @@ async function upsertAccountsBulkWithBisection(
   prisma: PrismaClient,
   rows: AccountProfileInput[],
   depth: number,
+  maxDepth: number,
 ): Promise<Set<string>> {
   if (rows.length === 0) return new Set()
 
@@ -155,14 +155,14 @@ async function upsertAccountsBulkWithBisection(
   } catch (error) {
     const sqlState = extractPostgresSqlState(error)
     const isRowLocal = sqlState !== null && isRowLocalSqlState(sqlState)
-    const isSystemic = sqlState === null || !isRowLocal || isSystemicSqlState(sqlState)
+    const isSystemic = sqlState === null || !isRowLocal
     if (isSystemic) throw error
 
     if (rows.length === 1) {
       logger.error(`Skipping row-invalid account ${rows[0].id} in bulk upsert`, error as Error)
       return new Set()
     }
-    if (depth >= maxBisectionDepth(rows.length)) {
+    if (depth >= maxDepth) {
       logger.error(
         `Bisection depth limit reached for account bulk upsert batch of size ${rows.length}`,
         error as Error,
@@ -170,11 +170,21 @@ async function upsertAccountsBulkWithBisection(
       return new Set()
     }
 
+    // 複数の row-local error を含むバッチでの並列 fan-out が接続プールを食い尽くさないよう、
+    // 両半分は直列に処理する。
     const mid = Math.floor(rows.length / 2)
-    const [left, right] = await Promise.all([
-      upsertAccountsBulkWithBisection(prisma, rows.slice(0, mid), depth + 1),
-      upsertAccountsBulkWithBisection(prisma, rows.slice(mid), depth + 1),
-    ])
+    const left = await upsertAccountsBulkWithBisection(
+      prisma,
+      rows.slice(0, mid),
+      depth + 1,
+      maxDepth,
+    )
+    const right = await upsertAccountsBulkWithBisection(
+      prisma,
+      rows.slice(mid),
+      depth + 1,
+      maxDepth,
+    )
     return new Set([...left, ...right])
   }
 }
@@ -182,9 +192,9 @@ async function upsertAccountsBulkWithBisection(
 /**
  * `crawler/db/label-repository.ts` の `recordAccountLabelsBulk()` と同じ `UNNEST` パターンで、
  * 複数件の Account profile を 1 ラウンドトリップで upsert する。
- * transaction client (`Prisma.TransactionClient`) を渡すと型エラーになる: bisection フォールバックは
- * 複数回に分けて実行する前提のため、単一トランザクション内で呼ぶと 1 文のエラーで
- * トランザクション全体が abort 状態になり bisection 自体が成立しないため。
+ * bisection フォールバックは複数回に分けて実行する前提のため、
+ * transaction client 内で呼ぶと 1 件のエラーでトランザクション全体が abort し、
+ * bisection 自体が成立しなくなる。そのため引数の型で root client のみに制限している。
  * @param prisma - Prisma クライアント (root client のみ。transaction client は型上渡せない)
  * @param inputs - upsert 対象のプロフィール一覧。同一 id が複数回出現した場合は最後の要素を採用する
  * @returns upsert に成功した author の id 集合
@@ -195,8 +205,9 @@ export async function upsertAccountsBulk(
 ): Promise<Set<string>> {
   if (inputs.length === 0) return new Set()
 
-  // ON CONFLICT DO UPDATE は同一トランザクション内で同じ行を2回操作するとエラーになるため、
+  // ON CONFLICT DO UPDATE は同一トランザクション内で同じ行を 2 回操作するとエラーになるため、
   // SQL を組み立てる前に id で重複排除する (後勝ち)。
   const deduped = new Map(inputs.map((input) => [input.id, input]))
-  return upsertAccountsBulkWithBisection(prisma, [...deduped.values()], 0)
+  const rows = [...deduped.values()]
+  return upsertAccountsBulkWithBisection(prisma, rows, 0, maxBisectionDepth(rows.length))
 }

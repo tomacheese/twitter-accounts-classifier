@@ -126,4 +126,25 @@ describe('upsertAccountsBulk bisection fallback', () => {
     await expect(upsertAccountsBulk(prisma, [makeInput('1'), makeInput('2')])).rejects.toThrow()
     expect(queryRaw).toHaveBeenCalledTimes(1)
   })
+
+  it('isolates a single row-local error at a realistic batch size without discarding valid rows', async () => {
+    const batchSize = 64
+    const badId = '37'
+    const inputs = Array.from({ length: batchSize }, (_, i) => makeInput(String(i)))
+
+    // $queryRaw の第2引数以降が UNNEST 対象の配列であり、先頭が id 配列になる。
+    const queryRaw = vi.fn().mockImplementation((_template: unknown, ...values: unknown[]) => {
+      const ids = values[0] as string[]
+      if (ids.includes(badId)) {
+        return Promise.reject(makeKnownRequestError('P2010', { code: '23502' }))
+      }
+      return Promise.resolve(ids.map((id) => ({ id })))
+    })
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const result = await upsertAccountsBulk(prisma, inputs)
+
+    const expected = new Set(inputs.map((i) => i.id).filter((id) => id !== badId))
+    expect(result).toEqual(expected)
+  })
 })
