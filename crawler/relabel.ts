@@ -234,7 +234,8 @@ export async function runRelabelBackfill(
     followGraphLabelDefinitionIds,
   )
   const latestRuleVersions = await loadLatestRuleVersions(prisma)
-  const replyCorpus = await loadReplyCorpus(prisma)
+  // CrawlRun に紐づかないため、既存の全件対象の挙動を維持するよう現在時刻を watermark として渡す。
+  const replyCorpus = await loadReplyCorpus(prisma, new Date())
   const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
   const replyHijackIndex = buildReplyHijackIndex(replyCorpus)
 

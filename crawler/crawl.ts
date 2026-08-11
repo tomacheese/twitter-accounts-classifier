@@ -130,7 +130,7 @@ export interface CrawlDependencies {
   persistAccount: (input: AccountProfileInput) => Promise<void>
   persistTweets: (inputs: TweetInput[]) => Promise<void>
   ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
-  loadReplyCorpus: () => Promise<ReplyHijackCorpusEntry[]>
+  loadReplyCorpus: (watermark: Date) => Promise<ReplyHijackCorpusEntry[]>
   loadFollowGraphLabelIndex: (
     labelDefinitionIds: Map<string, string>,
   ) => Promise<FollowGraphLabelIndex>
@@ -1528,7 +1528,11 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   const registry = new LabelRuleRegistry()
   for (const rule of ALL_LABEL_RULES) registry.register(rule)
   const labelDefinitionIds = await deps.ensureLabelDefinitions(registry)
-  const { id: crawlRunId, latestAccountStatuses } = await deps.startOrResumeCrawlRun(new Date())
+  const {
+    id: crawlRunId,
+    latestAccountStatuses,
+    startedAt: crawlRunStartedAt,
+  } = await deps.startOrResumeCrawlRun(new Date())
 
   // CrawlRun 開始後の前処理も try に含める。前処理は本番規模では長時間かかり得るため、
   // 開始前に実行すると生存中でも古い heartbeat の CrawlRun が残って見える。また前処理が
@@ -1544,7 +1548,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
     )
     // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
     // アカウントごとではなくサイクルごとに 1 回だけ構築する。
-    const replyCorpus = await deps.loadReplyCorpus()
+    const replyCorpus = await deps.loadReplyCorpus(crawlRunStartedAt)
     const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
     const replyHijackIndex = buildReplyHijackIndex(replyCorpus)
 
@@ -1685,7 +1689,7 @@ async function main(): Promise<void> {
       await upsertTweets(prisma, inputs)
     },
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
-    loadReplyCorpus: () => loadReplyCorpus(prisma),
+    loadReplyCorpus: (watermark) => loadReplyCorpus(prisma, watermark),
     loadFollowGraphLabelIndex: (labelDefinitionIds) =>
       buildFollowGraphLabelIndex(prisma, labelDefinitionIds),
     persistAuthorResultAtomic: (params) => persistAuthorResultAtomicRecord(prisma, params),

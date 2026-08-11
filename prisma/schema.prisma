@@ -99,6 +99,7 @@ model Tweet {
   collectedAt                DateTime @default(now())
 
   @@index([accountId])
+  @@index([collectedAt(sort: Desc), id(sort: Desc)], map: "Tweet_reply_corpus_idx")
 }
 
 model LabelDefinition {
