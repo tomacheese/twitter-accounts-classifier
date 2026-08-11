@@ -181,4 +181,21 @@ describe('crossTargetTemplatedReplyRule', () => {
     expect(result.value).toBe(true)
     expect(result.confidence).toBe(1)
   })
+
+  it('is true for a recent 12-hour cluster of 5 distinct targets even with an unrelated 2-day-old reply mixed in', () => {
+    const bundle = makeBundle([
+      { fullText: TEMPLATE_TEXT, isReply: true, hoursAgo: 48, inReplyToTweetId: 'target-old' },
+      ...Array.from({ length: 5 }, (_, i) => ({
+        fullText: TEMPLATE_TEXT,
+        isReply: true,
+        hoursAgo: i * 3,
+        inReplyToTweetId: `target${i}`,
+      })),
+    ])
+
+    const result = crossTargetTemplatedReplyRule.evaluate(bundle)
+
+    expect(result.value).toBe(true)
+    expect(result.confidence).toBeCloseTo(0.5)
+  })
 })

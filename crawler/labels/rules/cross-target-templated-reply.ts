@@ -12,18 +12,47 @@ interface ReplyEntry {
   createdAt: Date
 }
 
-interface GroupStats {
-  normalizedText: string
+interface WindowStats {
   targetCount: number
   replyCount: number
   spanHours: number
 }
 
+interface GroupStats extends WindowStats {
+  normalizedText: string
+}
+
+function computeWindowStats(anchor: ReplyEntry, sortedEntries: ReplyEntry[]): WindowStats {
+  const windowStart = anchor.createdAt.getTime()
+  const windowEndLimit = windowStart + WINDOW_HOURS * 60 * 60 * 1000
+  const windowEntries = sortedEntries.filter((e) => {
+    const time = e.createdAt.getTime()
+    return time >= windowStart && time <= windowEndLimit
+  })
+  const windowEnd = Math.max(...windowEntries.map((e) => e.createdAt.getTime()))
+  return {
+    targetCount: new Set(windowEntries.map((e) => e.targetTweetId)).size,
+    replyCount: windowEntries.length,
+    spanHours: (windowEnd - windowStart) / (1000 * 60 * 60),
+  }
+}
+
+function findBestWindow(entries: ReplyEntry[]): WindowStats {
+  // eslint-disable-next-line unicorn/no-array-sort
+  const sorted = [...entries].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+  // sorted は呼び出し元(evaluate)で必ず1件以上のグループにのみ渡されるため、先頭要素を初期値にできる
+  let best = computeWindowStats(sorted[0], sorted)
+  for (const anchor of sorted.slice(1)) {
+    const candidate = computeWindowStats(anchor, sorted)
+    if (candidate.targetCount > best.targetCount) {
+      best = candidate
+    }
+  }
+  return best
+}
+
 function computeGroupStats(normalizedText: string, entries: ReplyEntry[]): GroupStats {
-  const timestamps = entries.map((e) => e.createdAt.getTime())
-  const spanHours = (Math.max(...timestamps) - Math.min(...timestamps)) / (1000 * 60 * 60)
-  const targetCount = new Set(entries.map((e) => e.targetTweetId)).size
-  return { normalizedText, targetCount, replyCount: entries.length, spanHours }
+  return { normalizedText, ...findBestWindow(entries) }
 }
 
 function buildReason(stats: GroupStats): string {
@@ -55,7 +84,6 @@ export const crossTargetTemplatedReplyRule: LabelRule = {
     let best: GroupStats | null = null
     for (const [normalizedText, entries] of groups) {
       const stats = computeGroupStats(normalizedText, entries)
-      if (stats.spanHours > WINDOW_HOURS) continue
       if (stats.targetCount < MIN_DISTINCT_TARGETS) continue
       if (best === null || stats.targetCount > best.targetCount) {
         best = stats
