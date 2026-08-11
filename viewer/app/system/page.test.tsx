@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/prisma', () => ({ getPrismaClient: () => ({}) }))
 vi.mock('@/lib/queries/system-console', () => ({ getSystemConsoleData: vi.fn() }))
+vi.mock('@/lib/queries/relabel-status', () => ({ getRelabelStatus: vi.fn() }))
 
 const { getSystemConsoleData } = await import('@/lib/queries/system-console')
+const { getRelabelStatus } = await import('@/lib/queries/relabel-status')
 const { default: SystemPage } = await import('./page')
 
 describe('SystemPage', () => {
@@ -32,6 +34,11 @@ describe('SystemPage', () => {
           updatedAt: new Date('2026-08-01T00:06:00.000Z'),
         },
       ],
+    })
+    vi.mocked(getRelabelStatus).mockResolvedValue({
+      labelCoverage: [],
+      backlog: [],
+      scanCursorUpdatedAt: null,
     })
 
     const html = renderToStaticMarkup(await SystemPage())
