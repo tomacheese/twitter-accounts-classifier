@@ -108,6 +108,7 @@ model LabelDefinition {
   id                  String               @id @default(cuid())
   key                 String               @unique
   description         String
+  currentRuleVersion  String?
   createdAt           DateTime             @default(now())
   accountLabels       AccountLabel[]
   accountLabelsLatest AccountLabelLatest[]
@@ -170,6 +171,8 @@ model AccountLabelLatest {
   // value = true で絞り込む dashboard.ts/accounts.ts の各クエリを支えるインデックス。
   @@index([labelDefinitionId, value])
   @@index([value, accountId])
+  // viewer の relabel coverage クエリを支えるインデックス。
+  @@index([labelDefinitionId, ruleVersion])
 }
 
 // AccountLabelLatest から都度集計すると全件 Seq Scan になり本番の応答時間を守れないため、

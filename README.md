@@ -48,6 +48,16 @@ Viewer には認証機構がなく、フォロー・フォロワー・ブロッ�
 | `BLOCK_ACTION_DELAY_MS` | - | 1 件ブロックするごとの待機時間 (ミリ秒)。デフォルト 2000 |
 | `BLOCK_MAX_PER_ACCOUNT_PER_RUN` | - | 1 アカウント・1 サイクルあたりのブロック上限件数。デフォルト 50 |
 | `BLOCK_TARGET_NOT_FOUND_MAX_ATTEMPTS` | - | code 50 (`BlockTargetNotFoundError`) を許容する最大試行回数 (初回を含む)。デフォルト 3 |
+| `RELABELER_INTERVAL_SECONDS` | - | relabeler worker の実行間隔 (秒)。デフォルト 30 |
+| `RELABELER_PRODUCER_BATCH_SIZE` | - | relabeler producer (stale scan) が 1 cycle あたりに scan する Account 件数。デフォルト 5000 |
+| `RELABELER_WORKER_BATCH_SIZE` | - | relabeler worker が 1 cycle あたりに claim する work item の上限件数 (concurrency 分の合計ではなく 1 レーンあたりの値)。デフォルト 2000 |
+| `RELABELER_WORKER_CONCURRENCY` | - | relabeler worker の evaluate フェーズの並行度。デフォルト 1 |
+
+## relabel backfill の運用契約
+
+`relabeler` サービスは crawl とは独立して常駐し、`RELABELER_INTERVAL_SECONDS` (デフォルト 30 秒) ごとに stale scan と `account_relabel` キューの drain を行う。デフォルト設定 (batch size 現行維持・concurrency 1) では、新規/更新ラベル追加後の対象アカウント数が `RELABELER_WORKER_BATCH_SIZE` (デフォルト 2000) 件を大きく超えない範囲であれば数分〜数十分程度で `currentRuleVersion` coverage が収束する。対象が Account 全件規模 (約 247 万件) に及ぶ場合は、producer の `RELABELER_PRODUCER_BATCH_SIZE` による段階的な queued 化と drain 速度の両方に依存するため、より長い時間を要する。進捗は viewer の System 画面「Relabel backfill」セクションの coverage 表・backlog 表・scan cursor 更新時刻で確認できる。
+
+**重要**: 本番機の `compose.prod.yaml` はこのリポジトリに含まれないため、このリポジトリの `compose.yaml` に追随して本番の compose 定義へ `relabeler` サービスを追加するまでは、本番へのデプロイと同時に relabel が一切実行されなくなる (`entrypoint.sh` からの `relabel-worker` 呼び出しを本 PR で削除したため)。crawler イメージの更新と `relabeler` サービス追加は同一デプロイで反映すること。
 
 ## データ
 
