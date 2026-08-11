@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
 import { getCrawlAccountRuns } from './crawl-drilldown'
 
+/** CrawlAccountRun の主要フィールドを模したモック行。 */
 interface MockAccountRun {
   id: string
   username: string
@@ -18,9 +19,13 @@ interface MockAccountRun {
   startedAt: Date
   finishedAt: Date | null
   status: string
-  classificationStatus?: string
+  classificationStatus: string
 }
 
+/**
+ * @param overrides - crawlAccountRun/crawlAccountCheckpoint の findMany が返すフィクスチャ
+ * @returns Prisma クライアントのモックと、呼び出し引数を検証するための各 findMany のモック関数
+ */
 function createMockPrisma(overrides: { accountRuns?: MockAccountRun[]; checkpoints?: unknown[] }) {
   const allAccountRuns = overrides.accountRuns ?? []
   const accountRunFindMany = vi
@@ -64,6 +69,7 @@ describe('getCrawlAccountRuns', () => {
           startedAt: new Date('2026-08-08T00:00:00Z'),
           finishedAt: new Date('2026-08-08T00:05:00Z'),
           status: 'success',
+          classificationStatus: 'success',
         },
       ],
       checkpoints: [
@@ -98,6 +104,7 @@ describe('getCrawlAccountRuns', () => {
           startedAt: new Date('2026-08-08T00:00:00Z'),
           finishedAt: null,
           status: 'running',
+          classificationStatus: 'unknown',
         },
       ],
       checkpoints: [],

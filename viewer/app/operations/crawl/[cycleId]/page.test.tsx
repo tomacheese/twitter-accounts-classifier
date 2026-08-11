@@ -97,42 +97,4 @@ describe('CrawlCycleDetailPage', () => {
     expect(html).toContain('account_19')
     expect(html).not.toContain('account_20')
   })
-
-  it('resume で skipped 行が除外された結果でも Show more 判定が件数どおりに動く', async () => {
-    process.env.VIEWER_NEW_UI_SECTIONS = 'operations'
-    vi.mocked(getCrawlCycleDetail).mockResolvedValue(baseDetail)
-    // resume によって同一 crawlRunId 内に skipped 記録が発生していても、
-    // getCrawlAccountRuns は既に除外済みの 21 件を返す想定。
-    vi.mocked(getCrawlAccountRuns).mockResolvedValue(
-      Array.from({ length: 21 }, (_, index) => ({
-        id: `run-${index}`,
-        username: `account_${index}`,
-        recommendedCount: 0,
-        followingCount: 0,
-        trendingCount: 0,
-        replyCount: 0,
-        profileCount: 0,
-        labelsAppliedCount: 0,
-        followingSynced: false,
-        followersSynced: false,
-        blocksSynced: false,
-        warningCounts: {},
-        phaseDurations: [],
-        startedAt: new Date('2026-08-08T00:00:00Z'),
-        finishedAt: null,
-        status: 'success',
-      })),
-    )
-
-    const html = renderToStaticMarkup(
-      await CrawlCycleDetailPage({
-        params: Promise.resolve({ cycleId: 'cycle-1' }),
-        searchParams: Promise.resolve({}),
-      }),
-    )
-
-    expect(html).toContain('Show more')
-    expect(html).toContain('account_19')
-    expect(html).not.toContain('account_20')
-  })
 })
