@@ -34,19 +34,21 @@ describe('drainAccountRelabelQueue', () => {
       account: { findUnique: vi.fn().mockResolvedValue({ id: 'acct-1' }) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient
+    const buildFollowGraphLabelIndex = vi.fn().mockResolvedValue({ signalsFor: () => ({}) })
 
     const result = await drainAccountRelabelQueue(prisma, {
       registry,
       labelDefinitionIds: new Map([['test_rule', 'def-1']]),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: { swarmSizeFor: () => 0, isEligibleForScreening: () => true },
-      followGraphLabelIndex: { signalsFor: () => ({}) },
+      buildFollowGraphLabelIndex,
       batchSize: 10,
       leaseOwner: 'test-worker',
     })
 
     expect(result.claimed).toBe(1)
     expect(result.succeeded).toBe(1)
+    expect(buildFollowGraphLabelIndex).toHaveBeenCalledWith(['acct-1'])
     expect(recordLabelsSpy).toHaveBeenCalledWith(prisma, {
       accountId: 'acct-1',
       sourceKind: 'relabel',
@@ -83,13 +85,60 @@ describe('drainAccountRelabelQueue', () => {
       labelDefinitionIds: new Map(),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: { swarmSizeFor: () => 0, isEligibleForScreening: () => true },
-      followGraphLabelIndex: { signalsFor: () => ({}) },
+      buildFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
       batchSize: 10,
       leaseOwner: 'test-worker',
     })
 
     expect(result.succeeded).toBe(1)
     expect(completeSpy).toHaveBeenCalled()
+  })
+
+  it('claim できる work item が無い場合は buildFollowGraphLabelIndex を呼ばない', async () => {
+    vi.spyOn(workItemRepository, 'claimNextWorkItem').mockResolvedValueOnce(undefined)
+    const buildFollowGraphLabelIndex = vi.fn().mockResolvedValue({ signalsFor: () => ({}) })
+
+    const prisma = {} as unknown as PrismaClient
+
+    const result = await drainAccountRelabelQueue(prisma, {
+      registry: new LabelRuleRegistry(),
+      labelDefinitionIds: new Map(),
+      duplicateReplyIndex: { countOtherAccounts: () => 0 },
+      replyHijackIndex: { swarmSizeFor: () => 0, isEligibleForScreening: () => true },
+      buildFollowGraphLabelIndex,
+      batchSize: 10,
+      leaseOwner: 'test-worker',
+    })
+
+    expect(result.claimed).toBe(0)
+    expect(buildFollowGraphLabelIndex).not.toHaveBeenCalled()
+  })
+
+  it('claim した複数 work item の accountId をまとめて buildFollowGraphLabelIndex に渡す', async () => {
+    vi.spyOn(workItemRepository, 'claimNextWorkItem')
+      .mockResolvedValueOnce({ id: 'wi-1', triggerId: 'acct-1' } as never)
+      .mockResolvedValueOnce({ id: 'wi-2', triggerId: 'acct-2' } as never)
+      .mockResolvedValueOnce(undefined)
+    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItem').mockResolvedValue('succeeded')
+    const buildFollowGraphLabelIndex = vi.fn().mockResolvedValue({ signalsFor: () => ({}) })
+
+    const prisma = {
+      account: { findUnique: vi.fn().mockResolvedValue(null) },
+      tweet: { findMany: vi.fn() },
+    } as unknown as PrismaClient
+
+    await drainAccountRelabelQueue(prisma, {
+      registry: new LabelRuleRegistry(),
+      labelDefinitionIds: new Map(),
+      duplicateReplyIndex: { countOtherAccounts: () => 0 },
+      replyHijackIndex: { swarmSizeFor: () => 0, isEligibleForScreening: () => true },
+      buildFollowGraphLabelIndex,
+      batchSize: 10,
+      leaseOwner: 'test-worker',
+    })
+
+    expect(buildFollowGraphLabelIndex).toHaveBeenCalledTimes(1)
+    expect(buildFollowGraphLabelIndex).toHaveBeenCalledWith(['acct-1', 'acct-2'])
   })
 })
 

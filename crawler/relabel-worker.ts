@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { Logger } from '@book000/node-utils'
-import type { PrismaClient } from './generated/prisma'
+import type { AnalysisWorkItem, PrismaClient } from './generated/prisma'
 import { LabelRuleRegistry } from './labels/registry'
 import { buildAccountFeatureBundle } from './labels/build-account-feature-bundle'
 import type { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
@@ -32,7 +32,7 @@ export interface DrainAccountRelabelQueueOptions {
   labelDefinitionIds: Map<string, string>
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
-  followGraphLabelIndex: FollowGraphLabelIndex
+  buildFollowGraphLabelIndex: (accountIds: string[]) => Promise<FollowGraphLabelIndex>
   batchSize: number
   leaseOwner: string
 }
@@ -44,6 +44,8 @@ export interface DrainAccountRelabelQueueResult {
 
 /**
  * account_relabel kind の work item を bounded batch で claim し、1 account ずつ評価・永続化する。
+ * follow-graph signal の集計は claim できた work item の accountId だけに絞り込むため、
+ * 先に batch 全体を claim してから構築する。
  * @param prisma - Prisma クライアント
  * @param options - 評価に使うルールレジストリ・共有インデックス・batch size・lease owner 名
  * @returns claim した件数と succeeded (requeue 含む) にできた件数
@@ -52,9 +54,7 @@ export async function drainAccountRelabelQueue(
   prisma: PrismaClient,
   options: DrainAccountRelabelQueueOptions,
 ): Promise<DrainAccountRelabelQueueResult> {
-  let claimed = 0
-  let succeeded = 0
-
+  const items: AnalysisWorkItem[] = []
   for (let i = 0; i < options.batchSize; i++) {
     const item = await claimNextWorkItem(prisma, {
       kinds: [ACCOUNT_RELABEL_KIND],
@@ -62,8 +62,16 @@ export async function drainAccountRelabelQueue(
       leaseDurationMs: LEASE_DURATION_MS,
     })
     if (!item) break
-    claimed++
+    items.push(item)
+  }
 
+  let succeeded = 0
+  const followGraphLabelIndex =
+    items.length === 0
+      ? { signalsFor: () => ({}) }
+      : await options.buildFollowGraphLabelIndex(items.map((item) => item.triggerId))
+
+  for (const item of items) {
     try {
       const account = await prisma.account.findUnique({ where: { id: item.triggerId } })
       if (account) {
@@ -77,7 +85,7 @@ export async function drainAccountRelabelQueue(
           recentTweets,
           options.duplicateReplyIndex,
           options.replyHijackIndex,
-          options.followGraphLabelIndex,
+          followGraphLabelIndex,
         )
         const labelsToPersist = options.registry.applyAll(bundle).flatMap(({ rule, result }) => {
           const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
@@ -110,7 +118,7 @@ export async function drainAccountRelabelQueue(
     }
   }
 
-  return { claimed, succeeded }
+  return { claimed: items.length, succeeded }
 }
 
 interface StaleAccountRow {
@@ -222,13 +230,18 @@ async function runRelabelWorkerCycle(): Promise<void> {
 
     // CrawlRun に紐づかないため、既存の全件対象の挙動を維持するよう現在時刻を watermark として渡す。
     const replyCorpus = await loadReplyCorpus(prisma, new Date())
-    const followGraphLabelIndex = await buildFollowGraphLabelIndex(prisma, labelDefinitionIds)
+    const followGraphLabelDefinitionIds = new Map(
+      [...labelDefinitionIds.entries()].filter(([key]) =>
+        registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
+      ),
+    )
     const drainResult = await drainAccountRelabelQueue(prisma, {
       registry,
       labelDefinitionIds,
       duplicateReplyIndex: buildDuplicateReplyIndexImpl(replyCorpus),
       replyHijackIndex: buildReplyHijackIndexImpl(replyCorpus),
-      followGraphLabelIndex,
+      buildFollowGraphLabelIndex: (accountIds) =>
+        buildFollowGraphLabelIndex(prisma, followGraphLabelDefinitionIds, accountIds),
       batchSize: RELABEL_WORKER_BATCH_SIZE,
       leaseOwner: `${hostname()}-${process.pid}-${randomUUID()}`,
     })
