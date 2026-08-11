@@ -26,7 +26,7 @@ function createMockPrisma(overrides: { accountRuns?: MockAccountRun[]; checkpoin
   const accountRunFindMany = vi
     .fn()
     .mockImplementation((args: { where?: { classificationStatus?: { not?: string } } }) => {
-      const excludedStatus = args?.where?.classificationStatus?.not
+      const excludedStatus = args.where?.classificationStatus?.not
       const filtered =
         excludedStatus === undefined
           ? allAccountRuns
