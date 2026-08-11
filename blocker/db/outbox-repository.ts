@@ -127,7 +127,10 @@ export async function markOutboxRemoteFailed(
 
 /**
  * ブロック対象が存在しない場合の終端状態として記録する。
- * `remote_failed` と同様、次回 cycle では pending_remote に戻して再試行できる。
+ * `remote_failed` と異なり、`(blockerId, blockedId)` 単位で累積する `remoteSkipCount` を
+ * 原子的にインクリメントする。`{ increment: 1 }` は SQL の `SET x = x + 1` に変換されるため、
+ * 読み取り→書き込みの2段階を挟まず単一の UPDATE 文でカウントの原子性を担保する。
+ * `remoteSkipCount` が上限に達するまでは、次回 cycle で pending_remote に戻して再試行できる。
  * @param prisma - Prisma クライアント
  * @param outboxEntryId - 対象 entry の ID
  */
@@ -137,7 +140,11 @@ export async function markOutboxRemoteSkipped(
 ): Promise<void> {
   await prisma.blockOutboxEntry.update({
     where: { id: outboxEntryId },
-    data: { status: 'remote_skipped' },
+    data: {
+      status: 'remote_skipped',
+      remoteSkipCount: { increment: 1 },
+      lastRemoteSkippedAt: new Date(),
+    },
   })
 }
 

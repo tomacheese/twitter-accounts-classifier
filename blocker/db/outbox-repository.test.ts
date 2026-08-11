@@ -100,6 +100,32 @@ describe('findOrCreateOutboxEntry', () => {
     })
     expect(prisma.blockOutboxEntry.create).not.toHaveBeenCalled()
   })
+
+  it('remote_skipped 行を再利用する際、remoteSkipCount と lastRemoteSkippedAt を更新データに含めない', async () => {
+    const prisma = createMockPrismaClient()
+    vi.mocked(prisma.blockOutboxEntry.findUnique).mockResolvedValue({
+      id: 'outbox-1',
+      status: 'remote_skipped',
+      remoteSkipCount: 2,
+      lastRemoteSkippedAt: new Date('2026-08-01T00:00:00Z'),
+    } as never)
+    vi.mocked(prisma.blockOutboxEntry.update).mockResolvedValue({
+      id: 'outbox-1',
+      status: 'pending_remote',
+    } as never)
+
+    await findOrCreateOutboxEntry(prisma as never, {
+      blockAccountRunId: 'bar-1',
+      blockerId: 'blocker-1',
+      blockedId: 'blocked-1',
+      labelDefinitionId: 'label-1',
+      confidence: 0.9,
+    })
+
+    const [{ data }] = vi.mocked(prisma.blockOutboxEntry.update).mock.calls[0]
+    expect(data).not.toHaveProperty('remoteSkipCount')
+    expect(data).not.toHaveProperty('lastRemoteSkippedAt')
+  })
 })
 
 describe('outbox status updates', () => {
@@ -162,14 +188,18 @@ describe('outbox status updates', () => {
     })
   })
 
-  it('remote_skipped に更新する', async () => {
+  it('remote_skipped に更新し、remoteSkipCount を原子的にインクリメントする', async () => {
     const prisma = createMockPrismaClient()
 
     await markOutboxRemoteSkipped(prisma as never, 'outbox-1')
 
     expect(prisma.blockOutboxEntry.update).toHaveBeenCalledWith({
       where: { id: 'outbox-1' },
-      data: { status: 'remote_skipped' },
+      data: {
+        status: 'remote_skipped',
+        remoteSkipCount: { increment: 1 },
+        lastRemoteSkippedAt: expect.any(Date),
+      },
     })
   })
 })
