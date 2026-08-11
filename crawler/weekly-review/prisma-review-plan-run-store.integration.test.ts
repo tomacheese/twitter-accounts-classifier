@@ -9,7 +9,7 @@ afterAll(async () => {
   await prisma.$disconnect()
 })
 
-describe('PrismaWeeklyReviewRunPlanStore', () => {
+describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewRunPlanStore', () => {
   it('running run に target window・analysisVersion・reviewPlan を保存する', async () => {
     const id = `review_plan_${randomUUID()}`
     const startedAt = new Date('2026-08-12T00:00:00Z')

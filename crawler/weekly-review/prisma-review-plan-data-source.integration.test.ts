@@ -10,7 +10,7 @@ afterAll(async () => {
   await prisma.$disconnect()
 })
 
-describe('PrismaWeeklyReviewPlanningDataSource', () => {
+describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource', () => {
   it('candidate pool size が小さくても label ごとに true/false 両方の候補を読む', async () => {
     const suffix = randomUUID().slice(0, 8)
     const labelKey = `weekly_review_balanced_${suffix}`
