@@ -460,7 +460,7 @@ async function runAuthorUnitPhase(
   registry: LabelRuleRegistry,
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
-  replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
+  replyCorpus: ReplyHijackCorpusEntry[],
   followGraphLabelIndex: FollowGraphLabelIndex,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
@@ -487,8 +487,42 @@ async function runAuthorUnitPhase(
   }
   const otherRepliesByAuthor = new Map(Object.entries(repliesResult.otherRepliesByAuthor))
   const allTweets = [...recommended.tweets, ...following.tweets, ...trending.tweets]
+  const timelineAuthorIds = new Set(allTweets.map((t) => t.accountId))
+
+  // reply-only candidate は timeline 投稿者と比べて母数が非常に多いため、
+  // 実際に reply_hijack_swarm の構造条件を満たしうる候補だけに絞り込む。
+  // 対象アカウントの reply 先が複数ある場合、いずれか1件でも条件を満たせば候補として残す
+  // (どの reply が最終的にラベル判定に使われるかは deep classification 側の責務のため)。
+  function buildEffectiveReplyHijackIndex(
+    accountId: string,
+  ): ReturnType<typeof buildReplyHijackIndex> {
+    const ownReplies = otherRepliesByAuthor.get(accountId) ?? []
+    const ownReplyEntries: ReplyHijackCorpusEntry[] = ownReplies.map((t) => ({
+      accountId,
+      fullText: t.fullText,
+      inReplyToTweetId: t.inReplyToTweetId,
+      createdAt: t.createdAt,
+    }))
+    return buildReplyHijackIndex([...replyCorpus, ...ownReplyEntries])
+  }
+
+  function isScreeningEligible(accountId: string): boolean {
+    const candidateReplies = otherRepliesByAuthor.get(accountId) ?? []
+    const effectiveIndex = buildEffectiveReplyHijackIndex(accountId)
+    return candidateReplies.some(
+      (reply) =>
+        reply.inReplyToTweetId !== null &&
+        effectiveIndex.isEligibleForScreening(accountId, reply.inReplyToTweetId),
+    )
+  }
+
   const uniqueAuthorIds = [
-    ...new Set([...allTweets.map((t) => t.accountId), ...repliesResult.replyHijackCandidateIds]),
+    ...new Set([
+      ...allTweets.map((t) => t.accountId),
+      ...repliesResult.replyHijackCandidateIds.filter(
+        (id) => timelineAuthorIds.has(id) || isScreeningEligible(id),
+      ),
+    ]),
   ]
 
   const existingCheckpoints = await deps.loadCrawlAuthorCheckpoints(crawlRunId, account.username)
@@ -591,12 +625,13 @@ async function runAuthorUnitPhase(
         )
       }
 
+      const effectiveReplyHijackIndex = buildEffectiveReplyHijackIndex(authorId)
       let replyHijackSwarmSize = 0
       for (const t of bundleTweets) {
         if (!t.isReply || t.inReplyToTweetId === null) continue
         replyHijackSwarmSize = Math.max(
           replyHijackSwarmSize,
-          replyHijackIndex.swarmSizeFor(profile.id, t.inReplyToTweetId),
+          effectiveReplyHijackIndex.swarmSizeFor(profile.id, t.inReplyToTweetId),
         )
       }
 
@@ -1245,7 +1280,7 @@ async function runAccountCycle(
   registry: LabelRuleRegistry,
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
-  replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
+  replyCorpus: ReplyHijackCorpusEntry[],
   followGraphLabelIndex: FollowGraphLabelIndex,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
@@ -1348,7 +1383,7 @@ async function runAccountCycle(
                 registry,
                 labelDefinitionIds,
                 duplicateReplyIndex,
-                replyHijackIndex,
+                replyCorpus,
                 followGraphLabelIndex,
                 account,
                 crawlRunId,
@@ -1550,7 +1585,6 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
     // アカウントごとではなくサイクルごとに 1 回だけ構築する。
     const replyCorpus = await deps.loadReplyCorpus(crawlRunStartedAt)
     const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
-    const replyHijackIndex = buildReplyHijackIndex(replyCorpus)
 
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
@@ -1592,7 +1626,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
           registry,
           labelDefinitionIds,
           duplicateReplyIndex,
-          replyHijackIndex,
+          replyCorpus,
           followGraphLabelIndex,
           account,
           crawlRunId,

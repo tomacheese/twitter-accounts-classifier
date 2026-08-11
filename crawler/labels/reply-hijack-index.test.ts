@@ -117,3 +117,16 @@ describe('buildReplyHijackIndex', () => {
     expect(index.swarmSizeFor('unknown', 'target1')).toBe(0)
   })
 })
+
+describe('ReplyHijackIndex.isEligibleForScreening', () => {
+  it('returns true when the account/tweet pair belongs to a detected swarm', () => {
+    const corpus: ReplyHijackCorpusEntry[] = Array.from({ length: 5 }, (_, i) =>
+      entry(`member${i}`, 'これは十分な長さのテスト用リプライ本文サンプルです', 'target1', i),
+    )
+    const index = buildReplyHijackIndex(corpus)
+
+    expect(index.isEligibleForScreening('member0', 'target1')).toBe(true)
+    expect(index.isEligibleForScreening('member0', 'other-target')).toBe(false)
+    expect(index.isEligibleForScreening('non-member', 'target1')).toBe(false)
+  })
+})

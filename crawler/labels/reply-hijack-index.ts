@@ -35,6 +35,12 @@ export interface ReplyHijackIndex {
    *   属していない場合は 0
    */
   swarmSizeFor(accountId: string, tweetId: string): number
+  /**
+   * @param accountId - 検索対象のアカウント
+   * @param tweetId - このアカウントがリプライした対象ツイートの ID
+   * @returns このアカウント・対象ツイートの組が structural screening の条件 (`MIN_DISTINCT_AUTHORS` 等) を満たすか
+   */
+  isEligibleForScreening(accountId: string, tweetId: string): boolean
 }
 
 /**
@@ -85,6 +91,9 @@ export function buildReplyHijackIndex(corpus: ReplyHijackCorpusEntry[]): ReplyHi
       const members = memberAccountsByTarget.get(tweetId)
       if (!members?.has(accountId)) return 0
       return swarmSizeByTarget.get(tweetId) ?? 0
+    },
+    isEligibleForScreening(accountId, tweetId) {
+      return memberAccountsByTarget.get(tweetId)?.has(accountId) ?? false
     },
   }
 }
