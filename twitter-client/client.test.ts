@@ -32,6 +32,21 @@ describe('createCycleTLSFetch', () => {
   })
 })
 
+describe('createCycleTLSFetch timeout', () => {
+  it('rejects with TimeoutError when the cycletls call never settles', async () => {
+    const cycleTLS = vi.fn().mockReturnValue(
+      new Promise(() => {
+        // 意図的に永遠に settle しない: cycletls 子プロセスのハングを模する。
+      }),
+    )
+    const fetchImpl = createCycleTLSFetch(cycleTLS as never, 5)
+
+    await expect(fetchImpl('https://x.com/graphql/abc/HangingRequestTest')).rejects.toThrow(
+      'did not complete within 5ms',
+    )
+  })
+})
+
 // `createOpenApiClient`・`createTrendsScraper` はここから先で別途検証する。
 // 実物の `cycletls` クライアントは外部プロセスを起動して遅くなるうえ、
 // ここで検証したい「渡す fetch がレスポンスをキャプチャすること」とは無関係なため、
@@ -78,6 +93,24 @@ describe('createOpenApiClient', () => {
     expect(getLastResponseMatching('OpenApiWiringTest')).toMatchObject({
       body: '{"fake":true}',
     })
+  })
+})
+
+describe('createOpenApiClient timeout wiring', () => {
+  it('propagates a custom timeoutMs to the underlying fetch', async () => {
+    const { createOpenApiClient } = await import('./client')
+    const { TwitterOpenApi } = await import('twitter-openapi-typescript')
+
+    await createOpenApiClient({ ct0: 'c0', authToken: 'a0' }, 5)
+    fakeCycleTLS.mockReturnValueOnce(
+      new Promise(() => {
+        // 意図的に永遠に settle しない。
+      }),
+    )
+
+    await expect(
+      TwitterOpenApi.fetchApi('https://x.com/graphql/abc/OpenApiTimeoutWiringTest'),
+    ).rejects.toThrow('did not complete within 5ms')
   })
 })
 
