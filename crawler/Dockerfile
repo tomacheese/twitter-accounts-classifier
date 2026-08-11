@@ -61,5 +61,7 @@ COPY scripts ./scripts
 
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x entrypoint.sh
+COPY relabeler-entrypoint.sh ./relabeler-entrypoint.sh
+RUN chmod +x relabeler-entrypoint.sh
 WORKDIR /app/crawler
 ENTRYPOINT ["/app/entrypoint.sh"]
