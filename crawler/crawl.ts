@@ -7,6 +7,8 @@ import {
   getCrawlIntervalSeconds,
   getCrawlStaleThresholdMultiplier,
   getCrawlWarningThreshold,
+  getTwitterRequestTimeoutMs,
+  getCrawlAccountTimeoutMs,
 } from './config/env'
 import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
@@ -39,6 +41,7 @@ import {
   isResponseError,
   toSafeResponseErrorForLog,
   withTwitterRetry,
+  withTimeout,
   mergeTweetAdFlags,
   toAccountProfileInput,
   createOpenApiClient as createRealOpenApiClient,
@@ -131,9 +134,15 @@ export interface CrawlDependencies {
     password: string
     otp_secret: string | null
   }) => Promise<IssuedCookies>
-  createOpenApiClient: (cookies: IssuedCookies) => Promise<{ client: CrawlOpenApiClient }>
+  createOpenApiClient: (
+    cookies: IssuedCookies,
+    cycletlsPort: number,
+  ) => Promise<{ client: CrawlOpenApiClient }>
   closeOpenApiClient: (context: { client: CrawlOpenApiClient }) => Promise<void>
-  createTrendsScraper: (cookies: IssuedCookies) => Promise<{ scraper: TrendsScraperLike }>
+  createTrendsScraper: (
+    cookies: IssuedCookies,
+    cycletlsPort: number,
+  ) => Promise<{ scraper: TrendsScraperLike }>
   closeTrendsScraper: (context: { scraper: TrendsScraperLike }) => Promise<void>
   persistAccount: (input: AccountProfileInput) => Promise<void>
   persistTweets: (inputs: TweetInput[]) => Promise<void>
@@ -171,6 +180,8 @@ export interface CrawlDependencies {
   touchCrawlRunHeartbeat: (crawlRunId: string) => Promise<void>
   /** テスト時に `withTwitterRetry` のバックオフや author ループの待機を無効化する注入。 */
   sleep: (ms: number) => Promise<void>
+  /** {@link getCrawlAccountTimeoutMs} 参照。 */
+  accountTimeoutMs: number
 }
 
 /**
@@ -1225,6 +1236,22 @@ function restoreBlocksCheckpoint(value: unknown): BlocksCheckpointData | undefin
   return { synced: value.synced, warnings }
 }
 
+const CYCLETLS_PORT_RANGE_START = 20_000
+const CYCLETLS_PORT_RANGE_SIZE = 10_000
+let cycletlsPortCounter = 0
+
+/**
+ * account の cycletls ハンドルに割り当てる port を選ぶ。
+ * account ごとに port を変える理由は {@link runAccountCycle} 内のコメント参照。
+ * プロセス内で単調に増やすことで、同一プロセスの生存中は衝突が起きない。
+ * @returns 割り当てる port 番号
+ */
+function allocateCycletlsPort(): number {
+  const port = CYCLETLS_PORT_RANGE_START + (cycletlsPortCounter % CYCLETLS_PORT_RANGE_SIZE)
+  cycletlsPortCounter += 1
+  return port
+}
+
 async function runAccountCycle(
   deps: CrawlDependencies,
   registry: LabelRuleRegistry,
@@ -1272,155 +1299,198 @@ async function runAccountCycle(
         password: account.password,
         otp_secret: account.otpSecret,
       })
-      const trendsContext = needsTimeline ? await deps.createTrendsScraper(cookies) : undefined
+      // account 単位 timeout 発火時、元の Promise は settle せずイベントループ上に残るため、
+      // 内側の finally には到達できない。そのため cycletls ハンドルの close 処理を
+      // cycleTlsCleanups に登録し、withTimeout の外側から明示的に force-close する。
+      //
+      // cycletls は port をキーに実プロセスを参照カウント共有するため、
+      // 同じ port を使い続けると、timeout 後も裏で動き続ける orphan の遅延 close が、
+      // 別 account が既に使っている同じ port のプロセスを誤って kill してしまう。
+      // それを避けるため、port は account ごとに変える。
+      const cycletlsPort = allocateCycletlsPort()
+      const cycleTlsCleanups: (() => Promise<void>)[] = []
       try {
-        const openApiContext = await deps.createOpenApiClient(cookies)
-        try {
-          if (needsTimeline) {
-            if (!trendsContext) throw new Error('Missing trends context for timeline checkpoint')
-            const timelinePhase = await measurePhaseDuration((trackRetryWait) =>
-              fetchTimelineSnapshot(
-                deps,
-                account,
-                trendsContext,
-                openApiContext.client,
-                trackRetryWait,
-              ),
-            )
-            timelineSnapshot = timelinePhase.value
-            await deps.completeCrawlAccountCheckpoint({
-              crawlRunId,
-              username: account.username,
-              phase: 'timelines',
-              data: toCheckpointData({
-                ...storeTimelineSnapshot(timelineSnapshot),
-                durationMs: timelinePhase.durationMs,
-                retryWaitMs: timelinePhase.retryWaitMs,
-              }),
-            })
-          }
-          if (needsReplies) {
-            if (!timelineSnapshot) throw new Error('Missing timeline checkpoint for replies phase')
-            const resolvedTimelineSnapshotForReplies = timelineSnapshot
-            const repliesPhase = await measurePhaseDuration((trackRetryWait) =>
-              runRepliesPhase(
-                deps,
-                resolvedTimelineSnapshotForReplies,
-                openApiContext.client,
-                trackRetryWait,
-              ),
-            )
-            repliesResult = repliesPhase.value
-            await deps.completeCrawlAccountCheckpoint({
-              crawlRunId,
-              username: account.username,
-              phase: 'replies',
-              data: toCheckpointData({
-                ...storeRepliesResult(repliesResult),
-                durationMs: repliesPhase.durationMs,
-                retryWaitMs: repliesPhase.retryWaitMs,
-              }),
-            })
-          }
-          if (needsAuthors) {
-            if (!timelineSnapshot) throw new Error('Missing timeline checkpoint for author phase')
-            if (!repliesResult) throw new Error('Missing replies checkpoint for author phase')
-            const resolvedTimelineSnapshot = timelineSnapshot
-            const resolvedRepliesResult = repliesResult
-            const authorsPhase = await measurePhaseDuration((trackRetryWait) =>
-              runAuthorUnitPhase(
-                deps,
-                registry,
-                labelDefinitionIds,
-                duplicateReplyIndex,
-                replyCorpus,
-                followGraphLabelDefinitionIds,
-                account,
-                crawlRunId,
-                resolvedTimelineSnapshot,
-                resolvedRepliesResult,
-                openApiContext.client,
-                trackRetryWait,
-              ),
-            )
-            metrics = authorsPhase.value
-            await deps.completeCrawlAccountCheckpoint({
-              crawlRunId,
-              username: account.username,
-              phase: 'authors',
-              data: toCheckpointData({
-                ...metrics,
-                durationMs: authorsPhase.durationMs,
-                retryWaitMs: authorsPhase.retryWaitMs,
-              }),
-            })
-          }
-          if (needsFollowing) {
-            const followingPhase = await measurePhaseDuration((trackRetryWait) =>
-              syncFollowingPhase(deps, account, openApiContext.client, trackRetryWait),
-            )
-            following = followingPhase.value
-            await deps.completeCrawlAccountCheckpoint({
-              crawlRunId,
-              username: account.username,
-              phase: 'following',
-              data: toCheckpointData({
-                ...following,
-                durationMs: followingPhase.durationMs,
-                retryWaitMs: followingPhase.retryWaitMs,
-              }),
-            })
-          }
-          if (needsFollowers) {
-            const followersPhase = await measurePhaseDuration((trackRetryWait) =>
-              syncFollowersPhase(
-                deps,
-                account,
-                openApiContext.client,
-                following?.userId ?? null,
-                trackRetryWait,
-              ),
-            )
-            followers = followersPhase.value
-            await deps.completeCrawlAccountCheckpoint({
-              crawlRunId,
-              username: account.username,
-              phase: 'followers',
-              data: toCheckpointData({
-                ...followers,
-                durationMs: followersPhase.durationMs,
-                retryWaitMs: followersPhase.retryWaitMs,
-              }),
-            })
-          }
-          if (needsBlocks) {
-            const blocksPhase = await measurePhaseDuration((trackRetryWait) =>
-              syncBlocksPhase(
-                deps,
-                account,
-                openApiContext.client,
-                following?.userId ?? null,
-                crawlRunId,
-                trackRetryWait,
-              ),
-            )
-            blocks = blocksPhase.value
-            await deps.completeCrawlAccountCheckpoint({
-              crawlRunId,
-              username: account.username,
-              phase: 'blocks',
-              data: toCheckpointData({
-                ...blocks,
-                durationMs: blocksPhase.durationMs,
-                retryWaitMs: blocksPhase.retryWaitMs,
-              }),
-            })
-          }
-        } finally {
-          await deps.closeOpenApiClient(openApiContext)
-        }
+        await withTimeout(
+          (async () => {
+            const trendsContext = needsTimeline
+              ? await deps.createTrendsScraper(cookies, cycletlsPort)
+              : undefined
+            if (trendsContext) {
+              cycleTlsCleanups.push(() => deps.closeTrendsScraper(trendsContext))
+            }
+            try {
+              const openApiContext = await deps.createOpenApiClient(cookies, cycletlsPort)
+              cycleTlsCleanups.push(() => deps.closeOpenApiClient(openApiContext))
+              try {
+                if (needsTimeline) {
+                  if (!trendsContext) {
+                    throw new Error('Missing trends context for timeline checkpoint')
+                  }
+                  const timelinePhase = await measurePhaseDuration((trackRetryWait) =>
+                    fetchTimelineSnapshot(
+                      deps,
+                      account,
+                      trendsContext,
+                      openApiContext.client,
+                      trackRetryWait,
+                    ),
+                  )
+                  timelineSnapshot = timelinePhase.value
+                  await deps.completeCrawlAccountCheckpoint({
+                    crawlRunId,
+                    username: account.username,
+                    phase: 'timelines',
+                    data: toCheckpointData({
+                      ...storeTimelineSnapshot(timelineSnapshot),
+                      durationMs: timelinePhase.durationMs,
+                      retryWaitMs: timelinePhase.retryWaitMs,
+                    }),
+                  })
+                }
+                if (needsReplies) {
+                  if (!timelineSnapshot) {
+                    throw new Error('Missing timeline checkpoint for replies phase')
+                  }
+                  const resolvedTimelineSnapshotForReplies = timelineSnapshot
+                  const repliesPhase = await measurePhaseDuration((trackRetryWait) =>
+                    runRepliesPhase(
+                      deps,
+                      resolvedTimelineSnapshotForReplies,
+                      openApiContext.client,
+                      trackRetryWait,
+                    ),
+                  )
+                  repliesResult = repliesPhase.value
+                  await deps.completeCrawlAccountCheckpoint({
+                    crawlRunId,
+                    username: account.username,
+                    phase: 'replies',
+                    data: toCheckpointData({
+                      ...storeRepliesResult(repliesResult),
+                      durationMs: repliesPhase.durationMs,
+                      retryWaitMs: repliesPhase.retryWaitMs,
+                    }),
+                  })
+                }
+                if (needsAuthors) {
+                  if (!timelineSnapshot) {
+                    throw new Error('Missing timeline checkpoint for author phase')
+                  }
+                  if (!repliesResult) throw new Error('Missing replies checkpoint for author phase')
+                  const resolvedTimelineSnapshot = timelineSnapshot
+                  const resolvedRepliesResult = repliesResult
+                  const authorsPhase = await measurePhaseDuration((trackRetryWait) =>
+                    runAuthorUnitPhase(
+                      deps,
+                      registry,
+                      labelDefinitionIds,
+                      duplicateReplyIndex,
+                      replyCorpus,
+                      followGraphLabelDefinitionIds,
+                      account,
+                      crawlRunId,
+                      resolvedTimelineSnapshot,
+                      resolvedRepliesResult,
+                      openApiContext.client,
+                      trackRetryWait,
+                    ),
+                  )
+                  metrics = authorsPhase.value
+                  await deps.completeCrawlAccountCheckpoint({
+                    crawlRunId,
+                    username: account.username,
+                    phase: 'authors',
+                    data: toCheckpointData({
+                      ...metrics,
+                      durationMs: authorsPhase.durationMs,
+                      retryWaitMs: authorsPhase.retryWaitMs,
+                    }),
+                  })
+                }
+                if (needsFollowing) {
+                  const followingPhase = await measurePhaseDuration((trackRetryWait) =>
+                    syncFollowingPhase(deps, account, openApiContext.client, trackRetryWait),
+                  )
+                  following = followingPhase.value
+                  await deps.completeCrawlAccountCheckpoint({
+                    crawlRunId,
+                    username: account.username,
+                    phase: 'following',
+                    data: toCheckpointData({
+                      ...following,
+                      durationMs: followingPhase.durationMs,
+                      retryWaitMs: followingPhase.retryWaitMs,
+                    }),
+                  })
+                }
+                if (needsFollowers) {
+                  const followersPhase = await measurePhaseDuration((trackRetryWait) =>
+                    syncFollowersPhase(
+                      deps,
+                      account,
+                      openApiContext.client,
+                      following?.userId ?? null,
+                      trackRetryWait,
+                    ),
+                  )
+                  followers = followersPhase.value
+                  await deps.completeCrawlAccountCheckpoint({
+                    crawlRunId,
+                    username: account.username,
+                    phase: 'followers',
+                    data: toCheckpointData({
+                      ...followers,
+                      durationMs: followersPhase.durationMs,
+                      retryWaitMs: followersPhase.retryWaitMs,
+                    }),
+                  })
+                }
+                if (needsBlocks) {
+                  const blocksPhase = await measurePhaseDuration((trackRetryWait) =>
+                    syncBlocksPhase(
+                      deps,
+                      account,
+                      openApiContext.client,
+                      following?.userId ?? null,
+                      crawlRunId,
+                      trackRetryWait,
+                    ),
+                  )
+                  blocks = blocksPhase.value
+                  await deps.completeCrawlAccountCheckpoint({
+                    crawlRunId,
+                    username: account.username,
+                    phase: 'blocks',
+                    data: toCheckpointData({
+                      ...blocks,
+                      durationMs: blocksPhase.durationMs,
+                      retryWaitMs: blocksPhase.retryWaitMs,
+                    }),
+                  })
+                }
+              } finally {
+                await deps.closeOpenApiClient(openApiContext)
+              }
+            } finally {
+              if (trendsContext) await deps.closeTrendsScraper(trendsContext)
+            }
+          })(),
+          deps.accountTimeoutMs,
+          `Account cycle for ${account.username} exceeded ${deps.accountTimeoutMs}ms timeout`,
+        )
       } finally {
-        if (trendsContext) await deps.closeTrendsScraper(trendsContext)
+        // closeOpenApiClient/closeTrendsScraper は cycleTLS.exit() を呼ぶだけで、
+        // 二重に呼んでも安全である。そのため通常完了時に内側の finally と重複して呼ばれても無害。
+        const cleanups = cycleTlsCleanups.splice(0)
+        const results = await Promise.allSettled(cleanups.map((cleanup) => cleanup()))
+        for (const result of results) {
+          if (result.status === 'rejected') {
+            logger.error(
+              `Failed to force-close a cycletls handle for account ${account.username}`,
+              result.reason as Error,
+            )
+          }
+        }
       }
     }
 
@@ -1686,18 +1756,20 @@ async function main(): Promise<void> {
   })
 
   const staleThresholdMs = getCrawlIntervalSeconds() * getCrawlStaleThresholdMultiplier() * 1000
+  const twitterRequestTimeoutMs = getTwitterRequestTimeoutMs()
 
   const deps: CrawlDependencies = {
     config: loadConfig(),
     limits: CRAWL_LIMITS,
     issueCookies: (account) => cookieIssuer.issueCookiesWithRetry(account),
-    createOpenApiClient: async (cookies) => {
-      const context = await createRealOpenApiClient(cookies)
+    createOpenApiClient: async (cookies, cycletlsPort) => {
+      const context = await createRealOpenApiClient(cookies, twitterRequestTimeoutMs, cycletlsPort)
       return { ...context, client: toCrawlOpenApiClient(context.client, context.blocksClient) }
     },
     closeOpenApiClient: (context) =>
       closeRealOpenApiClient(context as unknown as Parameters<typeof closeRealOpenApiClient>[0]),
-    createTrendsScraper: (cookies) => createRealTrendsScraper(cookies),
+    createTrendsScraper: (cookies, cycletlsPort) =>
+      createRealTrendsScraper(cookies, twitterRequestTimeoutMs, cycletlsPort),
     closeTrendsScraper: (context) =>
       closeRealTrendsScraper(context as Parameters<typeof closeRealTrendsScraper>[0]),
     persistAccount: createPersistAccountFn(prisma),
@@ -1730,6 +1802,7 @@ async function main(): Promise<void> {
     touchCrawlRunHeartbeat: (crawlRunId) =>
       touchCrawlRunHeartbeatRecord(prisma, crawlRunId, new Date(), staleThresholdMs),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    accountTimeoutMs: getCrawlAccountTimeoutMs(),
   }
 
   try {

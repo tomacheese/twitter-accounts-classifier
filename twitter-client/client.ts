@@ -5,6 +5,7 @@ import { createTrendsClient } from './trends-client'
 import type { TrendsScraperLike } from './api-types'
 import { wrapFetchWithResponseCapture } from './response-capture'
 import { createBlocksClient, createBlock, type BlocksListRawApiLike } from './blocks-client'
+import { withTimeout } from './timeout'
 
 const CHROME_JA3 =
   '771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0'
@@ -33,28 +34,41 @@ export async function createOpenApiClientWith(
   })
 }
 
+/** {@link createCycleTLSFetch} が Node 側リクエスト timeout に使う既定値。 */
+export const DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS = 60_000
+
 /**
  * X の GraphQL エンドポイントは Node 標準 `fetch` を Cloudflare に拒否される (HTTP 403) ため、
  * legacy trends エンドポイントと同様、
  * `cycletls` で本物の Chrome TLS/JA3 フィンガープリントを提示する `fetch` 実装を用意し、
  * {@link createTrendsScraper} と {@link createOpenApiClient} の双方で共有している。
+ * `cycletls` 自体の内部 timeout (既定 20 秒) は Node↔Go 間の接続確立にのみ適用され、
+ * 確立済み接続でのリクエスト自体には効かないため、`timeoutMs` で Node 側にも上限を設ける。
  * @param cycleTLS - 初期化済みの `cycletls` クライアント
+ * @param timeoutMs - 1 リクエストあたりの Node 側上限時間 (ミリ秒)。既定 {@link DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS}
  * @returns `cycleTLS` 経由でリクエストを送る `fetch` 互換の関数
  */
-export function createCycleTLSFetch(cycleTLS: CycleTLSClient): typeof fetch {
+export function createCycleTLSFetch(
+  cycleTLS: CycleTLSClient,
+  timeoutMs: number = DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS,
+): typeof fetch {
   return async (input, init) => {
     const url = input instanceof Request ? input.url : String(input)
     const method = (init?.method ?? 'GET').toLowerCase() as
       'get' | 'post' | 'put' | 'delete' | 'head' | 'options' | 'patch'
-    const response = await cycleTLS(
-      url,
-      {
-        body: typeof init?.body === 'string' ? init.body : undefined,
-        headers: (init?.headers as Record<string, string> | undefined) ?? {},
-        ja3: CHROME_JA3,
-        userAgent: CHROME_USER_AGENT,
-      },
-      method,
+    const response = await withTimeout(
+      cycleTLS(
+        url,
+        {
+          body: typeof init?.body === 'string' ? init.body : undefined,
+          headers: (init?.headers as Record<string, string> | undefined) ?? {},
+          ja3: CHROME_JA3,
+          userAgent: CHROME_USER_AGENT,
+        },
+        method,
+      ),
+      timeoutMs,
+      `cycletls request to ${url} did not complete within ${timeoutMs}ms`,
     )
     return new Response(
       typeof response.data === 'string' ? response.data : JSON.stringify(response.data),
@@ -76,19 +90,32 @@ export interface OpenApiClientContext {
  * また、ライブラリ内部でパースに失敗すると生レスポンスが失われてしまうため、
  * {@link wrapFetchWithResponseCapture} でラップして事後に復元できるようにしている。
  * @param cookies - Twitter アカウントに対して発行されたクッキー
+ * @param timeoutMs - {@link createCycleTLSFetch} に渡す 1 リクエストあたりの上限時間 (ミリ秒)
+ * @param port - `cycletls` の Go バイナリが listen する port。省略時は `cycletls` 既定値 (9119)
  * @returns クライアントと、依存する `cycletls` クライアント。呼び出し側でクローズできるように返す
  */
-export async function createOpenApiClient(cookies: IssuedCookies): Promise<OpenApiClientContext> {
-  const cycleTLS = await initCycleTLS()
-  const fetchImpl = wrapFetchWithResponseCapture(createCycleTLSFetch(cycleTLS))
-  TwitterOpenApi.fetchApi = fetchImpl
-  const client = await createOpenApiClientWith(new TwitterOpenApi(), cookies)
-  const blocksClient = createBlocksClient(cookies, fetchImpl)
-  return {
-    client,
-    cycleTLS,
-    blocksClient,
-    createBlock: (targetUserId: string) => createBlock(cookies, fetchImpl, targetUserId),
+export async function createOpenApiClient(
+  cookies: IssuedCookies,
+  timeoutMs: number = DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS,
+  port?: number,
+): Promise<OpenApiClientContext> {
+  const cycleTLS = await initCycleTLS(port === undefined ? undefined : { port })
+  try {
+    const fetchImpl = wrapFetchWithResponseCapture(createCycleTLSFetch(cycleTLS, timeoutMs))
+    TwitterOpenApi.fetchApi = fetchImpl
+    const client = await createOpenApiClientWith(new TwitterOpenApi(), cookies)
+    const blocksClient = createBlocksClient(cookies, fetchImpl)
+    return {
+      client,
+      cycleTLS,
+      blocksClient,
+      createBlock: (targetUserId: string) => createBlock(cookies, fetchImpl, targetUserId),
+    }
+  } catch (error) {
+    // ここで throw すると呼び出し元は cycleTLS を受け取れず close できないため、
+    // 返す前に自分で close する。
+    await cycleTLS.exit()
+    throw error
   }
 }
 
@@ -113,13 +140,19 @@ export interface TrendsScraperContext {
  * {@link createOpenApiClient} と同じ診断上の理由から、
  * {@link wrapFetchWithResponseCapture} でもラップしている。
  * @param cookies - Twitter アカウントに対して発行されたクッキー
+ * @param timeoutMs - {@link createCycleTLSFetch} に渡す 1 リクエストあたりの上限時間 (ミリ秒)
+ * @param port - `cycletls` の Go バイナリが listen する port。省略時は `cycletls` 既定値 (9119)
  * @returns スクレイパーと、依存する `cycletls` クライアント。呼び出し側でクローズできるように返す
  */
-export async function createTrendsScraper(cookies: IssuedCookies): Promise<TrendsScraperContext> {
-  const cycleTLS = await initCycleTLS()
+export async function createTrendsScraper(
+  cookies: IssuedCookies,
+  timeoutMs: number = DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS,
+  port?: number,
+): Promise<TrendsScraperContext> {
+  const cycleTLS = await initCycleTLS(port === undefined ? undefined : { port })
   const scraper = createTrendsClient(
     cookies,
-    wrapFetchWithResponseCapture(createCycleTLSFetch(cycleTLS)),
+    wrapFetchWithResponseCapture(createCycleTLSFetch(cycleTLS, timeoutMs)),
   )
 
   return { scraper, cycleTLS }

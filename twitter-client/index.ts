@@ -36,5 +36,7 @@ export {
   closeOpenApiClient,
   createTrendsScraper,
   closeTrendsScraper,
+  DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS,
 } from './client'
 export type { OpenApiClientContext, TrendsScraperContext } from './client'
+export { withTimeout, TimeoutError } from './timeout'

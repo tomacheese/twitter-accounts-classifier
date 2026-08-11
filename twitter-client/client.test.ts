@@ -32,6 +32,21 @@ describe('createCycleTLSFetch', () => {
   })
 })
 
+describe('createCycleTLSFetch timeout', () => {
+  it('rejects with TimeoutError when the cycletls call never settles', async () => {
+    const cycleTLS = vi.fn().mockReturnValue(
+      new Promise(() => {
+        // 意図的に永遠に settle しない: cycletls 子プロセスのハングを模する。
+      }),
+    )
+    const fetchImpl = createCycleTLSFetch(cycleTLS as never, 5)
+
+    await expect(fetchImpl('https://x.com/graphql/abc/HangingRequestTest')).rejects.toThrow(
+      'did not complete within 5ms',
+    )
+  })
+})
+
 // `createOpenApiClient`・`createTrendsScraper` はここから先で別途検証する。
 // 実物の `cycletls` クライアントは外部プロセスを起動して遅くなるうえ、
 // ここで検証したい「渡す fetch がレスポンスをキャプチャすること」とは無関係なため、
@@ -49,10 +64,14 @@ vi.mock('cycletls', () => ({
   default: vi.fn().mockResolvedValue(fakeCycleTLS),
 }))
 
+const { getClientFromCookiesMock } = vi.hoisted(() => ({
+  getClientFromCookiesMock: vi.fn().mockResolvedValue({ marker: 'client' }),
+}))
+
 vi.mock('twitter-openapi-typescript', () => ({
   TwitterOpenApi: class {
     static fetchApi: typeof fetch
-    getClientFromCookies = vi.fn().mockResolvedValue({ marker: 'client' })
+    getClientFromCookies = getClientFromCookiesMock
   },
 }))
 
@@ -78,6 +97,60 @@ describe('createOpenApiClient', () => {
     expect(getLastResponseMatching('OpenApiWiringTest')).toMatchObject({
       body: '{"fake":true}',
     })
+  })
+})
+
+describe('createOpenApiClient timeout wiring', () => {
+  it('propagates a custom timeoutMs to the underlying fetch', async () => {
+    const { createOpenApiClient } = await import('./client')
+    const { TwitterOpenApi } = await import('twitter-openapi-typescript')
+
+    await createOpenApiClient({ ct0: 'c0', authToken: 'a0' }, 5)
+    fakeCycleTLS.mockReturnValueOnce(
+      new Promise(() => {
+        // 意図的に永遠に settle しない。
+      }),
+    )
+
+    await expect(
+      TwitterOpenApi.fetchApi('https://x.com/graphql/abc/OpenApiTimeoutWiringTest'),
+    ).rejects.toThrow('did not complete within 5ms')
+  })
+})
+
+describe('createOpenApiClient port wiring', () => {
+  it('passes the given port through to initCycleTLS', async () => {
+    const { createOpenApiClient } = await import('./client')
+    const cycletls = await import('cycletls')
+    const initCycleTLS = cycletls.default as ReturnType<typeof vi.fn>
+
+    await createOpenApiClient({ ct0: 'c0', authToken: 'a0' }, undefined, 20_123)
+
+    expect(initCycleTLS).toHaveBeenCalledWith({ port: 20_123 })
+  })
+
+  it('omits the port option when no port is given', async () => {
+    const { createOpenApiClient } = await import('./client')
+    const cycletls = await import('cycletls')
+    const initCycleTLS = cycletls.default as ReturnType<typeof vi.fn>
+
+    await createOpenApiClient({ ct0: 'c0', authToken: 'a0' })
+
+    expect(initCycleTLS).toHaveBeenCalledWith(undefined)
+  })
+})
+
+describe('createOpenApiClient failure cleanup', () => {
+  it('closes the cycletls handle when getClientFromCookies fails after initCycleTLS succeeds', async () => {
+    const { createOpenApiClient } = await import('./client')
+    const exitCallsBefore = fakeCycleTLS.exit.mock.calls.length
+    getClientFromCookiesMock.mockRejectedValueOnce(new Error('network unreachable'))
+
+    await expect(createOpenApiClient({ ct0: 'c0', authToken: 'a0' })).rejects.toThrow(
+      'network unreachable',
+    )
+
+    expect(fakeCycleTLS.exit.mock.calls.length).toBe(exitCallsBefore + 1)
   })
 })
 
@@ -107,5 +180,17 @@ describe('createTrendsScraper', () => {
     expect(getLastResponseMatching('TrendsWiringTest')).toMatchObject({
       body: '{"fake":true}',
     })
+  })
+})
+
+describe('createTrendsScraper port wiring', () => {
+  it('passes the given port through to initCycleTLS', async () => {
+    const { createTrendsScraper } = await import('./client')
+    const cycletls = await import('cycletls')
+    const initCycleTLS = cycletls.default as ReturnType<typeof vi.fn>
+
+    await createTrendsScraper({ ct0: 'c0', authToken: 'a0' }, undefined, 20_456)
+
+    expect(initCycleTLS).toHaveBeenCalledWith({ port: 20_456 })
   })
 })
