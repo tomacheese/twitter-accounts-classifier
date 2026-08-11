@@ -100,15 +100,22 @@ export async function createOpenApiClient(
   port?: number,
 ): Promise<OpenApiClientContext> {
   const cycleTLS = await initCycleTLS(port === undefined ? undefined : { port })
-  const fetchImpl = wrapFetchWithResponseCapture(createCycleTLSFetch(cycleTLS, timeoutMs))
-  TwitterOpenApi.fetchApi = fetchImpl
-  const client = await createOpenApiClientWith(new TwitterOpenApi(), cookies)
-  const blocksClient = createBlocksClient(cookies, fetchImpl)
-  return {
-    client,
-    cycleTLS,
-    blocksClient,
-    createBlock: (targetUserId: string) => createBlock(cookies, fetchImpl, targetUserId),
+  try {
+    const fetchImpl = wrapFetchWithResponseCapture(createCycleTLSFetch(cycleTLS, timeoutMs))
+    TwitterOpenApi.fetchApi = fetchImpl
+    const client = await createOpenApiClientWith(new TwitterOpenApi(), cookies)
+    const blocksClient = createBlocksClient(cookies, fetchImpl)
+    return {
+      client,
+      cycleTLS,
+      blocksClient,
+      createBlock: (targetUserId: string) => createBlock(cookies, fetchImpl, targetUserId),
+    }
+  } catch (error) {
+    // ここで throw すると呼び出し元は cycleTLS を受け取れず close できないため、
+    // 返す前に自分で close する。
+    await cycleTLS.exit()
+    throw error
   }
 }
 

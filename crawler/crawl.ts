@@ -1230,14 +1230,18 @@ function restoreBlocksCheckpoint(value: unknown): BlocksCheckpointData | undefin
 
 const CYCLETLS_PORT_RANGE_START = 20_000
 const CYCLETLS_PORT_RANGE_SIZE = 10_000
+let cycletlsPortCounter = 0
 
 /**
- * account の cycletls ハンドルに割り当てる port をランダムに選ぶ。
+ * account の cycletls ハンドルに割り当てる port を選ぶ。
  * account ごとに port を変える理由は {@link runAccountCycle} 内のコメント参照。
+ * プロセス内で単調に増やすことで、同一プロセスの生存中は衝突が起きない。
  * @returns 割り当てる port 番号
  */
 function allocateCycletlsPort(): number {
-  return CYCLETLS_PORT_RANGE_START + Math.floor(Math.random() * CYCLETLS_PORT_RANGE_SIZE)
+  const port = CYCLETLS_PORT_RANGE_START + (cycletlsPortCounter % CYCLETLS_PORT_RANGE_SIZE)
+  cycletlsPortCounter += 1
+  return port
 }
 
 async function runAccountCycle(

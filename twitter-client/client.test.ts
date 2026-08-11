@@ -64,10 +64,14 @@ vi.mock('cycletls', () => ({
   default: vi.fn().mockResolvedValue(fakeCycleTLS),
 }))
 
+const { getClientFromCookiesMock } = vi.hoisted(() => ({
+  getClientFromCookiesMock: vi.fn().mockResolvedValue({ marker: 'client' }),
+}))
+
 vi.mock('twitter-openapi-typescript', () => ({
   TwitterOpenApi: class {
     static fetchApi: typeof fetch
-    getClientFromCookies = vi.fn().mockResolvedValue({ marker: 'client' })
+    getClientFromCookies = getClientFromCookiesMock
   },
 }))
 
@@ -133,6 +137,20 @@ describe('createOpenApiClient port wiring', () => {
     await createOpenApiClient({ ct0: 'c0', authToken: 'a0' })
 
     expect(initCycleTLS).toHaveBeenCalledWith(undefined)
+  })
+})
+
+describe('createOpenApiClient failure cleanup', () => {
+  it('closes the cycletls handle when getClientFromCookies fails after initCycleTLS succeeds', async () => {
+    const { createOpenApiClient } = await import('./client')
+    const exitCallsBefore = fakeCycleTLS.exit.mock.calls.length
+    getClientFromCookiesMock.mockRejectedValueOnce(new Error('network unreachable'))
+
+    await expect(createOpenApiClient({ ct0: 'c0', authToken: 'a0' })).rejects.toThrow(
+      'network unreachable',
+    )
+
+    expect(fakeCycleTLS.exit.mock.calls.length).toBe(exitCallsBefore + 1)
   })
 })
 
