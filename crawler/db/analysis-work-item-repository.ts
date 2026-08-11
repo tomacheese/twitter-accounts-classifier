@@ -117,6 +117,53 @@ export interface ClaimNextWorkItemInput {
   leaseDurationMs: number
 }
 
+export interface ClaimWorkItemBatchInput extends ClaimNextWorkItemInput {
+  batchSize: number
+}
+
+/**
+ * FOR UPDATE SKIP LOCKED で最大 batchSize 件を 1 SQL で claim する。
+ * 候補選択と lease 更新を同じ statement にまとめるため、1 件ずつ transaction を
+ * 繰り返さずに複数 WorkItem を原子的に確保できる。
+ * @param prisma - Prisma クライアント
+ * @param input - claim 対象の kind、batch size、lease 情報
+ * @returns claim した WorkItem 一覧
+ */
+export async function claimWorkItemBatch(
+  prisma: PrismaClient,
+  input: ClaimWorkItemBatchInput,
+): Promise<AnalysisWorkItem[]> {
+  if (input.batchSize <= 0) return []
+
+  const now = new Date()
+  const leaseExpiresAt = new Date(now.getTime() + input.leaseDurationMs)
+
+  return prisma.$queryRaw<AnalysisWorkItem[]>`
+    WITH claimable AS (
+      SELECT "id"
+      FROM "AnalysisWorkItem"
+      WHERE "kind" = ANY(${input.kinds})
+        AND "status" IN ('queued', 'leased', 'failed')
+        AND "availableAt" <= ${now}
+        AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < ${now})
+        AND "attemptCount" < "maxAttempts"
+      ORDER BY "priority" DESC, "availableAt" ASC
+      LIMIT ${input.batchSize}
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE "AnalysisWorkItem" AS item
+    SET
+      "status" = 'leased',
+      "leaseOwner" = ${input.leaseOwner},
+      "leaseExpiresAt" = ${leaseExpiresAt},
+      "attemptCount" = item."attemptCount" + 1,
+      "updatedAt" = ${now}
+    FROM claimable
+    WHERE item."id" = claimable."id"
+    RETURNING item.*
+  `
+}
+
 /**
  * FOR UPDATE SKIP LOCKED で 1 件だけ claim する。
  * analyzer/queue/work-item-repository.ts の claimNextWorkItem と同じ契約を持つ、
