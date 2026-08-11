@@ -81,3 +81,27 @@ export function getCrawlStaleThresholdMultiplier(): number {
 export function getWeeklyAnalysisStaleThresholdSeconds(): number {
   return parsePositiveIntEnv('WEEKLY_ANALYSIS_STALE_THRESHOLD_SECONDS', 7200)
 }
+
+/**
+ * relabeler の producer (stale scan) が 1 cycle あたりに scan する Account 件数。
+ * @returns producer の batch size
+ */
+export function getRelabelerProducerBatchSize(): number {
+  return parsePositiveIntEnv('RELABELER_PRODUCER_BATCH_SIZE', 5000)
+}
+
+/**
+ * relabeler の worker (queue drain) が 1 cycle あたりに claim する work item の上限件数。
+ * @returns worker の batch size
+ */
+export function getRelabelerWorkerBatchSize(): number {
+  return parsePositiveIntEnv('RELABELER_WORKER_BATCH_SIZE', 2000)
+}
+
+/**
+ * relabeler の worker が evaluate フェーズを並列実行するレーン数。
+ * @returns worker の並行度
+ */
+export function getRelabelerWorkerConcurrency(): number {
+  return parsePositiveIntEnv('RELABELER_WORKER_CONCURRENCY', 1)
+}
