@@ -113,18 +113,29 @@ export async function attemptBlock(
     await withTwitterRetry(() => client.createBlock(candidate.accountId))
   } catch (error) {
     if (error instanceof BlockTargetNotFoundError) {
-      await deps.markOutboxRemoteSkipped(deps.prisma, outboxEntry.id)
-      await deps.recordBlockAction(deps.prisma, {
-        blockAccountRunId,
-        blockerId,
-        blockedId: candidate.accountId,
-        labelDefinitionId: candidate.labelDefinitionId,
-        confidence: candidate.confidence,
-        result: 'skipped',
-        errorMessage: error.message,
-        outboxEntryId: outboxEntry.id,
-      })
-      return 'skipped'
+      try {
+        await deps.markOutboxRemoteSkipped(deps.prisma, outboxEntry.id)
+        await deps.recordBlockAction(deps.prisma, {
+          blockAccountRunId,
+          blockerId,
+          blockedId: candidate.accountId,
+          labelDefinitionId: candidate.labelDefinitionId,
+          confidence: candidate.confidence,
+          result: 'skipped',
+          errorMessage: error.message,
+          outboxEntryId: outboxEntry.id,
+        })
+        return 'skipped'
+      } catch (persistError) {
+        // ここで捕捉しないと、呼び出し元の候補ループに例外が伝播し、
+        // 残り候補の処理と finishBlockAccountRun への到達を止めてしまう。
+        logger.error(
+          `Failed to persist remote_skipped for ${candidate.accountId} on behalf of ${blockerId}`,
+          persistError as Error,
+        )
+        captureException(persistError, { blockerId, blockedId: candidate.accountId })
+        return false
+      }
     }
 
     logger.error(
@@ -250,6 +261,8 @@ export async function runBlockAccountCycle(
       blockerId,
       account.blockRule,
       deps.limits.maxPerAccountPerRun,
+      deps.limits.targetNotFoundMaxAttempts,
+      deps.limits.intervalSeconds,
     )
 
     let blockedCount = 0

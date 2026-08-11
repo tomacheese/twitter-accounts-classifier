@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { BlockTargetNotFoundError } from 'twitter-client'
 import { runBlockAccountCycle, attemptBlock } from './block-cycle'
 import type { BlockerAccountConfig } from './config/load-config'
 
@@ -48,8 +49,14 @@ function fakeDeps(overrides: Partial<Record<string, unknown>> = {}) {
     markOutboxRemoteSucceeded: vi.fn().mockResolvedValue(undefined),
     markOutboxLocalPersisted: vi.fn().mockResolvedValue(undefined),
     markOutboxRemoteFailed: vi.fn().mockResolvedValue(undefined),
+    markOutboxRemoteSkipped: vi.fn().mockResolvedValue(undefined),
     prisma: {},
-    limits: { intervalSeconds: 21_600, actionDelayMs: 0, maxPerAccountPerRun: 50 },
+    limits: {
+      intervalSeconds: 21_600,
+      actionDelayMs: 0,
+      maxPerAccountPerRun: 50,
+      targetNotFoundMaxAttempts: 3,
+    },
     sleepImpl: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
@@ -66,6 +73,8 @@ describe('runBlockAccountCycle', () => {
       'blocker-1',
       { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
       50,
+      3,
+      21_600,
     )
   })
 
@@ -121,12 +130,53 @@ describe('runBlockAccountCycle', () => {
     ]
     const deps = fakeDeps({
       selectBlockCandidates: vi.fn().mockResolvedValue(candidates),
-      limits: { intervalSeconds: 21_600, actionDelayMs: 2000, maxPerAccountPerRun: 50 },
+      limits: {
+        intervalSeconds: 21_600,
+        actionDelayMs: 2000,
+        maxPerAccountPerRun: 50,
+        targetNotFoundMaxAttempts: 3,
+      },
     })
 
     await runBlockAccountCycle(deps as never, baseAccount(), 'run-1')
 
     expect(deps.sleepImpl).toHaveBeenCalledWith(2000)
+  })
+
+  it('1件目の remote_skipped 永続化が失敗しても2件目以降の候補処理と finishBlockAccountRun を継続する', async () => {
+    const candidates = [
+      { accountId: 'spam-1', labelDefinitionId: 'label-spam', confidence: 0.95 },
+      { accountId: 'spam-2', labelDefinitionId: 'label-spam', confidence: 0.9 },
+    ]
+    const client = {
+      client: {
+        getUserApi: vi.fn().mockReturnValue({
+          getUserByScreenName: vi
+            .fn()
+            .mockResolvedValue({ data: { user: { restId: 'blocker-1' } } }),
+        }),
+      },
+      createBlock: vi
+        .fn()
+        .mockRejectedValueOnce(new BlockTargetNotFoundError('spam-1'))
+        .mockResolvedValueOnce(undefined),
+    }
+    const deps = fakeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue(client),
+      selectBlockCandidates: vi.fn().mockResolvedValue(candidates),
+      markOutboxRemoteSkipped: vi.fn().mockRejectedValue(new Error('db down')),
+    })
+
+    const summary = await runBlockAccountCycle(deps as never, baseAccount(), 'run-1')
+
+    expect(client.createBlock).toHaveBeenNthCalledWith(1, 'spam-1')
+    expect(client.createBlock).toHaveBeenNthCalledWith(2, 'spam-2')
+    expect(deps.finishBlockAccountRun).toHaveBeenCalledWith(
+      deps.prisma,
+      'account-run-1',
+      expect.objectContaining({ status: 'completed', candidatesCount: 2 }),
+    )
+    expect(summary).toEqual({ username: 'alice', blockedCount: 1, failedCount: 1, failed: false })
   })
 
   it('returns a failed summary and skips candidate selection when own account resolution fails', async () => {
@@ -242,5 +292,47 @@ describe('attemptBlock', () => {
     })
 
     expect(succeeded).toBe(true)
+  })
+
+  it('BlockTargetNotFoundError かつ永続化 (markOutboxRemoteSkipped) が失敗しても例外を投げず false を返す', async () => {
+    const deps = fakeDeps()
+    vi.mocked(deps.findOrCreateOutboxEntry).mockResolvedValue({
+      id: 'outbox-1',
+      status: 'pending_remote',
+    })
+    vi.mocked(deps.markOutboxRemoteSkipped).mockRejectedValue(new Error('db down'))
+    const client = createMockClient()
+    vi.mocked(client.createBlock).mockRejectedValue(new BlockTargetNotFoundError('blocked-1'))
+
+    const result = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
+      accountId: 'blocked-1',
+      labelDefinitionId: 'label-1',
+      confidence: 0.9,
+    })
+
+    expect(result).toBe(false)
+  })
+
+  it('BlockTargetNotFoundError かつ永続化が成功すれば remote_skipped として記録し skipped を返す', async () => {
+    const deps = fakeDeps()
+    vi.mocked(deps.findOrCreateOutboxEntry).mockResolvedValue({
+      id: 'outbox-1',
+      status: 'pending_remote',
+    })
+    const client = createMockClient()
+    vi.mocked(client.createBlock).mockRejectedValue(new BlockTargetNotFoundError('blocked-1'))
+
+    const result = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
+      accountId: 'blocked-1',
+      labelDefinitionId: 'label-1',
+      confidence: 0.9,
+    })
+
+    expect(result).toBe('skipped')
+    expect(deps.markOutboxRemoteSkipped).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
+    expect(deps.recordBlockAction).toHaveBeenCalledWith(
+      deps.prisma,
+      expect.objectContaining({ blockedId: 'blocked-1', result: 'skipped' }),
+    )
   })
 })
