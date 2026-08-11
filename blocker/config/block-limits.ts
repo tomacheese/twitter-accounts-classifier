@@ -1,4 +1,9 @@
-import { getBlockActionDelayMs, getBlockIntervalSeconds, getBlockMaxPerAccountPerRun } from './env'
+import {
+  getBlockActionDelayMs,
+  getBlockIntervalSeconds,
+  getBlockMaxPerAccountPerRun,
+  getBlockTargetNotFoundMaxAttempts,
+} from './env'
 
 /**
  * ブロック実行の上限値一式。
@@ -7,6 +12,7 @@ export interface BlockLimits {
   intervalSeconds: number
   actionDelayMs: number
   maxPerAccountPerRun: number
+  targetNotFoundMaxAttempts: number
 }
 
 /**
@@ -19,5 +25,6 @@ export function loadBlockLimits(): BlockLimits {
     intervalSeconds: getBlockIntervalSeconds(),
     actionDelayMs: getBlockActionDelayMs(),
     maxPerAccountPerRun: getBlockMaxPerAccountPerRun(),
+    targetNotFoundMaxAttempts: getBlockTargetNotFoundMaxAttempts(),
   }
 }
