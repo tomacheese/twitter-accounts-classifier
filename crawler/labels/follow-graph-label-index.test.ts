@@ -162,6 +162,7 @@ describe('buildFollowGraphLabelIndex label filtering', () => {
 
     await buildFollowGraphLabelIndex(prisma, new Map([['topic_food', 'ld-food']]))
 
+    expect(queryRaw).toHaveBeenCalledTimes(2)
     for (const call of queryRaw.mock.calls) {
       const sql = (call[0] as unknown[]).join('')
       expect(sql).not.toContain('= ANY(')

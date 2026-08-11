@@ -49,4 +49,22 @@ describe('SystemPage', () => {
     expect(html).toContain('crawler')
     expect(html).toContain('unknown')
   })
+
+  it('getRelabelStatus が失敗しても他セクションは表示され続ける', async () => {
+    process.env.VIEWER_NEW_UI_SECTIONS = 'system'
+    vi.mocked(getSystemConsoleData).mockResolvedValue({
+      identity: { applicationVersion: '1.0.0', environment: 'production' },
+      componentHealth: null,
+      activePolicy: null,
+      readModels: [],
+      diagnosticsEnvVars: [],
+      componentBuildIdentities: [],
+    })
+    vi.mocked(getRelabelStatus).mockRejectedValue(new Error('db error'))
+
+    const html = renderToStaticMarkup(await SystemPage())
+
+    expect(html).toContain('System identity')
+    expect(html).toContain('Failed to load the relabel status data.')
+  })
 })

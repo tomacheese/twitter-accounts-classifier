@@ -91,7 +91,8 @@ export function getRelabelerProducerBatchSize(): number {
 }
 
 /**
- * relabeler の worker (queue drain) が 1 cycle あたりに claim する work item の上限件数。
+ * relabeler の worker (queue drain) が 1 レーンあたりに claim する work item の上限件数
+ * (concurrency 分の合計ではない)。
  * @returns worker の batch size
  */
 export function getRelabelerWorkerBatchSize(): number {

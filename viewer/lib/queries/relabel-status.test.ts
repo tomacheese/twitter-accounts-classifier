@@ -4,7 +4,10 @@ import { getRelabelStatus } from './relabel-status'
 
 describe('getRelabelStatus', () => {
   it('value に関係なく currentRuleVersion 一致件数を coverage として数える', async () => {
-    const countMock = vi.fn().mockResolvedValueOnce(30)
+    const groupByLabelLatest = vi.fn().mockResolvedValue([
+      { labelDefinitionId: 'ld-food', ruleVersion: '1.0.0', _count: 30 },
+      { labelDefinitionId: 'ld-food', ruleVersion: '0.9.0', _count: 5 },
+    ])
     const prisma = {
       account: { count: vi.fn().mockResolvedValue(100) },
       labelDefinition: {
@@ -17,7 +20,7 @@ describe('getRelabelStatus', () => {
           },
         ]),
       },
-      accountLabelLatest: { count: countMock },
+      accountLabelLatest: { groupBy: groupByLabelLatest },
       analysisWorkItem: {
         groupBy: vi.fn().mockResolvedValue([
           { status: 'queued', _count: 5 },
@@ -35,8 +38,9 @@ describe('getRelabelStatus', () => {
 
     const status = await getRelabelStatus(prisma)
 
-    expect(countMock).toHaveBeenCalledWith({
-      where: { labelDefinitionId: 'ld-food', ruleVersion: '1.0.0' },
+    expect(groupByLabelLatest).toHaveBeenCalledWith({
+      by: ['labelDefinitionId', 'ruleVersion'],
+      _count: true,
     })
     expect(status.labelCoverage).toEqual([
       {
@@ -54,8 +58,7 @@ describe('getRelabelStatus', () => {
     expect(status.scanCursorUpdatedAt).toEqual(new Date('2026-08-11T00:00:00Z'))
   })
 
-  it('currentRuleVersion が未設定の label は 0 件表示にする (count を呼ばない)', async () => {
-    const countMock = vi.fn()
+  it('currentRuleVersion が未設定の label は 0 件表示にする', async () => {
     const prisma = {
       account: { count: vi.fn().mockResolvedValue(100) },
       labelDefinition: {
@@ -68,14 +71,13 @@ describe('getRelabelStatus', () => {
           },
         ]),
       },
-      accountLabelLatest: { count: countMock },
+      accountLabelLatest: { groupBy: vi.fn().mockResolvedValue([]) },
       analysisWorkItem: { groupBy: vi.fn().mockResolvedValue([]) },
       relabelScanCursor: { findUnique: vi.fn().mockResolvedValue(null) },
     } as unknown as PrismaClient
 
     const status = await getRelabelStatus(prisma)
 
-    expect(countMock).not.toHaveBeenCalled()
     expect(status.labelCoverage).toEqual([
       {
         key: 'topic_new',

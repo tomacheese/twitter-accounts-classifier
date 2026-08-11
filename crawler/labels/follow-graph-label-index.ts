@@ -42,6 +42,7 @@ export interface BuildFollowGraphLabelIndexOptions {
  * 今回の実行中に確定した新しいラベルは反映しない (呼び出し元がこの関数を各実行の先頭で1回だけ呼ぶ前提のため)。
  * @param prisma - 問い合わせに使う Prisma クライアント
  * @param labelKeyToDefinitionId - ルールキーから LabelDefinition の id へのマップ (`ensureLabelDefinitionsForRules` の戻り値)
+ * @param options - 集計対象を絞り込むオプション
  * @returns アカウントごとにシグナルを読み出せるインデックス
  */
 export async function buildFollowGraphLabelIndex(
@@ -60,9 +61,8 @@ export async function buildFollowGraphLabelIndex(
 
   const accountIds = options?.accountIds
 
-  // accountIds の有無で完全に別クエリに分岐させているのは、Prisma.sql/Prisma.empty による
-  // 条件付き SQL 合成では $queryRaw モックへ渡るテンプレート文字列配列に断片が反映されず、
-  // テストで WHERE 句の有無を確実に検証できないため。
+  // Prisma.sql/Prisma.empty による条件付き SQL 合成は $queryRaw モックの呼び出し引数に断片が反映されず、
+  // テストで WHERE 句の有無を検証できない。そのため accountIds の有無で完全に別クエリに分岐させている。
   const followeeRows = accountIds
     ? await prisma.$queryRaw<AggregateRow[]>`
       SELECT

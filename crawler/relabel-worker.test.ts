@@ -128,12 +128,15 @@ describe('evaluateAccountRelabelItems', () => {
   it('concurrency を 2 以上に設定すると複数チャンクへ分割して並走する', async () => {
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItem').mockResolvedValue('succeeded')
     vi.spyOn(labelRepository, 'recordAccountLabelsBulk').mockResolvedValue([])
-    const findUniqueOrder: string[] = []
+    const pendingResolvers: (() => void)[] = []
     const prisma = {
       account: {
         findUnique: vi.fn().mockImplementation(({ where }: { where: { id: string } }) => {
-          findUniqueOrder.push(where.id)
-          return Promise.resolve({ id: where.id })
+          return new Promise((resolve) => {
+            pendingResolvers.push(() => {
+              resolve({ id: where.id })
+            })
+          })
         }),
       },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
@@ -146,7 +149,7 @@ describe('evaluateAccountRelabelItems', () => {
       { id: 'wi-4', triggerId: 'dave' },
     ] as never[]
 
-    const result = await evaluateAccountRelabelItems(prisma, items, {
+    const resultPromise = evaluateAccountRelabelItems(prisma, items, {
       registry: new LabelRuleRegistry(),
       labelDefinitionIds: new Map(),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
@@ -156,8 +159,21 @@ describe('evaluateAccountRelabelItems', () => {
       leaseOwner: 'test-worker',
     })
 
+    // concurrency: 2 なら chunk (alice→carol) と chunk (bob→dave) が同時に走り出すため、
+    // 両チャンク先頭の findUnique が解決前に 2 件同時に保留する。concurrency: 1 の直列実行では
+    // この時点で保留は 1 件にしかならないため、この件数がチャンク並走の検証点になる。
+    expect(pendingResolvers).toHaveLength(2)
+
+    while (pendingResolvers.length > 0) {
+      const toResolve = pendingResolvers.splice(0)
+      for (const resolve of toResolve) resolve()
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve()
+      }
+    }
+
+    const result = await resultPromise
     expect(result.succeeded).toBe(4)
-    expect(new Set(findUniqueOrder)).toEqual(new Set(['alice', 'bob', 'carol', 'dave']))
   })
 })
 
@@ -231,5 +247,30 @@ describe('runRelabelWorkerCycleOnce', () => {
 
     expect(followGraphSpy).not.toHaveBeenCalled()
     expect(replyCorpusSpy).not.toHaveBeenCalled()
+  })
+
+  it('index 構築が失敗した場合、claim 済みの item に lastErrorSummary を書き残して例外を再送出する', async () => {
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
+    vi.spyOn(workItemRepository, 'claimNextWorkItem')
+      .mockResolvedValueOnce({ id: 'wi-1', triggerId: 'alice' } as never)
+      .mockResolvedValueOnce(undefined)
+    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockRejectedValue(new Error('db timeout'))
+    const updateSpy = vi.fn().mockResolvedValue({})
+    const prisma = {
+      relabelScanCursor: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'singleton', lastScannedAccountId: null }),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      account: { findMany: vi.fn().mockResolvedValue([]) },
+      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      analysisWorkItem: { update: updateSpy },
+    } as unknown as PrismaClient
+
+    await expect(runRelabelWorkerCycleOnce(prisma)).rejects.toThrow('db timeout')
+
+    expect(updateSpy).toHaveBeenCalledWith({
+      where: { id: 'wi-1' },
+      data: { lastErrorSummary: expect.stringContaining('db timeout') },
+    })
   })
 })

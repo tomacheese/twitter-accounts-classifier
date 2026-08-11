@@ -77,8 +77,8 @@ export interface EvaluateAccountRelabelItemsResult {
 
 /**
  * claim 済みの account_relabel work item を、1 account ずつ評価・永続化する。
- * concurrency 個のチャンクに分割し、チャンクごとの逐次処理を Promise.all で並走させる
- * (チャンク内は account 単位の try/catch で例外を吸収済みのため、他チャンクを巻き込むことはない)。
+ * account 単位の try/catch で例外を吸収しているため、chunk を跨いだ Promise.all 並列化でも、
+ * 1 account の失敗が他の account やチャンクを巻き込むことはない。
  * @param prisma - Prisma クライアント
  * @param items - claimAccountRelabelBatch で claim 済みの work item 一覧
  * @param options - 評価に使うルールレジストリ・共有インデックス・並行度・lease owner 名
@@ -240,9 +240,8 @@ export async function scanForStaleAccounts(
 
 /**
  * 1 cycle 分の producer (incremental scan) + worker (claim → bounded index 構築 → evaluate) を実行する。
- * claim 件数が 0 件の場合、index 構築 (loadReplyCorpus・buildFollowGraphLabelIndex) を含む
- * worker 処理全体をスキップする。テストで prisma を差し替えられるよう、DB クライアントの
- * 確保・解放を行わない内部関数として分離している。
+ * DB クライアントの確保・解放を呼び出し元の runRelabelWorkerCycle に委ねているのは、
+ * テストで prisma を差し替えられるようにするため。
  * @param prisma - Prisma クライアント
  */
 export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<void> {
@@ -270,22 +269,40 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
     return
   }
 
-  const accountIds = claimed.map((item) => item.triggerId)
-  // CrawlRun に紐づかないため、既存の全件対象の挙動を維持するよう現在時刻を watermark として渡す。
-  const replyCorpus = await loadReplyCorpus(prisma, new Date())
-  const followGraphLabelIndex = await buildFollowGraphLabelIndex(prisma, labelDefinitionIds, {
-    accountIds,
-  })
-  const evaluateResult = await evaluateAccountRelabelItems(prisma, claimed, {
-    registry,
-    labelDefinitionIds,
-    duplicateReplyIndex: buildDuplicateReplyIndexImpl(replyCorpus),
-    replyHijackIndex: buildReplyHijackIndexImpl(replyCorpus),
-    followGraphLabelIndex,
-    concurrency,
-    leaseOwner,
-  })
-  logger.info(`Relabel drain: ${claimed.length} claimed, ${evaluateResult.succeeded} succeeded`)
+  try {
+    const accountIds = claimed.map((item) => item.triggerId)
+    // CrawlRun に紐づかないため、既存の全件対象の挙動を維持するよう現在時刻を watermark として渡す。
+    const replyCorpus = await loadReplyCorpus(prisma, new Date())
+    const followGraphLabelIndex = await buildFollowGraphLabelIndex(prisma, labelDefinitionIds, {
+      accountIds,
+    })
+    const evaluateResult = await evaluateAccountRelabelItems(prisma, claimed, {
+      registry,
+      labelDefinitionIds,
+      duplicateReplyIndex: buildDuplicateReplyIndexImpl(replyCorpus),
+      replyHijackIndex: buildReplyHijackIndexImpl(replyCorpus),
+      followGraphLabelIndex,
+      concurrency,
+      leaseOwner,
+    })
+    logger.info(`Relabel drain: ${claimed.length} claimed, ${evaluateResult.succeeded} succeeded`)
+  } catch (error) {
+    // index 構築が失敗すると claim 済みの全件が評価前に取り残されるため、次回 scan での
+    // 原因調査に使えるよう、release はせず lastErrorSummary だけ書き残して rethrow する。
+    logger.error('Relabel drain failed before evaluation', error as Error)
+    captureException(error, { source: 'relabel-worker.runRelabelWorkerCycleOnce' })
+    await Promise.all(
+      claimed.map((item) =>
+        prisma.analysisWorkItem
+          .update({
+            where: { id: item.id },
+            data: { lastErrorSummary: String(error).slice(0, 500) },
+          })
+          .catch(() => undefined),
+      ),
+    )
+    throw error
+  }
 }
 
 /**

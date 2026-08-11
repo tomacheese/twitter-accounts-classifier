@@ -27,46 +27,52 @@ const SCAN_CURSOR_ID = 'singleton'
 
 /**
  * label ごとの現行 ruleVersion coverage と account_relabel backlog を取得する。
- * coverage は value (true/false) では絞り込まない。正例が少ない/0件のラベルでも
+ * coverage は value (true/false) では絞り込まない。正例が少ないラベルでも、
  * 「現行 ruleVersion で再評価済みかどうか」という進捗の意味を保つため。
+ * label 定義数だけ COUNT を発行せず、AccountLabelLatest 側を 1 回の groupBy に集約してから
+ * 手元で label 定義と突き合わせる。
  * @param prisma - Prisma クライアント
  * @returns label ごとの coverage・backlog・最終 scan cursor 更新時刻
  */
 export async function getRelabelStatus(prisma: PrismaClient): Promise<RelabelStatus> {
-  const totalAccounts = await prisma.account.count()
-  const labelDefinitions = await prisma.labelDefinition.findMany()
+  const [totalAccounts, labelDefinitions, coverageGroups, backlogGroups, cursor] =
+    await Promise.all([
+      prisma.account.count(),
+      prisma.labelDefinition.findMany(),
+      prisma.accountLabelLatest.groupBy({
+        by: ['labelDefinitionId', 'ruleVersion'],
+        _count: true,
+      }),
+      prisma.analysisWorkItem.groupBy({
+        by: ['status'],
+        where: { kind: ACCOUNT_RELABEL_KIND },
+        _count: true,
+      }),
+      prisma.relabelScanCursor.findUnique({ where: { id: SCAN_CURSOR_ID } }),
+    ])
 
-  const labelCoverage: RelabelLabelCoverage[] = await Promise.all(
-    labelDefinitions.map(async (definition) => {
-      const coveredAccounts = definition.currentRuleVersion
-        ? await prisma.accountLabelLatest.count({
-            where: {
-              labelDefinitionId: definition.id,
-              ruleVersion: definition.currentRuleVersion,
-            },
-          })
-        : 0
-      return {
-        key: definition.key,
-        description: definition.description,
-        currentRuleVersion: definition.currentRuleVersion,
-        coveredAccounts,
-        totalAccounts,
-      }
-    }),
+  const coveredAccountsByDefinitionAndVersion = new Map(
+    coverageGroups.map((group) => [
+      `${group.labelDefinitionId}:${group.ruleVersion}`,
+      group._count,
+    ]),
   )
+  const labelCoverage: RelabelLabelCoverage[] = labelDefinitions.map((definition) => ({
+    key: definition.key,
+    description: definition.description,
+    currentRuleVersion: definition.currentRuleVersion,
+    coveredAccounts: definition.currentRuleVersion
+      ? (coveredAccountsByDefinitionAndVersion.get(
+          `${definition.id}:${definition.currentRuleVersion}`,
+        ) ?? 0)
+      : 0,
+    totalAccounts,
+  }))
 
-  const backlogGroups = await prisma.analysisWorkItem.groupBy({
-    by: ['status'],
-    where: { kind: ACCOUNT_RELABEL_KIND },
-    _count: true,
-  })
   const backlog: RelabelBacklogEntry[] = backlogGroups.map((group) => ({
     status: group.status,
     count: group._count,
   }))
-
-  const cursor = await prisma.relabelScanCursor.findUnique({ where: { id: SCAN_CURSOR_ID } })
 
   return { labelCoverage, backlog, scanCursorUpdatedAt: cursor?.updatedAt ?? null }
 }

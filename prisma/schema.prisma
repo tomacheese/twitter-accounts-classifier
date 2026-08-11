@@ -171,7 +171,7 @@ model AccountLabelLatest {
   // value = true で絞り込む dashboard.ts/accounts.ts の各クエリを支えるインデックス。
   @@index([labelDefinitionId, value])
   @@index([value, accountId])
-  // viewer の relabel coverage クエリ (labelDefinitionId・ruleVersion で絞り込んで件数を数える) を支えるインデックス。
+  // viewer の relabel coverage クエリを支えるインデックス。
   @@index([labelDefinitionId, ruleVersion])
 }
 

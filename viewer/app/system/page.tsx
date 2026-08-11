@@ -141,10 +141,13 @@ export default async function SystemPage(): Promise<React.ReactElement> {
 
   const prisma = getPrismaClient()
   try {
-    const [data, relabelStatus] = await Promise.all([
-      getSystemConsoleData(prisma),
-      getRelabelStatus(prisma),
-    ])
+    const data = await getSystemConsoleData(prisma)
+    // Relabel backfill セクションの失敗で画面全体を落とさないよう、他セクションの取得とは
+    // 分離して自身の catch で null にフォールバックする。
+    const relabelStatus = await getRelabelStatus(prisma).catch((error: unknown) => {
+      console.error('Failed to load the relabel status data:', error)
+      return null
+    })
 
     return (
       <div className="flex flex-col gap-6">
@@ -233,33 +236,39 @@ export default async function SystemPage(): Promise<React.ReactElement> {
           <h2 id="relabel-backfill-heading" className="text-lg font-semibold">
             Relabel backfill
           </h2>
-          <p className="mt-2">
-            Last scan cursor update:{' '}
-            {relabelStatus.scanCursorUpdatedAt
-              ? formatDateTime(relabelStatus.scanCursorUpdatedAt)
-              : '—'}
-          </p>
-          {relabelStatus.labelCoverage.length === 0 ? (
-            <p className="mt-2">No label definition recorded yet.</p>
+          {relabelStatus === null ? (
+            <p className="mt-2">Failed to load the relabel status data.</p>
           ) : (
-            <div className="mt-2">
-              <ResponsiveTable
-                columns={relabelCoverageColumns}
-                rows={relabelStatus.labelCoverage}
-                rowKey={(coverage) => coverage.key}
-              />
-            </div>
-          )}
-          {relabelStatus.backlog.length === 0 ? (
-            <p className="mt-2">No account_relabel backlog.</p>
-          ) : (
-            <div className="mt-2">
-              <ResponsiveTable
-                columns={relabelBacklogColumns}
-                rows={relabelStatus.backlog}
-                rowKey={(entry) => entry.status}
-              />
-            </div>
+            <>
+              <p className="mt-2">
+                Last scan cursor update:{' '}
+                {relabelStatus.scanCursorUpdatedAt
+                  ? formatDateTime(relabelStatus.scanCursorUpdatedAt)
+                  : '—'}
+              </p>
+              {relabelStatus.labelCoverage.length === 0 ? (
+                <p className="mt-2">No label definition recorded yet.</p>
+              ) : (
+                <div className="mt-2">
+                  <ResponsiveTable
+                    columns={relabelCoverageColumns}
+                    rows={relabelStatus.labelCoverage}
+                    rowKey={(coverage) => coverage.key}
+                  />
+                </div>
+              )}
+              {relabelStatus.backlog.length === 0 ? (
+                <p className="mt-2">No account_relabel backlog.</p>
+              ) : (
+                <div className="mt-2">
+                  <ResponsiveTable
+                    columns={relabelBacklogColumns}
+                    rows={relabelStatus.backlog}
+                    rowKey={(entry) => entry.status}
+                  />
+                </div>
+              )}
+            </>
           )}
         </section>
 
