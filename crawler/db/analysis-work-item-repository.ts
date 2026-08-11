@@ -97,17 +97,17 @@ export async function requestAccountRelabelBulk(
 
   const ids = accountIds.map(() => randomUUID())
   await prisma.$executeRaw`
-    INSERT INTO "AnalysisWorkItem" ("id", "kind", "triggerType", "triggerId")
-    SELECT u."id", ${ACCOUNT_RELABEL_KIND}, ${ACCOUNT_RELABEL_TRIGGER_TYPE}, u."triggerId"
+    INSERT INTO "AnalysisWorkItem" ("id", "kind", "triggerType", "triggerId", "updatedAt")
+    SELECT u."id", ${ACCOUNT_RELABEL_KIND}, ${ACCOUNT_RELABEL_TRIGGER_TYPE}, u."triggerId", now()
     FROM UNNEST(${ids}::text[], ${accountIds}::text[]) AS u("id", "triggerId")
     ON CONFLICT ("kind", "triggerType", "triggerId") DO UPDATE
     SET
-      "status" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN 'queued' ELSE "status" END,
-      "availableAt" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN now() ELSE "availableAt" END,
-      "staleRequestedAt" = CASE WHEN "status" = 'leased' THEN now() ELSE "staleRequestedAt" END,
-      "leaseOwner" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "leaseOwner" END,
-      "leaseExpiresAt" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "leaseExpiresAt" END,
-      "attemptCount" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN 0 ELSE "attemptCount" END
+      "status" = CASE WHEN "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES}) THEN 'queued' ELSE "AnalysisWorkItem"."status" END,
+      "availableAt" = CASE WHEN "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES}) THEN now() ELSE "AnalysisWorkItem"."availableAt" END,
+      "staleRequestedAt" = CASE WHEN "AnalysisWorkItem"."status" = 'leased' THEN now() ELSE "AnalysisWorkItem"."staleRequestedAt" END,
+      "leaseOwner" = CASE WHEN "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "AnalysisWorkItem"."leaseOwner" END,
+      "leaseExpiresAt" = CASE WHEN "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "AnalysisWorkItem"."leaseExpiresAt" END,
+      "attemptCount" = CASE WHEN "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES}) THEN 0 ELSE "AnalysisWorkItem"."attemptCount" END
   `
 }
 

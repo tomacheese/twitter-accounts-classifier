@@ -3,6 +3,7 @@ import { getPrismaClient } from './client'
 import {
   enqueueWorkItem,
   requestAccountRelabel,
+  requestAccountRelabelBulk,
   claimNextWorkItem,
   completeAccountRelabelWorkItem,
 } from './analysis-work-item-repository'
@@ -68,6 +69,22 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await requestAccountRelabel(prisma, 'acct-1')
 
       const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: claimed.id } })
+      expect(item.status).toBe('queued')
+    })
+
+    it('bulk でも succeeded だった account を queued に戻す', async () => {
+      await requestAccountRelabel(prisma, 'acct-1')
+      const existing = await prisma.analysisWorkItem.findFirstOrThrow({
+        where: { kind: 'account_relabel', triggerType: 'account', triggerId: 'acct-1' },
+      })
+      await prisma.analysisWorkItem.update({
+        where: { id: existing.id },
+        data: { status: 'succeeded' },
+      })
+
+      await requestAccountRelabelBulk(prisma, ['acct-1'])
+
+      const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
       expect(item.status).toBe('queued')
     })
 
