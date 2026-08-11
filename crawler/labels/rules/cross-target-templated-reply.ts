@@ -22,6 +22,21 @@ interface GroupStats extends WindowStats {
   normalizedText: string
 }
 
+function isBetterWindow(candidate: WindowStats, current: WindowStats): boolean {
+  if (candidate.targetCount !== current.targetCount)
+    return candidate.targetCount > current.targetCount
+  if (candidate.replyCount !== current.replyCount) return candidate.replyCount > current.replyCount
+  return candidate.spanHours < current.spanHours
+}
+
+function isBetterGroup(candidate: GroupStats, current: GroupStats): boolean {
+  if (candidate.targetCount !== current.targetCount)
+    return candidate.targetCount > current.targetCount
+  if (candidate.replyCount !== current.replyCount) return candidate.replyCount > current.replyCount
+  if (candidate.spanHours !== current.spanHours) return candidate.spanHours < current.spanHours
+  return candidate.normalizedText < current.normalizedText
+}
+
 function computeWindowStats(anchor: ReplyEntry, sortedEntries: ReplyEntry[]): WindowStats {
   const windowStart = anchor.createdAt.getTime()
   const windowEndLimit = windowStart + WINDOW_HOURS * 60 * 60 * 1000
@@ -44,7 +59,7 @@ function findBestWindow(entries: ReplyEntry[]): WindowStats {
   let best = computeWindowStats(sorted[0], sorted)
   for (const anchor of sorted.slice(1)) {
     const candidate = computeWindowStats(anchor, sorted)
-    if (candidate.targetCount > best.targetCount) {
+    if (isBetterWindow(candidate, best)) {
       best = candidate
     }
   }
@@ -85,7 +100,7 @@ export const crossTargetTemplatedReplyRule: LabelRule = {
     for (const [normalizedText, entries] of groups) {
       const stats = computeGroupStats(normalizedText, entries)
       if (stats.targetCount < MIN_DISTINCT_TARGETS) continue
-      if (best === null || stats.targetCount > best.targetCount) {
+      if (best === null || isBetterGroup(stats, best)) {
         best = stats
       }
     }

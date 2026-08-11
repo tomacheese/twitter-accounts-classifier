@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { crossTargetTemplatedReplyRule } from './cross-target-templated-reply'
 import type { AccountFeatureBundle } from '../types'
@@ -197,5 +198,60 @@ describe('crossTargetTemplatedReplyRule', () => {
 
     expect(result.value).toBe(true)
     expect(result.confidence).toBeCloseTo(0.5)
+  })
+
+  it('deterministically picks the lexicographically smaller template text when two groups tie on stats, regardless of tweet insertion order', () => {
+    const clusterA = Array.from({ length: 5 }, (_, i) => ({
+      fullText: 'aaaa この文面はテスト用の完全に架空のリプライテンプレートです',
+      isReply: true,
+      hoursAgo: i,
+      inReplyToTweetId: `target-a${i}`,
+    }))
+    const clusterZ = Array.from({ length: 5 }, (_, i) => ({
+      fullText: 'zzzz この文面はテスト用の完全に架空のリプライテンプレートです',
+      isReply: true,
+      hoursAgo: i,
+      inReplyToTweetId: `target-z${i}`,
+    }))
+
+    const resultAFirst = crossTargetTemplatedReplyRule.evaluate(
+      makeBundle([...clusterA, ...clusterZ]),
+    )
+    const resultZFirst = crossTargetTemplatedReplyRule.evaluate(
+      makeBundle([...clusterZ, ...clusterA]),
+    )
+
+    expect(resultAFirst.reason).toEqual(resultZFirst.reason)
+    const expectedHash = createHash('sha256')
+      .update('aaaa この文面はテスト用の完全に架空のリプライテンプレートです')
+      .digest('hex')
+      .slice(0, 16)
+    expect(resultAFirst.reason).toContain(`textHash=${expectedHash}`)
+  })
+
+  it('deterministically breaks a within-group window tie by preferring the higher reply count', () => {
+    const bundle = makeBundle([
+      // 過去クラスタ: target 5件、reply 5件、span 4h
+      ...Array.from({ length: 5 }, (_, i) => ({
+        fullText: TEMPLATE_TEXT,
+        isReply: true,
+        hoursAgo: 40 + i,
+        inReplyToTweetId: `old-target${i}`,
+      })),
+      // 直近クラスタ: target 5件だが同一targetへの重複replyを1件含み reply 6件、span 4h
+      ...Array.from({ length: 5 }, (_, i) => ({
+        fullText: TEMPLATE_TEXT,
+        isReply: true,
+        hoursAgo: i,
+        inReplyToTweetId: `new-target${i}`,
+      })),
+      { fullText: TEMPLATE_TEXT, isReply: true, hoursAgo: 0.5, inReplyToTweetId: 'new-target4' },
+    ])
+
+    const result = crossTargetTemplatedReplyRule.evaluate(bundle)
+
+    expect(result.value).toBe(true)
+    expect(result.reason).toContain('replies=6')
+    expect(result.reason).toContain('spanHours=4.0')
   })
 })
