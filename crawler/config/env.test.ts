@@ -243,9 +243,9 @@ describe('getCrawlAccountTimeoutMs', () => {
     }
   })
 
-  it('returns 1200000 when unset', () => {
+  it('returns 3600000 when unset', () => {
     delete process.env.CRAWL_ACCOUNT_TIMEOUT_MS
-    expect(getCrawlAccountTimeoutMs()).toBe(1_200_000)
+    expect(getCrawlAccountTimeoutMs()).toBe(3_600_000)
   })
 
   it('returns the configured value', () => {

@@ -27,29 +27,29 @@ Twitter をクロールしてツイート・アカウント情報を収集し、
 
 ## アクセス
 
-| サービス | URL |
-| --- | --- |
+| サービス        | URL                   |
+| --------------- | --------------------- |
 | Viewer (Web UI) | http://localhost:3000 |
 
 Viewer には認証機構がなく、フォロー・フォロワー・ブロック一覧を含む収集データを誰でも閲覧できる。信頼できるネットワーク内 (開発機・本番機分離構成の内側) からのみアクセスできる前提であり、インターネットに直接公開しないこと。
 
 ## 環境変数
 
-| 変数 | 必須 | 説明 |
-| --- | --- | --- |
-| `DATABASE_URL` | ○ | Postgres 接続文字列 |
-| `COOKIE_ISSUER_URL` | ○ | cookie-issuer サービスの URL。フォールバック値はないため未設定だと起動時にエラーになる |
-| `CRAWL_INTERVAL_SECONDS` | - | クロール間隔 (秒)。デフォルト 21600 (6時間) |
-| `CRAWL_STALE_THRESHOLD_MULTIPLIER` | - | `running` のまま放置された CrawlRun を検出するしきい値の倍率 (クロール間隔の何倍か)。デフォルト 3 |
-| `GLITCHTIP_DSN` | - | GlitchTip (エラートラッキング) の DSN。未設定なら送信しない |
-| `CRAWL_WARNING_THRESHOLD` | - | 1 アカウントの crawl 1 回あたり、GlitchTip へ集約通知する warning 件数の閾値。デフォルト 5 |
-| `TWITTER_REQUEST_TIMEOUT_MS` | - | cycletls 経由の Twitter/X への 1 リクエストに設ける Node 側の上限時間 (ミリ秒)。デフォルト 60000 (60 秒) |
-| `CRAWL_ACCOUNT_TIMEOUT_MS` | - | 1 account の crawl 処理 (外部通信フェーズ全体) に設ける上限時間 (ミリ秒)。デフォルト 1200000 (20 分) |
-| `BLOCK_INTERVAL_SECONDS` | - | ブロック実行の間隔 (秒)。デフォルト 21600 |
-| `BLOCK_STALE_THRESHOLD_MULTIPLIER` | - | `running` のまま放置された BlockRun を検出するしきい値の倍率 (ブロック実行間隔の何倍か)。デフォルト 3 |
-| `BLOCK_ACTION_DELAY_MS` | - | 1 件ブロックするごとの待機時間 (ミリ秒)。デフォルト 2000 |
-| `BLOCK_MAX_PER_ACCOUNT_PER_RUN` | - | 1 アカウント・1 サイクルあたりのブロック上限件数。デフォルト 50 |
-| `BLOCK_TARGET_NOT_FOUND_MAX_ATTEMPTS` | - | code 50 (`BlockTargetNotFoundError`) を許容する最大試行回数 (初回を含む)。デフォルト 3 |
+| 変数                                  | 必須 | 説明                                                                                                                                                                                                                      |
+| ------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                        | ○    | Postgres 接続文字列                                                                                                                                                                                                       |
+| `COOKIE_ISSUER_URL`                   | ○    | cookie-issuer サービスの URL。フォールバック値はないため未設定だと起動時にエラーになる                                                                                                                                    |
+| `CRAWL_INTERVAL_SECONDS`              | -    | クロール間隔 (秒)。デフォルト 21600 (6時間)                                                                                                                                                                               |
+| `CRAWL_STALE_THRESHOLD_MULTIPLIER`    | -    | `running` のまま放置された CrawlRun を検出するしきい値の倍率 (クロール間隔の何倍か)。デフォルト 3                                                                                                                         |
+| `GLITCHTIP_DSN`                       | -    | GlitchTip (エラートラッキング) の DSN。未設定なら送信しない                                                                                                                                                               |
+| `CRAWL_WARNING_THRESHOLD`             | -    | 1 アカウントの crawl 1 回あたり、GlitchTip へ集約通知する warning 件数の閾値。デフォルト 5                                                                                                                                |
+| `TWITTER_REQUEST_TIMEOUT_MS`          | -    | crawler が cycletls 経由の Twitter/X へ送る 1 リクエストに設ける Node 側の上限時間 (ミリ秒)。デフォルト 60000 (60 秒)。blocker やスクリプト実行 (`crawl-tweet.ts`) には適用されず、そちらは常にこのデフォルト値が使われる |
+| `CRAWL_ACCOUNT_TIMEOUT_MS`            | -    | crawler の 1 account の crawl 処理 (外部通信フェーズ全体) に設ける上限時間 (ミリ秒)。デフォルト 3600000 (60 分)。ハング検出専用の保険であり、通常のアカウント処理時間を下回らないよう運用環境の実測値に応じて調整すること |
+| `BLOCK_INTERVAL_SECONDS`              | -    | ブロック実行の間隔 (秒)。デフォルト 21600                                                                                                                                                                                 |
+| `BLOCK_STALE_THRESHOLD_MULTIPLIER`    | -    | `running` のまま放置された BlockRun を検出するしきい値の倍率 (ブロック実行間隔の何倍か)。デフォルト 3                                                                                                                     |
+| `BLOCK_ACTION_DELAY_MS`               | -    | 1 件ブロックするごとの待機時間 (ミリ秒)。デフォルト 2000                                                                                                                                                                  |
+| `BLOCK_MAX_PER_ACCOUNT_PER_RUN`       | -    | 1 アカウント・1 サイクルあたりのブロック上限件数。デフォルト 50                                                                                                                                                           |
+| `BLOCK_TARGET_NOT_FOUND_MAX_ATTEMPTS` | -    | code 50 (`BlockTargetNotFoundError`) を許容する最大試行回数 (初回を含む)。デフォルト 3                                                                                                                                    |
 
 ## データ
 

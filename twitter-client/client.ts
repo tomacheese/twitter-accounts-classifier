@@ -42,8 +42,8 @@ export const DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS = 60_000
  * legacy trends エンドポイントと同様、
  * `cycletls` で本物の Chrome TLS/JA3 フィンガープリントを提示する `fetch` 実装を用意し、
  * {@link createTrendsScraper} と {@link createOpenApiClient} の双方で共有している。
- * `cycletls` 自体の request timeout (既定 7 秒) は Go バイナリ側 HTTP クライアントのものであり、
- * Node↔Go 間の IPC 自体が固着した場合には効かないため、`timeoutMs` で Node 側にも上限を設ける。
+ * `cycletls` 自体の内部 timeout (既定 20 秒) は Node↔Go 間の接続確立にのみ適用され、
+ * 確立済み接続でのリクエスト自体には効かないため、`timeoutMs` で Node 側にも上限を設ける。
  * @param cycleTLS - 初期化済みの `cycletls` クライアント
  * @param timeoutMs - 1 リクエストあたりの Node 側上限時間 (ミリ秒)。既定 {@link DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS}
  * @returns `cycleTLS` 経由でリクエストを送る `fetch` 互換の関数
