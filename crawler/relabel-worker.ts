@@ -85,10 +85,13 @@ export async function drainAccountRelabelQueue(
         chunk.map((item) => item.triggerId),
       )
     } catch (error) {
-      // index 構築自体の失敗を chunk 内の各 item に記録する: ここで何も記録しないと、
-      // 既に claim 済みの item が理由不明のまま lease 切れを待つだけになるため。
+      // 何も記録しないと、claim 済みの item が理由不明のまま lease 切れを待つだけになる。
       logger.error('Failed to build follow-graph label index for relabel chunk', error as Error)
-      captureException(error, { source: 'relabel-worker.drainAccountRelabelQueue' })
+      captureException(error, {
+        source: 'relabel-worker.drainAccountRelabelQueue',
+        chunkSize: chunk.length,
+        triggerIds: chunk.map((item) => item.triggerId),
+      })
       await Promise.all(
         chunk.map((item) =>
           prisma.analysisWorkItem
@@ -99,7 +102,8 @@ export async function drainAccountRelabelQueue(
             .catch(() => undefined),
         ),
       )
-      continue
+      // DB 障害など他 chunk にも及ぶ失敗である可能性が高いため、以降の chunk は試行せず中断する。
+      break
     }
 
     for (const item of chunk) {

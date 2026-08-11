@@ -34,8 +34,8 @@ interface AggregateRow {
  * フォロワー方向は `Follow` を、それぞれ `AccountLabelLatest` と突き合わせる集約クエリで、
  * アカウント単位のグラフ探索を行わずにラベルごとの既存付与状況を組み立てる。
  * `accountIds` で対象 account を絞り込み、集計対象行数を account 数に比例させる。
- * 参照するのは今回の実行が始まる前に永続化済みの `AccountLabelLatest` の値のみであり、
- * 今回の実行中に確定した新しいラベルは反映しない。
+ * 参照するのは呼び出し時点までに永続化済みの `AccountLabelLatest` の値であり、
+ * 同一実行中に先行して確定したラベルも含まれうる。
  * @param prisma - 問い合わせに使う Prisma クライアント
  * @param labelKeyToDefinitionId - ルールキーから LabelDefinition の id へのマップ (`ensureLabelDefinitionsForRules` の戻り値)
  * @param accountIds - signal を構築する対象 account の id 一覧。空の場合はクエリを発行しない

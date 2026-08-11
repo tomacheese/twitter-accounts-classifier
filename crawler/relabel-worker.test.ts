@@ -173,11 +173,13 @@ describe('drainAccountRelabelQueue', () => {
     expect((buildFollowGraphLabelIndex.mock.calls[1][0] as string[]).length).toBe(1)
   })
 
-  it('buildFollowGraphLabelIndex が失敗した chunk の item は lastErrorSummary を記録し、次の chunk の処理は継続する', async () => {
-    vi.spyOn(workItemRepository, 'claimNextWorkItem')
-      .mockResolvedValueOnce({ id: 'wi-1', triggerId: 'acct-1' } as never)
-      .mockResolvedValueOnce(undefined)
-    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItem').mockResolvedValue('succeeded')
+  it('buildFollowGraphLabelIndex が失敗した場合、chunk 内の item に lastErrorSummary を記録し drain を中断する', async () => {
+    // claim 可能な item がまだ多数残っている状況でも、以降の chunk を試行しないことを検証する。
+    let callCount = 0
+    vi.spyOn(workItemRepository, 'claimNextWorkItem').mockImplementation(() => {
+      callCount++
+      return Promise.resolve({ id: `wi-${callCount}`, triggerId: `acct-${callCount}` } as never)
+    })
     const updateSpy = vi.fn().mockResolvedValue(undefined)
     const buildFollowGraphLabelIndex = vi.fn().mockRejectedValue(new Error('index build failed'))
 
@@ -193,12 +195,14 @@ describe('drainAccountRelabelQueue', () => {
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: { swarmSizeFor: () => 0, isEligibleForScreening: () => true },
       buildFollowGraphLabelIndex,
-      batchSize: 10,
+      batchSize: 250,
       leaseOwner: 'test-worker',
     })
 
-    expect(result.claimed).toBe(1)
+    expect(result.claimed).toBe(100)
     expect(result.succeeded).toBe(0)
+    expect(buildFollowGraphLabelIndex).toHaveBeenCalledTimes(1)
+    expect(updateSpy).toHaveBeenCalledTimes(100)
     expect(updateSpy).toHaveBeenCalledWith({
       where: { id: 'wi-1' },
       data: { lastErrorSummary: expect.stringContaining('index build failed') },
