@@ -38,8 +38,8 @@ export interface BuildFollowGraphLabelIndexOptions {
  * フォロー先方向は `Follow` と `LabelingFollowSample` の両方を、
  * フォロワー方向は `Follow` を、それぞれ `AccountLabelLatest` と突き合わせる集約クエリで、
  * アカウント単位のグラフ探索を行わずにラベルごとの既存付与状況を組み立てる。
- * 参照するのは今回の実行が始まる前に永続化済みの `AccountLabelLatest` の値のみであり、
- * 今回の実行中に確定した新しいラベルは反映しない (呼び出し元がこの関数を各実行の先頭で1回だけ呼ぶ前提のため)。
+ * 参照するのは呼び出し時点までに永続化済みの `AccountLabelLatest` の値であり、
+ * 同一実行中に先行して確定したラベルも含まれうる。
  * @param prisma - 問い合わせに使う Prisma クライアント
  * @param labelKeyToDefinitionId - ルールキーから LabelDefinition の id へのマップ (`ensureLabelDefinitionsForRules` の戻り値)
  * @param options - 集計対象を絞り込むオプション

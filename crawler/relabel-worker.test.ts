@@ -249,6 +249,42 @@ describe('runRelabelWorkerCycleOnce', () => {
     expect(replyCorpusSpy).not.toHaveBeenCalled()
   })
 
+  it('buildFollowGraphLabelIndex には usesFollowGraphSignal を持つルールのラベルだけを渡す', async () => {
+    // フィルタ後も残ることを検証するため、実際に usesFollowGraphSignal: true を持つルールの key を使う。
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(
+      new Map([
+        ['topic_anime', 'ld-follow'],
+        ['ad_pr_hashtag', 'ld-no-follow'],
+      ]),
+    )
+    vi.spyOn(workItemRepository, 'claimNextWorkItem')
+      .mockResolvedValueOnce({ id: 'wi-1', triggerId: 'alice' } as never)
+      .mockResolvedValueOnce(undefined)
+    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItem').mockResolvedValue('succeeded')
+    const followGraphSpy = vi
+      .spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
+      .mockResolvedValue({ signalsFor: () => ({}) })
+    const prisma = {
+      relabelScanCursor: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'singleton', lastScannedAccountId: null }),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      account: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      analysisWorkItem: { update: vi.fn().mockResolvedValue({}) },
+    } as unknown as PrismaClient
+
+    await runRelabelWorkerCycleOnce(prisma)
+
+    expect(followGraphSpy).toHaveBeenCalledWith(prisma, new Map([['topic_anime', 'ld-follow']]), {
+      accountIds: ['alice'],
+    })
+  })
+
   it('index 構築が失敗した場合、claim 済みの item に lastErrorSummary を書き残して例外を再送出する', async () => {
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
     vi.spyOn(workItemRepository, 'claimNextWorkItem')

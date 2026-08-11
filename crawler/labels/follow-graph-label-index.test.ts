@@ -35,7 +35,9 @@ describe('buildFollowGraphLabelIndex', () => {
     )
     const labelKeyToDefinitionId = new Map([['topic_food', 'def-topic_food']])
 
-    const index = await buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId)
+    const index = await buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId, {
+      accountIds: ['alice', 'bob'],
+    })
 
     expect(index.signalsFor('alice')).toEqual({
       topic_food: {
@@ -51,7 +53,9 @@ describe('buildFollowGraphLabelIndex', () => {
     const prisma = makePrisma([], [])
     const labelKeyToDefinitionId = new Map([['topic_food', 'def-topic_food']])
 
-    const index = await buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId)
+    const index = await buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId, {
+      accountIds: ['alice', 'bob'],
+    })
 
     expect(index.signalsFor('alice')).toEqual({})
   })
@@ -63,7 +67,9 @@ describe('buildFollowGraphLabelIndex', () => {
     )
     const labelKeyToDefinitionId = new Map([['topic_food', 'def-topic_food']])
 
-    const index = await buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId)
+    const index = await buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId, {
+      accountIds: ['alice', 'bob'],
+    })
 
     expect(index.signalsFor('alice')).toEqual({})
   })
@@ -75,7 +81,9 @@ describe('buildFollowGraphLabelIndex', () => {
     )
     const labelKeyToDefinitionId = new Map([['topic_food', 'def-topic_food']])
 
-    const index = await buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId)
+    const index = await buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId, {
+      accountIds: ['alice', 'bob'],
+    })
 
     expect(index.signalsFor('alice')).toEqual({})
   })
@@ -92,7 +100,9 @@ describe('buildFollowGraphLabelIndex', () => {
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
     const labelKeyToDefinitionId = new Map([['topic_food', 'def-topic_food']])
 
-    const building = buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId)
+    const building = buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId, {
+      accountIds: ['alice', 'bob'],
+    })
     await Promise.resolve()
 
     expect(queryRaw).toHaveBeenCalledTimes(1)
@@ -106,7 +116,9 @@ describe('buildFollowGraphLabelIndex', () => {
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
     const labelKeyToDefinitionId = new Map([['topic_food', 'def-topic_food']])
 
-    await buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId)
+    await buildFollowGraphLabelIndex(prisma, labelKeyToDefinitionId, {
+      accountIds: ['alice', 'bob'],
+    })
 
     const followeeQuerySql = (queryRaw.mock.calls[0][0] as unknown[]).join('')
     expect(followeeQuerySql).toContain('"LabelingFollowSample"')
@@ -118,7 +130,9 @@ describe('buildFollowGraphLabelIndex label filtering', () => {
     const queryRaw = vi.fn().mockResolvedValue([])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
-    await buildFollowGraphLabelIndex(prisma, new Map([['topic_anime', 'ld-anime']]))
+    await buildFollowGraphLabelIndex(prisma, new Map([['topic_anime', 'ld-anime']]), {
+      accountIds: ['alice'],
+    })
 
     expect(queryRaw).toHaveBeenCalledTimes(2)
     for (const call of queryRaw.mock.calls) {
@@ -135,7 +149,7 @@ describe('buildFollowGraphLabelIndex label filtering', () => {
     const queryRaw = vi.fn()
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
-    const index = await buildFollowGraphLabelIndex(prisma, new Map())
+    const index = await buildFollowGraphLabelIndex(prisma, new Map(), { accountIds: ['alice'] })
 
     expect(queryRaw).not.toHaveBeenCalled()
     expect(index.signalsFor('any')).toEqual({})

@@ -141,6 +141,7 @@ export interface CrawlDependencies {
   loadReplyCorpus: (watermark: Date) => Promise<ReplyHijackCorpusEntry[]>
   loadFollowGraphLabelIndex: (
     labelDefinitionIds: Map<string, string>,
+    accountIds: string[],
   ) => Promise<FollowGraphLabelIndex>
   persistAuthorResultAtomic: (
     params: PersistAuthorResultAtomicParams,
@@ -469,7 +470,7 @@ async function runAuthorUnitPhase(
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   replyCorpus: ReplyHijackCorpusEntry[],
-  followGraphLabelIndex: FollowGraphLabelIndex,
+  followGraphLabelDefinitionIds: Map<string, string>,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
   timelineSnapshot: TimelineSnapshot,
@@ -540,6 +541,13 @@ async function runAuthorUnitPhase(
       ),
     ]),
   ]
+
+  // follow-graph signal は判定対象となる author の accountId でしか引かれないため、
+  // ここで author 単位に判明した accountId だけに絞って構築する。
+  const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(
+    followGraphLabelDefinitionIds,
+    uniqueAuthorIds,
+  )
 
   const existingCheckpoints = await deps.loadCrawlAuthorCheckpoints(crawlRunId, account.username)
   const warnings: CrawlWarning[] = []
@@ -1223,7 +1231,7 @@ async function runAccountCycle(
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   replyCorpus: ReplyHijackCorpusEntry[],
-  followGraphLabelIndex: FollowGraphLabelIndex,
+  followGraphLabelDefinitionIds: Map<string, string>,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
 ): Promise<'success' | 'partial'> {
@@ -1326,7 +1334,7 @@ async function runAccountCycle(
                 labelDefinitionIds,
                 duplicateReplyIndex,
                 replyCorpus,
-                followGraphLabelIndex,
+                followGraphLabelDefinitionIds,
                 account,
                 crawlRunId,
                 resolvedTimelineSnapshot,
@@ -1515,13 +1523,12 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   // 開始前に実行すると生存中でも古い heartbeat の CrawlRun が残って見える。また前処理が
   // 失敗した場合に running 行を確定できない。
   try {
+    // follow-graph signal 対象の accountId は account のタイムライン取得後にしか判明しない。
+    // そのため、ここではラベル集合だけを決め、index 自体は author 単位で構築する。
     const followGraphLabelDefinitionIds = new Map(
       [...labelDefinitionIds.entries()].filter(([key]) =>
         registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
       ),
-    )
-    const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(
-      followGraphLabelDefinitionIds,
     )
     // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
     // アカウントごとではなくサイクルごとに 1 回だけ構築する。
@@ -1569,7 +1576,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
           labelDefinitionIds,
           duplicateReplyIndex,
           replyCorpus,
-          followGraphLabelIndex,
+          followGraphLabelDefinitionIds,
           account,
           crawlRunId,
         )
@@ -1697,8 +1704,8 @@ async function main(): Promise<void> {
     persistTweets: createPersistTweetsFn(prisma),
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: (watermark) => loadReplyCorpus(prisma, watermark),
-    loadFollowGraphLabelIndex: (labelDefinitionIds) =>
-      buildFollowGraphLabelIndex(prisma, labelDefinitionIds),
+    loadFollowGraphLabelIndex: (labelDefinitionIds, accountIds) =>
+      buildFollowGraphLabelIndex(prisma, labelDefinitionIds, { accountIds }),
     persistAuthorResultAtomic: (params) => persistAuthorResultAtomicRecord(prisma, params),
     recordCrawlAuthorCheckpoint: (params) => recordCrawlAuthorCheckpointRecord(prisma, params),
     loadCrawlAuthorCheckpoints: (crawlRunId, username) =>
