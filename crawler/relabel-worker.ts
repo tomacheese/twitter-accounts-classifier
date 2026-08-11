@@ -273,9 +273,18 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
     const accountIds = claimed.map((item) => item.triggerId)
     // CrawlRun に紐づかないため、既存の全件対象の挙動を維持するよう現在時刻を watermark として渡す。
     const replyCorpus = await loadReplyCorpus(prisma, new Date())
-    const followGraphLabelIndex = await buildFollowGraphLabelIndex(prisma, labelDefinitionIds, {
-      accountIds,
-    })
+    // follow-graph signal を使わないルールのラベルまで集計対象に含めると、
+    // 対象 account 数が同じでも不要な JOIN 対象ラベルが増えてクエリコストが膨らむ。
+    const followGraphLabelDefinitionIds = new Map(
+      [...labelDefinitionIds.entries()].filter(([key]) =>
+        registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
+      ),
+    )
+    const followGraphLabelIndex = await buildFollowGraphLabelIndex(
+      prisma,
+      followGraphLabelDefinitionIds,
+      { accountIds },
+    )
     const evaluateResult = await evaluateAccountRelabelItems(prisma, claimed, {
       registry,
       labelDefinitionIds,
