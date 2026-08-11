@@ -164,7 +164,6 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       .mockResolvedValue(new Map([['verified_blue_individual', 'ld1']])),
     loadReplyCorpus: vi.fn().mockResolvedValue([]),
     loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
-    resolveAccountIdsByUsername: vi.fn().mockResolvedValue(['acct-v']),
     persistAuthorResultAtomic: vi
       .fn()
       .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 1 }),
@@ -895,7 +894,7 @@ describe('runCrawlCycle', () => {
     expect(callForCandidate.replyHijackIndex.swarmSizeFor('candidate3', 'target-C')).toBe(5)
   })
 
-  it('labelDefinitionIds と対象 account の id を loadFollowGraphLabelIndex に渡し、その結果を persistAuthorResultAtomic に渡す', async () => {
+  it('follow-graph 対象ラベルと author 単位で判明した accountId を loadFollowGraphLabelIndex に渡し、その結果を persistAuthorResultAtomic に渡す', async () => {
     const followGraphLabelIndex = { signalsFor: vi.fn().mockReturnValue({}) }
     const deps = makeDeps({
       // フィルタ後も残ることを検証するため、実際に usesFollowGraphSignal: true を持つルールの key を使う。
@@ -905,19 +904,19 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    expect(deps.resolveAccountIdsByUsername).toHaveBeenCalledWith(['v'])
+    // デフォルトのタイムライン fixture が発見する author は author1 のみ。
     expect(deps.loadFollowGraphLabelIndex).toHaveBeenCalledWith(new Map([['topic_anime', 'ld1']]), [
-      'acct-v',
+      'author1',
     ])
     expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({ followGraphLabelIndex }),
     )
   })
 
-  it('resume で全 account が success/partial の場合、resolveAccountIdsByUsername を呼ばない', async () => {
-    const resolveAccountIdsByUsername = vi.fn().mockResolvedValue(['acct-v'])
+  it('resume で全 account が success/partial の場合、loadFollowGraphLabelIndex を呼ばない', async () => {
+    const loadFollowGraphLabelIndex = vi.fn().mockResolvedValue({ signalsFor: () => ({}) })
     const deps = makeDeps({
-      resolveAccountIdsByUsername,
+      loadFollowGraphLabelIndex,
       startOrResumeCrawlRun: vi.fn().mockResolvedValue({
         id: 'run1',
         latestAccountStatuses: new Map([
@@ -928,11 +927,11 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    expect(resolveAccountIdsByUsername).not.toHaveBeenCalled()
+    expect(loadFollowGraphLabelIndex).not.toHaveBeenCalled()
   })
 
-  it('resume で一部 account だけが処理対象の場合、その username だけを resolveAccountIdsByUsername に渡す', async () => {
-    const resolveAccountIdsByUsername = vi.fn().mockResolvedValue(['acct-partial'])
+  it('resume で一部 account だけが処理対象の場合、その account だけについて loadFollowGraphLabelIndex を呼ぶ', async () => {
+    const loadFollowGraphLabelIndex = vi.fn().mockResolvedValue({ signalsFor: () => ({}) })
     const deps = makeDeps({
       config: {
         accounts: [
@@ -940,7 +939,7 @@ describe('runCrawlCycle', () => {
           { email: 'partial@example.com', username: 'partial', password: 'p', otpSecret: null },
         ],
       },
-      resolveAccountIdsByUsername,
+      loadFollowGraphLabelIndex,
       startOrResumeCrawlRun: vi.fn().mockResolvedValue({
         id: 'run1',
         latestAccountStatuses: new Map([
@@ -951,7 +950,8 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    expect(resolveAccountIdsByUsername).toHaveBeenCalledWith(['partial'])
+    expect(loadFollowGraphLabelIndex).toHaveBeenCalledTimes(1)
+    expect(loadFollowGraphLabelIndex).toHaveBeenCalledWith(expect.any(Map), ['author1'])
   })
 
   it('continues to the next account if one account throws', async () => {
@@ -1679,7 +1679,7 @@ describe('runCrawlCycle', () => {
     )
   })
 
-  it('starts or resumes the CrawlRun before cycle-wide precomputation', async () => {
+  it('starts or resumes the CrawlRun before author-level follow-graph index construction', async () => {
     const deps = makeDeps()
 
     await runCrawlCycle(deps)
@@ -1695,14 +1695,17 @@ describe('runCrawlCycle', () => {
     expect(startOrder).toBeLessThan(replyCorpusOrder)
   })
 
-  it('finalizes the CrawlRun as failed when cycle-wide precomputation fails', async () => {
+  it('follow-graph index の構築が失敗した account は failed として記録され、CrawlRun 全体は中断されない', async () => {
     const deps = makeDeps({
-      loadFollowGraphLabelIndex: vi.fn().mockRejectedValue(new Error('precompute failed')),
+      loadFollowGraphLabelIndex: vi.fn().mockRejectedValue(new Error('index build failed')),
     })
 
-    await expect(runCrawlCycle(deps)).rejects.toThrow('precompute failed')
+    await runCrawlCycle(deps)
 
     expect(deps.startOrResumeCrawlRun).toHaveBeenCalledTimes(1)
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({ username: 'v', status: 'failed' }),
+    )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'failed')
   })
 

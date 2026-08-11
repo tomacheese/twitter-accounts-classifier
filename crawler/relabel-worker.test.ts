@@ -140,6 +140,70 @@ describe('drainAccountRelabelQueue', () => {
     expect(buildFollowGraphLabelIndex).toHaveBeenCalledTimes(1)
     expect(buildFollowGraphLabelIndex).toHaveBeenCalledWith(['acct-1', 'acct-2'])
   })
+
+  it('claim 件数が chunk サイズを超える場合、chunk ごとに buildFollowGraphLabelIndex を呼ぶ', async () => {
+    const totalItems = 101
+    let callCount = 0
+    vi.spyOn(workItemRepository, 'claimNextWorkItem').mockImplementation(() => {
+      if (callCount >= totalItems) return Promise.resolve(undefined)
+      callCount++
+      return { id: `wi-${callCount}`, triggerId: `acct-${callCount}` } as never
+    })
+    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItem').mockResolvedValue('succeeded')
+    const buildFollowGraphLabelIndex = vi.fn().mockResolvedValue({ signalsFor: () => ({}) })
+
+    const prisma = {
+      account: { findUnique: vi.fn().mockResolvedValue(null) },
+      tweet: { findMany: vi.fn() },
+    } as unknown as PrismaClient
+
+    const result = await drainAccountRelabelQueue(prisma, {
+      registry: new LabelRuleRegistry(),
+      labelDefinitionIds: new Map(),
+      duplicateReplyIndex: { countOtherAccounts: () => 0 },
+      replyHijackIndex: { swarmSizeFor: () => 0, isEligibleForScreening: () => true },
+      buildFollowGraphLabelIndex,
+      batchSize: totalItems,
+      leaseOwner: 'test-worker',
+    })
+
+    expect(result.claimed).toBe(totalItems)
+    expect(buildFollowGraphLabelIndex).toHaveBeenCalledTimes(2)
+    expect((buildFollowGraphLabelIndex.mock.calls[0][0] as string[]).length).toBe(100)
+    expect((buildFollowGraphLabelIndex.mock.calls[1][0] as string[]).length).toBe(1)
+  })
+
+  it('buildFollowGraphLabelIndex が失敗した chunk の item は lastErrorSummary を記録し、次の chunk の処理は継続する', async () => {
+    vi.spyOn(workItemRepository, 'claimNextWorkItem')
+      .mockResolvedValueOnce({ id: 'wi-1', triggerId: 'acct-1' } as never)
+      .mockResolvedValueOnce(undefined)
+    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItem').mockResolvedValue('succeeded')
+    const updateSpy = vi.fn().mockResolvedValue(undefined)
+    const buildFollowGraphLabelIndex = vi.fn().mockRejectedValue(new Error('index build failed'))
+
+    const prisma = {
+      account: { findUnique: vi.fn() },
+      tweet: { findMany: vi.fn() },
+      analysisWorkItem: { update: updateSpy },
+    } as unknown as PrismaClient
+
+    const result = await drainAccountRelabelQueue(prisma, {
+      registry: new LabelRuleRegistry(),
+      labelDefinitionIds: new Map(),
+      duplicateReplyIndex: { countOtherAccounts: () => 0 },
+      replyHijackIndex: { swarmSizeFor: () => 0, isEligibleForScreening: () => true },
+      buildFollowGraphLabelIndex,
+      batchSize: 10,
+      leaseOwner: 'test-worker',
+    })
+
+    expect(result.claimed).toBe(1)
+    expect(result.succeeded).toBe(0)
+    expect(updateSpy).toHaveBeenCalledWith({
+      where: { id: 'wi-1' },
+      data: { lastErrorSummary: expect.stringContaining('index build failed') },
+    })
+  })
 })
 
 describe('scanForStaleAccounts', () => {

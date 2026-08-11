@@ -33,8 +33,7 @@ interface AggregateRow {
  * フォロー先方向は `Follow` と `LabelingFollowSample` の両方を、
  * フォロワー方向は `Follow` を、それぞれ `AccountLabelLatest` と突き合わせる集約クエリで、
  * アカウント単位のグラフ探索を行わずにラベルごとの既存付与状況を組み立てる。
- * `accountIds` で指定した account だけを対象にすることで、集計対象行数を呼び出し元の
- * 対象 account 数に比例させる。
+ * `accountIds` で対象 account を絞り込み、集計対象行数を account 数に比例させる。
  * 参照するのは今回の実行が始まる前に永続化済みの `AccountLabelLatest` の値のみであり、
  * 今回の実行中に確定した新しいラベルは反映しない。
  * @param prisma - 問い合わせに使う Prisma クライアント
