@@ -42,6 +42,7 @@ import { templatedReplyNetworkRule } from './rules/templated-reply-network'
 import { selfDuplicateReplyRule } from './rules/self-duplicate-reply'
 import { replyFarmingRule } from './rules/reply-farming'
 import { replyFloodingRule } from './rules/reply-flooding'
+import { crossTargetTemplatedReplyRule } from './rules/cross-target-templated-reply'
 import { replyHijackSwarmRule } from './rules/reply-hijack-swarm'
 import { scamLinkDomainRule } from './rules/scam-link-domain'
 
@@ -94,6 +95,7 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   selfDuplicateReplyRule,
   replyFarmingRule,
   replyFloodingRule,
+  crossTargetTemplatedReplyRule,
   replyHijackSwarmRule,
   scamLinkDomainRule,
 ]
