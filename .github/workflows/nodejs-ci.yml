@@ -115,3 +115,5 @@ jobs:
         run: pnpm --filter crawler run test
       - name: Run blocker tests
         run: pnpm --filter blocker run test
+      - name: Run viewer tests
+        run: pnpm --filter viewer run test

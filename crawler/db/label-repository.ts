@@ -411,3 +411,22 @@ export async function recordCrawlAccountLabelsAtomic(
     { maxWait: 15_000, timeout: 15_000 },
   )
 }
+
+/**
+ * 一度も評価されたことのない account への account_relabel enqueue を避けるための存在確認。
+ * @param prisma - Prisma クライアント
+ * @param accountIds - 存在確認する accountId の一覧
+ * @returns AccountLabelLatest に既存行がある accountId の集合
+ */
+export async function filterAccountIdsWithExistingLabels(
+  prisma: PrismaClient,
+  accountIds: string[],
+): Promise<Set<string>> {
+  if (accountIds.length === 0) return new Set()
+  const rows = await prisma.accountLabelLatest.findMany({
+    where: { accountId: { in: accountIds } },
+    select: { accountId: true },
+    distinct: ['accountId'],
+  })
+  return new Set(rows.map((row) => row.accountId))
+}

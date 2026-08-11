@@ -15,11 +15,13 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
     await prisma.accountLabel.deleteMany()
     await prisma.accountLabelLatest.deleteMany()
     await prisma.crawlAccountLabelRun.deleteMany()
+    await prisma.crawlAuthorCheckpoint.deleteMany()
     await prisma.crawlRun.deleteMany()
     await prisma.labelDefinition.deleteMany()
-    // 他の integration test ファイルが同じ DB に Block を残していると、
+    // 他の integration test ファイルが同じ DB に Block/Tweet を残していると、
     // account の外部キー制約により削除が失敗するため先に消しておく。
     await prisma.block.deleteMany()
+    await prisma.tweet.deleteMany()
     await prisma.account.deleteMany()
   })
 

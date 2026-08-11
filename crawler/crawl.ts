@@ -8,12 +8,20 @@ import {
   getCrawlStaleThresholdMultiplier,
   getCrawlWarningThreshold,
 } from './config/env'
+import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertComponentBuildIdentity } from './build-identity'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
-import { ensureLabelDefinitionsForRules } from './db/label-repository'
+import {
+  ensureLabelDefinitionsForRules,
+  filterAccountIdsWithExistingLabels,
+} from './db/label-repository'
 import { refreshLabelAggregate } from './db/label-aggregate-repository'
+import {
+  requestAccountRelabel,
+  requestAccountRelabelBulk,
+} from './db/analysis-work-item-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
@@ -608,103 +616,32 @@ async function runAuthorUnitPhase(
       }
 
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
-      // recentTweets は他者に帰属する会話スレッドの文脈ツイートもそのまま保持するが、
-      // ラベル評価用のバンドルには含めない。
-      // 混入すると authorId 向けの全ルールが誤った recentTweets を読むことになるため。
-      const authorOwnRecentTweets = recentTweets.filter((t) => t.accountId === authorId)
       const authorOtherReplies = otherRepliesByAuthor.get(authorId) ?? []
-      const bundleTweets = mergeTweetAdFlags([
-        ...authorTimelineTweets,
-        ...authorOwnRecentTweets,
-        ...authorOtherReplies,
-      ])
 
-      // 複数の異なるテンプレ返信ネットワークに属することがあるため、
-      // 合計や平均ではなく最大値を最も強いシグナルとして採用する。
-      let templatedReplyNetworkSize = 0
-      for (const t of bundleTweets) {
-        if (!t.isReply) continue
-        templatedReplyNetworkSize = Math.max(
-          templatedReplyNetworkSize,
-          duplicateReplyIndex.countOtherAccounts(t.fullText, profile.id),
-        )
-      }
-
-      const effectiveReplyHijackIndex = buildEffectiveReplyHijackIndex(authorId)
-      let replyHijackSwarmSize = 0
-      for (const t of bundleTweets) {
-        if (!t.isReply || t.inReplyToTweetId === null) continue
-        replyHijackSwarmSize = Math.max(
-          replyHijackSwarmSize,
-          effectiveReplyHijackIndex.swarmSizeFor(profile.id, t.inReplyToTweetId),
-        )
-      }
-
-      const bundle = {
-        account: {
-          id: profile.id,
-          screenName: profile.screenName,
-          displayName: profile.displayName,
-          bio: profile.bio,
-          followersCount: profile.followersCount,
-          followingCount: profile.followingCount,
-          tweetCount: profile.tweetCount,
-          accountCreatedAt: profile.accountCreatedAt,
-          isBlueVerified: profile.isBlueVerified,
-          verifiedType: profile.verifiedType,
-          professionalType: profile.professionalType,
-          parodyCommentaryFanLabel: profile.parodyCommentaryFanLabel,
-        },
-        recentTweets: bundleTweets.map((t) => ({
-          id: t.id,
-          fullText: t.fullText,
-          createdAt: t.createdAt,
-          retweetCount: t.retweetCount,
-          likeCount: t.likeCount,
-          isReply: t.isReply,
-          isRetweet: t.isRetweet,
-          isPromoted: t.isPromoted,
-          isPaidPromotion: t.isPaidPromotion,
-          expandedUrls: t.expandedUrls ?? [],
-          hasAiGeneratedMedia: t.hasAiGeneratedMedia,
-          aiGeneratedDetectionSource: t.aiGeneratedDetectionSource,
-          foreignVideoSourceCount: t.foreignVideoSourceCount,
-          inReplyToTweetId: t.inReplyToTweetId,
-          quotedTweetAuthorId: t.quotedTweetAuthorId,
-          quotedTweetHasVideo: t.quotedTweetHasVideo,
-        })),
-        templatedReplyNetworkSize,
-        replyHijackSwarmSize,
-        followGraphLabelSignals: followGraphLabelIndex.signalsFor(profile.id),
-      }
-
-      const ruleResults = [...registry.applyAll(bundle)].flatMap(({ rule, result }) => {
-        const labelDefinitionId = labelDefinitionIds.get(rule.key)
-        if (!labelDefinitionId) {
-          logger.warn(`No LabelDefinition id found for rule "${rule.key}", skipping persistence`)
-          return []
-        }
-        return [{ labelDefinitionId, result, method: rule.key, ruleVersion: rule.version }]
-      })
-
-      const { observationId } = await deps.persistAuthorResultAtomic({
-        crawlRunId,
-        username: account.username,
-        authorId,
-        profile,
-        recentTweets,
-        recentTweetsFallbackAuthors: fallbackAuthors,
-        followSample,
-        labels: ruleResults,
-        warnings: authorWarnings,
-        durationMs: Date.now() - authorStartedAt,
-        retryWaitMs: authorRetryWait.ms,
-        appVersion: APP_VERSION,
-      })
+      const { observationId, labelsAppliedCount: appliedThisAuthor } =
+        await deps.persistAuthorResultAtomic({
+          crawlRunId,
+          username: account.username,
+          authorId,
+          profile,
+          recentTweets,
+          additionalOwnTweets: [...authorTimelineTweets, ...authorOtherReplies],
+          recentTweetsFallbackAuthors: fallbackAuthors,
+          followSample,
+          registry,
+          labelDefinitionIds,
+          duplicateReplyIndex,
+          replyHijackIndex: buildEffectiveReplyHijackIndex(authorId),
+          followGraphLabelIndex,
+          warnings: authorWarnings,
+          durationMs: Date.now() - authorStartedAt,
+          retryWaitMs: authorRetryWait.ms,
+          appVersion: APP_VERSION,
+        })
       succeededAuthorIds.add(authorId)
       // 再試行時は ON CONFLICT DO NOTHING で何も claim できず null が返る。
       // 実際には何も永続化していないため、件数を二重に数えない。
-      if (observationId !== null) labelsAppliedCount += ruleResults.length
+      if (observationId !== null) labelsAppliedCount += appliedThisAuthor
       warnings.push(...authorWarnings)
     } catch (error) {
       if (isExpectedAccountLookupError(error)) {
@@ -1699,6 +1636,41 @@ function toCrawlOpenApiClient(
   }
 }
 
+/**
+ * profile 更新を永続化し、classification-relevant な変化があった既存ラベル済み account のみ再評価を要求する persistAccount 実装を作る。
+ * @param prisma - Prisma クライアント
+ * @returns CrawlDependencies['persistAccount'] に渡せる関数
+ */
+export function createPersistAccountFn(prisma: PrismaClient): CrawlDependencies['persistAccount'] {
+  return async (input) => {
+    const { account, changed } = await upsertAccount(prisma, input, { detectChange: true })
+    if (!changed) return
+    const relabelable = await filterAccountIdsWithExistingLabels(prisma, [account.id])
+    if (relabelable.has(account.id)) {
+      await requestAccountRelabel(prisma, account.id)
+    }
+  }
+}
+
+/**
+ * tweet 更新を永続化し、classification-relevant な変化があった既存ラベル済み account のみ再評価を要求する persistTweets 実装を作る。
+ * @param prisma - Prisma クライアント
+ * @returns CrawlDependencies['persistTweets'] に渡せる関数
+ */
+export function createPersistTweetsFn(prisma: PrismaClient): CrawlDependencies['persistTweets'] {
+  return async (inputs) => {
+    const results = await upsertTweets(prisma, inputs)
+    const changedAccountIds = [
+      ...new Set(
+        results.filter((result) => result.changed).map((result) => result.tweet.accountId),
+      ),
+    ]
+    if (changedAccountIds.length === 0) return
+    const relabelable = await filterAccountIdsWithExistingLabels(prisma, changedAccountIds)
+    await requestAccountRelabelBulk(prisma, [...relabelable])
+  }
+}
+
 async function main(): Promise<void> {
   const prisma = getPrismaClient()
   await upsertComponentBuildIdentity(prisma, 'crawler')
@@ -1721,12 +1693,8 @@ async function main(): Promise<void> {
     createTrendsScraper: (cookies) => createRealTrendsScraper(cookies),
     closeTrendsScraper: (context) =>
       closeRealTrendsScraper(context as Parameters<typeof closeRealTrendsScraper>[0]),
-    persistAccount: async (input) => {
-      await upsertAccount(prisma, input)
-    },
-    persistTweets: async (inputs) => {
-      await upsertTweets(prisma, inputs)
-    },
+    persistAccount: createPersistAccountFn(prisma),
+    persistTweets: createPersistTweetsFn(prisma),
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: (watermark) => loadReplyCorpus(prisma, watermark),
     loadFollowGraphLabelIndex: (labelDefinitionIds) =>

@@ -45,7 +45,7 @@ export const botRule: LabelRule = {
   key: 'bot',
   description:
     '投稿頻度が人間としてあり得ない速さであり、かつリプライ比率がほぼゼロで、投稿間隔が機械的なまでに規則的である',
-  version: '1.4.0',
+  version: '1.5.0',
   evaluate(bundle) {
     const { tweetCount, accountCreatedAt } = bundle.account
     const sampled = bundle.recentTweets
@@ -78,7 +78,11 @@ export const botRule: LabelRule = {
         : Infinity
     const hasRegularIntervals = cov < INTERVAL_COEFFICIENT_OF_VARIATION_THRESHOLD
 
-    const value = isHighVelocity && (hasNearZeroReplies || hasRegularIntervals)
+    // どちらか一方の副次シグナルだけで確定させると、
+    // 返信をしない代わりに不定期に投稿する公式ブランド・メディアアカウント
+    // (スケジュール投稿ツール運用でも間隔は人手の更新ペースに揺らぐ)を bot 誤判定してしまう。
+    // description が謳う「機械的に規則的な間隔」も併せて満たす場合のみ確定させる。
+    const value = isHighVelocity && hasNearZeroReplies && hasRegularIntervals
     const signals = [isHighVelocity, hasNearZeroReplies, hasRegularIntervals].filter(Boolean).length
     const confidence = signals === 0 ? 0 : signals / 3
 

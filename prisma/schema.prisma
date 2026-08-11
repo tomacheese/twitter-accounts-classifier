@@ -98,7 +98,7 @@ model Tweet {
   source                     String
   collectedAt                DateTime @default(now())
 
-  @@index([accountId])
+  @@index([accountId, createdAt])
   // reply corpus 用の collectedAt/id 降順索引は isReply = true への部分索引であり、
   // Prisma の schema DSL では WHERE 句を表現できないため、
   // migration 20260811090000_add_reply_corpus_partial_index の raw SQL で管理する。
@@ -368,6 +368,9 @@ model CrawlAuthorCheckpoint {
   @@index([crawlRunId, username])
 }
 
+// activeLabelKeys (text[]) への GIN index は既定の array ops で表現できるため、本来は Prisma の schema DSL でも宣言できる。
+// ただしこの index は CONCURRENTLY 付きで作成する必要があり、生成される migration がそれに対応しないため、実体は migration 20260810210740_add_account_summary_latest_active_label_keys_gin_idx の raw SQL で作成する。
+// ここでの @@index 宣言は、shadow database の diff がこの index を誤って DROP 対象と判断するのを防ぐためのものである。
 model AccountSummaryLatest {
   accountId                   String    @id
   normalizedScreenName        String
@@ -386,6 +389,7 @@ model AccountSummaryLatest {
   @@index([lastClassificationChangedAt(sort: Desc), accountId])
   @@index([highestFindingSeverity, activeFindingCount, accountId])
   @@index([normalizedScreenName])
+  @@index([activeLabelKeys], type: Gin, map: "AccountSummaryLatest_activeLabelKeys_gin_idx")
 }
 
 model AccountClassificationLatest {
@@ -521,6 +525,9 @@ model AnalysisWorkItem {
   attemptCount     Int           @default(0)
   maxAttempts      Int           @default(5)
   dependencyKey    String?
+  // account_relabel 専用: lease 中に新しい変更要求が来たことを示すマーカー。
+  // complete 時にこれが設定されていれば succeeded にせず queued へ戻す(他 kind では未使用)。
+  staleRequestedAt DateTime?
   lastErrorCode    String?
   lastErrorSummary String?
   createdAt        DateTime      @default(now())
@@ -548,6 +555,14 @@ model AnalysisRun {
   errorSummary  String?
 
   @@index([workItemId, startedAt(sort: Desc)])
+}
+
+// account_relabel producer の incremental scan 位置を永続化する singleton テーブル。
+// 1 行だけを持ち、id は常に固定値 "singleton" を使う。
+model RelabelScanCursor {
+  id                   String   @id @default("singleton")
+  lastScannedAccountId String?
+  updatedAt            DateTime @updatedAt
 }
 
 model OperationCycle {
