@@ -101,6 +101,7 @@ export interface LatestAccountStatus {
 export interface CrawlRunStartResult {
   id: string
   latestAccountStatuses: Map<string, LatestAccountStatus>
+  startedAt: Date
 }
 
 /**
@@ -352,7 +353,7 @@ export async function startOrResumeCrawlRun(
   const existingRun = await prisma.crawlRun.findFirst({
     where: { status: 'running' },
     orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
-    select: { id: true, lastHeartbeatAt: true },
+    select: { id: true, lastHeartbeatAt: true, startedAt: true },
   })
 
   if (existingRun) {
@@ -379,7 +380,9 @@ export async function startOrResumeCrawlRun(
           { status, classificationStatus },
         ]),
       )
-      return { id: existingRun.id, latestAccountStatuses }
+      // resume 時に新しく渡される startedAt (このプロセスの開始時刻) ではなく、
+      // 永続化済みの元の CrawlRun.startedAt を返す。
+      return { id: existingRun.id, latestAccountStatuses, startedAt: existingRun.startedAt }
     }
 
     logger.warn(
@@ -416,5 +419,5 @@ export async function startOrResumeCrawlRun(
     })
     return created
   })
-  return { id: run.id, latestAccountStatuses: new Map() }
+  return { id: run.id, latestAccountStatuses: new Map(), startedAt: run.startedAt }
 }

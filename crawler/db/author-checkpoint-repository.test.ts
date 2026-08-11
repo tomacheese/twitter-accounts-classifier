@@ -179,7 +179,7 @@ describe('persistAuthorResultAtomic', () => {
 
   it('replaces the labeling follow sample within the same transaction when followSample is provided', async () => {
     const accountUpsert = vi.fn().mockResolvedValue({})
-    const followUpsertedAccountUpsert = vi.fn().mockResolvedValue({})
+    const followUpsertQueryRaw = vi.fn().mockResolvedValue([{ id: 'followee1' }])
     const followSampleDeleteMany = vi.fn().mockResolvedValue({ count: 0 })
     const followSampleCreateMany = vi.fn().mockResolvedValue({ count: 1 })
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
@@ -198,7 +198,7 @@ describe('persistAuthorResultAtomic', () => {
     }
     const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
     const prisma = {
-      account: { upsert: followUpsertedAccountUpsert, findUnique: vi.fn().mockResolvedValue(null) },
+      $queryRaw: followUpsertQueryRaw,
       $transaction: transaction,
     } as unknown as PrismaClient
 
@@ -218,7 +218,7 @@ describe('persistAuthorResultAtomic', () => {
       appVersion: 'test',
     })
 
-    expect(followUpsertedAccountUpsert).toHaveBeenCalledTimes(1)
+    expect(followUpsertQueryRaw).toHaveBeenCalledTimes(1)
     expect(followSampleDeleteMany).toHaveBeenCalledWith({ where: { accountId: 'author1' } })
     expect(followSampleCreateMany).toHaveBeenCalledWith({
       data: [{ accountId: 'author1', followeeId: 'followee1' }],

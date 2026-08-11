@@ -88,13 +88,15 @@ interface RecordAccountLabelsBulkRow {
   labeledAt: Date | null
   historyInserted: boolean
   latestUpserted: boolean
+  semanticNoOp: boolean
 }
 
 /**
  * 1アカウント分の評価結果をまとめて記録する: ラベルごとに `$queryRaw` を逐次発行する代わりに、
  * 列単位の配列を `UNNEST` で展開し、
- * `AccountLabel` への INSERT と `AccountLabelLatest` への UPSERT を1ラウンドトリップにまとめる。
- * UPSERT ガードの意味論は `recordCrawlAccountLabel` と同じ。
+ * `AccountLabel` への INSERT と `AccountLabelLatest` への UPSERT を 1 ラウンドトリップにまとめる。
+ * `AccountLabelLatest` への UPSERT は値・confidence・reason・method・ruleVersion が不変なら行わない
+ * (`recordCrawlAccountLabel` は claim 成立時に無条件で UPSERT する点が異なる)。
  * @param prisma - Prisma クライアント
  * @param params - 記録対象のアカウントと評価結果一覧
  * @returns 作成された `AccountLabel` 履歴行。`labels` と同じ順序とは限らないため、
@@ -133,6 +135,7 @@ export async function recordAccountLabelsBulk(
          OR al."ruleVersion" IS DISTINCT FROM ir."ruleVersion"
          OR al."confidence" IS DISTINCT FROM ir."confidence"
          OR al."reason" IS DISTINCT FROM ir."reason"
+         OR al."method" IS DISTINCT FROM ir."method"
     ),
     inserted_history AS (
       INSERT INTO "AccountLabel"
@@ -147,6 +150,7 @@ export async function recordAccountLabelsBulk(
       SELECT ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion", shared_now."labeledAt", ${params.sourceKind}, ${params.sourceId ?? null}, ${params.sourceUsername ?? null}
       FROM input_rows ir
       CROSS JOIN shared_now
+      WHERE EXISTS (SELECT 1 FROM to_insert ti WHERE ti."id" = ir."id")
       ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
       SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
           "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "labeledAt" = EXCLUDED."labeledAt",
@@ -161,15 +165,18 @@ export async function recordAccountLabelsBulk(
       EXISTS (
         SELECT 1 FROM upserted_latest ul
         WHERE ul."accountId" = ir."accountId" AND ul."labelDefinitionId" = ir."labelDefinitionId"
-      ) AS "latestUpserted"
+      ) AS "latestUpserted",
+      NOT EXISTS (
+        SELECT 1 FROM to_insert ti WHERE ti."id" = ir."id"
+      ) AS "semanticNoOp"
     FROM input_rows ir
     LEFT JOIN inserted_history ih ON ih."id" = ir."id"
   `
 
   const history: AccountLabel[] = []
   for (const row of rows) {
-    const { historyInserted, latestUpserted, labeledAt, ...rest } = row
-    if (!latestUpserted) {
+    const { historyInserted, latestUpserted, semanticNoOp, labeledAt, ...rest } = row
+    if (!latestUpserted && !semanticNoOp) {
       logger.warn(
         `recordAccountLabelsBulk: AccountLabelLatest upsert guard skipped the write (accountId=${rest.accountId}, labelDefinitionId=${rest.labelDefinitionId})`,
       )
@@ -232,7 +239,7 @@ export async function recordCrawlAccountLabel(
       RETURNING "id"
     ),
     previous_latest AS (
-      SELECT "value", "ruleVersion", "confidence", "reason"
+      SELECT "value", "ruleVersion", "confidence", "reason", "method"
       FROM "AccountLabelLatest"
       WHERE "accountId" = ${params.accountId} AND "labelDefinitionId" = ${params.labelDefinitionId}
     ),
@@ -246,6 +253,7 @@ export async function recordCrawlAccountLabel(
           SELECT 1 FROM previous_latest
           WHERE "value" = ${params.result.value} AND "ruleVersion" = ${params.ruleVersion}
             AND "confidence" = ${params.result.confidence} AND "reason" = ${params.result.reason}
+            AND "method" = ${params.method}
         )
       RETURNING "id"
     ),

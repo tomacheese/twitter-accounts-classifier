@@ -11,6 +11,7 @@ export const topicFoodRule: LabelRule = {
   key: 'topic_food',
   description: 'プロフィールでグルメ/料理を中心的な関心事として挙げている',
   version: '1.2.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && FOOD_PATTERN.test(bio)

@@ -112,3 +112,32 @@ describe('buildFollowGraphLabelIndex', () => {
     expect(followeeQuerySql).toContain('"LabelingFollowSample"')
   })
 })
+
+describe('buildFollowGraphLabelIndex label filtering', () => {
+  it('filters both queries by labelDefinitionId when given a restricted map', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await buildFollowGraphLabelIndex(prisma, new Map([['topic_anime', 'ld-anime']]))
+
+    expect(queryRaw).toHaveBeenCalledTimes(2)
+    for (const call of queryRaw.mock.calls) {
+      const sql = (call[0] as unknown[]).join('')
+      expect(sql).toContain('"labelDefinitionId" IN')
+      const joinedIds = call.slice(1).find((v) => (v as { values?: unknown[] }).values) as {
+        values: unknown[]
+      }
+      expect(joinedIds.values).toEqual(['ld-anime'])
+    }
+  })
+
+  it('returns an empty index without querying when the label map is empty', async () => {
+    const queryRaw = vi.fn()
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const index = await buildFollowGraphLabelIndex(prisma, new Map())
+
+    expect(queryRaw).not.toHaveBeenCalled()
+    expect(index.signalsFor('any')).toEqual({})
+  })
+})

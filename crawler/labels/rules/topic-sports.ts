@@ -15,6 +15,7 @@ export const topicSportsRule: LabelRule = {
   key: 'topic_sports',
   description: 'プロフィールでスポーツを中心的な関心事として挙げている',
   version: '1.2.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && SPORTS_PATTERN.test(bio)

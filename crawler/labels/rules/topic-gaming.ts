@@ -9,6 +9,7 @@ export const topicGamingRule: LabelRule = {
   key: 'topic_gaming',
   description: 'プロフィールでゲームを中心的な関心事として挙げている',
   version: '1.1.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && GAMING_PATTERN.test(bio)

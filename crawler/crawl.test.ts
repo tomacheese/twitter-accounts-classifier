@@ -86,6 +86,29 @@ function responseError(status: number, headers: Headers = new Headers()): Error 
   return error
 }
 
+// rawTweet() の legacy.createdAt は固定日時 (2020-01-01) を返すため、
+// この corpus も同じ日時に揃えて WINDOW_HOURS の範囲内に収める。
+const SWARM_CREATED_AT = new Date('2020-01-01T00:00:00Z')
+
+/**
+ * reply-only candidate の any-match structural screening を通過させるための、
+ * 対象ツイートへの 4 member 分の返信コーパス。呼び出し側で候補自身の返信と合わせて
+ * MIN_DISTINCT_AUTHORS (5) を満たすことを想定する。
+ */
+function replyHijackSwarmCorpus(targetTweetId: string) {
+  return [
+    'このサンプル動画は視聴する価値が十分にありましたよ',
+    'サンプル動画は視聴する価値が十分にあると思いました',
+    'このサンプル動画は視聴する価値が十分にある内容ですね',
+    'このサンプル動画は視聴する価値が十分にあった感じですね',
+  ].map((fullText, index) => ({
+    accountId: `swarm-member${index}`,
+    fullText,
+    inReplyToTweetId: targetTweetId,
+    createdAt: SWARM_CREATED_AT,
+  }))
+}
+
 function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies {
   const author = rawUser('author1')
   const tweet = rawTweet('tweet1', author)
@@ -292,7 +315,10 @@ describe('runCrawlCycle', () => {
     const author = rawUser('author1')
     const replyAuthor = rawUser('reply-author', 'replier')
     const tweet = rawTweet('tweet1', author)
-    const reply = rawTweet('reply1', replyAuthor, 'tweet1')
+    // structural screening の最小文字数 (MIN_NORMALIZED_LENGTH) を満たす長さの本文にする。
+    const reply = rawTweet('reply1', replyAuthor, 'tweet1', {
+      fullText: 'this reply text is intentionally long enough for screening',
+    })
 
     const getUserByRestId = vi
       .fn()
@@ -301,6 +327,9 @@ describe('runCrawlCycle', () => {
       )
 
     const deps = makeDeps({
+      // reply-only candidate は any-match structural screening を通過する必要があるため、
+      // reply-author 自身の reply と合わせて 5 member の swarm を構成する corpus を用意する。
+      loadReplyCorpus: vi.fn().mockResolvedValue(replyHijackSwarmCorpus('tweet1')),
       createOpenApiClient: vi.fn().mockResolvedValue({
         client: {
           getTweetApi: () => ({
@@ -341,22 +370,100 @@ describe('runCrawlCycle', () => {
     )
   })
 
+  it('skips fetchAccountProfile when a valid embedded profile exists for the author', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+    const getUserByRestId = vi.fn().mockResolvedValue({ data: author })
+
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId,
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(getUserByRestId).not.toHaveBeenCalled()
+  })
+
+  it('falls back to fetchAccountProfile when the embedded profile has an empty screenName/displayName', async () => {
+    const author = rawUser('author1', '')
+    const tweet = rawTweet('tweet1', author)
+    const getUserByRestId = vi.fn().mockResolvedValue({ data: rawUser('author1') })
+
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId,
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(getUserByRestId).toHaveBeenCalledWith({ userId: 'author1' })
+  })
+
   it("evaluates and persists labels for a third-party account that only hijacks replies on someone else's high-engagement tweet", async () => {
     const author = rawUser('author1')
-    const replyAuthor = rawUser('reply-author', 'replier')
+    // embedded profile を screenName 空で無効化し、専用プロフィール取得が実際に呼ばれることを検証できるようにする。
+    const replyAuthorEmbedded = rawUser('reply-author', '')
+    const replyAuthorFetched = rawUser('reply-author', 'replier')
     const tweet = rawTweet('tweet1', author)
-    const reply = rawTweet('reply1', replyAuthor, 'tweet1')
+    // structural screening の最小文字数 (MIN_NORMALIZED_LENGTH) を満たす長さの本文にする。
+    const reply = rawTweet('reply1', replyAuthorEmbedded, 'tweet1', {
+      fullText: 'this reply text is intentionally long enough for screening',
+    })
 
     const getUserByRestId = vi
       .fn()
       .mockImplementation(({ userId }: { userId: string }) =>
-        Promise.resolve({ data: userId === 'reply-author' ? replyAuthor : author }),
+        Promise.resolve({ data: userId === 'reply-author' ? replyAuthorFetched : author }),
       )
 
     const deps = makeDeps({
       ensureLabelDefinitions: vi
         .fn()
         .mockResolvedValue(new Map([['ad_reply_hijack', 'ld-hijack']])),
+      // reply-only candidate は any-match structural screening を通過する必要があるため、
+      // reply-author 自身の reply と合わせて 5 member の swarm を構成する corpus を用意する。
+      loadReplyCorpus: vi.fn().mockResolvedValue(replyHijackSwarmCorpus('tweet1')),
       createOpenApiClient: vi.fn().mockResolvedValue({
         client: {
           getTweetApi: () => ({
@@ -411,6 +518,9 @@ describe('runCrawlCycle', () => {
       ensureLabelDefinitions: vi
         .fn()
         .mockResolvedValue(new Map([['ad_reply_hijack', 'ld-hijack']])),
+      // reply-only candidate は any-match structural screening を通過する必要があるため、
+      // reply-author 自身の reply と合わせて 5 member の swarm を構成する corpus を用意する。
+      loadReplyCorpus: vi.fn().mockResolvedValue(replyHijackSwarmCorpus('tweet1')),
       createOpenApiClient: vi.fn().mockResolvedValue({
         client: {
           getTweetApi: () => ({
@@ -580,17 +690,221 @@ describe('runCrawlCycle', () => {
     expect(callForAuthor.replyHijackIndex.swarmSizeFor('author1', 'swarm-target')).toBe(5)
   })
 
+  it('keeps a reply-only candidate when ANY of its multiple reply targets is screening-eligible', async () => {
+    const author = rawUser('author1')
+    const candidate = rawUser('candidate1', 'replier')
+    const tweetA = rawTweet('target-A', author)
+    const tweetB = rawTweet('target-B', author)
+    const replyToA = rawTweet('reply-to-a', candidate, 'target-A', {
+      fullText: 'this reply text does not belong to any swarm at all today',
+    })
+    const replyToB = rawTweet('reply-to-b', candidate, 'target-B', {
+      fullText: 'このサンプル動画は視聴する価値が十分にあると実感しました',
+    })
+
+    const getUserByRestId = vi
+      .fn()
+      .mockImplementation(({ userId }: { userId: string }) =>
+        Promise.resolve({ data: userId === 'candidate1' ? candidate : author }),
+      )
+    const getTweetDetail = vi
+      .fn()
+      .mockImplementation(({ focalTweetId }: { focalTweetId: string }) =>
+        Promise.resolve({ data: { data: focalTweetId === 'target-A' ? [replyToA] : [replyToB] } }),
+      )
+
+    // rawTweet() の legacy.createdAt は固定日時 (2020-01-01) を返すため、
+    // candidate1 自身の reply とコーパス側の時刻を揃えて WINDOW_HOURS の範囲内に収める。
+    const swarmCreatedAt = new Date('2020-01-01T00:00:00Z')
+    const deps = makeDeps({
+      loadReplyCorpus: vi.fn().mockResolvedValue([
+        {
+          accountId: 'other1',
+          fullText: 'このサンプル動画は視聴する価値が十分にありましたよ',
+          inReplyToTweetId: 'target-B',
+          createdAt: swarmCreatedAt,
+        },
+        {
+          accountId: 'other2',
+          fullText: 'サンプル動画は視聴する価値が十分にあると思いました',
+          inReplyToTweetId: 'target-B',
+          createdAt: swarmCreatedAt,
+        },
+        {
+          accountId: 'other3',
+          fullText: 'このサンプル動画は視聴する価値が十分にある内容ですね',
+          inReplyToTweetId: 'target-B',
+          createdAt: swarmCreatedAt,
+        },
+        {
+          accountId: 'other4',
+          fullText: 'このサンプル動画は視聴する価値が十分にあった感じですね',
+          inReplyToTweetId: 'target-B',
+          createdAt: swarmCreatedAt,
+        },
+      ]),
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweetA, tweetB] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail,
+          }),
+          getUserApi: () => ({
+            getUserByRestId,
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    // candidate1 の embedded profile (reply レスポンス内の author) は screenName/displayName が
+    // 非空のため専用 fetch は省略されるが、screening を通過していることは author 単位の永続化で確認できる。
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({ authorId: 'candidate1' }),
+    )
+  })
+
+  it('excludes a reply-only candidate when none of its reply targets is screening-eligible', async () => {
+    const author = rawUser('author1')
+    const candidate = rawUser('candidate2', 'replier')
+    const tweetA = rawTweet('target-A', author)
+    const replyToA = rawTweet('reply-to-a', candidate, 'target-A', {
+      fullText: 'this reply text does not belong to any swarm at all today',
+    })
+
+    const getUserByRestId = vi
+      .fn()
+      .mockImplementation(({ userId }: { userId: string }) =>
+        Promise.resolve({ data: userId === 'candidate2' ? candidate : author }),
+      )
+
+    const deps = makeDeps({
+      loadReplyCorpus: vi.fn().mockResolvedValue([]),
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweetA] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [replyToA] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId,
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.persistAuthorResultAtomic).not.toHaveBeenCalledWith(
+      expect.objectContaining({ authorId: 'candidate2' }),
+    )
+  })
+
+  it('evaluates reply_hijack_swarm using the same effective index that screening used to admit the candidate', async () => {
+    const author = rawUser('author1')
+    const candidate = rawUser('candidate3', 'replier')
+    const tweetC = rawTweet('target-C', author)
+    const replyToC = rawTweet('reply-to-c', candidate, 'target-C', {
+      fullText: 'このサンプル動画は視聴する価値が十分にあると実感しました',
+    })
+
+    const getUserByRestId = vi
+      .fn()
+      .mockImplementation(({ userId }: { userId: string }) =>
+        Promise.resolve({ data: userId === 'candidate3' ? candidate : author }),
+      )
+
+    // rawTweet() の legacy.createdAt は固定日時 (2020-01-01) を返すため、
+    // candidate3 自身の reply とコーパス側の時刻を揃えて WINDOW_HOURS の範囲内に収める。
+    const swarmCreatedAt = new Date('2020-01-01T00:00:00Z')
+    const deps = makeDeps({
+      loadReplyCorpus: vi.fn().mockResolvedValue([
+        {
+          accountId: 'other1',
+          fullText: 'このサンプル動画は視聴する価値が十分にありましたよ',
+          inReplyToTweetId: 'target-C',
+          createdAt: swarmCreatedAt,
+        },
+        {
+          accountId: 'other2',
+          fullText: 'サンプル動画は視聴する価値が十分にあると思いました',
+          inReplyToTweetId: 'target-C',
+          createdAt: swarmCreatedAt,
+        },
+        {
+          accountId: 'other3',
+          fullText: 'このサンプル動画は視聴する価値が十分にある内容ですね',
+          inReplyToTweetId: 'target-C',
+          createdAt: swarmCreatedAt,
+        },
+        {
+          accountId: 'other4',
+          fullText: 'このサンプル動画は視聴する価値が十分にあった感じですね',
+          inReplyToTweetId: 'target-C',
+          createdAt: swarmCreatedAt,
+        },
+      ]),
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweetC] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [replyToC] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId,
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    // screening を通過できたのは candidate3 自身の新規 reply を merge した effective index が
+    // 5 member の swarm を構成したためであり、評価時にも同じ effective index が使われていれば
+    // persistAuthorResultAtomic に渡す replyHijackIndex もその 5 を反映するはずである。
+    const callForCandidate = (
+      deps.persistAuthorResultAtomic as ReturnType<typeof vi.fn>
+    ).mock.calls.find(
+      (call) => (call[0] as { authorId: string }).authorId === 'candidate3',
+    )?.[0] as {
+      replyHijackIndex: { swarmSizeFor: (accountId: string, tweetId: string) => number }
+    }
+    expect(callForCandidate.replyHijackIndex.swarmSizeFor('candidate3', 'target-C')).toBe(5)
+  })
+
   it('labelDefinitionIds を loadFollowGraphLabelIndex に渡し、その結果を persistAuthorResultAtomic に渡す', async () => {
     const followGraphLabelIndex = { signalsFor: vi.fn().mockReturnValue({}) }
     const deps = makeDeps({
+      // フィルタ後も残ることを検証するため、実際に usesFollowGraphSignal: true を持つルールの key を使う。
+      ensureLabelDefinitions: vi.fn().mockResolvedValue(new Map([['topic_anime', 'ld1']])),
       loadFollowGraphLabelIndex: vi.fn().mockResolvedValue(followGraphLabelIndex),
     })
 
     await runCrawlCycle(deps)
 
-    expect(deps.loadFollowGraphLabelIndex).toHaveBeenCalledWith(
-      new Map([['verified_blue_individual', 'ld1']]),
-    )
+    expect(deps.loadFollowGraphLabelIndex).toHaveBeenCalledWith(new Map([['topic_anime', 'ld1']]))
     expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({ followGraphLabelIndex }),
     )
@@ -617,7 +931,8 @@ describe('runCrawlCycle', () => {
 
   it('skips an author whose profile fetch throws but still persists the other authors and all tweets', async () => {
     const authorOk = rawUser('author-ok')
-    const authorBad = rawUser('author-bad')
+    // embedded profile を screenName 空で無効化し、専用プロフィール取得の失敗経路を検証できるようにする。
+    const authorBad = rawUser('author-bad', '')
     const tweetOk = rawTweet('tweet-ok', authorOk)
     const tweetBad = rawTweet('tweet-bad', authorBad)
 
@@ -1102,9 +1417,10 @@ describe('runCrawlCycle', () => {
             getTweetApi: () => ({
               getHomeTimeline: vi.fn().mockResolvedValue({
                 data: {
+                  // embedded profile を screenName 空で無効化し、専用プロフィール取得の失敗経路を検証できるようにする。
                   data: [
-                    rawTweet('tweet1', rawUser('author1')),
-                    rawTweet('tweet2', rawUser('author2')),
+                    rawTweet('tweet1', rawUser('author1', '')),
+                    rawTweet('tweet2', rawUser('author2', '')),
                   ],
                 },
               }),
@@ -1777,7 +2093,8 @@ describe('runCrawlCycle', () => {
 
   it('records a structured author_processing_failed warning when an author fails for a non-routine reason', async () => {
     const authorOk = rawUser('author-ok')
-    const authorBad = rawUser('author-bad')
+    // embedded profile を screenName 空で無効化し、専用プロフィール取得の失敗経路を検証できるようにする。
+    const authorBad = rawUser('author-bad', '')
     const tweetOk = rawTweet('tweet-ok', authorOk)
     const tweetBad = rawTweet('tweet-bad', authorBad)
 
@@ -1830,7 +2147,8 @@ describe('runCrawlCycle', () => {
   it.each([401, 403, 429, 500])(
     'records safe HTTP diagnostics and a partial run for author ResponseError %i',
     async (status) => {
-      const author = rawUser('author1')
+      // embedded profile を screenName 空で無効化し、専用プロフィール取得の失敗経路を検証できるようにする。
+      const author = rawUser('author1', '')
       const tweet = rawTweet('tweet1', author)
       const error = responseError(
         status,

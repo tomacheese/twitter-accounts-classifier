@@ -12,6 +12,7 @@ export const topicIllustrationRule: LabelRule = {
   key: 'topic_illustration',
   description: 'プロフィールでイラスト制作/投稿を中心的な関心事として挙げている',
   version: '1.1.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && ILLUSTRATION_PATTERN.test(bio)

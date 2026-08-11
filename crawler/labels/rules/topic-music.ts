@@ -11,6 +11,7 @@ export const topicMusicRule: LabelRule = {
   key: 'topic_music',
   description: 'プロフィールで音楽を中心的な関心事として挙げている',
   version: '1.1.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && MUSIC_PATTERN.test(bio)

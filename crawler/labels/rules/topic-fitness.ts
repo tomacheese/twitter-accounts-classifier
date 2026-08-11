@@ -10,6 +10,7 @@ export const topicFitnessRule: LabelRule = {
   key: 'topic_fitness',
   description: 'プロフィールで筋トレ・ジム通いなどのフィットネスを中心的な関心事として挙げている',
   version: '1.0.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && FITNESS_PATTERN.test(bio)

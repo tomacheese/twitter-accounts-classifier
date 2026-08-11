@@ -7,12 +7,16 @@ const REPLY_CORPUS_LIMIT = 20_000
 
 /**
  * @param prisma - Prisma クライアント
- * @returns 収集日時が新しい順の返信コーパス
+ * @param watermark - この時刻以前に収集された reply のみを対象にする
+ * @returns 収集日時が新しい順の返信コーパス。`collectedAt` の tie は `id` 降順で総順序化する
  */
-export async function loadReplyCorpus(prisma: PrismaClient): Promise<ReplyHijackCorpusEntry[]> {
+export async function loadReplyCorpus(
+  prisma: PrismaClient,
+  watermark: Date,
+): Promise<ReplyHijackCorpusEntry[]> {
   return prisma.tweet.findMany({
-    where: { isReply: true },
-    orderBy: { collectedAt: 'desc' },
+    where: { isReply: true, collectedAt: { lte: watermark } },
+    orderBy: [{ collectedAt: 'desc' }, { id: 'desc' }],
     take: REPLY_CORPUS_LIMIT,
     select: { accountId: true, fullText: true, inReplyToTweetId: true, createdAt: true },
   })

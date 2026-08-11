@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
 import type { FollowListResult } from '../twitter/follows'
+import * as accountRepository from './account-repository'
 import { syncFollowers, syncFollowing } from './follow-repository'
 
 function makeResult(ids: string[], reachedEnd: boolean): FollowListResult {
@@ -27,13 +28,14 @@ function makeResult(ids: string[], reachedEnd: boolean): FollowListResult {
   }
 }
 
-function makePrisma() {
-  const accountUpsert = vi.fn().mockResolvedValue({})
+function makePrisma(upsertedIds: Set<string>) {
+  const upsertAccountsBulkSpy = vi
+    .spyOn(accountRepository, 'upsertAccountsBulk')
+    .mockResolvedValue(upsertedIds)
   const followCreateMany = vi.fn().mockResolvedValue({ count: 0 })
   const followUpdateMany = vi.fn().mockResolvedValue({ count: 0 })
   const followDeleteMany = vi.fn().mockResolvedValue({ count: 0 })
   const tx = {
-    account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null) },
     follow: {
       createMany: followCreateMany,
       updateMany: followUpdateMany,
@@ -44,12 +46,11 @@ function makePrisma() {
     .fn()
     .mockImplementation((fn: (transactionClient: typeof tx) => Promise<void>) => fn(tx))
   const prisma = {
-    account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null) },
     $transaction,
   } as unknown as PrismaClient
   return {
     prisma,
-    accountUpsert,
+    upsertAccountsBulkSpy,
     followCreateMany,
     followUpdateMany,
     followDeleteMany,
@@ -58,16 +59,16 @@ function makePrisma() {
 }
 
 describe('syncFollowing', () => {
-  it('upserts an Account row for every discovered author', async () => {
-    const { prisma, accountUpsert } = makePrisma()
+  it('bulk upserts every discovered author in a single call', async () => {
+    const { prisma, upsertAccountsBulkSpy } = makePrisma(new Set(['a', 'b']))
 
     await syncFollowing(prisma, 'me', makeResult(['a', 'b'], true))
 
-    expect(accountUpsert).toHaveBeenCalledTimes(2)
+    expect(upsertAccountsBulkSpy).toHaveBeenCalledTimes(1)
   })
 
   it('creates a Follow edge for every id with followerId fixed to the given account', async () => {
-    const { prisma, followCreateMany } = makePrisma()
+    const { prisma, followCreateMany } = makePrisma(new Set(['a', 'b']))
 
     await syncFollowing(prisma, 'me', makeResult(['a', 'b'], true))
 
@@ -83,7 +84,7 @@ describe('syncFollowing', () => {
   })
 
   it('bumps lastSeenAt for every id with followerId fixed to the given account', async () => {
-    const { prisma, followUpdateMany } = makePrisma()
+    const { prisma, followUpdateMany } = makePrisma(new Set(['a', 'b']))
 
     await syncFollowing(prisma, 'me', makeResult(['a', 'b'], true))
 
@@ -95,7 +96,7 @@ describe('syncFollowing', () => {
   })
 
   it('deletes stale edges for the same follower when reachedEnd is true', async () => {
-    const { prisma, followDeleteMany } = makePrisma()
+    const { prisma, followDeleteMany } = makePrisma(new Set(['a']))
 
     await syncFollowing(prisma, 'me', makeResult(['a'], true))
 
@@ -105,7 +106,7 @@ describe('syncFollowing', () => {
   })
 
   it('does not delete anything when reachedEnd is false', async () => {
-    const { prisma, followDeleteMany } = makePrisma()
+    const { prisma, followDeleteMany } = makePrisma(new Set(['a']))
 
     await syncFollowing(prisma, 'me', makeResult(['a'], false))
 
@@ -113,7 +114,7 @@ describe('syncFollowing', () => {
   })
 
   it('does not delete anything when reachedEnd is true but no ids were observed', async () => {
-    const { prisma, followDeleteMany, followCreateMany } = makePrisma()
+    const { prisma, followDeleteMany, followCreateMany } = makePrisma(new Set())
 
     await syncFollowing(prisma, 'me', makeResult([], true))
 
@@ -121,8 +122,25 @@ describe('syncFollowing', () => {
     expect(followCreateMany).not.toHaveBeenCalled()
   })
 
+  it('excludes Account upsert failures from edge createMany/updateMany', async () => {
+    const { prisma, followCreateMany } = makePrisma(new Set(['ok1']))
+
+    await syncFollowing(prisma, 'me', makeResult(['ok1', 'bad1'], true))
+
+    const createCall = followCreateMany.mock.calls[0][0] as { data: { followeeId: string }[] }
+    expect(createCall.data.map((d) => d.followeeId)).toEqual(['ok1'])
+  })
+
+  it('skips deletion when any observed id failed Account upsert', async () => {
+    const { prisma, followDeleteMany } = makePrisma(new Set(['ok1']))
+
+    await syncFollowing(prisma, 'me', makeResult(['ok1', 'ok1', 'bad1'], true))
+
+    expect(followDeleteMany).not.toHaveBeenCalled()
+  })
+
   it('extends the transaction timeout beyond the Prisma default', async () => {
-    const { prisma, $transaction } = makePrisma()
+    const { prisma, $transaction } = makePrisma(new Set(['a']))
 
     await syncFollowing(prisma, 'me', makeResult(['a'], true))
 
@@ -135,7 +153,7 @@ describe('syncFollowing', () => {
 
 describe('syncFollowers', () => {
   it('creates a Follow edge for every id with followeeId fixed to the given account', async () => {
-    const { prisma, followCreateMany } = makePrisma()
+    const { prisma, followCreateMany } = makePrisma(new Set(['a']))
 
     await syncFollowers(prisma, 'me', makeResult(['a'], true))
 
@@ -148,7 +166,7 @@ describe('syncFollowers', () => {
   })
 
   it('bumps lastSeenAt for every id with followeeId fixed to the given account', async () => {
-    const { prisma, followUpdateMany } = makePrisma()
+    const { prisma, followUpdateMany } = makePrisma(new Set(['a']))
 
     await syncFollowers(prisma, 'me', makeResult(['a'], true))
 
@@ -160,7 +178,7 @@ describe('syncFollowers', () => {
   })
 
   it('deletes stale edges for the same followee when reachedEnd is true', async () => {
-    const { prisma, followDeleteMany } = makePrisma()
+    const { prisma, followDeleteMany } = makePrisma(new Set(['a']))
 
     await syncFollowers(prisma, 'me', makeResult(['a'], true))
 
@@ -170,7 +188,7 @@ describe('syncFollowers', () => {
   })
 
   it('does not delete anything when reachedEnd is true but no ids were observed', async () => {
-    const { prisma, followDeleteMany } = makePrisma()
+    const { prisma, followDeleteMany } = makePrisma(new Set())
 
     await syncFollowers(prisma, 'me', makeResult([], true))
 
@@ -178,7 +196,7 @@ describe('syncFollowers', () => {
   })
 
   it('extends the transaction timeout beyond the Prisma default', async () => {
-    const { prisma, $transaction } = makePrisma()
+    const { prisma, $transaction } = makePrisma(new Set(['a']))
 
     await syncFollowers(prisma, 'me', makeResult(['a'], true))
 

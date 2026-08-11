@@ -10,6 +10,7 @@ export const topicPetsRule: LabelRule = {
   key: 'topic_pets',
   description: 'プロフィールで猫・犬などペットの飼育・愛好を中心的な関心事として挙げている',
   version: '1.0.0',
+  usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && PETS_PATTERN.test(bio)

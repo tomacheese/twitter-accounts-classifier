@@ -1,19 +1,9 @@
-import { Logger } from '@book000/node-utils'
 import type { PrismaClient } from '../generated/prisma'
-import { upsertAccount } from './account-repository'
+import { upsertAccountsBulk } from './account-repository'
 import type { FollowListResult } from '../twitter/follows'
 
-const logger = Logger.configure('labeling-follow-sample-repository')
-
-// `./follow-repository` の `upsertFollowAuthors` と同様、
-// 1件の不正なプロフィールで残りのフォロー先の反映まで止めてはならないため、
-// アカウントごとに個別に upsert する。
-// upsert に失敗したアカウントの id は戻り値から除外し、
-// 呼び出し元が LabelingFollowSample の外部キー違反を避けられるようにする。
-// 1 件ごとの失敗を握り潰す前提のため、Postgres が transaction 全体を abort 状態にしてしまう
-// transaction client を渡してはならない。
 /**
- * @param prisma - Prisma クライアント。transaction 内でこの関数を使ってはならない
+ * @param prisma - Prisma クライアント。transaction 内でこの関数を使ってはならない (upsertAccountsBulk 参照)
  * @param result - 取得したフォロー先一覧（1ページ・上限件数分）
  * @returns Account の upsert に成功した followee ID の集合
  */
@@ -21,19 +11,7 @@ export async function upsertFollowSampleAuthors(
   prisma: PrismaClient,
   result: FollowListResult,
 ): Promise<Set<string>> {
-  const upsertedIds = new Set<string>()
-  for (const author of result.authors) {
-    try {
-      await upsertAccount(prisma, author)
-      upsertedIds.add(author.id)
-    } catch (error) {
-      logger.error(
-        `Failed to upsert account ${author.id} while sampling labeling follow edges`,
-        error as Error,
-      )
-    }
-  }
-  return upsertedIds
+  return upsertAccountsBulk(prisma, result.authors)
 }
 
 /**

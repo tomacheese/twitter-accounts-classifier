@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
 import type { BlockListResult } from '../twitter/blocks'
+import * as accountRepository from './account-repository'
 import { syncBlocks } from './block-repository'
 
 function makeResult(ids: string[], reachedEnd: boolean): BlockListResult {
@@ -28,6 +29,7 @@ function makeResult(ids: string[], reachedEnd: boolean): BlockListResult {
 }
 
 function makePrisma(
+  upsertedIds: Set<string>,
   existingBlocks: {
     id: string
     blockedId: string
@@ -37,7 +39,9 @@ function makePrisma(
   }[] = [],
   rediscoveredBlocks: { id: string; status: string }[] = [],
 ) {
-  const accountUpsert = vi.fn().mockResolvedValue({})
+  const upsertAccountsBulkSpy = vi
+    .spyOn(accountRepository, 'upsertAccountsBulk')
+    .mockResolvedValue(upsertedIds)
   const blockCreateMany = vi.fn().mockResolvedValue({ count: 0 })
   const blockUpdateMany = vi.fn().mockResolvedValue({ count: 0 })
   // 未取得の行を探す問い合わせと、再観測された行を探す問い合わせを where で区別する。
@@ -49,7 +53,6 @@ function makePrisma(
   const executeRaw = vi.fn().mockResolvedValue(0)
   const blockStateChangeCreateMany = vi.fn().mockResolvedValue({ count: 0 })
   const tx = {
-    account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null) },
     block: {
       createMany: blockCreateMany,
       updateMany: blockUpdateMany,
@@ -62,12 +65,11 @@ function makePrisma(
     .fn()
     .mockImplementation((fn: (transactionClient: typeof tx) => Promise<void>) => fn(tx))
   const prisma = {
-    account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null) },
     $transaction,
   } as unknown as PrismaClient
   return {
     prisma,
-    accountUpsert,
+    upsertAccountsBulkSpy,
     blockCreateMany,
     blockUpdateMany,
     blockFindMany,
@@ -88,16 +90,16 @@ function staleLookupCalls(blockFindMany: { mock: { calls: unknown[][] } }): unkn
 }
 
 describe('syncBlocks', () => {
-  it('upserts an Account row for every discovered author', async () => {
-    const { prisma, accountUpsert } = makePrisma()
+  it('bulk upserts every discovered author in a single call', async () => {
+    const { prisma, upsertAccountsBulkSpy } = makePrisma(new Set(['a', 'b']))
 
     await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a', 'b'], true))
 
-    expect(accountUpsert).toHaveBeenCalledTimes(2)
+    expect(upsertAccountsBulkSpy).toHaveBeenCalledTimes(1)
   })
 
   it('creates a Block edge for every id with blockerId fixed to the given account', async () => {
-    const { prisma, blockCreateMany } = makePrisma()
+    const { prisma, blockCreateMany } = makePrisma(new Set(['a', 'b']))
 
     await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a', 'b'], true))
 
@@ -113,7 +115,7 @@ describe('syncBlocks', () => {
   })
 
   it('records crawl provenance on every newly created Block edge', async () => {
-    const { prisma, blockCreateMany } = makePrisma()
+    const { prisma, blockCreateMany } = makePrisma(new Set(['a', 'b']))
 
     await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a', 'b'], true))
 
@@ -128,7 +130,7 @@ describe('syncBlocks', () => {
   })
 
   it('bumps lastSeenAt for every id with blockerId fixed to the given account', async () => {
-    const { prisma, blockUpdateMany } = makePrisma()
+    const { prisma, blockUpdateMany } = makePrisma(new Set(['a', 'b']))
 
     await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a', 'b'], true))
 
@@ -147,7 +149,9 @@ describe('syncBlocks', () => {
       consecutiveMissingCount: 0,
       missingSinceAt: null,
     }
-    const { prisma, executeRaw, blockStateChangeCreateMany } = makePrisma([existing])
+    const { prisma, executeRaw, blockStateChangeCreateMany } = makePrisma(new Set(['a']), [
+      existing,
+    ])
 
     await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a'], true))
 
@@ -184,7 +188,7 @@ describe('syncBlocks', () => {
       consecutiveMissingCount: 0,
       missingSinceAt: null,
     }
-    const { prisma, blockFindMany } = makePrisma([existing])
+    const { prisma, blockFindMany } = makePrisma(new Set(['a']), [existing])
 
     await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a'], false))
 
@@ -199,7 +203,7 @@ describe('syncBlocks', () => {
       consecutiveMissingCount: 0,
       missingSinceAt: null,
     }
-    const { prisma, blockFindMany, blockCreateMany } = makePrisma([existing])
+    const { prisma, blockFindMany, blockCreateMany } = makePrisma(new Set(), [existing])
 
     await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult([], true))
 
@@ -209,6 +213,7 @@ describe('syncBlocks', () => {
 
   it('restores a rediscovered edge to active and records the transition', async () => {
     const { prisma, blockUpdateMany, blockStateChangeCreateMany } = makePrisma(
+      new Set(['a']),
       [],
       [{ id: 'block-1', status: 'resolved' }],
     )
@@ -235,8 +240,19 @@ describe('syncBlocks', () => {
     })
   })
 
+  it('excludes failed Account upserts from edge createMany and skips reconciliation on partial failure', async () => {
+    const { prisma, blockCreateMany, blockFindMany } = makePrisma(new Set(['ok1']))
+
+    await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['ok1', 'bad1'], true))
+
+    const createCall = blockCreateMany.mock.calls[0][0] as { data: { blockedId: string }[] }
+    expect(createCall.data.map((d) => d.blockedId)).toEqual(['ok1'])
+    // isCompleteSync が false (every による集合包含チェックで失敗検出) のため reconciliation の findMany は呼ばれない。
+    expect(staleLookupCalls(blockFindMany)).toHaveLength(0)
+  })
+
   it('extends the transaction timeout beyond the Prisma default', async () => {
-    const { prisma, $transaction } = makePrisma()
+    const { prisma, $transaction } = makePrisma(new Set(['a']))
 
     await syncBlocks(prisma, 'me', 'crawl-run-1', makeResult(['a'], true))
 

@@ -138,7 +138,7 @@ export interface CrawlDependencies {
   persistAccount: (input: AccountProfileInput) => Promise<void>
   persistTweets: (inputs: TweetInput[]) => Promise<void>
   ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
-  loadReplyCorpus: () => Promise<ReplyHijackCorpusEntry[]>
+  loadReplyCorpus: (watermark: Date) => Promise<ReplyHijackCorpusEntry[]>
   loadFollowGraphLabelIndex: (
     labelDefinitionIds: Map<string, string>,
   ) => Promise<FollowGraphLabelIndex>
@@ -468,7 +468,7 @@ async function runAuthorUnitPhase(
   registry: LabelRuleRegistry,
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
-  replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
+  replyCorpus: ReplyHijackCorpusEntry[],
   followGraphLabelIndex: FollowGraphLabelIndex,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
@@ -495,8 +495,50 @@ async function runAuthorUnitPhase(
   }
   const otherRepliesByAuthor = new Map(Object.entries(repliesResult.otherRepliesByAuthor))
   const allTweets = [...recommended.tweets, ...following.tweets, ...trending.tweets]
+  const timelineAuthorIds = new Set(allTweets.map((t) => t.accountId))
+
+  // accountId ごとの effective index は screening と reply_hijack_swarm 評価の両方から
+  // 参照されるため、corpus 全体の再構築コストを避けてここで 1 回だけキャッシュする。
+  const effectiveReplyHijackIndexCache = new Map<string, ReturnType<typeof buildReplyHijackIndex>>()
+
+  function buildEffectiveReplyHijackIndex(
+    accountId: string,
+  ): ReturnType<typeof buildReplyHijackIndex> {
+    const cached = effectiveReplyHijackIndexCache.get(accountId)
+    if (cached) return cached
+    const ownReplies = otherRepliesByAuthor.get(accountId) ?? []
+    const ownReplyEntries: ReplyHijackCorpusEntry[] = ownReplies.map((t) => ({
+      accountId,
+      fullText: t.fullText,
+      inReplyToTweetId: t.inReplyToTweetId,
+      createdAt: t.createdAt,
+    }))
+    const index = buildReplyHijackIndex([...replyCorpus, ...ownReplyEntries])
+    effectiveReplyHijackIndexCache.set(accountId, index)
+    return index
+  }
+
+  // reply-only candidate は timeline 投稿者と比べて母数が非常に多いため、
+  // 実際に reply_hijack_swarm の構造条件を満たしうる候補だけに絞り込む。
+  // 対象アカウントの reply 先が複数ある場合、いずれか 1 件でも条件を満たせば候補として残す
+  // (どの reply が最終的にラベル判定に使われるかは deep classification 側の責務のため)。
+  function isScreeningEligible(accountId: string): boolean {
+    const candidateReplies = otherRepliesByAuthor.get(accountId) ?? []
+    const effectiveIndex = buildEffectiveReplyHijackIndex(accountId)
+    return candidateReplies.some(
+      (reply) =>
+        reply.inReplyToTweetId !== null &&
+        effectiveIndex.isEligibleForScreening(accountId, reply.inReplyToTweetId),
+    )
+  }
+
   const uniqueAuthorIds = [
-    ...new Set([...allTweets.map((t) => t.accountId), ...repliesResult.replyHijackCandidateIds]),
+    ...new Set([
+      ...allTweets.map((t) => t.accountId),
+      ...repliesResult.replyHijackCandidateIds.filter(
+        (id) => timelineAuthorIds.has(id) || isScreeningEligible(id),
+      ),
+    ]),
   ]
 
   const existingCheckpoints = await deps.loadCrawlAuthorCheckpoints(crawlRunId, account.username)
@@ -526,10 +568,20 @@ async function runAuthorUnitPhase(
     const authorWarnings: CrawlWarning[] = []
 
     try {
-      const profile = await withTwitterRetry(
-        () => fetchAccountProfile(userApi, authorId),
-        retryOptions(deps, trackAuthorRetryWait),
-      )
+      // embedded profile は追加の API 呼び出しなしで得られるため、
+      // screenName/displayName が非空なら専用 fetch を省く。
+      const embeddedProfile = extraAuthors.get(authorId)
+      const hasValidEmbeddedProfile =
+        embeddedProfile !== undefined &&
+        embeddedProfile.screenName !== '' &&
+        embeddedProfile.displayName !== ''
+
+      const profile = hasValidEmbeddedProfile
+        ? embeddedProfile
+        : await withTwitterRetry(
+            () => fetchAccountProfile(userApi, authorId),
+            retryOptions(deps, trackAuthorRetryWait),
+          )
 
       const { tweets: recentTweets, authors: fallbackAuthors } = await guardTimelineFetch(() =>
         withTwitterRetry(
@@ -579,7 +631,7 @@ async function runAuthorUnitPhase(
           registry,
           labelDefinitionIds,
           duplicateReplyIndex,
-          replyHijackIndex,
+          replyHijackIndex: buildEffectiveReplyHijackIndex(authorId),
           followGraphLabelIndex,
           warnings: authorWarnings,
           durationMs: Date.now() - authorStartedAt,
@@ -1170,7 +1222,7 @@ async function runAccountCycle(
   registry: LabelRuleRegistry,
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
-  replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
+  replyCorpus: ReplyHijackCorpusEntry[],
   followGraphLabelIndex: FollowGraphLabelIndex,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
@@ -1273,7 +1325,7 @@ async function runAccountCycle(
                 registry,
                 labelDefinitionIds,
                 duplicateReplyIndex,
-                replyHijackIndex,
+                replyCorpus,
                 followGraphLabelIndex,
                 account,
                 crawlRunId,
@@ -1453,18 +1505,28 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   const registry = new LabelRuleRegistry()
   for (const rule of ALL_LABEL_RULES) registry.register(rule)
   const labelDefinitionIds = await deps.ensureLabelDefinitions(registry)
-  const { id: crawlRunId, latestAccountStatuses } = await deps.startOrResumeCrawlRun(new Date())
+  const {
+    id: crawlRunId,
+    latestAccountStatuses,
+    startedAt: crawlRunStartedAt,
+  } = await deps.startOrResumeCrawlRun(new Date())
 
   // CrawlRun 開始後の前処理も try に含める。前処理は本番規模では長時間かかり得るため、
   // 開始前に実行すると生存中でも古い heartbeat の CrawlRun が残って見える。また前処理が
   // 失敗した場合に running 行を確定できない。
   try {
-    const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(labelDefinitionIds)
+    const followGraphLabelDefinitionIds = new Map(
+      [...labelDefinitionIds.entries()].filter(([key]) =>
+        registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
+      ),
+    )
+    const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(
+      followGraphLabelDefinitionIds,
+    )
     // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
     // アカウントごとではなくサイクルごとに 1 回だけ構築する。
-    const replyCorpus = await deps.loadReplyCorpus()
+    const replyCorpus = await deps.loadReplyCorpus(crawlRunStartedAt)
     const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
-    const replyHijackIndex = buildReplyHijackIndex(replyCorpus)
 
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
@@ -1506,7 +1568,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
           registry,
           labelDefinitionIds,
           duplicateReplyIndex,
-          replyHijackIndex,
+          replyCorpus,
           followGraphLabelIndex,
           account,
           crawlRunId,
@@ -1634,7 +1696,7 @@ async function main(): Promise<void> {
     persistAccount: createPersistAccountFn(prisma),
     persistTweets: createPersistTweetsFn(prisma),
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
-    loadReplyCorpus: () => loadReplyCorpus(prisma),
+    loadReplyCorpus: (watermark) => loadReplyCorpus(prisma, watermark),
     loadFollowGraphLabelIndex: (labelDefinitionIds) =>
       buildFollowGraphLabelIndex(prisma, labelDefinitionIds),
     persistAuthorResultAtomic: (params) => persistAuthorResultAtomicRecord(prisma, params),

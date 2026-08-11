@@ -220,7 +220,8 @@ async function runRelabelWorkerCycle(): Promise<void> {
       `Relabel scan: ${scanResult.scanned} accounts scanned, ${scanResult.requested} requested`,
     )
 
-    const replyCorpus = await loadReplyCorpus(prisma)
+    // CrawlRun に紐づかないため、既存の全件対象の挙動を維持するよう現在時刻を watermark として渡す。
+    const replyCorpus = await loadReplyCorpus(prisma, new Date())
     const followGraphLabelIndex = await buildFollowGraphLabelIndex(prisma, labelDefinitionIds)
     const drainResult = await drainAccountRelabelQueue(prisma, {
       registry,

@@ -19,7 +19,8 @@ describe('startOrResumeCrawlRun', () => {
 
   it('creates a CrawlRun row when no interrupted run exists', async () => {
     const findFirst = vi.fn().mockResolvedValue(null)
-    const create = vi.fn().mockResolvedValue({ id: 'run1' })
+    const startedAt = new Date('2026-07-28T00:00:00Z')
+    const create = vi.fn().mockResolvedValue({ id: 'run1', startedAt })
     const upsert = vi.fn().mockResolvedValue({})
     const tx = { crawlRun: { create }, analysisWorkItem: { upsert } }
     const transaction = vi.fn((fn: (transactionClient: unknown) => Promise<unknown>) => fn(tx))
@@ -27,15 +28,14 @@ describe('startOrResumeCrawlRun', () => {
       crawlRun: { findFirst, create },
       $transaction: transaction,
     } as unknown as PrismaClient
-    const startedAt = new Date('2026-07-28T00:00:00Z')
 
     const result = await startOrResumeCrawlRun(prisma, startedAt, staleThresholdMs)
 
-    expect(result).toEqual({ id: 'run1', latestAccountStatuses: new Map() })
+    expect(result).toEqual({ id: 'run1', latestAccountStatuses: new Map(), startedAt })
     expect(findFirst).toHaveBeenCalledWith({
       where: { status: 'running' },
       orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
-      select: { id: true, lastHeartbeatAt: true },
+      select: { id: true, lastHeartbeatAt: true, startedAt: true },
     })
     expect(create).toHaveBeenCalledWith({
       data: {
@@ -64,9 +64,11 @@ describe('startOrResumeCrawlRun', () => {
 
   it('reuses the newest interrupted run and refreshes its heartbeat', async () => {
     const startedAt = new Date('2026-07-28T00:00:00Z')
+    const originalStartedAt = new Date('2026-07-27T22:00:00Z')
     const findFirst = vi.fn().mockResolvedValue({
       id: 'run2',
       lastHeartbeatAt: new Date('2026-07-27T23:00:00Z'),
+      startedAt: originalStartedAt,
     })
     let sqlQuery: TemplateStringsArray | undefined
     let requestedRunId: string | undefined
@@ -95,6 +97,7 @@ describe('startOrResumeCrawlRun', () => {
         ['alice', { status: 'failed', classificationStatus: 'failed' }],
         ['bob', { status: 'partial', classificationStatus: 'partial' }],
       ]),
+      startedAt: originalStartedAt,
     })
     if (!sqlQuery) throw new Error('Expected the latest account status query')
     expect(sqlQuery.join('')).toContain(
@@ -122,7 +125,7 @@ describe('startOrResumeCrawlRun', () => {
       id: 'abandoned-run',
       lastHeartbeatAt,
     })
-    const create = vi.fn().mockResolvedValue({ id: 'new-run' })
+    const create = vi.fn().mockResolvedValue({ id: 'new-run', startedAt })
     const update = vi.fn().mockResolvedValue({})
     const upsert = vi.fn().mockResolvedValue({})
     const deleteCheckpoints = vi.fn().mockReturnValue({})
@@ -145,7 +148,7 @@ describe('startOrResumeCrawlRun', () => {
 
     const result = await startOrResumeCrawlRun(prisma, startedAt, staleThresholdMs)
 
-    expect(result).toEqual({ id: 'new-run', latestAccountStatuses: new Map() })
+    expect(result).toEqual({ id: 'new-run', latestAccountStatuses: new Map(), startedAt })
     expect(update).toHaveBeenCalledWith({
       where: { id: 'abandoned-run' },
       data: {
@@ -208,6 +211,46 @@ describe('startOrResumeCrawlRun', () => {
         staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
       },
     })
+  })
+
+  it('returns the persisted startedAt for a newly created run', async () => {
+    const startedAt = new Date('2026-01-01T00:00:00Z')
+    const findFirst = vi.fn().mockResolvedValue(null)
+    const create = vi.fn().mockResolvedValue({ id: 'run1', startedAt })
+    const upsert = vi.fn().mockResolvedValue({})
+    const tx = { crawlRun: { create }, analysisWorkItem: { upsert } }
+    const transaction = vi.fn((fn: (transactionClient: unknown) => Promise<unknown>) => fn(tx))
+    const prisma = {
+      crawlRun: { findFirst, create },
+      $transaction: transaction,
+    } as unknown as PrismaClient
+
+    const result = await startOrResumeCrawlRun(prisma, startedAt, staleThresholdMs)
+
+    expect(result.startedAt).toEqual(startedAt)
+  })
+
+  it('returns the ORIGINAL persisted startedAt (not the resume-time argument) when resuming', async () => {
+    const originalStartedAt = new Date('2026-01-01T00:00:00Z')
+    const resumeTimeArgument = new Date('2026-01-01T01:00:00Z')
+    const findFirst = vi.fn().mockResolvedValue({
+      id: 'run2',
+      lastHeartbeatAt: new Date('2026-01-01T00:30:00Z'),
+      startedAt: originalStartedAt,
+    })
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const update = vi.fn().mockResolvedValue({})
+    const upsert = vi.fn().mockResolvedValue({})
+    const prisma = {
+      crawlRun: { findFirst, create: vi.fn(), update },
+      analysisWorkItem: { upsert },
+      $queryRaw: queryRaw,
+    } as unknown as PrismaClient
+
+    const result = await startOrResumeCrawlRun(prisma, resumeTimeArgument, staleThresholdMs)
+
+    expect(result.startedAt).toEqual(originalStartedAt)
+    expect(result.startedAt).not.toEqual(resumeTimeArgument)
   })
 })
 
