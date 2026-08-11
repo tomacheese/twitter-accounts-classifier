@@ -8,7 +8,7 @@ import type { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import type { buildReplyHijackIndex } from './labels/reply-hijack-index'
 import type { FollowGraphLabelIndex } from './labels/follow-graph-label-index'
 import {
-  claimNextWorkItem,
+  claimWorkItemBatch,
   completeAccountRelabelWorkItem,
   requestAccountRelabelBulk,
 } from './db/analysis-work-item-repository'
@@ -48,17 +48,12 @@ export async function claimAccountRelabelBatch(
   prisma: PrismaClient,
   options: ClaimAccountRelabelBatchOptions,
 ): Promise<AnalysisWorkItem[]> {
-  const items: AnalysisWorkItem[] = []
-  for (let i = 0; i < options.batchSize; i++) {
-    const item = await claimNextWorkItem(prisma, {
-      kinds: [ACCOUNT_RELABEL_KIND],
-      leaseOwner: options.leaseOwner,
-      leaseDurationMs: LEASE_DURATION_MS,
-    })
-    if (!item) break
-    items.push(item)
-  }
-  return items
+  return claimWorkItemBatch(prisma, {
+    kinds: [ACCOUNT_RELABEL_KIND],
+    batchSize: options.batchSize,
+    leaseOwner: options.leaseOwner,
+    leaseDurationMs: LEASE_DURATION_MS,
+  })
 }
 
 export interface EvaluateAccountRelabelItemsOptions {

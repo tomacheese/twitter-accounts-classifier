@@ -14,30 +14,39 @@ import {
 } from './relabel-worker'
 
 describe('claimAccountRelabelBatch', () => {
-  it('batchSize を上限に work item を claim する', async () => {
-    vi.spyOn(workItemRepository, 'claimNextWorkItem')
-      .mockResolvedValueOnce({ id: 'wi-1', triggerId: 'alice' } as never)
-      .mockResolvedValueOnce({ id: 'wi-2', triggerId: 'bob' } as never)
-      .mockResolvedValueOnce(undefined)
+  it('batchSize 件を 1 回の DB roundtrip で claim する', async () => {
+    const first = { id: 'wi-1', triggerId: 'alice' } as never
+    const second = { id: 'wi-2', triggerId: 'bob' } as never
+    const queryRaw = vi.fn().mockResolvedValue([first, second])
+    const transaction = vi.fn()
+    const prisma = { $queryRaw: queryRaw, $transaction: transaction } as unknown as PrismaClient
 
-    const items = await claimAccountRelabelBatch({} as PrismaClient, {
+    const items = await claimAccountRelabelBatch(prisma, {
       batchSize: 10,
       leaseOwner: 'test-worker',
     })
 
-    expect(items).toHaveLength(2)
     expect(items.map((item) => item.triggerId)).toEqual(['alice', 'bob'])
+    expect(queryRaw).toHaveBeenCalledTimes(1)
+    expect(transaction).not.toHaveBeenCalled()
   })
 
-  it('claim できる件数が batchSize 未満でも、claim できなくなった時点で打ち切る', async () => {
-    vi.spyOn(workItemRepository, 'claimNextWorkItem').mockResolvedValueOnce(undefined)
+  it('claim 対象がない場合は空配列を返す', async () => {
+    const claimSpy = vi.spyOn(workItemRepository, 'claimWorkItemBatch').mockResolvedValue([])
+    const prisma = {} as PrismaClient
 
-    const items = await claimAccountRelabelBatch({} as PrismaClient, {
+    const items = await claimAccountRelabelBatch(prisma, {
       batchSize: 5,
       leaseOwner: 'test-worker',
     })
 
-    expect(items).toHaveLength(0)
+    expect(items).toEqual([])
+    expect(claimSpy).toHaveBeenCalledWith(prisma, {
+      kinds: ['account_relabel'],
+      batchSize: 5,
+      leaseOwner: 'test-worker',
+      leaseDurationMs: 5 * 60 * 1000,
+    })
   })
 })
 
@@ -231,7 +240,7 @@ describe('runRelabelWorkerCycleOnce', () => {
 
   it('claim 件数が 0 件の cycle では buildFollowGraphLabelIndex・loadReplyCorpus を呼ばない', async () => {
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
-    vi.spyOn(workItemRepository, 'claimNextWorkItem').mockResolvedValue(undefined)
+    vi.spyOn(workItemRepository, 'claimWorkItemBatch').mockResolvedValue([])
     const followGraphSpy = vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
     const replyCorpusSpy = vi.spyOn(replyCorpusModule, 'loadReplyCorpus')
     const prisma = {
@@ -257,9 +266,9 @@ describe('runRelabelWorkerCycleOnce', () => {
         ['ad_pr_hashtag', 'ld-no-follow'],
       ]),
     )
-    vi.spyOn(workItemRepository, 'claimNextWorkItem')
-      .mockResolvedValueOnce({ id: 'wi-1', triggerId: 'alice' } as never)
-      .mockResolvedValueOnce(undefined)
+    vi.spyOn(workItemRepository, 'claimWorkItemBatch').mockResolvedValue([
+      { id: 'wi-1', triggerId: 'alice' } as never,
+    ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItem').mockResolvedValue('succeeded')
     const followGraphSpy = vi
@@ -287,9 +296,9 @@ describe('runRelabelWorkerCycleOnce', () => {
 
   it('index 構築が失敗した場合、claim 済みの item に lastErrorSummary を書き残して例外を再送出する', async () => {
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
-    vi.spyOn(workItemRepository, 'claimNextWorkItem')
-      .mockResolvedValueOnce({ id: 'wi-1', triggerId: 'alice' } as never)
-      .mockResolvedValueOnce(undefined)
+    vi.spyOn(workItemRepository, 'claimWorkItemBatch').mockResolvedValue([
+      { id: 'wi-1', triggerId: 'alice' } as never,
+    ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockRejectedValue(new Error('db timeout'))
     const updateSpy = vi.fn().mockResolvedValue({})
     const prisma = {
