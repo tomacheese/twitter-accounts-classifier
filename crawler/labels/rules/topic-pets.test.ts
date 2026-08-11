@@ -60,6 +60,22 @@ describe('topicPetsRule', () => {
     ).toBe(false)
   })
 
+  it('is false for a bio mentioning にゃんこ大戦争 as a hobby game', () => {
+    expect(
+      topicPetsRule.evaluate(
+        makeBundle({ bio: 'にゃんこ大戦争にハマってます。日課で攻略配信も見てます' }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('is false for a bio using にゃんこ only in the same game character/community context', () => {
+    expect(
+      topicPetsRule.evaluate(
+        makeBundle({ bio: 'にゃんこ好きなキャラで初心者攻略まとめを作ってます' }),
+      ).value,
+    ).toBe(false)
+  })
+
   it('is false for an unrelated bio', () => {
     expect(
       topicPetsRule.evaluate(makeBundle({ bio: '毎日ラーメンの写真を載せています' })).value,
