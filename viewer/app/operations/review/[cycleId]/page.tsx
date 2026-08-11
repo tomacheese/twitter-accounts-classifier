@@ -40,6 +40,45 @@ export default async function WeeklyReviewCycleDetailPage({
   return (
     <div className="flex flex-col gap-6">
       <OperationCycleDetail detail={detail} />
+      {detail.quality ? (
+        <section aria-labelledby="weekly-review-quality-heading">
+          <h2 id="weekly-review-quality-heading" className="text-lg font-semibold">
+            Review quality
+          </h2>
+          <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <dt className="text-gray-500 dark:text-gray-400">Strategy</dt>
+              <dd>{detail.quality.strategyVersion}</dd>
+            </div>
+            <div>
+              <dt className="text-gray-500 dark:text-gray-400">Planned / reviewed</dt>
+              <dd>
+                {detail.quality.plannedSampleCount.toLocaleString()} /{' '}
+                {detail.quality.reviewedSampleCount.toLocaleString()}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-gray-500 dark:text-gray-400">Random / targeted</dt>
+              <dd>
+                {detail.quality.randomAuditCount.toLocaleString()} /{' '}
+                {detail.quality.targetedAuditCount.toLocaleString()}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-gray-500 dark:text-gray-400">Uncertain / skipped</dt>
+              <dd>
+                {detail.quality.uncertainCount.toLocaleString()} /{' '}
+                {detail.quality.skippedCount.toLocaleString()}
+              </dd>
+            </div>
+          </dl>
+          {detail.quality.incompletePhases.length > 0 ? (
+            <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
+              Incomplete phases: {detail.quality.incompletePhases.join(', ')}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
       <section aria-labelledby="weekly-review-findings-heading">
         <h2 id="weekly-review-findings-heading" className="text-lg font-semibold">
           Findings

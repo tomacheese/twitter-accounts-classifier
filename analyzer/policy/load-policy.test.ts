@@ -12,6 +12,19 @@ describe('loadPolicy', () => {
   it('detection-policy.json を検証して読み込める', () => {
     const policy = loadPolicy(path.join(dirname, 'detection-policy.json'))
     expect(policy.rules.length).toBeGreaterThan(0)
+    const weeklyTypes = policy.rules
+      .filter((rule) => rule.enabled && rule.detectorType === 'weekly_review')
+      .map((rule) => rule.type)
+    expect(weeklyTypes).toEqual(
+      expect.arrayContaining([
+        'possible_false_positive',
+        'possible_false_negative',
+        'rule_behavior_mismatch',
+        'review_incomplete',
+        'coverage_gap',
+        'external_threat_gap',
+      ]),
+    )
   })
 
   it('schema 違反があれば例外を投げる', () => {

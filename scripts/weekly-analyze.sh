@@ -114,6 +114,51 @@ echo "[weekly-analyze] checking for still-running previous WeeklyAnalysisRun rec
 PREVIOUS_RUNS_JSON="$("$TSX_BIN" "$RUN_CLI" list-running)"
 PREVIOUS_RUN_IDS="$(printf '%s' "$PREVIOUS_RUNS_JSON" | "$JQ_BIN" -r ".[] | select(.id != \"$RUN_ID\") | .id")"
 
+retro_complete_previous_run() {
+  PREVIOUS_ID="$1"
+  PREVIOUS_NUMBER="$2"
+  PREVIOUS_URL="${3:-}"
+  PREVIOUS_JSON="$("$TSX_BIN" "$RUN_CLI" get --id "$PREVIOUS_ID")"
+  PREVIOUS_HAS_PLAN="$(printf '%s' "$PREVIOUS_JSON" | "$JQ_BIN" -r '.hasReviewPlan // false')"
+
+  if [ "$PREVIOUS_HAS_PLAN" = "true" ]; then
+    PREVIOUS_RESULT_FILE="$(pwd)/logs/weekly-analysis-runs/$PREVIOUS_ID/review-result.json"
+    if [ ! -f "$PREVIOUS_RESULT_FILE" ]; then
+      echo "[weekly-analyze] previous planned run $PREVIOUS_ID has no durable review-result.json; refusing retroactive success" >&2
+      "$TSX_BIN" "$RUN_CLI" fail \
+        --id "$PREVIOUS_ID" \
+        --message "review plan は存在しますが構造化 review result が保存されていないため、成功として復旧できません。" \
+        >/dev/null 2>&1 || true
+      printf '%s\n' '{"ok":false,"incomplete":true}'
+      return 0
+    fi
+    if [ -n "$PREVIOUS_URL" ]; then
+      "$TSX_BIN" "$RUN_CLI" complete \
+        --id "$PREVIOUS_ID" \
+        --pull-request-number "$PREVIOUS_NUMBER" \
+        --pull-request-url "$PREVIOUS_URL" \
+        --structured-output-file "$PREVIOUS_RESULT_FILE"
+    else
+      "$TSX_BIN" "$RUN_CLI" complete \
+        --id "$PREVIOUS_ID" \
+        --pull-request-number "$PREVIOUS_NUMBER" \
+        --structured-output-file "$PREVIOUS_RESULT_FILE"
+    fi
+    return 0
+  fi
+
+  if [ -n "$PREVIOUS_URL" ]; then
+    "$TSX_BIN" "$RUN_CLI" complete \
+      --id "$PREVIOUS_ID" \
+      --pull-request-number "$PREVIOUS_NUMBER" \
+      --pull-request-url "$PREVIOUS_URL"
+  else
+    "$TSX_BIN" "$RUN_CLI" complete \
+      --id "$PREVIOUS_ID" \
+      --pull-request-number "$PREVIOUS_NUMBER"
+  fi
+}
+
 for PREVIOUS_RUN_ID in $PREVIOUS_RUN_IDS; do
   PREVIOUS_RUN_JSON="$("$TSX_BIN" "$RUN_CLI" get --id "$PREVIOUS_RUN_ID")"
   PREVIOUS_PR_NUMBER="$(printf '%s' "$PREVIOUS_RUN_JSON" | "$JQ_BIN" -r '.pullRequestNumber // empty')"
@@ -142,8 +187,7 @@ for PREVIOUS_RUN_ID in $PREVIOUS_RUN_IDS; do
   case "$PREVIOUS_PR_STATUS" in
     merged)
       echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER is merged; recording success retroactively"
-      COMPLETE_JSON="$("$TSX_BIN" "$RUN_CLI" complete \
-        --id "$PREVIOUS_RUN_ID" --pull-request-number "$PREVIOUS_PR_NUMBER" --pull-request-url "$PREVIOUS_PR_URL")"
+      COMPLETE_JSON="$(retro_complete_previous_run "$PREVIOUS_RUN_ID" "$PREVIOUS_PR_NUMBER" "$PREVIOUS_PR_URL")"
       if [ "$(printf '%s' "$COMPLETE_JSON" | "$JQ_BIN" -r '.ok')" != "true" ]; then
         echo "[weekly-analyze] complete call for previous run $PREVIOUS_RUN_ID did not apply (already terminal?)" >&2
       fi
@@ -156,8 +200,7 @@ for PREVIOUS_RUN_ID in $PREVIOUS_RUN_IDS; do
         RECHECK_STATUS="$(printf '%s' "$RECHECK_JSON" | "$JQ_BIN" -r '.status // empty')"
         if [ "$RECHECK_STATUS" = "merged" ]; then
           echo "[weekly-analyze] previous run $PREVIOUS_RUN_ID's PR #$PREVIOUS_PR_NUMBER merged while waiting"
-          COMPLETE_JSON="$("$TSX_BIN" "$RUN_CLI" complete \
-            --id "$PREVIOUS_RUN_ID" --pull-request-number "$PREVIOUS_PR_NUMBER")"
+          COMPLETE_JSON="$(retro_complete_previous_run "$PREVIOUS_RUN_ID" "$PREVIOUS_PR_NUMBER" "$PREVIOUS_PR_URL")"
           if [ "$(printf '%s' "$COMPLETE_JSON" | "$JQ_BIN" -r '.ok')" != "true" ]; then
             echo "[weekly-analyze] complete call for previous run $PREVIOUS_RUN_ID did not apply (already terminal?)" >&2
           fi
@@ -226,11 +269,26 @@ weekly_analyze_prepare_dependencies "$PNPM_BIN" "$WORKTREE_DIR"
 
 mkdir -p "$DIAGNOSTICS_DIR"
 PANE_LOG="$DIAGNOSTICS_DIR/pane-output.log"
+REVIEW_PLAN_FILE="$DIAGNOSTICS_DIR/review-plan.json"
+REVIEW_RESULT_FILE="$DIAGNOSTICS_DIR/review-result.json"
+REVIEW_PLAN_CLI="$WORKTREE_DIR/crawler/scripts/weekly-review-plan.ts"
+
+echo "[weekly-analyze] generating deterministic weekly review plan"
+"$TSX_BIN" "$REVIEW_PLAN_CLI" build \
+  --id "$RUN_ID" \
+  --output "$REVIEW_PLAN_FILE" \
+  --budget "${WEEKLY_REVIEW_SAMPLE_BUDGET:-240}" \
+  --candidate-pool-size "${WEEKLY_REVIEW_CANDIDATE_POOL_SIZE:-80}"
+export WEEKLY_REVIEW_PLAN_FILE="$REVIEW_PLAN_FILE"
+export WEEKLY_REVIEW_RESULT_FILE="$REVIEW_RESULT_FILE"
 
 echo "[weekly-analyze] starting weekly crawl review at $(date -Iseconds) in tmux session $SESSION_NAME"
 "$TMUX_BIN" new-session -d -s "$SESSION_NAME" -c "$WORKTREE_DIR" \
-  -e "PATH=$PATH" -e DATABASE_URL -e "WEEKLY_ANALYSIS_RUN_ID=$RUN_ID" -e "PGAPPNAME=$PGAPPNAME" \
-  "$CLAUDE_BIN" --permission-mode auto "Use the weekly-crawl-review skill to review this week's labeling output and make any needed fixes."
+  -e "PATH=$PATH" -e DATABASE_URL -e "WEEKLY_ANALYSIS_RUN_ID=$RUN_ID" \
+  -e "WEEKLY_REVIEW_PLAN_FILE=$REVIEW_PLAN_FILE" \
+  -e "WEEKLY_REVIEW_RESULT_FILE=$REVIEW_RESULT_FILE" -e "PGAPPNAME=$PGAPPNAME" \
+  "$CLAUDE_BIN" --agent weekly-review-coordinator --permission-mode auto \
+  "Run the weekly review from the precomputed review plan. Use the weekly-crawl-review skill and make any needed fixes."
 "$TMUX_BIN" pipe-pane -t "$SESSION_NAME" -o "cat >> \"$PANE_LOG\""
 echo "[weekly-analyze] launched tmux session $SESSION_NAME at $(date -Iseconds)"
 

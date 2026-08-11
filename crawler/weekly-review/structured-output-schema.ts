@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { severitySchema } from '../policy/schema'
+const severitySchema = z.enum(['low', 'medium', 'high', 'critical'])
 
 export const weeklyReviewSampleKindSchema = z.enum([
   'random_positive',

@@ -129,14 +129,58 @@ export interface BlockOperationCycleDetailView extends OperationCycleDetailView 
   accountRuns: BlockAccountRunView[]
 }
 
+export interface WeeklyReviewQualityView {
+  strategyVersion: string
+  plannedSampleCount: number
+  reviewedSampleCount: number
+  randomAuditCount: number
+  targetedAuditCount: number
+  uncertainCount: number
+  skippedCount: number
+  incompletePhases: string[]
+}
+
 /** Weekly Review Cycle 専用の詳細表示。 */
 export interface WeeklyReviewOperationCycleDetailView extends OperationCycleDetailView {
   /** Claude Code が生成した人間向け日本語サマリ。未生成なら null。 */
   findings: string | null
+  quality: WeeklyReviewQualityView | null
 }
 
 interface OperationCycleDetailRecord extends OperationCycleDetailView {
   sourceId: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseWeeklyReviewQuality(structuredOutput: unknown): WeeklyReviewQualityView | null {
+  if (!isRecord(structuredOutput) || !isRecord(structuredOutput.review)) return null
+  const review = structuredOutput.review
+  const numberFields = [
+    'plannedSampleCount',
+    'reviewedSampleCount',
+    'randomAuditCount',
+    'targetedAuditCount',
+    'uncertainCount',
+    'skippedCount',
+  ] as const
+  if (typeof review.strategyVersion !== 'string') return null
+  if (numberFields.some((field) => typeof review[field] !== 'number')) return null
+  if (!Array.isArray(review.incompletePhases)) return null
+  if (!review.incompletePhases.every((phase) => typeof phase === 'string')) return null
+
+  return {
+    strategyVersion: review.strategyVersion,
+    plannedSampleCount: review.plannedSampleCount as number,
+    reviewedSampleCount: review.reviewedSampleCount as number,
+    randomAuditCount: review.randomAuditCount as number,
+    targetedAuditCount: review.targetedAuditCount as number,
+    uncertainCount: review.uncertainCount as number,
+    skippedCount: review.skippedCount as number,
+    incompletePhases: review.incompletePhases,
+  }
 }
 
 /**
@@ -203,10 +247,14 @@ export async function getWeeklyReviewCycleDetail(
 
   const run = await prisma.weeklyAnalysisRun.findUnique({
     where: { id: detail.sourceId },
-    select: { findings: true },
+    select: { findings: true, structuredOutput: true },
   })
 
-  return { ...detail, findings: run?.findings ?? null }
+  return {
+    ...detail,
+    findings: run?.findings ?? null,
+    quality: parseWeeklyReviewQuality(run?.structuredOutput),
+  }
 }
 
 /**

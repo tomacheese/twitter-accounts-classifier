@@ -23,6 +23,7 @@ import { buildBlockRelationSummary } from './read-models/build-block-relation-su
 import { ingestWeeklyReviewFindings } from './weekly-review/ingest'
 import { runRetentionSweep } from './retention/sweep'
 import { structuredOutputSchema } from './weekly-review/structured-output-schema'
+import { validateStructuredOutputAgainstReviewPlan } from './weekly-review/validate-review-plan'
 import { loadPolicy } from './policy/load-policy'
 import { computePolicyHash } from './policy/policy-hash'
 import { Logger } from '@book000/node-utils'
@@ -511,6 +512,10 @@ export async function processWeeklyReviewIngest(
     throw new Error(
       `invalid structuredOutput for WeeklyAnalysisRun ${weeklyAnalysisRun.id}: ${parsed.error.message}`,
     )
+  }
+
+  if (weeklyAnalysisRun.reviewPlan !== null) {
+    validateStructuredOutputAgainstReviewPlan(weeklyAnalysisRun.reviewPlan, parsed.data)
   }
 
   const { policy } = getPolicy()

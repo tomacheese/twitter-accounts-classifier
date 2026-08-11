@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "policyVersion": "2026-08-08.0",
+  "policyVersion": "2026-08-12.0",
   "rules": [
     {
       "type": "label_count_drop",
@@ -73,6 +73,71 @@
     },
     {
       "type": "possible_false_positive",
+      "enabled": true,
+      "detectorType": "weekly_review",
+      "identityVersion": 1,
+      "severity": "medium",
+      "activationCount": 1,
+      "resolutionCount": 2,
+      "criticalImmediate": false,
+      "recurrenceWindow": "P30D",
+      "cooldown": "P1D",
+      "maxWeeklyReviewSeverityWithoutCorroboration": "medium"
+    },
+    {
+      "type": "possible_false_negative",
+      "enabled": true,
+      "detectorType": "weekly_review",
+      "identityVersion": 1,
+      "severity": "medium",
+      "activationCount": 1,
+      "resolutionCount": 2,
+      "criticalImmediate": false,
+      "recurrenceWindow": "P30D",
+      "cooldown": "P1D",
+      "maxWeeklyReviewSeverityWithoutCorroboration": "medium"
+    },
+    {
+      "type": "rule_behavior_mismatch",
+      "enabled": true,
+      "detectorType": "weekly_review",
+      "identityVersion": 1,
+      "severity": "high",
+      "activationCount": 1,
+      "resolutionCount": 2,
+      "criticalImmediate": false,
+      "recurrenceWindow": "P30D",
+      "cooldown": "P1D",
+      "maxWeeklyReviewSeverityWithoutCorroboration": "medium"
+    },
+    {
+      "type": "review_incomplete",
+      "enabled": true,
+      "detectorType": "weekly_review",
+      "identityVersion": 1,
+      "severity": "high",
+      "activationCount": 1,
+      "resolutionCount": 1,
+      "criticalImmediate": false,
+      "recurrenceWindow": "P7D",
+      "cooldown": "PT1H",
+      "maxWeeklyReviewSeverityWithoutCorroboration": "high"
+    },
+    {
+      "type": "coverage_gap",
+      "enabled": true,
+      "detectorType": "weekly_review",
+      "identityVersion": 1,
+      "severity": "medium",
+      "activationCount": 1,
+      "resolutionCount": 2,
+      "criticalImmediate": false,
+      "recurrenceWindow": "P30D",
+      "cooldown": "P1D",
+      "maxWeeklyReviewSeverityWithoutCorroboration": "medium"
+    },
+    {
+      "type": "external_threat_gap",
       "enabled": true,
       "detectorType": "weekly_review",
       "identityVersion": 1,

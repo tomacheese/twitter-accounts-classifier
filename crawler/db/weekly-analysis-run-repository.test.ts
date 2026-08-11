@@ -28,12 +28,20 @@ function toRow(overrides: Record<string, unknown> = {}) {
     sampledAccountIds: [],
     findings: null,
     commitSha: null,
+    reviewPlan: null,
+    structuredOutput: null,
     ...overrides,
   }
 }
 
 function toRecordLike(overrides: Record<string, unknown> = {}) {
-  return toRow({ currentPhase: 'sampling', ...overrides })
+  const row = toRow({ currentPhase: 'sampling', ...overrides })
+  const { reviewPlan, structuredOutput, ...record } = row
+  return {
+    ...record,
+    hasReviewPlan: (reviewPlan as unknown) !== null,
+    hasStructuredOutput: (structuredOutput as unknown) !== null,
+  }
 }
 
 describe('cancelWeeklyAnalysisRunBackends', () => {
@@ -98,6 +106,19 @@ describe('createWeeklyAnalysisRun', () => {
 })
 
 describe('getWeeklyAnalysisRun', () => {
+  it('review plan と structured output の有無を復旧判断用 boolean として返す', async () => {
+    const findUnique = vi
+      .fn()
+      .mockResolvedValue(
+        toRow({ reviewPlan: { schemaVersion: 1 }, structuredOutput: { schemaVersion: 2 } }),
+      )
+    const prisma = { weeklyAnalysisRun: { findUnique } } as unknown as PrismaClient
+
+    const run = await getWeeklyAnalysisRun(prisma, 'run1')
+
+    expect(run).toMatchObject({ hasReviewPlan: true, hasStructuredOutput: true })
+  })
+
   it('returns null when no row matches the id', async () => {
     const findUnique = vi.fn().mockResolvedValue(null)
     const prisma = { weeklyAnalysisRun: { findUnique } } as unknown as PrismaClient

@@ -215,6 +215,7 @@ async function ingestOneFinding(
         kind: 'weekly_review_structured_output',
         schemaVersion: ctx.structuredOutput.schemaVersion,
         redactionVersion: 1,
+        sampleStrategyVersion: ctx.structuredOutput.review?.strategyVersion,
         payload: {
           evidenceReference: candidate.evidenceReference,
           sampleReference: candidate.sampleReference,
