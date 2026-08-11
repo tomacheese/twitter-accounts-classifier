@@ -127,10 +127,9 @@ export async function markOutboxRemoteFailed(
 
 /**
  * ブロック対象が存在しない場合の終端状態として記録する。
- * `remote_failed` と異なり、`(blockerId, blockedId)` 単位で累積する `remoteSkipCount` を
- * 原子的にインクリメントする。`{ increment: 1 }` は SQL の `SET x = x + 1` に変換されるため、
- * 読み取り→書き込みの2段階を挟まず単一の UPDATE 文でカウントの原子性を担保する。
- * `remoteSkipCount` が上限に達するまでは、次回 cycle で pending_remote に戻して再試行できる。
+ * `remote_failed` とは異なり `(blockerId, blockedId)` 単位の `remoteSkipCount` を持つ。
+ * 読み取り→書き込みの2段階を避けて同時実行下でも取りこぼさないよう、原子的にインクリメントする。
+ * `remoteSkipCount` が上限未満でも、cooldown 経過前は候補選定から除外され続ける。
  * @param prisma - Prisma クライアント
  * @param outboxEntryId - 対象 entry の ID
  */

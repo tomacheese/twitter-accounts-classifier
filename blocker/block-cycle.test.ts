@@ -335,4 +335,43 @@ describe('attemptBlock', () => {
       expect.objectContaining({ blockedId: 'blocked-1', result: 'skipped' }),
     )
   })
+
+  it('BlockTargetNotFoundError で remote_skipped 記録後の recordBlockAction 失敗時も skipped を返す', async () => {
+    const deps = fakeDeps()
+    vi.mocked(deps.findOrCreateOutboxEntry).mockResolvedValue({
+      id: 'outbox-1',
+      status: 'pending_remote',
+    })
+    vi.mocked(deps.recordBlockAction).mockRejectedValue(new Error('db down'))
+    const client = createMockClient()
+    vi.mocked(client.createBlock).mockRejectedValue(new BlockTargetNotFoundError('blocked-1'))
+
+    const result = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
+      accountId: 'blocked-1',
+      labelDefinitionId: 'label-1',
+      confidence: 0.9,
+    })
+
+    expect(result).toBe('skipped')
+    expect(deps.markOutboxRemoteSkipped).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
+  })
+
+  it('createBlock 失敗時の永続化 (markOutboxRemoteFailed) が失敗しても例外を投げず false を返す', async () => {
+    const deps = fakeDeps()
+    vi.mocked(deps.findOrCreateOutboxEntry).mockResolvedValue({
+      id: 'outbox-1',
+      status: 'pending_remote',
+    })
+    vi.mocked(deps.markOutboxRemoteFailed).mockRejectedValue(new Error('db down'))
+    const client = createMockClient()
+    vi.mocked(client.createBlock).mockRejectedValue(new Error('boom'))
+
+    const result = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
+      accountId: 'blocked-1',
+      labelDefinitionId: 'label-1',
+      confidence: 0.9,
+    })
+
+    expect(result).toBe(false)
+  })
 })

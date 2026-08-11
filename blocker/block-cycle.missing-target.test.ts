@@ -46,7 +46,12 @@ function fakeDeps() {
       markOutboxRemoteFailed: vi.fn().mockResolvedValue(undefined),
       markOutboxRemoteSkipped: vi.fn().mockResolvedValue(undefined),
       prisma: {},
-      limits: { intervalSeconds: 21_600, actionDelayMs: 0, maxPerAccountPerRun: 50 },
+      limits: {
+        intervalSeconds: 21_600,
+        actionDelayMs: 0,
+        maxPerAccountPerRun: 50,
+        targetNotFoundMaxAttempts: 3,
+      },
       sleepImpl: vi.fn().mockResolvedValue(undefined),
     },
   }

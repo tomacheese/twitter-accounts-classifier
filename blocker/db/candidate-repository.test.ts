@@ -148,7 +148,9 @@ describe('selectBlockCandidates SQL shape', () => {
     expect(sql).toContain(`oe."status" = 'remote_skipped'`)
     expect(sql).toContain('oe."remoteSkipCount"')
     expect(sql).toContain('oe."lastRemoteSkippedAt"')
-    expect(values).toEqual(expect.arrayContaining([3, 21_600]))
+    expect(values.at(-3)).toBe(3)
+    expect(values.at(-2)).toBe(21_600)
+    expect(values.at(-1)).toBe(50)
   })
 })
 
@@ -538,6 +540,10 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
         labelDefinitionId: labelDefinition.id,
         confidence: 0.9,
         status: 'remote_failed',
+        // remote_skipped であれば terminal skip / cooldown 中になるはずの値をあえて設定し、
+        // status の絞り込みが正しく remote_skipped 限定になっていることを検証する。
+        remoteSkipCount: 3,
+        lastRemoteSkippedAt: new Date(),
       },
     })
 

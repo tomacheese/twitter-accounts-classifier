@@ -115,6 +115,22 @@ export async function attemptBlock(
     if (error instanceof BlockTargetNotFoundError) {
       try {
         await deps.markOutboxRemoteSkipped(deps.prisma, outboxEntry.id)
+      } catch (persistError) {
+        // ここで捕捉しないと、呼び出し元の候補ループに例外が伝播し、
+        // 残り候補の処理と finishBlockAccountRun への到達を止めてしまう。
+        logger.error(
+          `Failed to persist remote_skipped for ${candidate.accountId} on behalf of ${blockerId}`,
+          persistError as Error,
+        )
+        captureException(persistError, {
+          blockerId,
+          blockedId: candidate.accountId,
+          targetNotFoundMessage: error.message,
+        })
+        return false
+      }
+
+      try {
         await deps.recordBlockAction(deps.prisma, {
           blockAccountRunId,
           blockerId,
@@ -125,17 +141,15 @@ export async function attemptBlock(
           errorMessage: error.message,
           outboxEntryId: outboxEntry.id,
         })
-        return 'skipped'
       } catch (persistError) {
-        // ここで捕捉しないと、呼び出し元の候補ループに例外が伝播し、
-        // 残り候補の処理と finishBlockAccountRun への到達を止めてしまう。
+        // remote_skipped 自体は記録済みのため、この失敗で候補ループを止めない。
         logger.error(
-          `Failed to persist remote_skipped for ${candidate.accountId} on behalf of ${blockerId}`,
+          `Failed to record skip action for ${candidate.accountId} on behalf of ${blockerId}`,
           persistError as Error,
         )
         captureException(persistError, { blockerId, blockedId: candidate.accountId })
-        return false
       }
+      return 'skipped'
     }
 
     logger.error(
@@ -143,17 +157,26 @@ export async function attemptBlock(
       error as Error,
     )
     captureException(error, { blockerId, blockedId: candidate.accountId })
-    await deps.markOutboxRemoteFailed(deps.prisma, outboxEntry.id)
-    await deps.recordBlockAction(deps.prisma, {
-      blockAccountRunId,
-      blockerId,
-      blockedId: candidate.accountId,
-      labelDefinitionId: candidate.labelDefinitionId,
-      confidence: candidate.confidence,
-      result: 'failure',
-      errorMessage: error instanceof Error ? error.message : String(error),
-      outboxEntryId: outboxEntry.id,
-    })
+    try {
+      await deps.markOutboxRemoteFailed(deps.prisma, outboxEntry.id)
+      await deps.recordBlockAction(deps.prisma, {
+        blockAccountRunId,
+        blockerId,
+        blockedId: candidate.accountId,
+        labelDefinitionId: candidate.labelDefinitionId,
+        confidence: candidate.confidence,
+        result: 'failure',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        outboxEntryId: outboxEntry.id,
+      })
+    } catch (persistError) {
+      // 通常失敗の記録に失敗しても、skip 経路と同じ方針で候補ループを止めない。
+      logger.error(
+        `Failed to persist remote_failed for ${candidate.accountId} on behalf of ${blockerId}`,
+        persistError as Error,
+      )
+      captureException(persistError, { blockerId, blockedId: candidate.accountId })
+    }
     return false
   }
 
