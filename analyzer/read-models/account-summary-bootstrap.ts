@@ -204,15 +204,26 @@ export async function processAccountSummaryBootstrap(
 
         if (accounts.length > 0) {
           const accountIds = accounts.map((account) => account.id)
-          const [labelLatestRows, activeFindings, labelDefinitions] = await Promise.all([
-            tx.accountLabelLatest.findMany({ where: { accountId: { in: accountIds } } }),
-            findActiveFindingsForAccounts(
-              tx as unknown as PrismaClient,
-              accountIds,
-              chunkWatermarkAt ?? new Date(),
-            ),
-            tx.labelDefinition.findMany({ select: { id: true, key: true } }),
-          ])
+          const [labelLatestRows, activeFindings, labelDefinitions, observationRows] =
+            await Promise.all([
+              tx.accountLabelLatest.findMany({ where: { accountId: { in: accountIds } } }),
+              findActiveFindingsForAccounts(
+                tx as unknown as PrismaClient,
+                accountIds,
+                chunkWatermarkAt ?? new Date(),
+              ),
+              tx.labelDefinition.findMany({ select: { id: true, key: true } }),
+              // relabel は AccountClassificationObservation を作らないため、この行が無い
+              // アカウントは AccountLabelLatest.labeledAt のみに基づく freshness にフォールバックする。
+              tx.accountClassificationObservation.groupBy({
+                by: ['accountId'],
+                where: { accountId: { in: accountIds } },
+                _max: { observedAt: true },
+              }),
+            ])
+          const maxObservedAtByAccount = new Map(
+            observationRows.map((row) => [row.accountId, row._max.observedAt]),
+          )
           const labelKeyById = new Map(labelDefinitions.map((def) => [def.id, def.key]))
           const labelsByAccount = new Map<string, typeof labelLatestRows>()
           for (const row of labelLatestRows) {
@@ -250,6 +261,13 @@ export async function processAccountSummaryBootstrap(
                 classificationObservedAt = label.labeledAt
               }
             }
+            const observationMax = maxObservedAtByAccount.get(account.id) ?? null
+            if (
+              observationMax &&
+              (!classificationObservedAt || observationMax > classificationObservedAt)
+            ) {
+              classificationObservedAt = observationMax
+            }
             const finding = findingsByAccount.get(account.id)
 
             summaryRows.push({
@@ -260,6 +278,9 @@ export async function processAccountSummaryBootstrap(
               profileObservedAt: account.lastCrawledAt,
               activeLabelKeys,
               activeLabelCount: activeLabelKeys.length,
+              // 増分更新側 (processAccountSummaryRefresh) は実際の変化検出結果を使うが、
+              // bootstrap 側はここで無条件に classificationObservedAt と同値にしており、
+              // その非対称は本 PR のスコープ外の既存差異として維持する。
               lastClassificationChangedAt: classificationObservedAt,
               classificationObservedAt,
               activeFindingCount: finding?.count ?? 0,
