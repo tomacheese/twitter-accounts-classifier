@@ -9,6 +9,7 @@ function makeBundle(
     isReply?: boolean
     isRetweet?: boolean
     hoursAgo?: number
+    createdAt?: Date
     inReplyToTweetId?: string | null
   }[],
 ): AccountFeatureBundle {
@@ -28,7 +29,7 @@ function makeBundle(
     recentTweets: tweets.map((t, i) => ({
       id: `t${i}`,
       fullText: t.fullText,
-      createdAt: new Date(Date.now() - (t.hoursAgo ?? 0) * 60 * 60 * 1000),
+      createdAt: t.createdAt ?? new Date(Date.now() - (t.hoursAgo ?? 0) * 60 * 60 * 1000),
       retweetCount: 0,
       likeCount: 0,
       isReply: t.isReply ?? false,
@@ -155,7 +156,7 @@ describe('crossTargetTemplatedReplyRule', () => {
     const bundle = makeBundle(
       Array.from({ length: 5 }, (_, i) => ({
         fullText: TEMPLATE_TEXT,
-        isReply: false,
+        isReply: true,
         isRetweet: true,
         hoursAgo: i,
         inReplyToTweetId: `target${i}`,
@@ -165,6 +166,42 @@ describe('crossTargetTemplatedReplyRule', () => {
     const result = crossTargetTemplatedReplyRule.evaluate(bundle)
 
     expect(result.value).toBe(false)
+  })
+
+  it("does not count replies to the account's own past tweets as distinct targets", () => {
+    const bundle = makeBundle([
+      ...Array.from({ length: 5 }, (_, i) => ({
+        fullText: `own post ${i}`,
+        isReply: false,
+        hoursAgo: 10 + i,
+      })),
+      ...Array.from({ length: 5 }, (_, i) => ({
+        fullText: TEMPLATE_TEXT,
+        isReply: true,
+        hoursAgo: i,
+        inReplyToTweetId: `t${i}`,
+      })),
+    ])
+
+    const result = crossTargetTemplatedReplyRule.evaluate(bundle)
+
+    expect(result.value).toBe(false)
+  })
+
+  it('includes a reply landing exactly 24 hours after the window anchor', () => {
+    const anchor = new Date('2024-01-01T00:00:00.000Z').getTime()
+    const bundle = makeBundle(
+      [0, 6, 12, 18, 24].map((hoursAfterAnchor, i) => ({
+        fullText: TEMPLATE_TEXT,
+        isReply: true,
+        createdAt: new Date(anchor + hoursAfterAnchor * 60 * 60 * 1000),
+        inReplyToTweetId: `target${i}`,
+      })),
+    )
+
+    const result = crossTargetTemplatedReplyRule.evaluate(bundle)
+
+    expect(result.value).toBe(true)
   })
 
   it('reaches full confidence at 10 or more distinct targets', () => {
@@ -231,14 +268,12 @@ describe('crossTargetTemplatedReplyRule', () => {
 
   it('deterministically breaks a within-group window tie by preferring the higher reply count', () => {
     const bundle = makeBundle([
-      // 過去クラスタ: target 5件、reply 5件、span 4h
       ...Array.from({ length: 5 }, (_, i) => ({
         fullText: TEMPLATE_TEXT,
         isReply: true,
         hoursAgo: 40 + i,
         inReplyToTweetId: `old-target${i}`,
       })),
-      // 直近クラスタ: target 5件だが同一targetへの重複replyを1件含み reply 6件、span 4h
       ...Array.from({ length: 5 }, (_, i) => ({
         fullText: TEMPLATE_TEXT,
         isReply: true,
