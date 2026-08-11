@@ -2,8 +2,42 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
 import { getCrawlAccountRuns } from './crawl-drilldown'
 
-function createMockPrisma(overrides: { accountRuns?: unknown[]; checkpoints?: unknown[] }) {
-  const accountRunFindMany = vi.fn().mockResolvedValue(overrides.accountRuns ?? [])
+/** CrawlAccountRun の主要フィールドを模したモック行。 */
+interface MockAccountRun {
+  id: string
+  username: string
+  recommendedCount: number
+  followingCount: number
+  trendingCount: number
+  replyCount: number
+  profileCount: number
+  labelsAppliedCount: number
+  followingSynced: boolean
+  followersSynced: boolean
+  blocksSynced: boolean
+  warnings: unknown
+  startedAt: Date
+  finishedAt: Date | null
+  status: string
+  classificationStatus: string
+}
+
+/**
+ * @param overrides - crawlAccountRun/crawlAccountCheckpoint の findMany が返すフィクスチャ
+ * @returns Prisma クライアントのモックと、呼び出し引数を検証するための各 findMany のモック関数
+ */
+function createMockPrisma(overrides: { accountRuns?: MockAccountRun[]; checkpoints?: unknown[] }) {
+  const allAccountRuns = overrides.accountRuns ?? []
+  const accountRunFindMany = vi
+    .fn()
+    .mockImplementation((args: { where?: { classificationStatus?: { not?: string } } }) => {
+      const excludedStatus = args.where?.classificationStatus?.not
+      const filtered =
+        excludedStatus === undefined
+          ? allAccountRuns
+          : allAccountRuns.filter((run) => run.classificationStatus !== excludedStatus)
+      return Promise.resolve(filtered)
+    })
   const checkpointFindMany = vi.fn().mockResolvedValue(overrides.checkpoints ?? [])
   return {
     prisma: {
@@ -35,6 +69,7 @@ describe('getCrawlAccountRuns', () => {
           startedAt: new Date('2026-08-08T00:00:00Z'),
           finishedAt: new Date('2026-08-08T00:05:00Z'),
           status: 'success',
+          classificationStatus: 'success',
         },
       ],
       checkpoints: [
@@ -69,6 +104,7 @@ describe('getCrawlAccountRuns', () => {
           startedAt: new Date('2026-08-08T00:00:00Z'),
           finishedAt: null,
           status: 'running',
+          classificationStatus: 'unknown',
         },
       ],
       checkpoints: [],
@@ -78,5 +114,179 @@ describe('getCrawlAccountRuns', () => {
 
     expect(result[0].warningCounts).toEqual({})
     expect(result[0].phaseDurations).toEqual([])
+  })
+})
+
+describe('getCrawlAccountRuns の skipped 除外', () => {
+  it('success 行 + resume の skipped 行が同一 username にある場合、success 行のみを返す', async () => {
+    const { prisma, accountRunFindMany } = createMockPrisma({
+      accountRuns: [
+        {
+          id: 'run-success',
+          username: 'alice',
+          recommendedCount: 100,
+          followingCount: 3,
+          trendingCount: 0,
+          replyCount: 2,
+          profileCount: 1,
+          labelsAppliedCount: 4,
+          followingSynced: true,
+          followersSynced: true,
+          blocksSynced: false,
+          warnings: [],
+          startedAt: new Date('2026-08-08T00:00:00Z'),
+          finishedAt: new Date('2026-08-08T00:05:00Z'),
+          status: 'success',
+          classificationStatus: 'success',
+        },
+        {
+          id: 'run-skipped',
+          username: 'alice',
+          recommendedCount: 0,
+          followingCount: 0,
+          trendingCount: 0,
+          replyCount: 0,
+          profileCount: 0,
+          labelsAppliedCount: 0,
+          followingSynced: false,
+          followersSynced: false,
+          blocksSynced: false,
+          warnings: [],
+          startedAt: new Date('2026-08-09T00:00:00Z'),
+          finishedAt: new Date('2026-08-09T00:00:01Z'),
+          status: 'success',
+          classificationStatus: 'skipped',
+        },
+      ],
+      checkpoints: [
+        { username: 'alice', phase: 'following', data: { durationMs: 1200, retryWaitMs: null } },
+      ],
+    })
+
+    const result = await getCrawlAccountRuns(prisma, 'crawl-run-1')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('run-success')
+    expect(result[0].recommendedCount).toBe(100)
+    expect(result[0].phaseDurations).toEqual([
+      { phase: 'following', durationMs: 1200, retryWaitMs: null },
+    ])
+    expect(accountRunFindMany).toHaveBeenCalledWith({
+      where: { crawlRunId: 'crawl-run-1', classificationStatus: { not: 'skipped' } },
+      orderBy: [{ startedAt: 'asc' }],
+    })
+  })
+
+  it('partial 行 + resume の skipped 行がある場合、partial 行のみを返す', async () => {
+    const { prisma } = createMockPrisma({
+      accountRuns: [
+        {
+          id: 'run-partial',
+          username: 'bob',
+          recommendedCount: 5,
+          followingCount: 1,
+          trendingCount: 0,
+          replyCount: 0,
+          profileCount: 0,
+          labelsAppliedCount: 1,
+          followingSynced: false,
+          followersSynced: false,
+          blocksSynced: false,
+          warnings: [{ type: 'timeout' }],
+          startedAt: new Date('2026-08-08T00:00:00Z'),
+          finishedAt: new Date('2026-08-08T00:03:00Z'),
+          status: 'partial',
+          classificationStatus: 'partial',
+        },
+        {
+          id: 'run-skipped',
+          username: 'bob',
+          recommendedCount: 0,
+          followingCount: 0,
+          trendingCount: 0,
+          replyCount: 0,
+          profileCount: 0,
+          labelsAppliedCount: 0,
+          followingSynced: false,
+          followersSynced: false,
+          blocksSynced: false,
+          warnings: [],
+          startedAt: new Date('2026-08-09T00:00:00Z'),
+          finishedAt: new Date('2026-08-09T00:00:01Z'),
+          status: 'success',
+          classificationStatus: 'skipped',
+        },
+      ],
+      checkpoints: [],
+    })
+
+    const result = await getCrawlAccountRuns(prisma, 'crawl-run-1')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('run-partial')
+    expect(result[0].status).toBe('partial')
+    expect(result[0].warningCounts).toEqual({ timeout: 1 })
+  })
+
+  it('classificationStatus が unknown の legacy 行は除外しない', async () => {
+    const { prisma } = createMockPrisma({
+      accountRuns: [
+        {
+          id: 'run-legacy',
+          username: 'carol',
+          recommendedCount: 7,
+          followingCount: 0,
+          trendingCount: 0,
+          replyCount: 0,
+          profileCount: 0,
+          labelsAppliedCount: 0,
+          followingSynced: false,
+          followersSynced: false,
+          blocksSynced: false,
+          warnings: [],
+          startedAt: new Date('2026-08-08T00:00:00Z'),
+          finishedAt: new Date('2026-08-08T00:02:00Z'),
+          status: 'success',
+          classificationStatus: 'unknown',
+        },
+      ],
+      checkpoints: [],
+    })
+
+    const result = await getCrawlAccountRuns(prisma, 'crawl-run-1')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('run-legacy')
+  })
+
+  it('resume が発生していない通常 run では全行がそのまま返る', async () => {
+    const { prisma } = createMockPrisma({
+      accountRuns: [
+        {
+          id: 'run-only',
+          username: 'dave',
+          recommendedCount: 12,
+          followingCount: 2,
+          trendingCount: 1,
+          replyCount: 0,
+          profileCount: 0,
+          labelsAppliedCount: 3,
+          followingSynced: true,
+          followersSynced: true,
+          blocksSynced: true,
+          warnings: [],
+          startedAt: new Date('2026-08-08T00:00:00Z'),
+          finishedAt: new Date('2026-08-08T00:04:00Z'),
+          status: 'success',
+          classificationStatus: 'success',
+        },
+      ],
+      checkpoints: [],
+    })
+
+    const result = await getCrawlAccountRuns(prisma, 'crawl-run-1')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('run-only')
   })
 })
