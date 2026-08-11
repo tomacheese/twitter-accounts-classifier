@@ -305,6 +305,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
     const prisma = getPrismaClient()
 
     beforeEach(async () => {
+      // Block は他の統合テストファイルが残す可能性があり、
+      // account 削除時の FK 違反を避けるため先に消しておく。
+      await prisma.block.deleteMany()
       await prisma.tweet.deleteMany()
       await prisma.accountLabel.deleteMany()
       await prisma.accountLabelLatest.deleteMany()
