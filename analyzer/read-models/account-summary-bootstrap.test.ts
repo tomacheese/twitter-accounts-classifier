@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { getPrismaClient } from '../db/client'
+import { processAccountSummaryRefresh } from '../worker-processors'
 import {
   processAccountSummaryBootstrap,
   enqueueAccountSummaryBootstrapIfNeeded,
@@ -208,6 +209,74 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
       where: { accountId: account.id },
     })
     expect(summary?.classificationObservedAt?.getTime()).toBe(labeledAt.getTime())
+  })
+
+  it('computes the same classificationObservedAt as processAccountSummaryRefresh for a normal crawl-produced account', async () => {
+    const labeledAt = new Date('2026-01-01T00:00:00Z')
+    const observedAt = new Date('2026-01-02T00:00:00Z')
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_bootstrap_refresh_parity',
+        screenName: 'ivan',
+        displayName: 'Ivan',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: labeledAt,
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'test_bootstrap_refresh_parity_label', description: 'テスト用ラベル' },
+    })
+    const labelData = {
+      accountId: account.id,
+      labelDefinitionId: labelDefinition.id,
+      value: true,
+      confidence: 0.8,
+      reason: 'test reason',
+      method: 'rule',
+      ruleVersion: 'v1',
+      labeledAt,
+    }
+    // bootstrap は AccountLabelLatest を、processAccountSummaryRefresh は AccountLabel 履歴を
+    // それぞれ読むため、両方に同じ値の行を用意する。
+    await prisma.accountLabelLatest.create({ data: labelData })
+    await prisma.accountLabel.create({ data: labelData })
+    const observation = await prisma.accountClassificationObservation.create({
+      data: { accountId: account.id, observedAt, labelCount: 1 },
+    })
+    const bootstrapWorkItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_bootstrap',
+        triggerType: 'account_summary_bootstrap_chunk',
+        triggerId: randomUUID(),
+      },
+    })
+
+    await processAccountSummaryBootstrap(prisma, bootstrapWorkItem, { chunkSize: 10 })
+    const bootstrapSummary = await prisma.accountSummaryLatest.findUnique({
+      where: { accountId: account.id },
+    })
+
+    const refreshWorkItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+        triggerId: observation.id,
+      },
+    })
+    await processAccountSummaryRefresh(prisma, refreshWorkItem)
+    const refreshSummary = await prisma.accountSummaryLatest.findUnique({
+      where: { accountId: account.id },
+    })
+
+    // lastClassificationChangedAt は一致を要求しない: 増分側の変化検出ロジックとは
+    // 一致しないことを許容する既存差異のため。
+    expect(bootstrapSummary?.classificationObservedAt?.getTime()).toBe(
+      refreshSummary?.classificationObservedAt?.getTime(),
+    )
+    expect(bootstrapSummary?.classificationObservedAt?.getTime()).toBe(observedAt.getTime())
   })
 
   it('does not overwrite a live update that is newer than the bootstrap baseline', async () => {
