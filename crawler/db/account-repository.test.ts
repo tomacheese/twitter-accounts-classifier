@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Prisma, type PrismaClient } from '../generated/prisma'
-import { upsertAccount, upsertAccountsBulk, type AccountProfileInput } from './account-repository'
+import {
+  upsertAccount,
+  upsertAccountsBulk,
+  resolveAccountIdsByUsername,
+  type AccountProfileInput,
+} from './account-repository'
 
 const sampleInput: AccountProfileInput = {
   id: '123',
@@ -212,5 +217,33 @@ describe('upsertAccountsBulk bisection fallback', () => {
 
     const expected = new Set(inputs.map((i) => i.id).filter((id) => id !== badId))
     expect(result).toEqual(expected)
+  })
+})
+
+describe('resolveAccountIdsByUsername', () => {
+  it('screenName が一致する Account の id だけを返す', async () => {
+    const prisma = {
+      account: {
+        findMany: vi.fn().mockResolvedValue([{ id: 'acct-alice' }, { id: 'acct-bob' }]),
+      },
+    } as unknown as PrismaClient
+
+    const ids = await resolveAccountIdsByUsername(prisma, ['alice', 'bob'])
+
+    expect(ids).toEqual(['acct-alice', 'acct-bob'])
+    expect(prisma.account.findMany).toHaveBeenCalledWith({
+      where: { screenName: { in: ['alice', 'bob'] } },
+      select: { id: true },
+    })
+  })
+
+  it('usernames が空の場合はクエリを発行せず空配列を返す', async () => {
+    const findMany = vi.fn()
+    const prisma = { account: { findMany } } as unknown as PrismaClient
+
+    const ids = await resolveAccountIdsByUsername(prisma, [])
+
+    expect(ids).toEqual([])
+    expect(findMany).not.toHaveBeenCalled()
   })
 })

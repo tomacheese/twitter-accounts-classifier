@@ -282,3 +282,22 @@ export async function upsertAccountsBulk(
   const rows = [...deduped.values()]
   return upsertAccountsBulkWithBisection(prisma, rows, 0, maxBisectionDepth(rows.length))
 }
+
+/**
+ * config 上の username(screenName)一覧から、既に永続化済みの Account の id を解決する。
+ * 一度も crawl されていない username は結果から自然に除外される。
+ * @param prisma - Prisma クライアント
+ * @param usernames - 解決したい screenName 一覧
+ * @returns 一致した Account の id 一覧(順序は保証しない)
+ */
+export async function resolveAccountIdsByUsername(
+  prisma: PrismaClient,
+  usernames: string[],
+): Promise<string[]> {
+  if (usernames.length === 0) return []
+  const accounts = await prisma.account.findMany({
+    where: { screenName: { in: usernames } },
+    select: { id: true },
+  })
+  return accounts.map((account) => account.id)
+}

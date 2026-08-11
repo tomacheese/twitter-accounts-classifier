@@ -11,7 +11,11 @@ import {
 import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertComponentBuildIdentity } from './build-identity'
-import { upsertAccount, type AccountProfileInput } from './db/account-repository'
+import {
+  upsertAccount,
+  resolveAccountIdsByUsername,
+  type AccountProfileInput,
+} from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
 import {
   ensureLabelDefinitionsForRules,
@@ -141,7 +145,9 @@ export interface CrawlDependencies {
   loadReplyCorpus: (watermark: Date) => Promise<ReplyHijackCorpusEntry[]>
   loadFollowGraphLabelIndex: (
     labelDefinitionIds: Map<string, string>,
+    accountIds: string[],
   ) => Promise<FollowGraphLabelIndex>
+  resolveAccountIdsByUsername: (usernames: string[]) => Promise<string[]>
   persistAuthorResultAtomic: (
     params: PersistAuthorResultAtomicParams,
   ) => Promise<PersistAuthorResultAtomicResult>
@@ -1520,8 +1526,21 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
         registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
       ),
     )
+    // resume で既に success/partial な account は今回処理しないため、
+    // follow-graph index もその account 分の accountId で絞り込んで構築する。
+    const usernamesToProcess = deps.config.accounts
+      .filter((account) => {
+        const previous = latestAccountStatuses.get(account.username)
+        return previous?.status !== 'success' && previous?.status !== 'partial'
+      })
+      .map((account) => account.username)
+    const followGraphAccountIds =
+      usernamesToProcess.length === 0
+        ? []
+        : await deps.resolveAccountIdsByUsername(usernamesToProcess)
     const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(
       followGraphLabelDefinitionIds,
+      followGraphAccountIds,
     )
     // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
     // アカウントごとではなくサイクルごとに 1 回だけ構築する。
@@ -1697,8 +1716,9 @@ async function main(): Promise<void> {
     persistTweets: createPersistTweetsFn(prisma),
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: (watermark) => loadReplyCorpus(prisma, watermark),
-    loadFollowGraphLabelIndex: (labelDefinitionIds) =>
-      buildFollowGraphLabelIndex(prisma, labelDefinitionIds),
+    loadFollowGraphLabelIndex: (labelDefinitionIds, accountIds) =>
+      buildFollowGraphLabelIndex(prisma, labelDefinitionIds, accountIds),
+    resolveAccountIdsByUsername: (usernames) => resolveAccountIdsByUsername(prisma, usernames),
     persistAuthorResultAtomic: (params) => persistAuthorResultAtomicRecord(prisma, params),
     recordCrawlAuthorCheckpoint: (params) => recordCrawlAuthorCheckpointRecord(prisma, params),
     loadCrawlAuthorCheckpoints: (crawlRunId, username) =>

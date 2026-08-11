@@ -164,6 +164,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       .mockResolvedValue(new Map([['verified_blue_individual', 'ld1']])),
     loadReplyCorpus: vi.fn().mockResolvedValue([]),
     loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
+    resolveAccountIdsByUsername: vi.fn().mockResolvedValue(['acct-v']),
     persistAuthorResultAtomic: vi
       .fn()
       .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 1 }),
@@ -894,7 +895,7 @@ describe('runCrawlCycle', () => {
     expect(callForCandidate.replyHijackIndex.swarmSizeFor('candidate3', 'target-C')).toBe(5)
   })
 
-  it('labelDefinitionIds を loadFollowGraphLabelIndex に渡し、その結果を persistAuthorResultAtomic に渡す', async () => {
+  it('labelDefinitionIds と対象 account の id を loadFollowGraphLabelIndex に渡し、その結果を persistAuthorResultAtomic に渡す', async () => {
     const followGraphLabelIndex = { signalsFor: vi.fn().mockReturnValue({}) }
     const deps = makeDeps({
       // フィルタ後も残ることを検証するため、実際に usesFollowGraphSignal: true を持つルールの key を使う。
@@ -904,10 +905,54 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    expect(deps.loadFollowGraphLabelIndex).toHaveBeenCalledWith(new Map([['topic_anime', 'ld1']]))
+    expect(deps.resolveAccountIdsByUsername).toHaveBeenCalledWith(['v'])
+    expect(deps.loadFollowGraphLabelIndex).toHaveBeenCalledWith(
+      new Map([['topic_anime', 'ld1']]),
+      ['acct-v'],
+    )
     expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({ followGraphLabelIndex }),
     )
+  })
+
+  it('resume で全 account が success/partial の場合、resolveAccountIdsByUsername を呼ばない', async () => {
+    const resolveAccountIdsByUsername = vi.fn().mockResolvedValue(['acct-v'])
+    const deps = makeDeps({
+      resolveAccountIdsByUsername,
+      startOrResumeCrawlRun: vi.fn().mockResolvedValue({
+        id: 'run1',
+        latestAccountStatuses: new Map([
+          ['v', { status: 'success', classificationStatus: 'success' }],
+        ]),
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(resolveAccountIdsByUsername).not.toHaveBeenCalled()
+  })
+
+  it('resume で一部 account だけが処理対象の場合、その username だけを resolveAccountIdsByUsername に渡す', async () => {
+    const resolveAccountIdsByUsername = vi.fn().mockResolvedValue(['acct-partial'])
+    const deps = makeDeps({
+      config: {
+        accounts: [
+          { email: 'done@example.com', username: 'done', password: 'p', otpSecret: null },
+          { email: 'partial@example.com', username: 'partial', password: 'p', otpSecret: null },
+        ],
+      },
+      resolveAccountIdsByUsername,
+      startOrResumeCrawlRun: vi.fn().mockResolvedValue({
+        id: 'run1',
+        latestAccountStatuses: new Map([
+          ['done', { status: 'success', classificationStatus: 'success' }],
+        ]),
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(resolveAccountIdsByUsername).toHaveBeenCalledWith(['partial'])
   })
 
   it('continues to the next account if one account throws', async () => {
