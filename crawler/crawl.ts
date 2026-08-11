@@ -134,9 +134,15 @@ export interface CrawlDependencies {
     password: string
     otp_secret: string | null
   }) => Promise<IssuedCookies>
-  createOpenApiClient: (cookies: IssuedCookies) => Promise<{ client: CrawlOpenApiClient }>
+  createOpenApiClient: (
+    cookies: IssuedCookies,
+    cycletlsPort: number,
+  ) => Promise<{ client: CrawlOpenApiClient }>
   closeOpenApiClient: (context: { client: CrawlOpenApiClient }) => Promise<void>
-  createTrendsScraper: (cookies: IssuedCookies) => Promise<{ scraper: TrendsScraperLike }>
+  createTrendsScraper: (
+    cookies: IssuedCookies,
+    cycletlsPort: number,
+  ) => Promise<{ scraper: TrendsScraperLike }>
   closeTrendsScraper: (context: { scraper: TrendsScraperLike }) => Promise<void>
   persistAccount: (input: AccountProfileInput) => Promise<void>
   persistTweets: (inputs: TweetInput[]) => Promise<void>
@@ -173,10 +179,7 @@ export interface CrawlDependencies {
   touchCrawlRunHeartbeat: (crawlRunId: string) => Promise<void>
   /** テスト時に `withTwitterRetry` のバックオフや author ループの待機を無効化する注入。 */
   sleep: (ms: number) => Promise<void>
-  /**
-   * 1 account の crawl 処理 (timelines〜blocks の外部通信フェーズ) 全体に設ける上限時間 (ミリ秒)。
-   * 外部通信が固着した場合でも、この上限時間で打ち切って次のアカウント・次のサイクルへ処理を進める。
-   */
+  /** {@link getCrawlAccountTimeoutMs} 参照。 */
   accountTimeoutMs: number
 }
 
@@ -1225,6 +1228,18 @@ function restoreBlocksCheckpoint(value: unknown): BlocksCheckpointData | undefin
   return { synced: value.synced, warnings }
 }
 
+const CYCLETLS_PORT_RANGE_START = 20_000
+const CYCLETLS_PORT_RANGE_SIZE = 10_000
+
+/**
+ * account の cycletls ハンドルに割り当てる port をランダムに選ぶ。
+ * account ごとに port を変える理由は {@link runAccountCycle} 内のコメント参照。
+ * @returns 割り当てる port 番号
+ */
+function allocateCycletlsPort(): number {
+  return CYCLETLS_PORT_RANGE_START + Math.floor(Math.random() * CYCLETLS_PORT_RANGE_SIZE)
+}
+
 async function runAccountCycle(
   deps: CrawlDependencies,
   registry: LabelRuleRegistry,
@@ -1272,22 +1287,27 @@ async function runAccountCycle(
         password: account.password,
         otp_secret: account.otpSecret,
       })
-      // account 単位 timeout が発火した場合、元の Promise は settle しないままイベントループ上に残り、
-      // 内側の finally (closeOpenApiClient/closeTrendsScraper) には到達できない。
-      // そのため、生成できた cycletls ハンドルの close 処理をここに登録し、
-      // withTimeout の外側から明示的に force-close する。
+      // account 単位 timeout 発火時、元の Promise は settle せずイベントループ上に残るため、
+      // 内側の finally には到達できない。そのため cycletls ハンドルの close 処理を
+      // cycleTlsCleanups に登録し、withTimeout の外側から明示的に force-close する。
+      //
+      // cycletls は port をキーに実プロセスを参照カウント共有するため、
+      // 同じ port を使い続けると、timeout 後も裏で動き続ける orphan の遅延 close が、
+      // 別 account が既に使っている同じ port のプロセスを誤って kill してしまう。
+      // それを避けるため、port は account ごとに変える。
+      const cycletlsPort = allocateCycletlsPort()
       const cycleTlsCleanups: (() => Promise<void>)[] = []
       try {
         await withTimeout(
           (async () => {
             const trendsContext = needsTimeline
-              ? await deps.createTrendsScraper(cookies)
+              ? await deps.createTrendsScraper(cookies, cycletlsPort)
               : undefined
             if (trendsContext) {
               cycleTlsCleanups.push(() => deps.closeTrendsScraper(trendsContext))
             }
             try {
-              const openApiContext = await deps.createOpenApiClient(cookies)
+              const openApiContext = await deps.createOpenApiClient(cookies, cycletlsPort)
               cycleTlsCleanups.push(() => deps.closeOpenApiClient(openApiContext))
               try {
                 if (needsTimeline) {
@@ -1447,10 +1467,18 @@ async function runAccountCycle(
           `Account cycle for ${account.username} exceeded ${deps.accountTimeoutMs}ms timeout`,
         )
       } finally {
-        // 通常完了時は内側の finally で既に close 済みだが、closeOpenApiClient/closeTrendsScraper は
-        // cycleTLS.exit() を呼ぶだけで二重に呼んでも安全なため、ここでの再呼び出しは無害。
+        // closeOpenApiClient/closeTrendsScraper は cycleTLS.exit() を呼ぶだけで、
+        // 二重に呼んでも安全である。そのため通常完了時に内側の finally と重複して呼ばれても無害。
         const cleanups = cycleTlsCleanups.splice(0)
-        await Promise.allSettled(cleanups.map((cleanup) => cleanup()))
+        const results = await Promise.allSettled(cleanups.map((cleanup) => cleanup()))
+        for (const result of results) {
+          if (result.status === 'rejected') {
+            logger.error(
+              `Failed to force-close a cycletls handle for account ${account.username}`,
+              result.reason as Error,
+            )
+          }
+        }
       }
     }
 
@@ -1723,13 +1751,14 @@ async function main(): Promise<void> {
     config: loadConfig(),
     limits: CRAWL_LIMITS,
     issueCookies: (account) => cookieIssuer.issueCookiesWithRetry(account),
-    createOpenApiClient: async (cookies) => {
-      const context = await createRealOpenApiClient(cookies, twitterRequestTimeoutMs)
+    createOpenApiClient: async (cookies, cycletlsPort) => {
+      const context = await createRealOpenApiClient(cookies, twitterRequestTimeoutMs, cycletlsPort)
       return { ...context, client: toCrawlOpenApiClient(context.client, context.blocksClient) }
     },
     closeOpenApiClient: (context) =>
       closeRealOpenApiClient(context as unknown as Parameters<typeof closeRealOpenApiClient>[0]),
-    createTrendsScraper: (cookies) => createRealTrendsScraper(cookies, twitterRequestTimeoutMs),
+    createTrendsScraper: (cookies, cycletlsPort) =>
+      createRealTrendsScraper(cookies, twitterRequestTimeoutMs, cycletlsPort),
     closeTrendsScraper: (context) =>
       closeRealTrendsScraper(context as Parameters<typeof closeRealTrendsScraper>[0]),
     persistAccount: createPersistAccountFn(prisma),

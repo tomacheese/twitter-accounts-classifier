@@ -114,6 +114,28 @@ describe('createOpenApiClient timeout wiring', () => {
   })
 })
 
+describe('createOpenApiClient port wiring', () => {
+  it('passes the given port through to initCycleTLS', async () => {
+    const { createOpenApiClient } = await import('./client')
+    const cycletls = await import('cycletls')
+    const initCycleTLS = cycletls.default as ReturnType<typeof vi.fn>
+
+    await createOpenApiClient({ ct0: 'c0', authToken: 'a0' }, undefined, 20_123)
+
+    expect(initCycleTLS).toHaveBeenCalledWith({ port: 20_123 })
+  })
+
+  it('omits the port option when no port is given', async () => {
+    const { createOpenApiClient } = await import('./client')
+    const cycletls = await import('cycletls')
+    const initCycleTLS = cycletls.default as ReturnType<typeof vi.fn>
+
+    await createOpenApiClient({ ct0: 'c0', authToken: 'a0' })
+
+    expect(initCycleTLS).toHaveBeenCalledWith(undefined)
+  })
+})
+
 describe('createOpenApiClient blocksClient/createBlock wiring', () => {
   it('exposes a raw blocks client and a bound createBlock function', async () => {
     const { createOpenApiClient } = await import('./client')
@@ -140,5 +162,17 @@ describe('createTrendsScraper', () => {
     expect(getLastResponseMatching('TrendsWiringTest')).toMatchObject({
       body: '{"fake":true}',
     })
+  })
+})
+
+describe('createTrendsScraper port wiring', () => {
+  it('passes the given port through to initCycleTLS', async () => {
+    const { createTrendsScraper } = await import('./client')
+    const cycletls = await import('cycletls')
+    const initCycleTLS = cycletls.default as ReturnType<typeof vi.fn>
+
+    await createTrendsScraper({ ct0: 'c0', authToken: 'a0' }, undefined, 20_456)
+
+    expect(initCycleTLS).toHaveBeenCalledWith({ port: 20_456 })
   })
 })

@@ -93,8 +93,7 @@ export function getTwitterRequestTimeoutMs(): number {
 }
 
 /**
- * 1 account の crawl 処理 (timelines〜blocks の外部通信フェーズ) 全体に設ける上限時間 (ミリ秒)。
- * 外部通信が固着した場合でも、この上限時間で打ち切って次のアカウント・次のサイクルへ処理を進める。
+ * 1 account の crawl 処理 (外部通信フェーズ全体) に設ける上限時間 (ミリ秒)。
  * @returns 設定された上限時間 (ミリ秒)。未設定時は 1200000 (20 分)
  */
 export function getCrawlAccountTimeoutMs(): number {

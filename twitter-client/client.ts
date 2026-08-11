@@ -34,7 +34,7 @@ export async function createOpenApiClientWith(
   })
 }
 
-/** cycletls の子プロセス自体がハングした場合に備え、Node 側でも request ごとの上限時間を設ける。既定 60 秒。 */
+/** {@link createCycleTLSFetch} が Node 側リクエスト timeout に使う既定値。 */
 export const DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS = 60_000
 
 /**
@@ -91,13 +91,15 @@ export interface OpenApiClientContext {
  * {@link wrapFetchWithResponseCapture} でラップして事後に復元できるようにしている。
  * @param cookies - Twitter アカウントに対して発行されたクッキー
  * @param timeoutMs - {@link createCycleTLSFetch} に渡す 1 リクエストあたりの上限時間 (ミリ秒)
+ * @param port - `cycletls` の Go バイナリが listen する port。省略時は `cycletls` 既定値 (9119)
  * @returns クライアントと、依存する `cycletls` クライアント。呼び出し側でクローズできるように返す
  */
 export async function createOpenApiClient(
   cookies: IssuedCookies,
   timeoutMs: number = DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS,
+  port?: number,
 ): Promise<OpenApiClientContext> {
-  const cycleTLS = await initCycleTLS()
+  const cycleTLS = await initCycleTLS(port === undefined ? undefined : { port })
   const fetchImpl = wrapFetchWithResponseCapture(createCycleTLSFetch(cycleTLS, timeoutMs))
   TwitterOpenApi.fetchApi = fetchImpl
   const client = await createOpenApiClientWith(new TwitterOpenApi(), cookies)
@@ -132,13 +134,15 @@ export interface TrendsScraperContext {
  * {@link wrapFetchWithResponseCapture} でもラップしている。
  * @param cookies - Twitter アカウントに対して発行されたクッキー
  * @param timeoutMs - {@link createCycleTLSFetch} に渡す 1 リクエストあたりの上限時間 (ミリ秒)
+ * @param port - `cycletls` の Go バイナリが listen する port。省略時は `cycletls` 既定値 (9119)
  * @returns スクレイパーと、依存する `cycletls` クライアント。呼び出し側でクローズできるように返す
  */
 export async function createTrendsScraper(
   cookies: IssuedCookies,
   timeoutMs: number = DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS,
+  port?: number,
 ): Promise<TrendsScraperContext> {
-  const cycleTLS = await initCycleTLS()
+  const cycleTLS = await initCycleTLS(port === undefined ? undefined : { port })
   const scraper = createTrendsClient(
     cookies,
     wrapFetchWithResponseCapture(createCycleTLSFetch(cycleTLS, timeoutMs)),

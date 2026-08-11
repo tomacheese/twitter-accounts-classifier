@@ -222,11 +222,8 @@ describe('runCrawlCycle', () => {
         errorMessage: expect.stringContaining('exceeded 20ms timeout'),
       }),
     )
-    // createTrendsScraper は正常に解決するため登録され、account timeout の force-close 対象になる。
     expect(closeTrendsScraper).toHaveBeenCalled()
-    // createOpenApiClient は一度も解決しないため、対応する close は呼ばれない。
     expect(closeOpenApiClient).not.toHaveBeenCalled()
-    // ハングした account の処理を打ち切った後もサイクル全体は完了する。
     expect(finishCrawlRun).toHaveBeenCalled()
   })
 
@@ -945,6 +942,22 @@ describe('runCrawlCycle', () => {
     expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({ followGraphLabelIndex }),
     )
+  })
+
+  it('assigns a different cycletls port to each account', async () => {
+    const config = {
+      accounts: [
+        { email: 'a@example.com', username: 'first', password: 'p', otpSecret: null },
+        { email: 'b@example.com', username: 'second', password: 'p', otpSecret: null },
+      ],
+    }
+    const deps = makeDeps({ config })
+
+    await runCrawlCycle(deps)
+
+    const openApiPorts = vi.mocked(deps.createOpenApiClient).mock.calls.map(([, port]) => port)
+    expect(openApiPorts).toHaveLength(2)
+    expect(openApiPorts[0]).not.toBe(openApiPorts[1])
   })
 
   it('continues to the next account if one account throws', async () => {
