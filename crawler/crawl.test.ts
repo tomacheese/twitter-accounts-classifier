@@ -141,7 +141,9 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       .mockResolvedValue(new Map([['verified_blue_individual', 'ld1']])),
     loadReplyCorpus: vi.fn().mockResolvedValue([]),
     loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
-    persistAuthorResultAtomic: vi.fn().mockResolvedValue({ observationId: 'observation1' }),
+    persistAuthorResultAtomic: vi
+      .fn()
+      .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 1 }),
     recordCrawlAuthorCheckpoint: vi.fn().mockResolvedValue(undefined),
     loadCrawlAuthorCheckpoints: vi.fn().mockResolvedValue(new Map()),
     syncFollowing: vi.fn().mockResolvedValue(undefined),
@@ -185,7 +187,8 @@ describe('runCrawlCycle', () => {
         crawlRunId: 'run1',
         username: 'v',
         authorId: 'author1',
-        labels: expect.arrayContaining([expect.objectContaining({ labelDefinitionId: 'ld1' })]),
+        registry: expect.any(LabelRuleRegistry),
+        labelDefinitionIds: new Map([['verified_blue_individual', 'ld1']]),
       }),
     )
     expect(deps.closeTrendsScraper).toHaveBeenCalled()
@@ -383,9 +386,7 @@ describe('runCrawlCycle', () => {
     expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({
         authorId: 'reply-author',
-        labels: expect.arrayContaining([
-          expect.objectContaining({ labelDefinitionId: 'ld-hijack' }),
-        ]),
+        labelDefinitionIds: new Map([['ad_reply_hijack', 'ld-hijack']]),
       }),
     )
   })
@@ -437,24 +438,21 @@ describe('runCrawlCycle', () => {
     expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({
         authorId: 'reply-author',
-        labels: expect.arrayContaining([
-          expect.objectContaining({
-            labelDefinitionId: 'ld-hijack',
-            result: expect.objectContaining({ value: true }),
-          }),
+        additionalOwnTweets: expect.arrayContaining([
+          expect.objectContaining({ id: 'reply1' }),
+          expect.objectContaining({ id: 'reply2' }),
+          expect.objectContaining({ id: 'reply3' }),
         ]),
       }),
     )
   })
 
-  it('attaches templatedReplyNetworkSize to the bundle, computed from the loaded reply corpus', async () => {
+  it('builds a duplicateReplyIndex from the loaded reply corpus and passes it to persistAuthorResultAtomic', async () => {
     const author = rawUser('author1')
     const tweet = rawTweet('tweet1', author)
     const templatedReply = rawTweet('own-reply', author, 'tweet1', {
       fullText: 'this exact templated reply text appears everywhere',
     })
-
-    const applyAllSpy = vi.spyOn(LabelRuleRegistry.prototype, 'applyAll')
 
     const deps = makeDeps({
       loadReplyCorpus: vi.fn().mockResolvedValue([
@@ -493,23 +491,26 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    const bundleForAuthor = applyAllSpy.mock.calls
-      .map((call) => call[0])
-      .find((bundle) => bundle.account.id === 'author1')
-    expect(bundleForAuthor?.templatedReplyNetworkSize).toBe(2)
-
-    applyAllSpy.mockRestore()
+    const callForAuthor = (
+      deps.persistAuthorResultAtomic as ReturnType<typeof vi.fn>
+    ).mock.calls.find((call) => (call[0] as { authorId: string }).authorId === 'author1')?.[0] as {
+      duplicateReplyIndex: { countOtherAccounts: (text: string, accountId: string) => number }
+    }
+    expect(
+      callForAuthor.duplicateReplyIndex.countOtherAccounts(
+        'this exact templated reply text appears everywhere',
+        'author1',
+      ),
+    ).toBe(2)
   })
 
-  it('attaches replyHijackSwarmSize to the bundle, computed from the loaded reply corpus', async () => {
+  it('builds a replyHijackIndex from the loaded reply corpus and passes it to persistAuthorResultAtomic', async () => {
     const author = rawUser('author1')
     const tweet = rawTweet('tweet1', author)
     const ownReply = rawTweet('own-reply', author, 'tweet1', {
       fullText: 'このサンプル動画は視聴する価値が十分にあると思いますね',
       inReplyToStatusIdStr: 'swarm-target',
     })
-
-    const applyAllSpy = vi.spyOn(LabelRuleRegistry.prototype, 'applyAll')
 
     const now = Date.now()
     const deps = makeDeps({
@@ -571,45 +572,28 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    const bundleForAuthor = applyAllSpy.mock.calls
-      .map((call) => call[0])
-      .find((bundle) => bundle.account.id === 'author1')
-    expect(bundleForAuthor?.replyHijackSwarmSize).toBe(5)
-
-    applyAllSpy.mockRestore()
+    const callForAuthor = (
+      deps.persistAuthorResultAtomic as ReturnType<typeof vi.fn>
+    ).mock.calls.find((call) => (call[0] as { authorId: string }).authorId === 'author1')?.[0] as {
+      replyHijackIndex: { swarmSizeFor: (accountId: string, tweetId: string) => number }
+    }
+    expect(callForAuthor.replyHijackIndex.swarmSizeFor('author1', 'swarm-target')).toBe(5)
   })
 
-  it('labelDefinitionIds を loadFollowGraphLabelIndex に渡し、bundle に followGraphLabelSignals を設定する', async () => {
-    const signalsFor = vi.fn().mockReturnValue({
-      topic_food: {
-        followeeLabeledCount: 5,
-        followeeTotalCount: 15,
-        followerLabeledCount: 0,
-        followerTotalCount: 0,
-      },
-    })
-    const applyAllSpy = vi.spyOn(LabelRuleRegistry.prototype, 'applyAll')
+  it('labelDefinitionIds を loadFollowGraphLabelIndex に渡し、その結果を persistAuthorResultAtomic に渡す', async () => {
+    const followGraphLabelIndex = { signalsFor: vi.fn().mockReturnValue({}) }
     const deps = makeDeps({
-      loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor }),
+      loadFollowGraphLabelIndex: vi.fn().mockResolvedValue(followGraphLabelIndex),
     })
 
     await runCrawlCycle(deps)
 
-    expect(signalsFor).toHaveBeenCalled()
-    const bundles = applyAllSpy.mock.calls.map((call) => call[0])
-    expect(bundles.length).toBeGreaterThan(0)
-    for (const bundle of bundles) {
-      expect(bundle.followGraphLabelSignals).toEqual({
-        topic_food: {
-          followeeLabeledCount: 5,
-          followeeTotalCount: 15,
-          followerLabeledCount: 0,
-          followerTotalCount: 0,
-        },
-      })
-    }
-
-    applyAllSpy.mockRestore()
+    expect(deps.loadFollowGraphLabelIndex).toHaveBeenCalledWith(
+      new Map([['verified_blue_individual', 'ld1']]),
+    )
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({ followGraphLabelIndex }),
+    )
   })
 
   it('continues to the next account if one account throws', async () => {
@@ -688,14 +672,12 @@ describe('runCrawlCycle', () => {
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'success')
   })
 
-  it('merges a timeline-only promoted tweet into the label bundle for its author', async () => {
+  it('passes a timeline-only promoted tweet to persistAuthorResultAtomic as an additionalOwnTweet for its author', async () => {
     const author = rawUser('author1')
     const promotedTweet = rawTweet('promoted1', author, null, {
       isPromoted: true,
       isPaidPromotion: true,
     })
-
-    const applyAllSpy = vi.spyOn(LabelRuleRegistry.prototype, 'applyAll')
 
     const deps = makeDeps({
       createOpenApiClient: vi.fn().mockResolvedValue({
@@ -721,22 +703,21 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    const bundleForAuthor = applyAllSpy.mock.calls
-      .map((call) => call[0])
-      .find((bundle) => bundle.account.id === 'author1')
-    expect(bundleForAuthor?.recentTweets).toContainEqual(
-      expect.objectContaining({ id: 'promoted1', isPromoted: true, isPaidPromotion: true }),
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorId: 'author1',
+        additionalOwnTweets: expect.arrayContaining([
+          expect.objectContaining({ id: 'promoted1', isPromoted: true, isPaidPromotion: true }),
+        ]),
+      }),
     )
-
-    applyAllSpy.mockRestore()
   })
 
-  it('passes normalized expanded URLs into the account label bundle', async () => {
+  it('passes normalized expanded URLs to persistAuthorResultAtomic as an additionalOwnTweet', async () => {
     const author = rawUser('author1')
     const linkedTweet = rawTweet('linked1', author, null, {
       expandedUrls: ['https://www.amazon.co.jp/dp/TEST?tag=fictional-22'],
     })
-    const applyAllSpy = vi.spyOn(LabelRuleRegistry.prototype, 'applyAll')
     const deps = makeDeps({
       createOpenApiClient: vi.fn().mockResolvedValue({
         client: {
@@ -764,19 +745,20 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    const bundleForAuthor = applyAllSpy.mock.calls
-      .map((call) => call[0])
-      .find((bundle) => bundle.account.id === 'author1')
-    expect(bundleForAuthor?.recentTweets).toContainEqual(
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: 'linked1',
-        expandedUrls: ['https://www.amazon.co.jp/dp/TEST?tag=fictional-22'],
+        authorId: 'author1',
+        additionalOwnTweets: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'linked1',
+            expandedUrls: ['https://www.amazon.co.jp/dp/TEST?tag=fictional-22'],
+          }),
+        ]),
       }),
     )
-    applyAllSpy.mockRestore()
   })
 
-  it('does not let a profile-fetched copy overwrite a true isPromoted/isPaidPromotion flag observed via the timeline', async () => {
+  it('passes the timeline-observed true isPromoted/isPaidPromotion flag through to persistAuthorResultAtomic even when the profile fetch reports it as false', async () => {
     const author = rawUser('author1')
     const promotedInTimeline = rawTweet('shared1', author, null, {
       isPromoted: true,
@@ -786,8 +768,6 @@ describe('runCrawlCycle', () => {
       isPromoted: false,
       isPaidPromotion: false,
     })
-
-    const applyAllSpy = vi.spyOn(LabelRuleRegistry.prototype, 'applyAll')
 
     const deps = makeDeps({
       createOpenApiClient: vi.fn().mockResolvedValue({
@@ -816,17 +796,17 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    const bundleForAuthor = applyAllSpy.mock.calls
-      .map((call) => call[0])
-      .find((bundle) => bundle.account.id === 'author1')
-    expect(bundleForAuthor?.recentTweets).toContainEqual(
-      expect.objectContaining({ id: 'shared1', isPromoted: true, isPaidPromotion: true }),
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorId: 'author1',
+        additionalOwnTweets: expect.arrayContaining([
+          expect.objectContaining({ id: 'shared1', isPromoted: true, isPaidPromotion: true }),
+        ]),
+      }),
     )
-
-    applyAllSpy.mockRestore()
   })
 
-  it('excludes a foreign author tweet returned by getUserTweetsAndReplies (reply-thread context) from the author label bundle, while still persisting it under its own author', async () => {
+  it('passes a foreign author tweet returned by getUserTweetsAndReplies (reply-thread context) through as a raw recentTweet, tagged under its own author', async () => {
     const author = rawUser('author1')
     const stranger = rawUser('stranger1', 'stranger')
     const timelineTweet = rawTweet('timeline1', author)
@@ -835,8 +815,6 @@ describe('runCrawlCycle', () => {
     // 返信先の親ツイートを会話スレッドの文脈として本人の投稿と一緒に返すため、
     // 実際の投稿者は本人とは限らない。
     const foreignParentTweet = rawTweet('parent1', stranger)
-
-    const applyAllSpy = vi.spyOn(LabelRuleRegistry.prototype, 'applyAll')
 
     const deps = makeDeps({
       createOpenApiClient: vi.fn().mockResolvedValue({
@@ -863,25 +841,15 @@ describe('runCrawlCycle', () => {
 
     await runCrawlCycle(deps)
 
-    const bundleForAuthor = applyAllSpy.mock.calls
-      .map((call) => call[0])
-      .find((bundle) => bundle.account.id === 'author1')
-    expect(bundleForAuthor?.recentTweets).toContainEqual(
-      expect.objectContaining({ id: 'own-reply1' }),
-    )
-    expect(bundleForAuthor?.recentTweets).not.toContainEqual(
-      expect.objectContaining({ id: 'parent1' }),
-    )
     expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({
         authorId: 'author1',
         recentTweets: expect.arrayContaining([
+          expect.objectContaining({ id: 'own-reply1', accountId: 'author1' }),
           expect.objectContaining({ id: 'parent1', accountId: 'stranger1' }),
         ]),
       }),
     )
-
-    applyAllSpy.mockRestore()
   })
 
   it('does not let a profile-fetched duplicate overwrite a true isPromoted/isPaidPromotion flag in the batch persisted to the DB', async () => {

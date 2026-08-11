@@ -24,22 +24,22 @@ function hasPrDisclosureMarker(fullText: string): boolean {
   return PR_BRACKET_PATTERN.test(fullText) && JAPANESE_TEXT_PATTERN.test(fullText)
 }
 
-// 懸賞・キャンペーンの応募ツイートは、
-// 主催者側のキャンペーンハッシュタグと共に「#PR」風のハッシュタグを含むことがあるが、
-// それは他者の懸賞への応募であって自身のスポンサー開示ではないため、
-// このラベルの対象から除外する。
-const CAMPAIGN_ENTRY_PATTERN = /キャンペーン|懸賞|当選|抽選|応募|当たりますように|プレゼント企画/i
+// 懸賞・キャンペーンへの応募ツイートは、主催者側の企画ハッシュタグと共に「#PR」風のハッシュタグを含むことがあるが、
+// それは他者の懸賞への応募であって自身のスポンサー開示ではないため、このラベルの対象から除外する。
+// 「キャンペーン」等の語だけで判定すると、商品提供を受けたレビュー投稿の企画名にも同じ語が現れて誤って除外されるため、
+// 投稿者自身が応募者側であることを示す一人称的な行動 (応募した・当選しますように等) に限定する。
+const CAMPAIGN_ENTRY_PATTERN =
+  /(応募し(まし|て)た|当た(りますように|りました)|抽選で.{0,10}(当たり|当選))/u
 
-// サンプル数が極端に少ない状態で `isPaidPromotion` フラグ単体を信頼すると、
-// 1件の誤判定・不明瞭な判定がアカウント全体の判定を左右してしまうため、
-// 最低限のサンプル数を要求する。
-const MIN_SAMPLE_FOR_PAID_PROMOTION_FLAG = 3
+// isPaidPromotion は X 公式の有償パートナーシップ開示機能によるフラグであり、
+// ヒューリスティックな #PR ハッシュタグ検出と異なりサンプル数で信頼度を割り引く理由がない。
+// そのため 1 件でも true があれば陽性とみなす。
 
 export const adPrHashtagRule: LabelRule = {
   key: 'ad_pr_hashtag',
   description:
     '日本の Twitter で慣習的に使われる「#PR」ハッシュタグ、または X 公式の有償パートナーシップ開示機能のいずれかで、広告ツイートであることを適切に開示している',
-  version: '1.2.0',
+  version: '1.3.0',
   evaluate(bundle) {
     // このラベルはアカウント自身の投稿における開示を主張するものであるため、
     // リツイート(他者が書いた本文に `RT @...` を付与したもの)は対象から除外する。
@@ -49,8 +49,7 @@ export const adPrHashtagRule: LabelRule = {
     const hasPrHashtag = sampled.some(
       (t) => hasPrDisclosureMarker(t.fullText) && !CAMPAIGN_ENTRY_PATTERN.test(t.fullText),
     )
-    const hasPaidPromotionDisclosure =
-      sampled.length >= MIN_SAMPLE_FOR_PAID_PROMOTION_FLAG && sampled.some((t) => t.isPaidPromotion)
+    const hasPaidPromotionDisclosure = sampled.some((t) => t.isPaidPromotion)
 
     const value = hasPrHashtag || hasPaidPromotionDisclosure
     const confidence = (hasPrHashtag ? 0.6 : 0) + (hasPaidPromotionDisclosure ? 0.6 : 0)

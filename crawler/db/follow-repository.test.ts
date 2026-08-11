@@ -33,7 +33,7 @@ function makePrisma() {
   const followUpdateMany = vi.fn().mockResolvedValue({ count: 0 })
   const followDeleteMany = vi.fn().mockResolvedValue({ count: 0 })
   const tx = {
-    account: { upsert: accountUpsert },
+    account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null) },
     follow: {
       createMany: followCreateMany,
       updateMany: followUpdateMany,
@@ -44,7 +44,7 @@ function makePrisma() {
     .fn()
     .mockImplementation((fn: (transactionClient: typeof tx) => Promise<void>) => fn(tx))
   const prisma = {
-    account: { upsert: accountUpsert },
+    account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null) },
     $transaction,
   } as unknown as PrismaClient
   return {

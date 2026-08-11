@@ -98,7 +98,7 @@ model Tweet {
   source                     String
   collectedAt                DateTime @default(now())
 
-  @@index([accountId])
+  @@index([accountId, createdAt])
 }
 
 model LabelDefinition {
@@ -522,6 +522,9 @@ model AnalysisWorkItem {
   attemptCount     Int           @default(0)
   maxAttempts      Int           @default(5)
   dependencyKey    String?
+  // account_relabel 専用: lease 中に新しい変更要求が来たことを示すマーカー。
+  // complete 時にこれが設定されていれば succeeded にせず queued へ戻す(他 kind では未使用)。
+  staleRequestedAt DateTime?
   lastErrorCode    String?
   lastErrorSummary String?
   createdAt        DateTime      @default(now())
@@ -549,6 +552,14 @@ model AnalysisRun {
   errorSummary  String?
 
   @@index([workItemId, startedAt(sort: Desc)])
+}
+
+// account_relabel producer の incremental scan 位置を永続化する singleton テーブル。
+// 1 行だけを持ち、id は常に固定値 "singleton" を使う。
+model RelabelScanCursor {
+  id                   String   @id @default("singleton")
+  lastScannedAccountId String?
+  updatedAt            DateTime @updatedAt
 }
 
 model OperationCycle {
