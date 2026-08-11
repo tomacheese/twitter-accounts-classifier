@@ -347,6 +347,32 @@ describe('recordAccountLabelsBulk no-op suppression', () => {
 
     expect(warn).toHaveBeenCalled()
   })
+
+  it('gates the AccountLabelLatest UPDATE (labeledAt and the 3 provenance fields included) on the same to_insert set as the history INSERT', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await recordAccountLabelsBulk(prisma, {
+      sourceKind: 'relabel',
+      accountId: 'u1',
+      labels: [
+        {
+          labelDefinitionId: 'ld1',
+          result: { value: true, confidence: 1, reason: 'because a' },
+          method: 'rule-a',
+          ruleVersion: '1.0.0',
+        },
+      ],
+    })
+
+    const [sql] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    const sqlText = sql.join('')
+    // semantic no-op の行は upserted_latest の INSERT ... SELECT 自体に乗らないため、
+    // labeledAt・sourceKind・sourceId・sourceUsername を含め一切 UPDATE されない。
+    expect(sqlText).toMatch(
+      /upserted_latest AS \(\s*INSERT INTO "AccountLabelLatest"[\s\S]*?WHERE EXISTS \(SELECT 1 FROM to_insert ti WHERE ti\."id" = ir\."id"\)/,
+    )
+  })
 })
 
 describe('recordCrawlAccountLabel', () => {
