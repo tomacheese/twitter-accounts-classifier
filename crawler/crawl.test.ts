@@ -184,6 +184,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
     clearCrawlAccountCheckpoints: vi.fn().mockResolvedValue(undefined),
     touchCrawlRunHeartbeat: vi.fn().mockResolvedValue(undefined),
     sleep: vi.fn().mockResolvedValue(undefined),
+    accountTimeoutMs: 60_000,
     ...overrides,
   }
 }
@@ -191,6 +192,42 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
 describe('runCrawlCycle', () => {
   beforeEach(() => {
     captureMessageMock.mockClear()
+  })
+
+  it('1 account の外部通信が account timeout を超えて応答しない場合、failed として記録し次に進む', async () => {
+    const closeOpenApiClient = vi.fn().mockResolvedValue(undefined)
+    const closeTrendsScraper = vi.fn().mockResolvedValue(undefined)
+    const recordCrawlAccountRun = vi.fn().mockResolvedValue(undefined)
+    const finishCrawlRun = vi.fn().mockResolvedValue(undefined)
+    const deps = makeDeps({
+      accountTimeoutMs: 20,
+      createOpenApiClient: vi.fn(
+        () =>
+          new Promise<never>(() => {
+            // 意図的に永遠に settle しない: cycletls 子プロセスのハングを模する。
+          }),
+      ),
+      closeOpenApiClient,
+      closeTrendsScraper,
+      recordCrawlAccountRun,
+      finishCrawlRun,
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        username: 'v',
+        status: 'failed',
+        errorMessage: expect.stringContaining('exceeded 20ms timeout'),
+      }),
+    )
+    // createTrendsScraper は正常に解決するため登録され、account timeout の force-close 対象になる。
+    expect(closeTrendsScraper).toHaveBeenCalled()
+    // createOpenApiClient は一度も解決しないため、対応する close は呼ばれない。
+    expect(closeOpenApiClient).not.toHaveBeenCalled()
+    // ハングした account の処理を打ち切った後もサイクル全体は完了する。
+    expect(finishCrawlRun).toHaveBeenCalled()
   })
 
   it('runs the full pipeline for the configured account and persists results', async () => {
