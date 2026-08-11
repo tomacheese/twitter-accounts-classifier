@@ -1,6 +1,7 @@
 import React from 'react'
 import { getPrismaClient } from '@/lib/prisma'
 import { getSystemConsoleData } from '@/lib/queries/system-console'
+import { getRelabelStatus } from '@/lib/queries/relabel-status'
 import { formatDateTime } from '@/lib/format-date'
 import { ErrorFallback } from '../components/error-fallback'
 import { ResponsiveTable, type ResponsiveTableColumn } from '../components/responsive-table'
@@ -11,6 +12,7 @@ import type {
   SystemComponentBuildIdentity,
   SystemReadModelStatus,
 } from '@/lib/queries/system-console'
+import type { RelabelLabelCoverage, RelabelBacklogEntry } from '@/lib/queries/relabel-status'
 
 const componentBuildIdentityColumns: ResponsiveTableColumn<SystemComponentBuildIdentity>[] = [
   {
@@ -84,6 +86,48 @@ const readModelColumns: ResponsiveTableColumn<SystemReadModelStatus>[] = [
   },
 ]
 
+const relabelCoverageColumns: ResponsiveTableColumn<RelabelLabelCoverage>[] = [
+  {
+    key: 'key',
+    header: 'Label',
+    priority: 'primary',
+    render: (coverage) => <span className="font-mono">{coverage.key}</span>,
+  },
+  {
+    key: 'currentRuleVersion',
+    header: 'Current rule version',
+    priority: 'primary',
+    render: (coverage) => coverage.currentRuleVersion ?? '—',
+  },
+  {
+    key: 'coverage',
+    header: 'Coverage',
+    priority: 'primary',
+    render: (coverage) => `${coverage.coveredAccounts} / ${coverage.totalAccounts}`,
+  },
+  {
+    key: 'description',
+    header: 'Description',
+    priority: 'secondary',
+    render: (coverage) => coverage.description,
+  },
+]
+
+const relabelBacklogColumns: ResponsiveTableColumn<RelabelBacklogEntry>[] = [
+  {
+    key: 'status',
+    header: 'Status',
+    priority: 'primary',
+    render: (entry) => entry.status,
+  },
+  {
+    key: 'count',
+    header: 'Count',
+    priority: 'primary',
+    render: (entry) => entry.count,
+  },
+]
+
 // 指定しないと、DB 接続がないビルド時に next build が静的生成を試みてしまう。
 export const dynamic = 'force-dynamic'
 
@@ -98,6 +142,12 @@ export default async function SystemPage(): Promise<React.ReactElement> {
   const prisma = getPrismaClient()
   try {
     const data = await getSystemConsoleData(prisma)
+    // Relabel backfill セクションの失敗で画面全体を落とさないよう、他セクションの取得とは
+    // 分離して自身の catch で null にフォールバックする。
+    const relabelStatus = await getRelabelStatus(prisma).catch((error: unknown) => {
+      console.error('Failed to load the relabel status data:', error)
+      return null
+    })
 
     return (
       <div className="flex flex-col gap-6">
@@ -179,6 +229,46 @@ export default async function SystemPage(): Promise<React.ReactElement> {
                 rowKey={(model) => model.modelKey}
               />
             </div>
+          )}
+        </section>
+
+        <section aria-labelledby="relabel-backfill-heading">
+          <h2 id="relabel-backfill-heading" className="text-lg font-semibold">
+            Relabel backfill
+          </h2>
+          {relabelStatus === null ? (
+            <p className="mt-2">Failed to load the relabel status data.</p>
+          ) : (
+            <>
+              <p className="mt-2">
+                Last scan cursor update:{' '}
+                {relabelStatus.scanCursorUpdatedAt
+                  ? formatDateTime(relabelStatus.scanCursorUpdatedAt)
+                  : '—'}
+              </p>
+              {relabelStatus.labelCoverage.length === 0 ? (
+                <p className="mt-2">No label definition recorded yet.</p>
+              ) : (
+                <div className="mt-2">
+                  <ResponsiveTable
+                    columns={relabelCoverageColumns}
+                    rows={relabelStatus.labelCoverage}
+                    rowKey={(coverage) => coverage.key}
+                  />
+                </div>
+              )}
+              {relabelStatus.backlog.length === 0 ? (
+                <p className="mt-2">No account_relabel backlog.</p>
+              ) : (
+                <div className="mt-2">
+                  <ResponsiveTable
+                    columns={relabelBacklogColumns}
+                    rows={relabelStatus.backlog}
+                    rowKey={(entry) => entry.status}
+                  />
+                </div>
+              )}
+            </>
           )}
         </section>
 

@@ -140,4 +140,32 @@ describe('buildFollowGraphLabelIndex label filtering', () => {
     expect(queryRaw).not.toHaveBeenCalled()
     expect(index.signalsFor('any')).toEqual({})
   })
+
+  it('filters both queries by accountIds when the option is given', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await buildFollowGraphLabelIndex(prisma, new Map([['topic_food', 'ld-food']]), {
+      accountIds: ['alice', 'bob'],
+    })
+
+    expect(queryRaw).toHaveBeenCalledTimes(2)
+    for (const call of queryRaw.mock.calls) {
+      const sql = (call[0] as unknown[]).join('')
+      expect(sql).toContain('= ANY(')
+    }
+  })
+
+  it('does not filter by accountIds when the option is omitted', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await buildFollowGraphLabelIndex(prisma, new Map([['topic_food', 'ld-food']]))
+
+    expect(queryRaw).toHaveBeenCalledTimes(2)
+    for (const call of queryRaw.mock.calls) {
+      const sql = (call[0] as unknown[]).join('')
+      expect(sql).not.toContain('= ANY(')
+    }
+  })
 })

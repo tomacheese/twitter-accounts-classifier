@@ -9,6 +9,7 @@ const logger = Logger.configure('label-repository')
 export interface LabelDefinitionInput {
   key: string
   description: string
+  currentRuleVersion: string
 }
 
 export async function ensureLabelDefinition(
@@ -18,7 +19,7 @@ export async function ensureLabelDefinition(
   return prisma.labelDefinition.upsert({
     where: { key: input.key },
     create: input,
-    update: { description: input.description },
+    update: { description: input.description, currentRuleVersion: input.currentRuleVersion },
   })
 }
 
@@ -36,6 +37,7 @@ export async function ensureLabelDefinitionsForRules(
       const definition = await ensureLabelDefinition(prisma, {
         key: rule.key,
         description: rule.description,
+        currentRuleVersion: rule.version,
       })
       return [rule.key, definition.id] as const
     }),

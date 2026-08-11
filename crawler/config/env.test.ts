@@ -4,6 +4,9 @@ import {
   getCrawlIntervalSeconds,
   getCrawlStaleThresholdMultiplier,
   getCrawlWarningThreshold,
+  getRelabelerProducerBatchSize,
+  getRelabelerWorkerBatchSize,
+  getRelabelerWorkerConcurrency,
   getWeeklyAnalysisStaleThresholdSeconds,
   getTwitterRequestTimeoutMs,
   getCrawlAccountTimeoutMs,
@@ -170,6 +173,93 @@ describe('getCrawlStaleThresholdMultiplier', () => {
     process.env.CRAWL_STALE_THRESHOLD_MULTIPLIER = '-1'
     expect(() => getCrawlStaleThresholdMultiplier()).toThrow(
       'CRAWL_STALE_THRESHOLD_MULTIPLIER environment variable must be a positive integer',
+    )
+  })
+})
+
+describe('getRelabelerProducerBatchSize', () => {
+  const originalValue = process.env.RELABELER_PRODUCER_BATCH_SIZE
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env.RELABELER_PRODUCER_BATCH_SIZE
+    } else {
+      process.env.RELABELER_PRODUCER_BATCH_SIZE = originalValue
+    }
+  })
+
+  it('returns 5000 when unset', () => {
+    delete process.env.RELABELER_PRODUCER_BATCH_SIZE
+    expect(getRelabelerProducerBatchSize()).toBe(5000)
+  })
+
+  it('returns the configured value', () => {
+    process.env.RELABELER_PRODUCER_BATCH_SIZE = '1000'
+    expect(getRelabelerProducerBatchSize()).toBe(1000)
+  })
+
+  it('throws when the value is not a positive integer', () => {
+    process.env.RELABELER_PRODUCER_BATCH_SIZE = '0'
+    expect(() => getRelabelerProducerBatchSize()).toThrow(
+      'RELABELER_PRODUCER_BATCH_SIZE environment variable must be a positive integer',
+    )
+  })
+})
+
+describe('getRelabelerWorkerBatchSize', () => {
+  const originalValue = process.env.RELABELER_WORKER_BATCH_SIZE
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env.RELABELER_WORKER_BATCH_SIZE
+    } else {
+      process.env.RELABELER_WORKER_BATCH_SIZE = originalValue
+    }
+  })
+
+  it('returns 2000 when unset', () => {
+    delete process.env.RELABELER_WORKER_BATCH_SIZE
+    expect(getRelabelerWorkerBatchSize()).toBe(2000)
+  })
+
+  it('returns the configured value', () => {
+    process.env.RELABELER_WORKER_BATCH_SIZE = '500'
+    expect(getRelabelerWorkerBatchSize()).toBe(500)
+  })
+
+  it('throws when the value is not a positive integer', () => {
+    process.env.RELABELER_WORKER_BATCH_SIZE = '-1'
+    expect(() => getRelabelerWorkerBatchSize()).toThrow(
+      'RELABELER_WORKER_BATCH_SIZE environment variable must be a positive integer',
+    )
+  })
+})
+
+describe('getRelabelerWorkerConcurrency', () => {
+  const originalValue = process.env.RELABELER_WORKER_CONCURRENCY
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env.RELABELER_WORKER_CONCURRENCY
+    } else {
+      process.env.RELABELER_WORKER_CONCURRENCY = originalValue
+    }
+  })
+
+  it('returns 1 when unset', () => {
+    delete process.env.RELABELER_WORKER_CONCURRENCY
+    expect(getRelabelerWorkerConcurrency()).toBe(1)
+  })
+
+  it('returns the configured value', () => {
+    process.env.RELABELER_WORKER_CONCURRENCY = '4'
+    expect(getRelabelerWorkerConcurrency()).toBe(4)
+  })
+
+  it('throws when the value is not a positive integer', () => {
+    process.env.RELABELER_WORKER_CONCURRENCY = '1.5'
+    expect(() => getRelabelerWorkerConcurrency()).toThrow(
+      'RELABELER_WORKER_CONCURRENCY environment variable must be a positive integer',
     )
   })
 })

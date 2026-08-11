@@ -23,7 +23,7 @@ export interface RelabelResult {
  * 通常運用は crawler/relabel-worker.ts の producer が entrypoint loop の周期ごとに incremental に進める。
  * 新規ルール追加直後などに今すぐ全件を re-scan して account_relabel を要求したい場合の手動 CLI (`pnpm relabel`) 向けエントリポイントとして用意する。
  * rule 評価・label 永続化はここでは行わず、stale な account の enqueue だけを行う。
- * 評価・永続化は relabel-worker.ts の drainAccountRelabelQueue (entrypoint loop 経由) が担う。
+ * 評価・永続化は relabel-worker.ts の evaluateAccountRelabelItems (relabeler-entrypoint loop 経由) が担う。
  * @param prisma - 使用する Prisma クライアント
  * @param registry - stale 判定に使うラベルルールのレジストリ
  * @returns scan した account の総数と account_relabel を要求した総数

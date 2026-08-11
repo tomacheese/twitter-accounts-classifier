@@ -89,6 +89,27 @@ services:
       - ./data:/app/crawler/data
     logging: *default-logging
 
+  relabeler:
+    build:
+      context: .
+      dockerfile: crawler/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    entrypoint: ["/app/relabeler-entrypoint.sh"]
+    environment:
+      # analyzer と同様、HDD と PostgreSQL の shared memory を圧迫しないよう DB 接続本数を絞る。
+      DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}?connection_limit=5&pool_timeout=0
+      RELABELER_INTERVAL_SECONDS: ${RELABELER_INTERVAL_SECONDS:-30}
+      RELABELER_PRODUCER_BATCH_SIZE: ${RELABELER_PRODUCER_BATCH_SIZE:-5000}
+      RELABELER_WORKER_BATCH_SIZE: ${RELABELER_WORKER_BATCH_SIZE:-2000}
+      RELABELER_WORKER_CONCURRENCY: ${RELABELER_WORKER_CONCURRENCY:-1}
+      GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
+    logging: *default-logging
+
   viewer:
     build:
       context: .

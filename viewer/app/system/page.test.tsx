@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/prisma', () => ({ getPrismaClient: () => ({}) }))
 vi.mock('@/lib/queries/system-console', () => ({ getSystemConsoleData: vi.fn() }))
+vi.mock('@/lib/queries/relabel-status', () => ({ getRelabelStatus: vi.fn() }))
 
 const { getSystemConsoleData } = await import('@/lib/queries/system-console')
+const { getRelabelStatus } = await import('@/lib/queries/relabel-status')
 const { default: SystemPage } = await import('./page')
 
 describe('SystemPage', () => {
@@ -33,6 +35,11 @@ describe('SystemPage', () => {
         },
       ],
     })
+    vi.mocked(getRelabelStatus).mockResolvedValue({
+      labelCoverage: [],
+      backlog: [],
+      scanCursorUpdatedAt: null,
+    })
 
     const html = renderToStaticMarkup(await SystemPage())
 
@@ -41,5 +48,23 @@ describe('SystemPage', () => {
     expect(html).toContain('abc123')
     expect(html).toContain('crawler')
     expect(html).toContain('unknown')
+  })
+
+  it('getRelabelStatus が失敗しても他セクションは表示され続ける', async () => {
+    process.env.VIEWER_NEW_UI_SECTIONS = 'system'
+    vi.mocked(getSystemConsoleData).mockResolvedValue({
+      identity: { applicationVersion: '1.0.0', environment: 'production' },
+      componentHealth: null,
+      activePolicy: null,
+      readModels: [],
+      diagnosticsEnvVars: [],
+      componentBuildIdentities: [],
+    })
+    vi.mocked(getRelabelStatus).mockRejectedValue(new Error('db error'))
+
+    const html = renderToStaticMarkup(await SystemPage())
+
+    expect(html).toContain('System identity')
+    expect(html).toContain('Failed to load the relabel status data.')
   })
 })

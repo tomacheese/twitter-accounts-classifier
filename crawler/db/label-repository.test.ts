@@ -18,10 +18,37 @@ describe('ensureLabelDefinition', () => {
     const upsert = vi.fn().mockResolvedValue({ id: 'ld1', key: 'blue_verified' })
     const prisma = { labelDefinition: { upsert } } as unknown as PrismaClient
 
-    await ensureLabelDefinition(prisma, { key: 'blue_verified', description: 'desc' })
+    await ensureLabelDefinition(prisma, {
+      key: 'blue_verified',
+      description: 'desc',
+      currentRuleVersion: '1.0.0',
+    })
 
     const call = upsert.mock.calls[0][0] as Record<string, unknown>
     expect(call.where).toEqual({ key: 'blue_verified' })
+  })
+
+  it('既存の LabelDefinition の currentRuleVersion を更新する', async () => {
+    const upsertMock = vi.fn().mockResolvedValue({
+      id: 'def-1',
+      key: 'blue_verified',
+      description: 'desc',
+      currentRuleVersion: '2.0.0',
+      createdAt: new Date(),
+    })
+    const prisma = { labelDefinition: { upsert: upsertMock } } as unknown as PrismaClient
+
+    await ensureLabelDefinition(prisma, {
+      key: 'blue_verified',
+      description: 'desc',
+      currentRuleVersion: '2.0.0',
+    })
+
+    expect(upsertMock).toHaveBeenCalledWith({
+      where: { key: 'blue_verified' },
+      create: { key: 'blue_verified', description: 'desc', currentRuleVersion: '2.0.0' },
+      update: { description: 'desc', currentRuleVersion: '2.0.0' },
+    })
   })
 })
 

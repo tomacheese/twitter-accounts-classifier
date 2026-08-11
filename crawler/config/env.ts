@@ -99,3 +99,28 @@ export function getTwitterRequestTimeoutMs(): number {
 export function getCrawlAccountTimeoutMs(): number {
   return parsePositiveIntEnv('CRAWL_ACCOUNT_TIMEOUT_MS', 3_600_000)
 }
+
+/**
+ * relabeler の producer (stale scan) が 1 cycle あたりに scan する Account 件数。
+ * @returns producer の batch size
+ */
+export function getRelabelerProducerBatchSize(): number {
+  return parsePositiveIntEnv('RELABELER_PRODUCER_BATCH_SIZE', 5000)
+}
+
+/**
+ * relabeler の worker (queue drain) が 1 レーンあたりに claim する work item の上限件数
+ * (concurrency 分の合計ではない)。
+ * @returns worker の batch size
+ */
+export function getRelabelerWorkerBatchSize(): number {
+  return parsePositiveIntEnv('RELABELER_WORKER_BATCH_SIZE', 2000)
+}
+
+/**
+ * relabeler の worker が evaluate フェーズを並列実行するレーン数。
+ * @returns worker の並行度
+ */
+export function getRelabelerWorkerConcurrency(): number {
+  return parsePositiveIntEnv('RELABELER_WORKER_CONCURRENCY', 1)
+}
