@@ -53,7 +53,7 @@ export async function getCrawlAccountRuns(
   crawlRunId: string,
 ): Promise<CrawlAccountRunView[]> {
   const accountRuns = await prisma.crawlAccountRun.findMany({
-    where: { crawlRunId },
+    where: { crawlRunId, classificationStatus: { not: 'skipped' } },
     orderBy: [{ startedAt: 'asc' }],
   })
   const usernames = accountRuns.map((run) => run.username)
