@@ -33,22 +33,26 @@ interface AggregateRow {
  * フォロー先方向は `Follow` と `LabelingFollowSample` の両方を、
  * フォロワー方向は `Follow` を、それぞれ `AccountLabelLatest` と突き合わせる集約クエリで、
  * アカウント単位のグラフ探索を行わずにラベルごとの既存付与状況を組み立てる。
+ * `accountIds` で指定した account だけを対象にすることで、集計対象行数を呼び出し元の
+ * 対象 account 数に比例させる。
  * 参照するのは今回の実行が始まる前に永続化済みの `AccountLabelLatest` の値のみであり、
- * 今回の実行中に確定した新しいラベルは反映しない (呼び出し元がこの関数を各実行の先頭で1回だけ呼ぶ前提のため)。
+ * 今回の実行中に確定した新しいラベルは反映しない。
  * @param prisma - 問い合わせに使う Prisma クライアント
  * @param labelKeyToDefinitionId - ルールキーから LabelDefinition の id へのマップ (`ensureLabelDefinitionsForRules` の戻り値)
+ * @param accountIds - signal を構築する対象 account の id 一覧。空の場合はクエリを発行しない
  * @returns アカウントごとにシグナルを読み出せるインデックス
  */
 export async function buildFollowGraphLabelIndex(
   prisma: PrismaClient,
   labelKeyToDefinitionId: Map<string, string>,
+  accountIds: string[],
 ): Promise<FollowGraphLabelIndex> {
   const definitionIdToKey = new Map(
     [...labelKeyToDefinitionId.entries()].map(([key, id]) => [id, key]),
   )
   const targetDefinitionIds = [...definitionIdToKey.keys()]
 
-  if (targetDefinitionIds.length === 0) {
+  if (targetDefinitionIds.length === 0 || accountIds.length === 0) {
     return { signalsFor: () => ({}) }
   }
 
@@ -65,6 +69,7 @@ export async function buildFollowGraphLabelIndex(
       ) edges
       JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
       WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
+        AND edges."accountId" = ANY(${accountIds})
       GROUP BY edges."accountId", all_latest."labelDefinitionId"
     `
   const followerRows = await prisma.$queryRaw<AggregateRow[]>`
@@ -76,6 +81,7 @@ export async function buildFollowGraphLabelIndex(
       FROM "Follow" f
       JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = f."followerId"
       WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
+        AND f."followeeId" = ANY(${accountIds})
       GROUP BY f."followeeId", all_latest."labelDefinitionId"
     `
 
