@@ -222,16 +222,13 @@ describe('upsertAccountsBulk bisection fallback', () => {
 
 describe('resolveAccountIdsByUsername', () => {
   it('screenName が一致する Account の id だけを返す', async () => {
-    const prisma = {
-      account: {
-        findMany: vi.fn().mockResolvedValue([{ id: 'acct-alice' }, { id: 'acct-bob' }]),
-      },
-    } as unknown as PrismaClient
+    const findMany = vi.fn().mockResolvedValue([{ id: 'acct-alice' }, { id: 'acct-bob' }])
+    const prisma = { account: { findMany } } as unknown as PrismaClient
 
     const ids = await resolveAccountIdsByUsername(prisma, ['alice', 'bob'])
 
     expect(ids).toEqual(['acct-alice', 'acct-bob'])
-    expect(prisma.account.findMany).toHaveBeenCalledWith({
+    expect(findMany).toHaveBeenCalledWith({
       where: { screenName: { in: ['alice', 'bob'] } },
       select: { id: true },
     })

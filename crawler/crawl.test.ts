@@ -906,10 +906,9 @@ describe('runCrawlCycle', () => {
     await runCrawlCycle(deps)
 
     expect(deps.resolveAccountIdsByUsername).toHaveBeenCalledWith(['v'])
-    expect(deps.loadFollowGraphLabelIndex).toHaveBeenCalledWith(
-      new Map([['topic_anime', 'ld1']]),
-      ['acct-v'],
-    )
+    expect(deps.loadFollowGraphLabelIndex).toHaveBeenCalledWith(new Map([['topic_anime', 'ld1']]), [
+      'acct-v',
+    ])
     expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({ followGraphLabelIndex }),
     )
