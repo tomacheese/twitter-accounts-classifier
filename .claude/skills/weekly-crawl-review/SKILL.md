@@ -29,11 +29,20 @@ Run `scripts/weekly-analysis-heartbeat.sh sampling`. Summarize label risk, sampl
 
 Start the following work concurrently:
 
+Create an agent team for this parallel phase. Spawn each worker as a named agent-team teammate using the matching project subagent definition; do not rely on plain subagents for work that must report through `SendMessage`. Use `judge-0` through `judge-7`, `rule-auditor`, and `researcher` as the initial worker names. A single replacement uses `<original-name>-retry`; do not create retry chains.
+
 - One `weekly-review-sample-judge` per sample batch. Each batch must perform a read-only, blind-first evaluation.
 - `weekly-review-rule-auditor` for high-risk labels and recently changed rules.
 - `weekly-review-researcher` for current spam and abuse context.
 
 The coordinator integrates sample-judge results. Never drop a sample because a subagent failed: mark execution failures as `skipped` and insufficient evidence as `uncertain`. If the phase exceeds 30 minutes, refresh the `cross_checking` heartbeat.
+
+Use `SendMessage` as the worker liveness and handoff protocol:
+
+- Every worker must send `SendMessage` to recipient `team-lead` before becoming idle, completing, blocking, or failing. A worker that is still active for 5 minutes without completing must send a short progress message.
+- `team-lead` must track outstanding workers and their last message. If a worker becomes idle without the required report, immediately send a message that resumes the worker and requests the missing report.
+- If an active worker has sent no progress or completion message for 5 minutes, request status with `SendMessage`. If there is still no response after another 5 minutes, send a second request for an immediate partial result or blocking reason.
+- If the second request yields no usable response, retry the work once by resuming that worker when possible or starting one replacement. After two failed attempts, stop retrying and record the affected work as `review_incomplete`; planned samples that cannot be judged become `skipped`.
 
 ### 3. Aggregate judgments
 
