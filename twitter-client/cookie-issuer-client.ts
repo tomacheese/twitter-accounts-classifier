@@ -27,7 +27,17 @@ export interface CookieIssuerClientOptions {
 
 export interface RetryOptions {
   maxAttempts?: number
+  /**
+   * attempt ごとの待機を線形に増やす (`delayMs * attempt`) ための基準値 (ミリ秒)。
+   */
   delayMs?: number
+  /**
+   * retry 間の sleep の累積時間 (ミリ秒) の上限。
+   * HTTP request/response 自体の wall-clock 時間は含まない。
+   * Cookie Issuer 側の lock 待機 timeout (`LOGIN_LOCK_TIMEOUT_SECONDS`) とは種類が異なる。
+   * 両者を同一の end-to-end timeout として扱わないこと。
+   */
+  maxTotalWaitMs?: number
 }
 
 export function createCookieIssuerClient(options: CookieIssuerClientOptions) {
@@ -58,24 +68,31 @@ export function createCookieIssuerClient(options: CookieIssuerClientOptions) {
     account: CookieIssuerAccount,
     retry: RetryOptions = {},
   ): Promise<IssuedCookies> {
-    const maxAttempts = retry.maxAttempts ?? 5
+    const maxAttempts = retry.maxAttempts ?? 10
     const delayMs = retry.delayMs ?? 3000
-    let lastError: unknown
+    const maxTotalWaitMs = retry.maxTotalWaitMs ?? 150_000
+    let cumulativeWaitMs = 0
+    let lastAttempt = 0
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      lastAttempt = attempt
       try {
         return await issueCookies(account)
       } catch (error) {
-        lastError = error
         const isBusy = error instanceof CookieIssuerError && error.status === 409
-        if (!isBusy || attempt === maxAttempts) {
-          throw error
-        }
-        await sleepImpl(delayMs)
+        if (!isBusy) throw error
+        if (attempt === maxAttempts) break
+        const nextWaitMs = delayMs * attempt
+        if (cumulativeWaitMs + nextWaitMs > maxTotalWaitMs) break
+        await sleepImpl(nextWaitMs)
+        cumulativeWaitMs += nextWaitMs
       }
     }
 
-    throw lastError
+    throw new CookieIssuerError(
+      `Cookie Issuer busy: exhausted ${lastAttempt} attempts over ${cumulativeWaitMs}ms (last status 409)`,
+      409,
+    )
   }
 
   return { issueCookies, issueCookiesWithRetry }
