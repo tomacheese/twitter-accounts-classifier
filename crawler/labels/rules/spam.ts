@@ -12,7 +12,7 @@ import type { LabelRule } from '../types'
 const SOLICITATION_GAP = String.raw`[^\s❌🆖✗・、。!！🚫🈲]{0,10}`
 const SOLICITATION_PATTERN = new RegExp(
   String.raw`出会い(系|活)|パパ活|ママ活|裏垢.{0,10}(dm|DM|募集|販売)|自動(フォロー|いいね)|稼げる|副業${SOLICITATION_GAP}(募集|紹介|稼)|儲かる|不労所得|高収入.{0,10}(バイト|副業)|f4f|follow\s*for\s*follow|dm\s*me.{0,10}fun`,
-  'iu',
+  'giu',
 )
 
 // SOLICITATION_PATTERN は用語の有無のみを判定し、
@@ -27,17 +27,23 @@ const REJECTION_WINDOW_LENGTH = 60
 const REJECTION_PATTERN =
   /お断り|お断わり|御断り|拒否|NG|ダメ|禁止|お控え|ご遠慮|しないで|通報|ブロック|スルー|無視|要らん|要りません|要らない|いりません|いらない|不要|結構です|興味(が)?(あり|有り)?ません|対応(は)?していません|🆖|❌|✗/i
 
-function isRejectedSolicitation(bio: string): boolean {
+function isRejectedMatch(normalized: string, match: RegExpMatchArray): boolean {
+  const index = match.index ?? 0
+  const afterMatch = normalized.slice(
+    index + match[0].length,
+    index + match[0].length + REJECTION_WINDOW_LENGTH,
+  )
+  return REJECTION_PATTERN.test(afterMatch)
+}
+
+// 最初の一致だけを見ると、先に来た拒否表現につられて後方の別の勧誘を見逃す。
+// そのため全ての一致箇所を判定し、いずれかが拒否文脈でなければ勧誘とみなす。
+function hasGenuineSolicitation(bio: string): boolean {
   // 半角カタカナ・全角英数字などの表記ゆれを吸収するため、
   // 判定前に正規化する (例: 半角の「ﾀﾞﾒ」は全角「ダメ」の NG 語彙に一致しない)。
   const normalized = bio.normalize('NFKC')
-  const match = SOLICITATION_PATTERN.exec(normalized)
-  if (match === null) return false
-  const afterMatch = normalized.slice(
-    match.index + match[0].length,
-    match.index + match[0].length + REJECTION_WINDOW_LENGTH,
-  )
-  return REJECTION_PATTERN.test(afterMatch)
+  const matches = [...normalized.matchAll(SOLICITATION_PATTERN)]
+  return matches.some((match) => !isRejectedMatch(normalized, match))
 }
 
 // スパムボットはフォロー返しを期待して大量のアカウントをフォローするため、
@@ -58,11 +64,10 @@ export const spamRule: LabelRule = {
   key: 'spam',
   description:
     'プロフィールで出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある',
-  version: '1.6.0',
+  version: '1.7.0',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
-    const hasSolicitation =
-      bio !== null && SOLICITATION_PATTERN.test(bio) && !isRejectedSolicitation(bio)
+    const hasSolicitation = bio !== null && hasGenuineSolicitation(bio)
 
     const sampled = bundle.recentTweets
     const retweetRatio =

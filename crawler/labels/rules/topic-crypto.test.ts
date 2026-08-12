@@ -57,6 +57,16 @@ describe('topicCryptoRule', () => {
     ).toBe(false)
   })
 
+  it('is true for a bio with an early rejected NFT mention followed by a later, well-separated genuine crypto declaration', () => {
+    expect(
+      topicCryptoRule.evaluate(
+        makeBundle({
+          bio: 'イラスト垢です。🚫NFT/AI学習🚫 無断転載もお断り。猫と旅行が好きです。趣味の投資としてビットコインも少し保有しています',
+        }),
+      ).value,
+    ).toBe(true)
+  })
+
   it('bio・ツイートにキーワードを含まず、フォローグラフシグナルがしきい値を満たす場合は value: true・confidence: 0.5 になる', () => {
     const bundle = {
       ...makeBundle({}),
