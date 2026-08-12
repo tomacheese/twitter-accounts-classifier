@@ -353,6 +353,128 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
     expect(issues).toHaveLength(1)
     expect(issues[0]?.component).toBe('analyzer:label_aggregate_refresh')
   })
+
+  it('stage-specific failure は同一 WorkItem のリトライ成功で resolve される', async () => {
+    const workItemId = `work-item-${randomUUID()}`
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'label_aggregate_refresh',
+      workItemId,
+      attemptNumber: 1,
+      status: 'failed',
+      errorSummary: 'transaction timeout',
+      errorCode: 'label_aggregate_snapshot_failed',
+      triggerType: 'schedule',
+      createdAt: new Date('2026-08-09T00:00:00Z'),
+      now: new Date('2026-08-09T00:00:00Z'),
+    })
+    const issue = await prisma.operationalIssue.findFirstOrThrow()
+    expect(issue.status).toBe('active')
+
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'label_aggregate_refresh',
+      workItemId,
+      attemptNumber: 2,
+      status: 'succeeded',
+      errorSummary: undefined,
+      errorCode: undefined,
+      triggerType: 'schedule',
+      createdAt: new Date('2026-08-09T00:00:00Z'),
+      now: new Date('2026-08-09T00:05:00Z'),
+    })
+
+    const resolved = await prisma.operationalIssue.findUniqueOrThrow({ where: { id: issue.id } })
+    expect(resolved.status).toBe('resolved')
+  })
+
+  it('stage-specific failure は triggerType 条件を満たす別 WorkItem の成功で resolve される', async () => {
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'label_aggregate_refresh',
+      workItemId: `work-item-${randomUUID()}`,
+      attemptNumber: 1,
+      status: 'dead',
+      errorSummary: 'transaction timeout',
+      errorCode: 'label_aggregate_snapshot_failed',
+      triggerType: 'schedule',
+      createdAt: new Date('2026-08-09T00:00:00Z'),
+      now: new Date('2026-08-09T00:00:00Z'),
+    })
+    const issue = await prisma.operationalIssue.findFirstOrThrow()
+
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'label_aggregate_refresh',
+      workItemId: `work-item-${randomUUID()}`,
+      attemptNumber: 1,
+      status: 'succeeded',
+      errorSummary: undefined,
+      errorCode: undefined,
+      triggerType: 'schedule',
+      createdAt: new Date('2026-08-09T01:00:00Z'),
+      now: new Date('2026-08-09T01:05:00Z'),
+    })
+
+    const resolved = await prisma.operationalIssue.findUniqueOrThrow({ where: { id: issue.id } })
+    expect(resolved.status).toBe('resolved')
+  })
+
+  it('label_finding_generation_failed は schedule 起点の成功では resolve されない', async () => {
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'label_aggregate_refresh',
+      workItemId: `work-item-${randomUUID()}`,
+      attemptNumber: 1,
+      status: 'failed',
+      errorSummary: 'finding generation failed',
+      errorCode: 'label_finding_generation_failed',
+      triggerType: 'crawl_run',
+      createdAt: new Date('2026-08-09T00:00:00Z'),
+      now: new Date('2026-08-09T00:00:00Z'),
+    })
+    const issue = await prisma.operationalIssue.findFirstOrThrow()
+
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'label_aggregate_refresh',
+      workItemId: `work-item-${randomUUID()}`,
+      attemptNumber: 1,
+      status: 'succeeded',
+      errorSummary: undefined,
+      errorCode: undefined,
+      triggerType: 'schedule',
+      createdAt: new Date('2026-08-09T01:00:00Z'),
+      now: new Date('2026-08-09T01:05:00Z'),
+    })
+
+    const stillActive = await prisma.operationalIssue.findUniqueOrThrow({ where: { id: issue.id } })
+    expect(stillActive.status).toBe('active')
+  })
+
+  it('label_finding_generation_failed は crawl_run 起点の成功で resolve される', async () => {
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'label_aggregate_refresh',
+      workItemId: `work-item-${randomUUID()}`,
+      attemptNumber: 1,
+      status: 'failed',
+      errorSummary: 'finding generation failed',
+      errorCode: 'label_finding_generation_failed',
+      triggerType: 'crawl_run',
+      createdAt: new Date('2026-08-09T00:00:00Z'),
+      now: new Date('2026-08-09T00:00:00Z'),
+    })
+    const issue = await prisma.operationalIssue.findFirstOrThrow()
+
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'label_aggregate_refresh',
+      workItemId: `work-item-${randomUUID()}`,
+      attemptNumber: 1,
+      status: 'succeeded',
+      errorSummary: undefined,
+      errorCode: undefined,
+      triggerType: 'crawl_run',
+      createdAt: new Date('2026-08-09T01:00:00Z'),
+      now: new Date('2026-08-09T01:05:00Z'),
+    })
+
+    const resolved = await prisma.operationalIssue.findUniqueOrThrow({ where: { id: issue.id } })
+    expect(resolved.status).toBe('resolved')
+  })
 })
 
 describe.skipIf(!process.env.DATABASE_URL)('detectStalledBlockOutboxEntries', () => {

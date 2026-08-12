@@ -240,15 +240,51 @@ export async function detectAnalysisStageFailure(
   input: DetectAnalysisStageFailureInput,
 ): Promise<void> {
   if (input.status === 'succeeded') {
-    const component = `analyzer:${input.kind}`
-    const fingerprint = computeFingerprint('run_failure', { component, runId: input.workItemId })
+    const genericComponent = `analyzer:${input.kind}`
+    const genericFingerprint = computeFingerprint('run_failure', {
+      component: genericComponent,
+      runId: input.workItemId,
+    })
     await resolveIssueOnSuccess(
       prisma,
-      fingerprint,
+      genericFingerprint,
       input.workItemId,
       input.attemptNumber,
       input.now,
     )
+
+    const stages = STAGE_DEFINITIONS[input.kind]
+    if (stages) {
+      for (const stageDef of Object.values(stages)) {
+        const stageComponent = `analyzer:${input.kind}:${stageDef.stage}`
+
+        // 同一 WorkItem 自身の stage issue は、cutoff なしで必ず resolve する。
+        // 同じ workItemId のリトライは常に同じ triggerType を持つため、
+        // supersededBy の判定を待たずに解消してよい。
+        const stageFingerprint = computeFingerprint('run_failure', {
+          component: stageComponent,
+          runId: input.workItemId,
+        })
+        await resolveIssueOnSuccess(
+          prisma,
+          stageFingerprint,
+          input.workItemId,
+          input.attemptNumber,
+          input.now,
+        )
+
+        // 他 WorkItem 由来の同 stage issue は、triggerType 条件を満たす場合のみ cross-resolve する。
+        if (!stageDef.supersededBy(input.triggerType)) continue
+        await detectRunFailures(prisma, {
+          component: stageComponent,
+          runId: input.workItemId,
+          runStatus: 'succeeded',
+          errorSummary: null,
+          now: input.now,
+          supersedeCutoff: input.createdAt,
+        })
+      }
+    }
     return
   }
 
