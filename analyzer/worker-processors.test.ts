@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { Logger } from '@book000/node-utils'
 import { getPrismaClient } from './db/client'
+import { detectAnalysisStageFailure } from './operational-issues/detect-run-failures'
 import * as labelMetricSnapshotModule from './metrics/label-metric-snapshot'
 import * as publishModule from './read-models/publish'
 import {
@@ -309,6 +310,61 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     })
     expect(attentionPointer).not.toBeNull()
     expect(overviewPointer).not.toBeNull()
+  })
+
+  it('processPostCompletionRefresh は元 WorkItem の lastErrorCode も復元し、generic issue を新規作成しない', async () => {
+    const workItemId = `work-item-${randomUUID()}`
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'label_aggregate_refresh',
+      workItemId,
+      attemptNumber: 1,
+      status: 'dead',
+      errorSummary: 'transaction timeout',
+      errorCode: 'label_aggregate_snapshot_failed',
+      triggerType: 'schedule',
+      createdAt: new Date(),
+      now: new Date(),
+    })
+    const issue = await prisma.operationalIssue.findFirstOrThrow()
+    expect(issue.component).toBe('analyzer:label_aggregate_refresh:snapshot')
+
+    // handleWorkItemSettled の post-completion hook が一度失敗し、durable retry として post_completion_refresh 経由で同じ元 WorkItem を再処理する状況を再現する。
+    const originalWorkItem = await prisma.analysisWorkItem.create({
+      data: {
+        id: workItemId,
+        kind: 'label_aggregate_refresh',
+        triggerType: 'schedule',
+        triggerId: `trigger-${randomUUID()}`,
+        status: 'dead',
+        attemptCount: 1,
+        lastErrorCode: 'label_aggregate_snapshot_failed',
+        lastErrorSummary: 'transaction timeout',
+      },
+    })
+
+    await processPostCompletionRefresh(prisma, {
+      id: `post-completion-refresh-${randomUUID()}`,
+      kind: 'post_completion_refresh',
+      triggerType: 'work_item_completion',
+      triggerId: originalWorkItem.id,
+      status: 'succeeded',
+      priority: 0,
+      availableAt: new Date(),
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      attemptCount: 1,
+      maxAttempts: 5,
+      dependencyKey: null,
+      staleRequestedAt: null,
+      lastErrorCode: null,
+      lastErrorSummary: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    const activeIssues = await prisma.operationalIssue.findMany({ where: { status: 'active' } })
+    expect(activeIssues).toHaveLength(1)
+    expect(activeIssues[0]?.component).toBe('analyzer:label_aggregate_refresh:snapshot')
   })
 
   describe('processOperationCycleRefresh', () => {

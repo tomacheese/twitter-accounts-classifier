@@ -135,7 +135,7 @@ function getPolicy(): { policy: ReturnType<typeof loadPolicy>; policyHash: strin
  * @param prisma - Prisma クライアント
  * @param sourceWatermarkAt - 集計の基準時刻
  */
-async function publishAttentionAndOverview(
+export async function publishAttentionAndOverview(
   prisma: PrismaClient,
   sourceWatermarkAt: Date,
 ): Promise<void> {
@@ -701,6 +701,9 @@ export async function handleWorkItemSettled(
     attemptNumber: workItem.attemptCount,
     status: outcome.status,
     errorSummary: outcome.errorSummary,
+    errorCode: outcome.errorCode,
+    triggerType: workItem.triggerType,
+    createdAt: workItem.createdAt,
     now: new Date(),
   })
 
@@ -748,6 +751,7 @@ export async function processPostCompletionRefresh(
   })
   const outcome: WorkItemOutcome = {
     status: originalWorkItem.status as WorkItemOutcome['status'],
+    errorCode: originalWorkItem.lastErrorCode ?? undefined,
     errorSummary: originalWorkItem.lastErrorSummary ?? undefined,
   }
   await handleWorkItemSettled(prisma, originalWorkItem, outcome)

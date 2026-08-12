@@ -174,6 +174,7 @@ export async function runWorkerLoopOnce(
   if (exhaustedWorkItem) {
     await runPostCompletionHook(prisma, deps, exhaustedWorkItem, {
       status: 'dead',
+      errorCode: exhaustedWorkItem.lastErrorCode ?? undefined,
       errorSummary: exhaustedWorkItem.lastErrorSummary ?? undefined,
     })
     return true

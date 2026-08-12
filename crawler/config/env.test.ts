@@ -4,8 +4,10 @@ import {
   getCrawlIntervalSeconds,
   getCrawlStaleThresholdMultiplier,
   getCrawlWarningThreshold,
+  getRelabelerLabelLookupChunkSize,
   getRelabelerProducerBatchSize,
   getRelabelerWorkerBatchSize,
+  getRelabelerWorkerChunkSize,
   getRelabelerWorkerConcurrency,
   getWeeklyAnalysisStaleThresholdSeconds,
   getTwitterRequestTimeoutMs,
@@ -260,6 +262,64 @@ describe('getRelabelerWorkerConcurrency', () => {
     process.env.RELABELER_WORKER_CONCURRENCY = '1.5'
     expect(() => getRelabelerWorkerConcurrency()).toThrow(
       'RELABELER_WORKER_CONCURRENCY environment variable must be a positive integer',
+    )
+  })
+})
+
+describe('getRelabelerWorkerChunkSize', () => {
+  const originalValue = process.env.RELABELER_WORKER_CHUNK_SIZE
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env.RELABELER_WORKER_CHUNK_SIZE
+    } else {
+      process.env.RELABELER_WORKER_CHUNK_SIZE = originalValue
+    }
+  })
+
+  it('returns 1000 when unset', () => {
+    delete process.env.RELABELER_WORKER_CHUNK_SIZE
+    expect(getRelabelerWorkerChunkSize()).toBe(1000)
+  })
+
+  it('returns the configured value', () => {
+    process.env.RELABELER_WORKER_CHUNK_SIZE = '250'
+    expect(getRelabelerWorkerChunkSize()).toBe(250)
+  })
+
+  it('throws when the value is not a positive integer', () => {
+    process.env.RELABELER_WORKER_CHUNK_SIZE = '0'
+    expect(() => getRelabelerWorkerChunkSize()).toThrow(
+      'RELABELER_WORKER_CHUNK_SIZE environment variable must be a positive integer',
+    )
+  })
+})
+
+describe('getRelabelerLabelLookupChunkSize', () => {
+  const originalValue = process.env.RELABELER_LABEL_LOOKUP_CHUNK_SIZE
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env.RELABELER_LABEL_LOOKUP_CHUNK_SIZE
+    } else {
+      process.env.RELABELER_LABEL_LOOKUP_CHUNK_SIZE = originalValue
+    }
+  })
+
+  it('returns 1000 when unset', () => {
+    delete process.env.RELABELER_LABEL_LOOKUP_CHUNK_SIZE
+    expect(getRelabelerLabelLookupChunkSize()).toBe(1000)
+  })
+
+  it('returns the configured value', () => {
+    process.env.RELABELER_LABEL_LOOKUP_CHUNK_SIZE = '500'
+    expect(getRelabelerLabelLookupChunkSize()).toBe(500)
+  })
+
+  it('throws when the value is not a positive integer', () => {
+    process.env.RELABELER_LABEL_LOOKUP_CHUNK_SIZE = '-1'
+    expect(() => getRelabelerLabelLookupChunkSize()).toThrow(
+      'RELABELER_LABEL_LOOKUP_CHUNK_SIZE environment variable must be a positive integer',
     )
   })
 })

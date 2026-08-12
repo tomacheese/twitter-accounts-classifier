@@ -16,7 +16,8 @@
     "precheck": "pnpm run db:generate",
     "check": "run-p lint typecheck test",
     "db:generate": "prisma generate --schema=../prisma/schema.prisma --generator analyzerClient",
-    "backfill:remove-legacy-read-model-refresh-stage": "tsx scripts/backfill-remove-legacy-read-model-refresh-stage.ts"
+    "backfill:remove-legacy-read-model-refresh-stage": "tsx scripts/backfill-remove-legacy-read-model-refresh-stage.ts",
+    "cleanup:deprecated-work-item-kinds": "node dist/scripts/cleanup-deprecated-work-item-kinds.js"
   },
   "dependencies": {
     "@book000/node-utils": "^1.0.0",
