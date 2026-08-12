@@ -12,8 +12,8 @@ export interface IssuedCookies {
 export class CookieIssuerError extends Error {
   readonly status?: number
 
-  constructor(message: string, status?: number) {
-    super(message)
+  constructor(message: string, status?: number, options?: ErrorOptions) {
+    super(message, options)
     this.name = 'CookieIssuerError'
     this.status = status
   }
@@ -29,15 +29,11 @@ export interface CookieIssuerClientOptions {
 
 export interface RetryOptions {
   maxAttempts?: number
-  /**
-   * attempt ごとの待機を線形に増やす (`delayMs * attempt`) ための基準値 (ミリ秒)。
-   */
+  /** retry 間隔の基準値 (ミリ秒)。attempt が進むほど待機時間を線形に増やす際に用いる。 */
   delayMs?: number
   /**
    * retry 間の sleep の累積時間 (ミリ秒) の上限。
-   * HTTP request/response 自体の wall-clock 時間は含まない。
-   * Cookie Issuer 側の lock 待機 timeout (`LOGIN_LOCK_TIMEOUT_SECONDS`) とは種類が異なる。
-   * 両者を同一の end-to-end timeout として扱わないこと。
+   * HTTP request/response 自体の wall-clock 時間は含まない end-to-end 以外の timeout であり、Cookie Issuer 側の lock 待機 timeout とは同一視しないこと。
    */
   maxTotalWaitMs?: number
 }
@@ -75,17 +71,21 @@ export function createCookieIssuerClient(options: CookieIssuerClientOptions) {
     account: CookieIssuerAccount,
     retry: RetryOptions = {},
   ): Promise<IssuedCookies> {
-    const maxAttempts = retry.maxAttempts ?? 10
+    // maxAttempts の既定値は、線形 backoff の累積待機が maxTotalWaitMs に達する attempt 数より 1 大きくしてあり、
+    // maxTotalWaitMs の上限が実際に効くようにしている。
+    const maxAttempts = retry.maxAttempts ?? 11
     const delayMs = retry.delayMs ?? 3000
     const maxTotalWaitMs = retry.maxTotalWaitMs ?? 150_000
     let cumulativeWaitMs = 0
     let lastAttempt = 0
+    let lastError: unknown
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       lastAttempt = attempt
       try {
         return await issueCookies(account)
       } catch (error) {
+        lastError = error
         const isBusy = error instanceof CookieIssuerError && error.status === 409
         if (!isBusy) throw error
         if (attempt === maxAttempts) break
@@ -99,6 +99,7 @@ export function createCookieIssuerClient(options: CookieIssuerClientOptions) {
     throw new CookieIssuerError(
       `Cookie Issuer busy: exhausted ${lastAttempt} attempts over ${cumulativeWaitMs}ms (last status 409)`,
       409,
+      { cause: lastError },
     )
   }
 

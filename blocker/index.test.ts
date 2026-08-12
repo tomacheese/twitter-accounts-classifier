@@ -263,7 +263,7 @@ describe('runBlockCycle', () => {
     expect(reconcileAccountOutbox).toHaveBeenCalledTimes(2)
   })
 
-  it('block本処理が成功した場合、reconciliationはcookiesを再利用しCookie Issuerへ追加request しない', async () => {
+  it('block 本処理が成功した場合、reconciliation は cookies を再利用し Cookie Issuer へ追加 request しない', async () => {
     const config: BlockerAppConfig = {
       accounts: [
         {
@@ -313,7 +313,7 @@ describe('runBlockCycle', () => {
     )
   })
 
-  it('block本処理の認証自体が失敗した場合、reconciliationはcookies無しで呼ばれる (自前で再発行するフォールバック)', async () => {
+  it('block 本処理の認証自体が失敗した場合、reconciliation は cookies 無しで呼ばれる (自前で再発行するフォールバック)', async () => {
     const config: BlockerAppConfig = {
       accounts: [
         {

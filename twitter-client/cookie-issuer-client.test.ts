@@ -61,7 +61,7 @@ describe('createCookieIssuerClient', () => {
     expect(sleepImpl).toHaveBeenCalledWith(10)
   })
 
-  it('本番と同様の約110.7秒のbusy区間を経ても既定値のretry budget内で成功する', async () => {
+  it('本番と同様の約 110.7 秒の busy 区間を経ても既定値の retry budget 内で成功する', async () => {
     const busyUntilMs = 110_700
     let elapsedMs = 0
     const fetchImpl = vi
@@ -93,7 +93,7 @@ describe('createCookieIssuerClient', () => {
     expect(fetchImpl.mock.calls.length).toBeLessThanOrEqual(10)
   })
 
-  it('既定のmaxAttemptsを使い切った場合、busyと識別できるメッセージで失敗する', async () => {
+  it('既定の maxAttempts を使い切った場合、busy と識別できるメッセージで失敗する', async () => {
     const fetchImpl = vi
       .fn()
       .mockImplementation(() => Promise.resolve(new Response('busy', { status: 409 })))
@@ -116,7 +116,7 @@ describe('createCookieIssuerClient', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(10)
   })
 
-  it('maxAttemptsを増やしてもmaxTotalWaitMsに達したら停止し、busyと識別できるメッセージで失敗する', async () => {
+  it('maxAttempts を増やしても maxTotalWaitMs に達したら停止し、busy と識別できるメッセージで失敗する', async () => {
     const fetchImpl = vi
       .fn()
       .mockImplementation(() => Promise.resolve(new Response('busy', { status: 409 })))
@@ -139,12 +139,11 @@ describe('createCookieIssuerClient', () => {
     expect((error as Error).message).toMatch(
       /^Cookie Issuer busy: exhausted 10 attempts over 135000ms \(last status 409\)$/,
     )
-    // maxAttempts=100 でも maxTotalWaitMs の分岐で止まるため、
-    // 実際に fetch されるのは 10 回 (attempt 1〜10) のみになる
+    // maxAttempts=100 でも maxTotalWaitMs の分岐で止まるため、実際の fetch 回数は maxAttempts より少なくなる
     expect(fetchImpl).toHaveBeenCalledTimes(10)
   })
 
-  it('clientNameを指定した場合、X-Client-Name headerを付与する', async () => {
+  it('clientName を指定した場合、X-Client-Name header を付与する', async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValue(jsonResponse({ status: 'ok', ct0: 'c0', auth_token: 'a0' }))
@@ -164,7 +163,7 @@ describe('createCookieIssuerClient', () => {
     )
   })
 
-  it('clientNameを指定しない場合、X-Client-Name headerを付与しない', async () => {
+  it('clientName を指定しない場合、X-Client-Name header を付与しない', async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValue(jsonResponse({ status: 'ok', ct0: 'c0', auth_token: 'a0' }))
