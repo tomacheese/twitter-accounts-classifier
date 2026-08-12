@@ -27,6 +27,7 @@ export interface PlanningCandidate {
   reason: string
   ruleVersion: string
   labeledAt: Date
+  evaluable: boolean
   changeType?: string
 }
 
@@ -35,10 +36,12 @@ export type WeeklyReviewSampleKind =
   | 'random_negative'
   | 'recent_change'
   | 'high_confidence_negative'
+  | 'positive_evidence_negative'
   | 'low_confidence_positive'
   | 'old_rule_version'
   | 'rare_reason'
   | 'risk_targeted'
+  | 'insufficient_support'
 
 export type WeeklyReviewSelectionSignal = Exclude<
   WeeklyReviewSampleKind,
@@ -58,6 +61,8 @@ export interface WeeklyReviewSample {
   sampleKind: WeeklyReviewSampleKind
   priorityScore: number
   selectionSignals: WeeklyReviewSelectionSignal[]
+  /** random_positive/random_negative サンプルにのみ設定する。targeted サンプルは持たない。 */
+  populationCount?: number
 }
 
 export interface WeeklyReviewPlanLabel {
@@ -70,7 +75,7 @@ export interface WeeklyReviewPlanLabel {
 
 export interface WeeklyReviewPlan {
   schemaVersion: 1
-  strategyVersion: 'risk-stratified/1'
+  strategyVersion: 'risk-stratified/2'
   seed: string
   budget: number
   targetFrom: string
@@ -79,6 +84,9 @@ export interface WeeklyReviewPlan {
   samples: WeeklyReviewSample[]
 }
 
+/** キーは `${labelDefinitionId}:${value}`。 */
+export type PopulationCountsByLabelAndValue = Map<string, number>
+
 export interface BuildWeeklyReviewPlanInput {
   seed: string
   budget: number
@@ -86,7 +94,13 @@ export interface BuildWeeklyReviewPlanInput {
   targetTo: Date
   labels: PlanningLabel[]
   candidates: PlanningCandidate[]
+  populationCounts?: PopulationCountsByLabelAndValue
 }
+
+// value=false の candidate は証拠がないほど confidence が 1 に近づくため、
+// 単純な confidence>0 では大半の value=false candidate を毎回フラグしてしまう。
+// margin 未満、つまり陽性方向へ幾らか傾いた証拠が残るものだけを審査対象にする。
+const NEGATIVE_EVIDENCE_MARGIN = 0.9
 
 function stableRank(seed: string, value: string): string {
   return createHash('sha256').update(`${seed}\0${value}`).digest('hex')
@@ -117,6 +131,7 @@ function toSample(
   sampleKind: WeeklyReviewSampleKind,
   priorityScore: number,
   selectionSignals: WeeklyReviewSelectionSignal[],
+  populationCount?: number,
 ): WeeklyReviewSample {
   return {
     sampleId: `${candidate.labelDefinitionId}:${candidate.accountId}`,
@@ -131,6 +146,7 @@ function toSample(
     sampleKind,
     priorityScore,
     selectionSignals,
+    ...(populationCount === undefined ? {} : { populationCount }),
   }
 }
 
@@ -140,9 +156,12 @@ function selectionSignals(
   reasonFrequency: number,
 ): WeeklyReviewSelectionSignal[] {
   const signals: WeeklyReviewSelectionSignal[] = []
+  if (!candidate.evaluable) signals.push('insufficient_support')
   if (candidate.changeType) signals.push('recent_change')
   if (candidate.ruleVersion !== label.currentRuleVersion) signals.push('old_rule_version')
-  if (!candidate.value && candidate.confidence > 0) signals.push('high_confidence_negative')
+  if (!candidate.value && candidate.confidence < NEGATIVE_EVIDENCE_MARGIN) {
+    signals.push('positive_evidence_negative')
+  }
   if (candidate.value && candidate.confidence < 0.5) signals.push('low_confidence_positive')
   if (reasonFrequency <= 2) signals.push('rare_reason')
   return signals
@@ -154,12 +173,16 @@ function targetedKind(
   reasonFrequency: number,
 ): { kind: WeeklyReviewSampleKind; score: number } {
   const risk = computeRiskScore(label)
+  if (!candidate.evaluable) return { kind: 'insufficient_support', score: risk + 9 }
   if (candidate.changeType) return { kind: 'recent_change', score: risk + 8 }
   if (candidate.ruleVersion !== label.currentRuleVersion) {
     return { kind: 'old_rule_version', score: risk + 6 }
   }
-  if (!candidate.value && candidate.confidence > 0) {
-    return { kind: 'high_confidence_negative', score: risk + 5 + candidate.confidence * 3 }
+  if (!candidate.value && candidate.confidence < NEGATIVE_EVIDENCE_MARGIN) {
+    return {
+      kind: 'positive_evidence_negative',
+      score: risk + 5 + (NEGATIVE_EVIDENCE_MARGIN - candidate.confidence) * 3,
+    }
   }
   if (candidate.value && candidate.confidence < 0.5) {
     return { kind: 'low_confidence_positive', score: risk + 5 + (0.5 - candidate.confidence) * 3 }
@@ -180,21 +203,26 @@ export function buildWeeklyReviewPlan(input: BuildWeeklyReviewPlanInput): Weekly
   const riskByLabel = new Map(input.labels.map((label) => [label.id, computeRiskScore(label)]))
   const selected = new Map<string, WeeklyReviewSample>()
 
-  const sortedLabels = input.labels.toSorted((a, b) => {
-    const riskDiff = (riskByLabel.get(b.id) ?? 0) - (riskByLabel.get(a.id) ?? 0)
-    if (riskDiff !== 0) return riskDiff
-    return stableRank(input.seed, a.id).localeCompare(stableRank(input.seed, b.id))
-  })
+  // targeted fill 用の risk 順とは別に、random baseline はラベルを risk と無関係な
+  // seed 依存の順序で回すことで、budget が小さくても risk 最上位のラベルだけに独占されない。
+  const shuffledLabels = input.labels.toSorted((a, b) =>
+    stableRank(input.seed, `${a.id}:baseline-order`).localeCompare(
+      stableRank(input.seed, `${b.id}:baseline-order`),
+    ),
+  )
+  const populationCounts = input.populationCounts ?? new Map<string, number>()
 
-  for (const label of sortedLabels) {
+  for (const label of shuffledLabels) {
     if (selected.size >= input.budget) break
     const pool = candidatesByLabel.get(label.id) ?? []
     const reasonCounts = new Map<string, number>()
     for (const item of pool) reasonCounts.set(item.reason, (reasonCounts.get(item.reason) ?? 0) + 1)
     for (const value of [true, false]) {
       if (selected.size >= input.budget) break
+      // evaluable=false の candidate は support 不足で不偏 audit の代表例として使えないため、
+      // random baseline の対象からは外し targeted fill 側の insufficient_support に委ねる。
       const candidate = pool
-        .filter((item) => item.value === value)
+        .filter((item) => item.value === value && item.evaluable)
         .toSorted((a, b) =>
           stableRank(input.seed, `${a.labelDefinitionId}:${a.accountId}:baseline`).localeCompare(
             stableRank(input.seed, `${b.labelDefinitionId}:${b.accountId}:baseline`),
@@ -210,6 +238,7 @@ export function buildWeeklyReviewPlan(input: BuildWeeklyReviewPlanInput): Weekly
           kind,
           0,
           selectionSignals(candidate, label, reasonCounts.get(candidate.reason) ?? 0),
+          populationCounts.get(`${label.id}:${value}`),
         ),
       )
     }
@@ -264,7 +293,7 @@ export function buildWeeklyReviewPlan(input: BuildWeeklyReviewPlanInput): Weekly
 
   return {
     schemaVersion: 1,
-    strategyVersion: 'risk-stratified/1',
+    strategyVersion: 'risk-stratified/2',
     seed: input.seed,
     budget: input.budget,
     targetFrom: input.targetFrom.toISOString(),

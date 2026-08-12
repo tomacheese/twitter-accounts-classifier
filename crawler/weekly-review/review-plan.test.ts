@@ -36,6 +36,7 @@ function candidate(
     reason: overrides.reason ?? (value ? 'positive evidence' : 'negative evidence'),
     ruleVersion: overrides.ruleVersion ?? '1.0.0',
     labeledAt: overrides.labeledAt ?? new Date('2026-08-07T00:00:00Z'),
+    evaluable: overrides.evaluable ?? true,
     changeType: overrides.changeType,
   }
 }
@@ -125,7 +126,8 @@ describe('buildWeeklyReviewPlan', () => {
     expect(
       plan.samples.some((sample) =>
         sample.selectionSignals.some(
-          (signal) => signal === 'high_confidence_negative' || signal === 'low_confidence_positive',
+          (signal) =>
+            signal === 'positive_evidence_negative' || signal === 'low_confidence_positive',
         ),
       ),
     ).toBe(true)
@@ -166,5 +168,116 @@ describe('buildWeeklyReviewPlan', () => {
       plan.labels.find((item) => item.labelKey === 'topic_stable')?.riskScore ?? 0,
     )
     expect(plan.samples[4]?.labelKey).toBe('spam_risky')
+  })
+
+  it('random baseline を全ラベルへ配分し risk が高いラベルだけに独占させない', () => {
+    const labels = Array.from({ length: 10 }, (_, i) =>
+      label({ id: `l${i}`, key: `label_${i}`, activeFindingCount: i === 0 ? 100 : 0 }),
+    )
+    const candidates = labels.flatMap((l) => [
+      candidate(l.id, l.key, `${l.id}-pos`, true),
+      candidate(l.id, l.key, `${l.id}-neg`, false),
+    ])
+
+    const plan = buildWeeklyReviewPlan({
+      seed: 'run-baseline-spread',
+      budget: 6,
+      targetFrom,
+      targetTo,
+      labels,
+      candidates,
+    })
+
+    const randomLabelIds = new Set(
+      plan.samples
+        .filter(
+          (sample) =>
+            sample.sampleKind === 'random_positive' || sample.sampleKind === 'random_negative',
+        )
+        .map((sample) => sample.labelDefinitionId),
+    )
+    expect(randomLabelIds.size).toBeGreaterThan(1)
+  })
+
+  it('evaluable=false の candidate を insufficient_support として他の targeted signal より優先する', () => {
+    const l = label({ id: 'l1', key: 'label_one' })
+    const insufficientCandidate = candidate('l1', 'label_one', 'account-insufficient', false, {
+      confidence: 0.5,
+      evaluable: false,
+      ruleVersion: '0.9.0',
+    })
+
+    const plan = buildWeeklyReviewPlan({
+      seed: 'run-insufficient',
+      budget: 1,
+      targetFrom,
+      targetTo,
+      labels: [l],
+      candidates: [insufficientCandidate],
+    })
+
+    const sample = plan.samples.find((s) => s.accountId === 'account-insufficient')
+    expect(sample?.sampleKind).toBe('insufficient_support')
+  })
+
+  it('high_confidence_negative を margin 付きの positive_evidence_negative に置き換える', () => {
+    const l = label({ id: 'l1', key: 'label_one' })
+    const belowMargin = candidate('l1', 'label_one', 'account-below-margin', false, {
+      confidence: 0.95,
+    })
+    const aboveMargin = candidate('l1', 'label_one', 'account-above-margin', false, {
+      confidence: 0.3,
+    })
+
+    const plan = buildWeeklyReviewPlan({
+      seed: 'run-margin',
+      budget: 2,
+      targetFrom,
+      targetTo,
+      labels: [l],
+      candidates: [belowMargin, aboveMargin],
+    })
+
+    const below = plan.samples.find((s) => s.accountId === 'account-below-margin')
+    const above = plan.samples.find((s) => s.accountId === 'account-above-margin')
+    expect(below?.selectionSignals).not.toContain('positive_evidence_negative')
+    expect(above?.selectionSignals).toContain('positive_evidence_negative')
+  })
+
+  it('random sample には populationCounts から populationCount を設定する', () => {
+    const l = label({ id: 'l1', key: 'label_one' })
+    const c = candidate('l1', 'label_one', 'account-1', true)
+
+    const plan = buildWeeklyReviewPlan({
+      seed: 'run-population',
+      budget: 1,
+      targetFrom,
+      targetTo,
+      labels: [l],
+      candidates: [c],
+      populationCounts: new Map([['l1:true', 12_345]]),
+    })
+
+    const sample = plan.samples.find((s) => s.sampleKind === 'random_positive')
+    expect(sample?.populationCount).toBe(12_345)
+  })
+
+  it('targeted sample には populationCount を設定しない', () => {
+    const l = label({ id: 'l1', key: 'label_one' })
+    const changeCandidate = candidate('l1', 'label_one', 'account-1', true, {
+      changeType: 'value_changed',
+    })
+
+    const plan = buildWeeklyReviewPlan({
+      seed: 'run-no-population',
+      budget: 1,
+      targetFrom,
+      targetTo,
+      labels: [l],
+      candidates: [changeCandidate],
+    })
+
+    const sample = plan.samples.find((s) => s.sampleKind === 'recent_change')
+    expect(sample?.populationCount).toBeUndefined()
   })
 })
