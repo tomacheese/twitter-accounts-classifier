@@ -80,6 +80,41 @@ describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
   })
 })
 
+describe('buildLabelAggregateSnapshotSet freshness threshold assertions', () => {
+  const fakePrisma = {
+    labelDefinition: { findMany: vi.fn(() => Promise.resolve([])) },
+    labelMetricSnapshot: { count: vi.fn(() => Promise.resolve(0)) },
+    $transaction: vi.fn(),
+  }
+
+  it('staleAfterMs が7日を超えると例外を投げる', async () => {
+    await expect(
+      buildLabelAggregateSnapshotSet(fakePrisma as never, {
+        triggerWorkItemId: 'work_item_stale_too_large',
+        policyHash: 'hash',
+        analyzerVersion: 'test',
+        thresholds: { minCoverage: 0, maxStaleRatio: 1 },
+        freshnessThresholdsMs: {
+          delayedAfterMs: 10 * 60 * 1000,
+          staleAfterMs: 8 * 24 * 60 * 60 * 1000,
+        },
+      }),
+    ).rejects.toThrow(/staleAfterMs/)
+  })
+
+  it('delayedAfterMs が分単位丸めの粒度未満だと例外を投げる', async () => {
+    await expect(
+      buildLabelAggregateSnapshotSet(fakePrisma as never, {
+        triggerWorkItemId: 'work_item_delayed_too_small',
+        policyHash: 'hash',
+        analyzerVersion: 'test',
+        thresholds: { minCoverage: 0, maxStaleRatio: 1 },
+        freshnessThresholdsMs: { delayedAfterMs: 60 * 1000, staleAfterMs: 20 * 60 * 1000 },
+      }),
+    ).rejects.toThrow(/delayedAfterMs\/staleAfterMs/)
+  })
+})
+
 describe('buildLabelAggregateSnapshotSet transaction options', () => {
   it('allows production-scale label aggregation to run longer than Prisma default timeout', async () => {
     const transaction = vi.fn(() => Promise.resolve(new Date('2026-08-09T00:00:00Z')))
@@ -550,5 +585,63 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     }
     expect(valueCountRows.reduce((sum, row) => sum + row.count, 0)).toBe(1)
     expect(finalRow.value).toBe(false)
+  })
+
+  it('observedAt が7日境界の前後でバケット割り当てが切り替わる', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_freshness_boundary', description: 'テスト用ラベル' },
+    })
+    for (const id of ['acct_boundary_fresh', 'acct_boundary_stale']) {
+      await prisma.account.create({
+        data: {
+          id,
+          screenName: id,
+          displayName: id,
+          followersCount: 0,
+          followingCount: 0,
+          tweetCount: 0,
+          accountCreatedAt: new Date(),
+          lastCrawledAt: new Date(),
+        },
+      })
+    }
+    const justUnder7Days = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000 - 60 * 1000))
+    const justOver7Days = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000 + 60 * 1000))
+
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_boundary_fresh',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.5,
+        reason: 'r',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: justUnder7Days,
+        sourceObservationId: null,
+      },
+      {
+        accountId: 'acct_boundary_stale',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.5,
+        reason: 'r',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: justOver7Days,
+        sourceObservationId: null,
+      },
+    ])
+
+    const buckets = await prisma.accountClassificationFreshnessBucket.findMany({
+      where: { labelDefinitionId: label.id },
+    })
+    const sentinelBucket = buckets.find(
+      (bucket) => bucket.observedAtBucket.getTime() === new Date('1970-01-01T00:00:00Z').getTime(),
+    )
+    expect(sentinelBucket?.count).toBe(1)
+    expect(
+      buckets.filter((bucket) => bucket !== sentinelBucket).reduce((sum, b) => sum + b.count, 0),
+    ).toBe(1)
   })
 })
