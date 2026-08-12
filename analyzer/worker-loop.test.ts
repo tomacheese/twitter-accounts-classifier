@@ -119,6 +119,27 @@ describe('runWorkerLoopOnce', () => {
     )
   })
 
+  it('dead-letter された WorkItem の lastErrorCode を outcome に引き継ぐ', async () => {
+    deadLetterExhaustedWorkItem.mockResolvedValue(
+      makeWorkItem({
+        status: 'dead',
+        attemptCount: 5,
+        maxAttempts: 5,
+        leaseOwner: null,
+        lastErrorCode: 'label_aggregate_snapshot_failed',
+      }),
+    )
+    const deps = makeDeps()
+
+    await runWorkerLoopOnce(prisma, deps)
+
+    expect(deps.onWorkItemSettled).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({ id: 'work-item-1' }),
+      expect.objectContaining({ status: 'dead', errorCode: 'label_aggregate_snapshot_failed' }),
+    )
+  })
+
   it('queue が空なら false を返し、どの処理関数も呼ばない', async () => {
     claimNextWorkItem.mockResolvedValue(undefined)
     const deps = makeDeps()

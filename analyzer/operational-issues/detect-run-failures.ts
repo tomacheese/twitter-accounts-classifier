@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../generated/prisma'
 import { computeFingerprint } from '../findings/fingerprint'
+import type { LabelAggregateRefreshErrorCode } from '../worker-processors'
 
 /**
  * detectRunFailures の入力。
@@ -19,6 +20,11 @@ export interface DetectRunFailuresInput {
   severity?: string
   /** Occurrence の重複判定キー。既定は runId。 */
   observationKey?: string
+  /**
+   * 指定時、この時刻より後に検出された active issue (lastDetectedAt が新しい) は一括解消の対象から除外する。
+   * 並列処理で settle 順序が入れ替わっても、自分より後に発生した failure まで誤って消さないためのカットオフ。
+   */
+  supersedeCutoff?: Date
 }
 
 const FAILED_STATUSES = new Set(['failed', 'timeout', 'dead'])
@@ -39,13 +45,25 @@ export async function detectRunFailures(
 ): Promise<void> {
   if (RECOVERED_STATUSES.has(input.runStatus)) {
     const issues = await prisma.operationalIssue.findMany({
-      where: { component: input.component, type: 'run_failure', status: 'active' },
+      where: {
+        component: input.component,
+        type: 'run_failure',
+        status: 'active',
+        ...(input.supersedeCutoff ? { lastDetectedAt: { lte: input.supersedeCutoff } } : {}),
+      },
     })
     for (const issue of issues) {
-      await prisma.operationalIssue.update({
-        where: { id: issue.id },
+      // findMany と update の間に別レーンが同一 issue を re-activate する余地があるため、
+      // where に status/cutoff を含めた compare-and-set にして取りこぼしを防ぐ。
+      const { count } = await prisma.operationalIssue.updateMany({
+        where: {
+          id: issue.id,
+          status: 'active',
+          ...(input.supersedeCutoff ? { lastDetectedAt: { lte: input.supersedeCutoff } } : {}),
+        },
         data: { status: 'resolved', resolvedAt: input.now },
       })
+      if (count === 0) continue
       await prisma.operationalIssueOccurrence.upsert({
         where: {
           issueId_observationKey: {
@@ -124,8 +142,56 @@ export interface DetectAnalysisStageFailureInput {
   status: 'succeeded' | 'failed' | 'dead'
   /** 記録するエラー概要。 */
   errorSummary: string | undefined
+  /** 失敗種別。LabelAggregateRefreshError 由来でない失敗では undefined になる。 */
+  errorCode: string | undefined
+  /** WorkItem の起点種別 (crawl_run/schedule/weekly_analysis_run 等)。 */
+  triggerType: string
+  /** WorkItem の enqueue 時刻。settle 順序の逆転を弾くカットオフに使う。 */
+  createdAt: Date
   /** 判定の基準時刻。 */
   now: Date
+}
+
+/** 特定 kind の失敗 stage 定義。 */
+interface StageDefinition {
+  /** component に `analyzer:${kind}:${stage}` として付与する stage 名。 */
+  stage: string
+  /** この stage の failure を supersede してよい、成功した WorkItem の triggerType 条件。 */
+  supersededBy: (successTriggerType: string) => boolean
+}
+
+/**
+ * kind → errorCode → stage 定義。定義が無い kind/errorCode の組は generic component (`analyzer:${kind}`) のまま扱う。
+ * 何が復旧したか errorCode から判別できない失敗を、安易に他の成功で消さないよう cross-WorkItem の一括 resolve は行わない。
+ */
+// LabelAggregateRefreshErrorCode に satisfies することで、キーの typo や union 側の
+// rename がコンパイルエラーになるようにする。
+const LABEL_AGGREGATE_REFRESH_STAGES = {
+  // snapshot 再構築と summary publish は triggerType によらず毎回実行されるため、
+  // どの triggerType の成功でも supersede してよい。
+  label_aggregate_snapshot_failed: { stage: 'snapshot', supersededBy: () => true },
+  label_summary_publish_failed: { stage: 'summary_publish', supersededBy: () => true },
+  // finding generation は triggerType === 'crawl_run' のときしか実行されないため、
+  // crawl_run 起点の成功だけが「finding generation が実際に再実行され成功した」ことを証明できる。
+  label_finding_generation_failed: {
+    stage: 'finding_generation',
+    supersededBy: (triggerType: string) => triggerType === 'crawl_run',
+  },
+} satisfies Record<LabelAggregateRefreshErrorCode, StageDefinition>
+
+const STAGE_DEFINITIONS: Partial<Record<string, Partial<Record<string, StageDefinition>>>> = {
+  label_aggregate_refresh: LABEL_AGGREGATE_REFRESH_STAGES,
+}
+
+/**
+ * failure の component 名を kind と errorCode から決定する。
+ * @param kind - WorkItem の kind
+ * @param errorCode - 失敗種別 (未分類なら undefined)
+ * @returns component 名。stage 定義があれば stage-specific、無ければ generic。
+ */
+function resolveComponent(kind: string, errorCode: string | undefined): string {
+  const stageDef = errorCode ? STAGE_DEFINITIONS[kind]?.[errorCode] : undefined
+  return stageDef ? `analyzer:${kind}:${stageDef.stage}` : `analyzer:${kind}`
 }
 
 /**
@@ -184,22 +250,55 @@ export async function detectAnalysisStageFailure(
   prisma: PrismaClient,
   input: DetectAnalysisStageFailureInput,
 ): Promise<void> {
-  const component = `analyzer:${input.kind}`
-
   if (input.status === 'succeeded') {
-    const fingerprint = computeFingerprint('run_failure', { component, runId: input.workItemId })
+    const genericComponent = `analyzer:${input.kind}`
+    const genericFingerprint = computeFingerprint('run_failure', {
+      component: genericComponent,
+      runId: input.workItemId,
+    })
     await resolveIssueOnSuccess(
       prisma,
-      fingerprint,
+      genericFingerprint,
       input.workItemId,
       input.attemptNumber,
       input.now,
     )
+
+    const stages = STAGE_DEFINITIONS[input.kind]
+    if (stages) {
+      for (const stageDef of Object.values(stages)) {
+        if (!stageDef) continue
+        const stageComponent = `analyzer:${input.kind}:${stageDef.stage}`
+
+        // 同じ workItemId のリトライは常に同じ triggerType を持つため、supersededBy の判定を待たずに解消してよい。
+        const stageFingerprint = computeFingerprint('run_failure', {
+          component: stageComponent,
+          runId: input.workItemId,
+        })
+        await resolveIssueOnSuccess(
+          prisma,
+          stageFingerprint,
+          input.workItemId,
+          input.attemptNumber,
+          input.now,
+        )
+
+        if (!stageDef.supersededBy(input.triggerType)) continue
+        await detectRunFailures(prisma, {
+          component: stageComponent,
+          runId: input.workItemId,
+          runStatus: 'succeeded',
+          errorSummary: null,
+          now: input.now,
+          supersedeCutoff: input.createdAt,
+        })
+      }
+    }
     return
   }
 
   await detectRunFailures(prisma, {
-    component,
+    component: resolveComponent(input.kind, input.errorCode),
     runId: input.workItemId,
     runStatus: input.status,
     errorSummary: input.errorSummary ?? null,
