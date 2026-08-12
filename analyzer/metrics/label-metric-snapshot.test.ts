@@ -970,4 +970,73 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     expect(buckets.reduce((sum, b) => sum + b.count, 0)).toBe(Number(naive[0].count))
   })
+
+  it('複数labelDefinitionIdを含む更新が逆順で重なってもデッドロックしない', async () => {
+    const labelX = await prisma.labelDefinition.create({
+      data: { key: 'test_deadlock_x', description: 'テスト用ラベルX' },
+    })
+    const labelY = await prisma.labelDefinition.create({
+      data: { key: 'test_deadlock_y', description: 'テスト用ラベルY' },
+    })
+    for (const id of ['acct_deadlock_1', 'acct_deadlock_2']) {
+      await prisma.account.create({
+        data: {
+          id,
+          screenName: id,
+          displayName: id,
+          followersCount: 0,
+          followingCount: 0,
+          tweetCount: 0,
+          accountCreatedAt: new Date(),
+          lastCrawledAt: new Date(),
+        },
+      })
+    }
+    const now = new Date()
+    const baseRow = (accountId: string, labelDefinitionId: string, value: boolean) => ({
+      accountId,
+      labelDefinitionId,
+      value,
+      confidence: 0.5,
+      reason: 'r',
+      method: 'rule',
+      ruleVersion: 'v1',
+      observedAt: now,
+      sourceObservationId: null,
+    })
+    await upsertAccountClassificationLatest(prisma, [
+      baseRow('acct_deadlock_1', labelX.id, true),
+      baseRow('acct_deadlock_1', labelY.id, true),
+      baseRow('acct_deadlock_2', labelX.id, true),
+      baseRow('acct_deadlock_2', labelY.id, true),
+    ])
+
+    // labelDefinitionId をまたぐロック順序の一貫性は、トリガー自体ではなく
+    // upsertAccountClassificationLatest が常に labelDefinitionId 昇順で
+    // INSERT する choke point によって保証される契約である。
+    // ここでは呼び出し元がそれぞれ逆順で行を渡しても (acct_deadlock_1 は
+    // Y→X、acct_deadlock_2 は X→Y)、choke point 内部のソートにより
+    // 実際の書き込み順序は両者とも X→Y に揃うため、デッドロックしないことを検証する。
+    const later = new Date(now.getTime() + 60 * 1000)
+    const updateForward = upsertAccountClassificationLatest(prisma, [
+      baseRow('acct_deadlock_1', labelY.id, false),
+      baseRow('acct_deadlock_1', labelX.id, false),
+    ].map((row) => ({ ...row, observedAt: later })))
+    const updateBackward = upsertAccountClassificationLatest(prisma, [
+      baseRow('acct_deadlock_2', labelX.id, false),
+      baseRow('acct_deadlock_2', labelY.id, false),
+    ].map((row) => ({ ...row, observedAt: later })))
+
+    await expect(Promise.all([updateForward, updateBackward])).resolves.toBeDefined()
+
+    for (const label of [labelX, labelY]) {
+      const naive = await naiveValueCounts(label.id)
+      const valueCountRows = await prisma.accountClassificationValueCount.findMany({
+        where: { labelDefinitionId: label.id },
+      })
+      for (const row of valueCountRows) {
+        expect(row.count).toBe(naive.get(row.value) ?? 0)
+      }
+    }
+  })
 })
