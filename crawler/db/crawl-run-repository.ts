@@ -31,7 +31,7 @@ export interface CrawlWarning {
    * キャプチャできた場合のみ生の HTTP レスポンス本文も保持する。
    */
   rawResponseSnippet?: string
-  /** author 処理の ResponseError に限り記録する安全な HTTP 診断情報。 */
+  /** ResponseError から取得できた場合に記録する安全な HTTP 診断情報。 */
   httpStatus?: number
   retryAfterSeconds?: number
   rateLimitLimit?: number
