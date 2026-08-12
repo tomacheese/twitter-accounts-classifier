@@ -22,6 +22,7 @@ import { ALL_LABEL_RULES } from './labels/all-rules'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { initMonitoring, captureException } from './monitoring/sentry'
 import {
+  getRelabelerLabelLookupChunkSize,
   getRelabelerProducerBatchSize,
   getRelabelerWorkerBatchSize,
   getRelabelerWorkerConcurrency,
@@ -204,10 +205,18 @@ export async function scanForStaleAccounts(
   if (targets.length === 0) return { scanned: 0, requested: 0, wrapped: false }
 
   const accountIds = targets.map((account) => account.id)
-  const latestRows = await prisma.accountLabelLatest.findMany({
-    where: { accountId: { in: accountIds } },
-    select: { accountId: true, labelDefinitionId: true, ruleVersion: true },
-  })
+  const targetLabelDefinitionIds = [...options.labelDefinitionIds.values()]
+  const lookupChunkSize = getRelabelerLabelLookupChunkSize()
+  const latestRows: { accountId: string; labelDefinitionId: string; ruleVersion: string }[] = []
+  for (let i = 0; i < accountIds.length; i += lookupChunkSize) {
+    const chunk = accountIds.slice(i, i + lookupChunkSize)
+    latestRows.push(
+      ...(await prisma.accountLabelLatest.findMany({
+        where: { accountId: { in: chunk }, labelDefinitionId: { in: targetLabelDefinitionIds } },
+        select: { accountId: true, labelDefinitionId: true, ruleVersion: true },
+      })),
+    )
+  }
   const latestByKey = new Map(
     latestRows.map((row) => [`${row.accountId}:${row.labelDefinitionId}`, row.ruleVersion]),
   )

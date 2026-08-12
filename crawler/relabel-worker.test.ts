@@ -231,6 +231,50 @@ describe('scanForStaleAccounts', () => {
     expect(result.requested).toBe(2)
     expect(result.wrapped).toBe(false)
   })
+
+  it('accountIds が chunk size を超える場合、AccountLabelLatest lookup を chunk ごとに分割し labelDefinitionId でも絞り込む', async () => {
+    vi.stubEnv('RELABELER_LABEL_LOOKUP_CHUNK_SIZE', '2')
+    vi.spyOn(workItemRepository, 'requestAccountRelabelBulk').mockResolvedValue()
+    const findManyCalls: unknown[] = []
+    const prisma = {
+      relabelScanCursor: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'singleton', lastScannedAccountId: null }),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      account: {
+        findMany: vi.fn().mockResolvedValue([{ id: 'acct-1' }, { id: 'acct-2' }, { id: 'acct-3' }]),
+      },
+      accountLabelLatest: {
+        findMany: vi.fn().mockImplementation((args: unknown) => {
+          findManyCalls.push(args)
+          return Promise.resolve([])
+        }),
+      },
+    } as unknown as PrismaClient
+
+    const rule: LabelRule = {
+      key: 'test_rule',
+      description: 'test',
+      version: '1.0.0',
+      evaluate: () => ({ value: true, confidence: 1, reason: 'test' }),
+    }
+    const registry = new LabelRuleRegistry()
+    registry.register(rule)
+
+    await scanForStaleAccounts(prisma, {
+      registry,
+      labelDefinitionIds: new Map([['test_rule', 'def-1']]),
+      batchSize: 500,
+    })
+
+    // chunk size 2 に対し 3 件の account なので chunk は [acct-1, acct-2] と [acct-3] の2つに分かれる。
+    expect(findManyCalls).toHaveLength(2)
+    for (const call of findManyCalls) {
+      const where = (call as { where: { labelDefinitionId: { in: string[] } } }).where
+      expect(where.labelDefinitionId).toEqual({ in: ['def-1'] })
+    }
+    vi.unstubAllEnvs()
+  })
 })
 
 describe('runRelabelWorkerCycleOnce', () => {
