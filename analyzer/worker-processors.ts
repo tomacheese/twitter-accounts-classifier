@@ -688,6 +688,9 @@ export async function handleWorkItemSettled(
     attemptNumber: workItem.attemptCount,
     status: outcome.status,
     errorSummary: outcome.errorSummary,
+    errorCode: outcome.errorCode,
+    triggerType: workItem.triggerType,
+    createdAt: workItem.createdAt,
     now: new Date(),
   })
 
