@@ -21,6 +21,8 @@ export class CookieIssuerError extends Error {
 
 export interface CookieIssuerClientOptions {
   baseUrl: string
+  /** Cookie Issuer への request で送る `X-Client-Name` header の値。呼び出し元 (`crawler`/`blocker` 等) を識別するための非機密な固定文字列。 */
+  clientName?: string
   fetchImpl?: typeof fetch
   sleepImpl?: (ms: number) => Promise<void>
 }
@@ -46,9 +48,14 @@ export function createCookieIssuerClient(options: CookieIssuerClientOptions) {
     options.sleepImpl ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
 
   async function issueCookies(account: CookieIssuerAccount): Promise<IssuedCookies> {
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+    }
+    if (options.clientName) headers['X-Client-Name'] = options.clientName
+
     const response = await fetchImpl(`${options.baseUrl}/login`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify(account),
     })
 

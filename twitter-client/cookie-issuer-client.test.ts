@@ -145,4 +145,40 @@ describe('createCookieIssuerClient', () => {
     // 実際に fetch されるのは 10 回 (attempt 1〜10) のみになる
     expect(fetchImpl).toHaveBeenCalledTimes(10)
   })
+
+  it('clientNameを指定した場合、X-Client-Name headerを付与する', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ status: 'ok', ct0: 'c0', auth_token: 'a0' }),
+      )
+    const client = createCookieIssuerClient({
+      baseUrl: 'http://issuer.local',
+      clientName: 'crawler',
+      fetchImpl,
+    })
+
+    await client.issueCookies({ username: 'x', password: 'y', otp_secret: null })
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://issuer.local/login',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-Client-Name': 'crawler' }),
+      }),
+    )
+  })
+
+  it('clientNameを指定しない場合、X-Client-Name headerを付与しない', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ status: 'ok', ct0: 'c0', auth_token: 'a0' }),
+      )
+    const client = createCookieIssuerClient({ baseUrl: 'http://issuer.local', fetchImpl })
+
+    await client.issueCookies({ username: 'x', password: 'y', otp_secret: null })
+
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    expect(init.headers).not.toHaveProperty('X-Client-Name')
+  })
 })
