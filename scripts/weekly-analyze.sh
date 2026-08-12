@@ -76,6 +76,13 @@ export DATABASE_URL
 PGAPPNAME="$RUN_DB_APPLICATION_NAME"
 export PGAPPNAME
 RUN_BACKENDS_CLEANED=0
+SESSION_NAME="weekly-crawl-review-$RUN_ID"
+WORKTREE_DIR="$(pwd)/.worktrees/weekly-crawl-review-$RUN_ID"
+WORKTREE_BRANCH="weekly-crawl-review-$RUN_ID"
+DIAGNOSTICS_DIR="$(pwd)/logs/weekly-analysis-runs/$RUN_ID"
+TMUX_SESSION_STARTED=0
+TMUX_PANE_PID=""
+TMUX_CLEANED=0
 
 cleanup_run_backends() {
   [ "${RUN_BACKENDS_CLEANED:-0}" = "1" ] && return 0
@@ -87,10 +94,37 @@ cleanup_run_backends() {
   return 1
 }
 
+cleanup_tmux_review_processes() {
+  [ "${TMUX_CLEANED:-0}" = "1" ] && return 0
+  [ "${TMUX_SESSION_STARTED:-0}" = "1" ] || {
+    TMUX_CLEANED=1
+    return 0
+  }
+
+  if "$TMUX_BIN" has-session -t "$SESSION_NAME" 2>/dev/null; then
+    # Stop pipe-pane before killing the pane so its logger process cannot outlive the run.
+    "$TMUX_BIN" pipe-pane -t "$SESSION_NAME" 2>/dev/null || true
+  fi
+
+  _tmux_cleanup_failed=0
+  if ! weekly_analyze_terminate_process_group \
+    "$TMUX_PANE_PID" "$WORKTREE_DIR" "${WEEKLY_REVIEW_PROCESS_GRACE_SECONDS:-5}"; then
+    _tmux_cleanup_failed=1
+  fi
+
+  if "$TMUX_BIN" has-session -t "$SESSION_NAME" 2>/dev/null; then
+    "$TMUX_BIN" kill-session -t "$SESSION_NAME" 2>/dev/null || _tmux_cleanup_failed=1
+  fi
+  TMUX_CLEANED=1
+  [ "$_tmux_cleanup_failed" -eq 0 ]
+}
+
 # スーパーバイザー自身が予期せず異常終了した場合でも WeeklyAnalysisRun を running のまま
 # 放置しないよう、終了時に status を確認しまだ running であれば失敗として終端させる。
 finalize_run_on_unexpected_exit() {
   EXIT_CODE=$?
+  cleanup_tmux_review_processes || \
+    echo "[weekly-analyze] failed to terminate weekly-review tmux processes during supervisor exit" >&2
   if ! cleanup_run_backends; then
     echo "[weekly-analyze] failed to cancel residual PostgreSQL backends during supervisor exit" >&2
   fi
@@ -104,11 +138,6 @@ finalize_run_on_unexpected_exit() {
   exit "$EXIT_CODE"
 }
 trap finalize_run_on_unexpected_exit EXIT
-
-SESSION_NAME="weekly-crawl-review-$RUN_ID"
-WORKTREE_DIR="$(pwd)/.worktrees/weekly-crawl-review-$RUN_ID"
-WORKTREE_BRANCH="weekly-crawl-review-$RUN_ID"
-DIAGNOSTICS_DIR="$(pwd)/logs/weekly-analysis-runs/$RUN_ID"
 
 echo "[weekly-analyze] checking for still-running previous WeeklyAnalysisRun records"
 PREVIOUS_RUNS_JSON="$("$TSX_BIN" "$RUN_CLI" list-running)"
@@ -289,6 +318,8 @@ echo "[weekly-analyze] starting weekly crawl review at $(date -Iseconds) in tmux
   -e "WEEKLY_REVIEW_RESULT_FILE=$REVIEW_RESULT_FILE" -e "PGAPPNAME=$PGAPPNAME" \
   "$CLAUDE_BIN" --agent weekly-review-coordinator --permission-mode auto \
   "Run the weekly review from the precomputed review plan. Use the weekly-crawl-review skill and make any needed fixes."
+TMUX_SESSION_STARTED=1
+TMUX_PANE_PID="$("$TMUX_BIN" display-message -p -t "$SESSION_NAME" '#{pane_pid}' 2>/dev/null || true)"
 "$TMUX_BIN" pipe-pane -t "$SESSION_NAME" -o "cat >> \"$PANE_LOG\""
 echo "[weekly-analyze] launched tmux session $SESSION_NAME at $(date -Iseconds)"
 
@@ -321,15 +352,18 @@ done
 # DB が終端状態に達した直後でも tmux 側では後処理中の可能性があるため、
 # worktree を削除する前に自然終了を猶予をもって待ち、
 # 猶予を過ぎてもセッションが残っていれば明示的に終了させる。
-TMUX_GRACE_DEADLINE=$(($(date +%s) + 120))
+TMUX_GRACE_DEADLINE=$(($(date +%s) + ${WEEKLY_REVIEW_TMUX_GRACE_SECONDS:-120}))
 while "$TMUX_BIN" has-session -t "$SESSION_NAME" 2>/dev/null; do
   if [ "$(date +%s)" -ge "$TMUX_GRACE_DEADLINE" ]; then
-    echo "[weekly-analyze] tmux session $SESSION_NAME still alive after grace period; killing it"
-    "$TMUX_BIN" kill-session -t "$SESSION_NAME" 2>/dev/null || true
+    echo "[weekly-analyze] tmux session $SESSION_NAME still alive after grace period; terminating its process group"
     break
   fi
   sleep 5
 done
+if ! cleanup_tmux_review_processes; then
+  echo "[weekly-analyze] failed to terminate weekly-review tmux processes" >&2
+  exit 1
+fi
 
 echo "[weekly-analyze] cancelling residual PostgreSQL backends for $RUN_DB_APPLICATION_NAME"
 if ! cleanup_run_backends; then

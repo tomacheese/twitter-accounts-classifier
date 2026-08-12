@@ -6,7 +6,15 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$REPO_ROOT/scripts/weekly-analyze-runtime.sh"
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+PROCESS_PID=""
+cleanup_test() {
+  if [ -n "$PROCESS_PID" ]; then
+    /bin/kill -KILL -- "-$PROCESS_PID" 2>/dev/null || true
+    wait "$PROCESS_PID" 2>/dev/null || true
+  fi
+  rm -rf "$TMP_DIR"
+}
+trap cleanup_test EXIT
 
 fail() {
   echo "[weekly-analyze-runtime.test] $*" >&2
@@ -76,5 +84,19 @@ URL_WITH_QUERY="$(weekly_analyze_database_url_with_application_name \
   'postgresql://weekly_review:test@example.invalid/testdb?connect_timeout=5' 'weekly-crawl-review-run1')"
 assert_eq "$URL_WITH_QUERY" \
   'postgresql://weekly_review:test@example.invalid/testdb?connect_timeout=5&application_name=weekly-crawl-review-run1'
+
+PROCESS_DIR="$TMP_DIR/process-group"
+mkdir -p "$PROCESS_DIR"
+setsid sh -c 'cd "$1" && trap "" TERM && while :; do sleep 1; done' sh "$PROCESS_DIR" &
+PROCESS_PID=$!
+sleep 0.1
+weekly_analyze_terminate_process_group "$PROCESS_PID" "$PROCESS_DIR" 0 || \
+  fail 'run-scoped process group cleanup failed'
+sleep 0.1
+if kill -0 "$PROCESS_PID" 2>/dev/null; then
+  fail 'run-scoped process group survived TERM/KILL cleanup'
+fi
+wait "$PROCESS_PID" 2>/dev/null || true
+PROCESS_PID=""
 
 echo '[weekly-analyze-runtime.test] ok'
