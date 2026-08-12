@@ -135,6 +135,17 @@ describe('spamRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it('is true for a bio with an early rejected dating-solicitation mention followed by a separate, unrejected side-hustle solicitation', () => {
+    const result = spamRule.evaluate(
+      makeBundle({
+        bio: '出会い系はお断りです。副業で稼げる情報も紹介しています',
+        followersCount: 10,
+        followingCount: 800,
+      }),
+    )
+    expect(result.value).toBe(true)
+  })
+
   it('is false for a bio that lists multiple rejected solicitation types before a single trailing rejection word', () => {
     const result = spamRule.evaluate(
       makeBundle({

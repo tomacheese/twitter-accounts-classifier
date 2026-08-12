@@ -1,10 +1,9 @@
 import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 import type { LabelRule } from '../types'
 
-// Bare "beauty" is deliberately excluded: it hits generic idioms and business taglines
-// unrelated to cosmetics ("the beauty of the open road", "timeless beauty" in a jewelry bio),
-// so only the more specific compounds are matched. The negative lookbehind on メイク keeps
-// ヘアメイク matching while excluding リメイク (remake), a common false-positive substring.
+// 素の "beauty" は美容と無関係な慣用句や宣伝文句 (旅先の景観、ジュエリーの謳い文句など) にも
+// 頻出するため対象外とし、より限定的な複合語のみに一致させている。
+// メイクへの否定後読みは、ヘアメイクへの一致を保ったまま誤検知の多いリメイクの部分一致を除外するため。
 const BEAUTY_PATTERN = /コスメ|美容|(?<!リ)メイク|スキンケア|\b(cosmetics?|skincare|makeup)\b/i
 
 export const topicBeautyRule: LabelRule = {
