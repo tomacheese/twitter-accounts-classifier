@@ -61,7 +61,13 @@ export interface WeeklyReviewSample {
   sampleKind: WeeklyReviewSampleKind
   priorityScore: number
   selectionSignals: WeeklyReviewSelectionSignal[]
-  /** random_positive/random_negative サンプルにのみ設定する。targeted サンプルは持たない。 */
+  /**
+   * random_positive/random_negative サンプルにのみ設定する。targeted サンプルは持たない。
+   * この値は candidate-pool inclusion probability (poolSize / populationCount) の分母であり、
+   * このサンプルが最終的に WeeklyReviewPlan.samples に選ばれた実際の確率
+   * (final weekly-review sample selection probability、ハッシュ層化抽出のタイブレークや
+   * 実行ごとの budget にも依存する) そのものではない。
+   */
   populationCount?: number
 }
 
