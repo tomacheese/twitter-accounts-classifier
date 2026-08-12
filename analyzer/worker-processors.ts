@@ -14,7 +14,7 @@ import { parseIsoDurationMs } from './findings/lifecycle'
 import { buildOrUpdateCrawlCycle } from './operations/build-crawl-cycle'
 import { buildOrUpdateWeeklyReviewCycle } from './operations/build-weekly-review-cycle'
 import { buildOrUpdateBlockCycle } from './operations/build-block-cycle'
-import type { WorkItemOutcome } from './worker-loop'
+import { WORK_ITEM_COMPLETION_TRIGGER_TYPE, type WorkItemOutcome } from './worker-loop'
 import { publishGeneration } from './read-models/publish'
 import { buildLabelSummary } from './read-models/build-label-summary'
 import { buildAttentionItems } from './read-models/build-attention-items'
@@ -669,6 +669,19 @@ export async function refreshReadModelFreshnessFromPolicy(prisma: PrismaClient):
 }
 
 /**
+ * OperationCycle を持たないことが仕様上明確な triggerType。
+ * Crawl/Block/Weekly Review のような OperationCycle の対象ではない。
+ */
+const NON_CYCLE_TRIGGER_TYPES = new Set([
+  'account_classification_observation',
+  'review_finding_occurrence',
+  'account_summary_bootstrap_chunk',
+  'bootstrap_completion',
+  RETENTION_SWEEP_TRIGGER_TYPE,
+  WORK_ITEM_COMPLETION_TRIGGER_TYPE,
+])
+
+/**
  * WorkItem の終了状態が確定した後に、対応する OperationCycle を再計算し、
  * analyzer 自身の失敗を OperationalIssue へ昇格する。
  * @param prisma - Prisma クライアント
@@ -705,7 +718,9 @@ export async function handleWorkItemSettled(
       break
     }
     default: {
-      logger.warn(`no operation cycle builder for trigger type: ${workItem.triggerType}`)
+      if (!NON_CYCLE_TRIGGER_TYPES.has(workItem.triggerType)) {
+        logger.warn(`no operation cycle builder for trigger type: ${workItem.triggerType}`)
+      }
     }
   }
 
