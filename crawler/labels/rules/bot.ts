@@ -1,3 +1,4 @@
+import { combineRequired, rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 const VELOCITY_THRESHOLD_PER_DAY = 150
@@ -45,7 +46,7 @@ export const botRule: LabelRule = {
   key: 'bot',
   description:
     '投稿頻度が人間としてあり得ない速さであり、かつリプライ比率がほぼゼロで、投稿間隔が機械的なまでに規則的である',
-  version: '1.5.0',
+  version: '1.6.0',
   evaluate(bundle) {
     const { tweetCount, accountCreatedAt } = bundle.account
     const sampled = bundle.recentTweets
@@ -83,12 +84,35 @@ export const botRule: LabelRule = {
     // (スケジュール投稿ツール運用でも間隔は人手の更新ペースに揺らぐ)を bot 誤判定してしまう。
     // description が謳う「機械的に規則的な間隔」も併せて満たす場合のみ確定させる。
     const value = isHighVelocity && hasNearZeroReplies && hasRegularIntervals
-    const signals = [isHighVelocity, hasNearZeroReplies, hasRegularIntervals].filter(Boolean).length
-    const confidence = signals === 0 ? 0 : signals / 3
+
+    const velocityScore = rampScore(
+      tweetsPerDay,
+      VELOCITY_THRESHOLD_PER_DAY,
+      150,
+      'higher-is-positive',
+    )
+    const recentVelocityScore = rampScore(
+      recentTweetsPerDay,
+      RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY,
+      50,
+      'higher-is-positive',
+    )
+    const replyRatioScore =
+      hasNearZeroReplies || originalPosts.length >= MIN_SAMPLE_FOR_TIMING_SIGNALS
+        ? rampScore(replyRatio, REPLY_RATIO_THRESHOLD, 0.05, 'lower-is-positive')
+        : 0
+    const covScore = Number.isFinite(cov)
+      ? rampScore(cov, INTERVAL_COEFFICIENT_OF_VARIATION_THRESHOLD, 0.2, 'lower-is-positive')
+      : 0
+    const evidenceScore = combineRequired([
+      combineRequired([velocityScore, recentVelocityScore]),
+      replyRatioScore,
+      covScore,
+    ])
 
     return {
       value,
-      confidence,
+      confidence: toConfidence(value, evidenceScore),
       reason: `tweetsPerDay=${tweetsPerDay.toFixed(1)}, recentTweetsPerDay=${recentTweetsPerDay.toFixed(1)}, replyRatio=${replyRatio.toFixed(2)} (originalPosts=${originalPosts.length}/${sampled.length}), intervalCoV=${Number.isFinite(cov) ? cov.toFixed(2) : 'n/a'}`,
     }
   },
