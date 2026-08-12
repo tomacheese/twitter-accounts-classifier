@@ -87,6 +87,7 @@ interface RecordAccountLabelsBulkRow {
   reason: string
   method: string
   ruleVersion: string
+  evaluable: boolean
   labeledAt: Date | null
   historyInserted: boolean
   latestUpserted: boolean
@@ -118,14 +119,15 @@ export async function recordAccountLabelsBulk(
   const reasons = params.labels.map((label) => label.result.reason)
   const methods = params.labels.map((label) => label.method)
   const ruleVersions = params.labels.map((label) => label.ruleVersion)
+  const evaluables = params.labels.map((label) => label.result.evaluable ?? true)
 
   const rows = await prisma.$queryRaw<RecordAccountLabelsBulkRow[]>`
     WITH shared_now AS (
       SELECT now() AS "labeledAt"
     ),
     input_rows AS (
-      SELECT * FROM UNNEST(${ids}::text[], ${accountIds}::text[], ${labelDefinitionIds}::text[], ${values}::boolean[], ${confidences}::double precision[], ${reasons}::text[], ${methods}::text[], ${ruleVersions}::text[])
-        AS u("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion")
+      SELECT * FROM UNNEST(${ids}::text[], ${accountIds}::text[], ${labelDefinitionIds}::text[], ${values}::boolean[], ${confidences}::double precision[], ${reasons}::text[], ${methods}::text[], ${ruleVersions}::text[], ${evaluables}::boolean[])
+        AS u("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable")
     ),
     to_insert AS (
       SELECT ir.*
@@ -138,30 +140,31 @@ export async function recordAccountLabelsBulk(
          OR al."confidence" IS DISTINCT FROM ir."confidence"
          OR al."reason" IS DISTINCT FROM ir."reason"
          OR al."method" IS DISTINCT FROM ir."method"
+         OR al."evaluable" IS DISTINCT FROM ir."evaluable"
     ),
     inserted_history AS (
       INSERT INTO "AccountLabel"
-        ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
+        ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
       SELECT ti.*, shared_now."labeledAt", ${params.sourceKind}, ${params.sourceId ?? null}, ${params.sourceUsername ?? null}
       FROM to_insert ti
       CROSS JOIN shared_now
       RETURNING *
     ),
     upserted_latest AS (
-      INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
-      SELECT ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion", shared_now."labeledAt", ${params.sourceKind}, ${params.sourceId ?? null}, ${params.sourceUsername ?? null}
+      INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
+      SELECT ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion", ir."evaluable", shared_now."labeledAt", ${params.sourceKind}, ${params.sourceId ?? null}, ${params.sourceUsername ?? null}
       FROM input_rows ir
       CROSS JOIN shared_now
       WHERE EXISTS (SELECT 1 FROM to_insert ti WHERE ti."id" = ir."id")
       ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
       SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
-          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "labeledAt" = EXCLUDED."labeledAt",
+          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "evaluable" = EXCLUDED."evaluable", "labeledAt" = EXCLUDED."labeledAt",
           "sourceKind" = EXCLUDED."sourceKind", "sourceId" = EXCLUDED."sourceId", "sourceUsername" = EXCLUDED."sourceUsername"
       WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
       RETURNING "accountId", "labelDefinitionId"
     )
     SELECT
-      ir."id", ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion",
+      ir."id", ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion", ir."evaluable",
       ih."labeledAt",
       (ih."id" IS NOT NULL) AS "historyInserted",
       EXISTS (
@@ -241,33 +244,33 @@ export async function recordCrawlAccountLabel(
       RETURNING "id"
     ),
     previous_latest AS (
-      SELECT "value", "ruleVersion", "confidence", "reason", "method"
+      SELECT "value", "ruleVersion", "confidence", "reason", "method", "evaluable"
       FROM "AccountLabelLatest"
       WHERE "accountId" = ${params.accountId} AND "labelDefinitionId" = ${params.labelDefinitionId}
     ),
     inserted_history AS (
       INSERT INTO "AccountLabel"
-        ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
-      SELECT ${id}, ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, ${params.result.confidence}, ${params.result.reason}, ${params.method}, ${params.ruleVersion}, "labeledAt", 'crawl', ${params.crawlRunId}, ${params.username}
+        ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
+      SELECT ${id}, ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, ${params.result.confidence}, ${params.result.reason}, ${params.method}, ${params.ruleVersion}, ${params.result.evaluable ?? true}, "labeledAt", 'crawl', ${params.crawlRunId}, ${params.username}
       FROM shared_now
       WHERE EXISTS (SELECT 1 FROM claimed)
         AND NOT EXISTS (
           SELECT 1 FROM previous_latest
           WHERE "value" = ${params.result.value} AND "ruleVersion" = ${params.ruleVersion}
             AND "confidence" = ${params.result.confidence} AND "reason" = ${params.result.reason}
-            AND "method" = ${params.method}
+            AND "method" = ${params.method} AND "evaluable" = ${params.result.evaluable ?? true}
         )
       RETURNING "id"
     ),
     upserted_latest AS (
       INSERT INTO "AccountLabelLatest"
-        ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
-      SELECT ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, ${params.result.confidence}, ${params.result.reason}, ${params.method}, ${params.ruleVersion}, "labeledAt", 'crawl', ${params.crawlRunId}, ${params.username}
+        ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
+      SELECT ${params.accountId}, ${params.labelDefinitionId}, ${params.result.value}, ${params.result.confidence}, ${params.result.reason}, ${params.method}, ${params.ruleVersion}, ${params.result.evaluable ?? true}, "labeledAt", 'crawl', ${params.crawlRunId}, ${params.username}
       FROM shared_now
       WHERE EXISTS (SELECT 1 FROM claimed)
       ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
       SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
-          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "labeledAt" = EXCLUDED."labeledAt",
+          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "evaluable" = EXCLUDED."evaluable", "labeledAt" = EXCLUDED."labeledAt",
           "sourceKind" = EXCLUDED."sourceKind", "sourceId" = EXCLUDED."sourceId", "sourceUsername" = EXCLUDED."sourceUsername"
       WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
       RETURNING "accountId"
