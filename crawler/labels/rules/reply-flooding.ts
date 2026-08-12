@@ -1,3 +1,4 @@
+import { rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 import { averagePairwiseSimilarity } from '../text-similarity'
 
@@ -19,7 +20,7 @@ export const replyFloodingRule: LabelRule = {
   key: 'reply_flooding',
   description:
     '同一相手への返信を短時間のうちに大量投稿しており、その文面が言い換えや翻訳違いを含めて内容的に酷似している。1つのバズったツイートに大量の言い換えリプライを浴びせてインプレッションを稼ぐ「インプレゾンビ」の典型パターン',
-  version: '1.1.0',
+  version: '1.2.0',
   evaluate(bundle) {
     // 先頭の @メンション(会話相手)でグルーピングすると、
     // 通常の相互会話との区別ができない。一人との往復チャットや口論でも、
@@ -61,13 +62,20 @@ export const replyFloodingRule: LabelRule = {
       return { value: false, confidence: 0, reason: 'no reply-flooding target found' }
     }
 
-    const volumeSignal = Math.min(1, best.count / 20)
-    const similaritySignal = Math.min(1, best.similarity / 0.15)
-    const confidence = Math.min(1, volumeSignal * 0.4 + similaritySignal * 0.6)
+    const volumeScore = rampScore(best.count, MIN_REPLIES_TO_SAME_TARGET, 12, 'higher-is-positive')
+    const similarityScore = rampScore(
+      best.similarity,
+      SIMILARITY_THRESHOLD,
+      0.12,
+      'higher-is-positive',
+    )
+    // 旧実装の加重比率 (volume 40% + similarity 60%) をそのまま踏襲する単純な加重平均。
+    // 必須/代替条件ではなく元々連続的な加重ブレンドだったため combineRequired/combineAlternatives は使わない。
+    const evidenceScore = 0.4 * volumeScore + 0.6 * similarityScore
 
     return {
       value: true,
-      confidence,
+      confidence: toConfidence(true, evidenceScore),
       reason: `target=@${best.target}, replies=${best.count}, avgSimilarity=${best.similarity.toFixed(3)}`,
     }
   },

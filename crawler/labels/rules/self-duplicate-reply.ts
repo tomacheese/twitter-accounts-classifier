@@ -1,3 +1,4 @@
+import { rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 import { normalizeReplyText } from '../duplicate-reply-index'
 
@@ -12,7 +13,7 @@ export const selfDuplicateReplyRule: LabelRule = {
   key: 'self_duplicate_reply',
   description:
     '同一内容(URL/メンションを除去した上で比較)を単独ツイートとしても @リプライとしても繰り返し投稿している。インプレッション稼ぎ(「インプレゾンビ」)行為の特徴',
-  version: '1.1.0',
+  version: '1.2.0',
   evaluate(bundle) {
     // リプライ先が自分自身の直近ツイートである場合、それは他者のバズ投稿に相乗りした
     // リプライではなく、自分の投稿を続けるスレッド内の連投にすぎない。
@@ -43,9 +44,10 @@ export const selfDuplicateReplyRule: LabelRule = {
     }
 
     const value = duplicatePairs >= MIN_DUPLICATE_PAIRS
+    const evidenceScore = rampScore(duplicatePairs, MIN_DUPLICATE_PAIRS, 2, 'higher-is-positive')
     return {
       value,
-      confidence: value ? Math.min(1, duplicatePairs / 4) : 0,
+      confidence: toConfidence(value, evidenceScore),
       reason: `selfDuplicatePostReplyPairs=${duplicatePairs}`,
     }
   },

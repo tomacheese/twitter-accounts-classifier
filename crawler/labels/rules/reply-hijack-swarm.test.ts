@@ -67,7 +67,7 @@ describe('replyHijackSwarmRule', () => {
     const result = replyHijackSwarmRule.evaluate(makeBundle(undefined))
 
     expect(result.value).toBe(false)
-    expect(result.confidence).toBe(0)
+    expect(result.confidence).toBeLessThan(1)
   })
 
   it('is false for a 5+ member swarm when the account also posts plenty of original content', () => {

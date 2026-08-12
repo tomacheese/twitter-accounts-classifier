@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto'
+import { rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 import { normalizeReplyText } from '../duplicate-reply-index'
 
 const MIN_DISTINCT_TARGETS = 5
 const WINDOW_HOURS = 24
-const CONFIDENCE_DIVISOR = 10
 const TEXT_HASH_LENGTH = 16
 
 interface ReplyEntry {
@@ -82,7 +82,7 @@ export const crossTargetTemplatedReplyRule: LabelRule = {
   key: 'cross_target_templated_reply',
   description:
     '同一または実質同一の定型リプライを、短時間のうちに複数の異なる親ツイートへ反復投稿している。インプレッション獲得目的のアカウントが異なるバズ投稿へ同じ賞賛文・誘導文を大量に返信する典型パターン',
-  version: '1.0.0',
+  version: '1.1.0',
   evaluate(bundle) {
     // 自分自身の過去ツイートへの返信はスレッド内の連投であり、
     // 異なる他者への反復投稿という本ルールの検出対象ではないため除外する
@@ -113,9 +113,10 @@ export const crossTargetTemplatedReplyRule: LabelRule = {
       return { value: false, confidence: 0, reason: 'no cross-target templated reply group found' }
     }
 
+    const evidenceScore = rampScore(best.targetCount, MIN_DISTINCT_TARGETS, 5, 'higher-is-positive')
     return {
       value: true,
-      confidence: Math.min(1, best.targetCount / CONFIDENCE_DIVISOR),
+      confidence: toConfidence(true, evidenceScore),
       reason: buildReason(best),
     }
   },
