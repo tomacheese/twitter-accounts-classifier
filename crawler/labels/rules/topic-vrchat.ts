@@ -27,7 +27,7 @@ export const topicVrchatRule: LabelRule = {
       keywordMatch ? KEYWORD_SCORE : 0,
       followGraph.evidenceScore,
     ])
-    const evaluable = bio !== null || followGraph.evaluable
+    const evaluable = bio !== null || tweetMatch || followGraph.evaluable
     return {
       value,
       confidence: toConfidence(value, evidenceScore, evaluable),

@@ -12,11 +12,11 @@ export interface FollowGraphTopicSignalOptions {
 }
 
 export interface FollowGraphTopicSignalResult {
-  /** 既存と同じ判定: totalCount >= MIN_FOLLOWEE_SAMPLE && labeledCount / totalCount >= MIN_FOLLOWEE_LABELED_RATIO。 */
+  /** フォロー先の該当ラベル比率が閾値以上か。 */
   matched: boolean
-  /** totalCount < MIN_FOLLOWEE_SAMPLE の場合は 0。それ以外は posteriorProbabilityAtLeast(labeledCount, totalCount, MIN_FOLLOWEE_LABELED_RATIO)。 */
+  /** サンプル数を考慮した比率の証拠強度。サンプル不足で判定不能な場合は 0。 */
   evidenceScore: number
-  /** totalCount >= MIN_FOLLOWEE_SAMPLE かどうか。follow graph 単独で判定材料になり得るかを表す。 */
+  /** follow graph 単独で判定材料になり得るだけのサンプル数があるか。 */
   evaluable: boolean
 }
 

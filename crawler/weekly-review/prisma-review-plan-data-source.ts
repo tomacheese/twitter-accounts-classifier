@@ -119,7 +119,7 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
             -- sample frame = 期間内の各 accountId × labelDefinitionId の最新1件 (dedupe 後の期間内全件)。
             -- listPopulationCounts と同じ DISTINCT ON キー・LIMIT なしで揃え、
             -- inclusion probability がゼロの行を population frame に含めない。
-            SELECT DISTINCT ON (label."accountId", label."labelDefinitionId")
+            SELECT DISTINCT ON (label."labelDefinitionId", label."accountId")
               label."accountId",
               label.value,
               label.confidence,
@@ -131,7 +131,7 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
             WHERE label."labelDefinitionId" = definition.id
               AND label."labeledAt" >= ${targetFrom}
               AND label."labeledAt" <= ${targetTo}
-            ORDER BY label."accountId", label."labelDefinitionId", label."labeledAt" DESC, label.id DESC
+            ORDER BY label."labelDefinitionId", label."accountId", label."labeledAt" DESC, label.id DESC
           ) deduped
         ) ranked
         WHERE ranked.stratum_rank <= ${poolSize}
@@ -142,6 +142,7 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
   /**
    * `targetFrom`〜`targetTo` の期間内に labeled された、ラベル×value ごとのアカウント数
    * (relabel 履歴の行数ではなく account 単位の重複排除後) を返す。
+   * `listRecentCandidates` の抽出母集団と揃えるため `evaluable` でも絞り込む。
    */
   public async listPopulationCounts(
     targetFrom: Date,
@@ -150,14 +151,15 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
     return this.prisma.$queryRaw<PlanningPopulationCountRow[]>(Prisma.sql`
       SELECT deduped."labelDefinitionId", deduped.value, COUNT(*)::int AS count
       FROM (
-        SELECT DISTINCT ON (label."accountId", label."labelDefinitionId")
+        SELECT DISTINCT ON (label."labelDefinitionId", label."accountId")
           label."accountId",
           label."labelDefinitionId",
           label.value
         FROM "AccountLabel" label
         WHERE label."labeledAt" >= ${targetFrom}
           AND label."labeledAt" <= ${targetTo}
-        ORDER BY label."accountId", label."labelDefinitionId", label."labeledAt" DESC, label.id DESC
+          AND label.evaluable
+        ORDER BY label."labelDefinitionId", label."accountId", label."labeledAt" DESC, label.id DESC
       ) deduped
       GROUP BY deduped."labelDefinitionId", deduped.value
     `)

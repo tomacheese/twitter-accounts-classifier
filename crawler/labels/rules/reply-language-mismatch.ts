@@ -65,7 +65,7 @@ export const replyLanguageMismatchRule: LabelRule = {
 
     const value = hasEnoughSample && mismatch >= SCRIPT_MISMATCH_THRESHOLD
     // サンプル数が多いほど閾値超過分に対し早く 1.0 へ飽和するよう、
-    // rampWidth をサンプルサイズに反比例させる (統計量そのものは smoothedRate 等で縮小しない)。
+    // rampWidth をサンプルサイズの平方根に反比例させる (統計量そのものは smoothedRate 等で縮小しない)。
     const minSampleSide = Math.min(ownPosts.length, replies.length)
     const rampWidth = hasEnoughSample ? 0.3 * Math.sqrt(MIN_SAMPLE_PER_SIDE / minSampleSide) : 0.3
     const evidenceScore = hasEnoughSample

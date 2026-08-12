@@ -49,6 +49,10 @@ export async function selectBlockCandidates(
         all_latest."confidence"
       FROM "AccountLabelLatest" all_latest
       JOIN relevant_labels rl ON rl.id = all_latest."labelDefinitionId"
+      -- ruleVersion 不一致の行は stale とみなし候補から除外する。
+      -- currentRuleVersion を一斉に上げるデプロイ直後は relabel が追いつくまで
+      -- 対象ラベルの候補が一時的にゼロになり得るため、大量バージョン更新時は relabel queue の
+      -- 進捗を並行して監視する。
       WHERE all_latest."value" = true
         AND all_latest."confidence" >= rl.threshold
         AND all_latest."ruleVersion" = rl."currentRuleVersion"

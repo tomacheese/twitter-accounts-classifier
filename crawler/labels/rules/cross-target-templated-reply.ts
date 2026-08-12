@@ -110,7 +110,11 @@ export const crossTargetTemplatedReplyRule: LabelRule = {
     }
 
     if (best === null) {
-      return { value: false, confidence: 0, reason: 'no cross-target templated reply group found' }
+      return {
+        value: false,
+        confidence: toConfidence(false, 0),
+        reason: 'no cross-target templated reply group found',
+      }
     }
 
     const evidenceScore = rampScore(best.targetCount, MIN_DISTINCT_TARGETS, 5, 'higher-is-positive')

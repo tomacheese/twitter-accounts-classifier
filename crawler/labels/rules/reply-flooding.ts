@@ -59,7 +59,11 @@ export const replyFloodingRule: LabelRule = {
     }
 
     if (best === null) {
-      return { value: false, confidence: 0, reason: 'no reply-flooding target found' }
+      return {
+        value: false,
+        confidence: toConfidence(false, 0),
+        reason: 'no reply-flooding target found',
+      }
     }
 
     const volumeScore = rampScore(best.count, MIN_REPLIES_TO_SAME_TARGET, 12, 'higher-is-positive')
@@ -69,8 +73,7 @@ export const replyFloodingRule: LabelRule = {
       0.12,
       'higher-is-positive',
     )
-    // 旧実装の加重比率 (volume 40% + similarity 60%) をそのまま踏襲する単純な加重平均。
-    // 必須/代替条件ではなく元々連続的な加重ブレンドだったため combineRequired/combineAlternatives は使わない。
+    // 必須/代替条件ではなく連続的な加重ブレンドであるため combineRequired/combineAlternatives は使わない。
     const evidenceScore = 0.4 * volumeScore + 0.6 * similarityScore
 
     return {

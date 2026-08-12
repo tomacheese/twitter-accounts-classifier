@@ -109,11 +109,17 @@ export const botRule: LabelRule = {
       replyRatioScore,
       covScore,
     ])
+    // replyRatio・intervalCoV のいずれかがサンプル不足なら、
+    // value=false は「機械的でないと確認できた」のではなく「判定材料が無かった」に過ぎない。
+    const evaluable =
+      originalPosts.length >= MIN_SAMPLE_FOR_TIMING_SIGNALS &&
+      sampled.length >= MIN_SAMPLE_FOR_TIMING_SIGNALS
 
     return {
       value,
-      confidence: toConfidence(value, evidenceScore),
+      confidence: toConfidence(value, evidenceScore, evaluable),
       reason: `tweetsPerDay=${tweetsPerDay.toFixed(1)}, recentTweetsPerDay=${recentTweetsPerDay.toFixed(1)}, replyRatio=${replyRatio.toFixed(2)} (originalPosts=${originalPosts.length}/${sampled.length}), intervalCoV=${Number.isFinite(cov) ? cov.toFixed(2) : 'n/a'}`,
+      evaluable,
     }
   },
 }

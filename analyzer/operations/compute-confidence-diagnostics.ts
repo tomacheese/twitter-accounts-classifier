@@ -1,8 +1,11 @@
+import { Logger } from '@book000/node-utils'
 import type { PrismaClient } from '../generated/prisma'
 import {
   structuredOutputSchema,
   type WeeklyReviewSampleJudgment,
 } from '../weekly-review/structured-output-schema'
+
+const logger = Logger.configure('analyzer:compute-confidence-diagnostics')
 
 const MIN_DIAGNOSTIC_N_EFF = 20
 const BIN_WIDTH = 0.1
@@ -35,6 +38,13 @@ export interface ConfidenceDiagnosticsSnapshot {
 interface WeightedJudgment {
   judgment: WeeklyReviewSampleJudgment
   weight: number
+}
+
+interface RollingCell {
+  labelKey: string
+  classifierValue: boolean
+  ruleVersion: string
+  entries: WeightedJudgment[]
 }
 
 function binStartOf(confidence: number): number {
@@ -93,8 +103,7 @@ function groupByBin(entries: WeightedJudgment[]): ConfidenceDiagnosticsBin[] {
  * `confidence`/`evidenceScore` は校正されていない heuristic decision score であるため、
  * ここで返す指標は「confidence が高いほど実際に正しい割合が高いか」の診断であり、
  * 確率としての較正誤差 (calibration error) ではない。Brier score は参考値としてのみ含める。
- * `ruleVersion` が変わった時点でそのセルの累積はリセットする (異なる confidence 計算式の
- * judgment を混ぜないことを最優先する)。
+ * `ruleVersion` が変わった時点でそのセルの累積をリセットする (異なる confidence 計算式の judgment を混在させないため)。
  * @param prisma - Prisma クライアント
  * @param options - 対象期間 (省略時は全期間)
  * @returns `labelKey × ruleVersion × classifierValue` ごとの、各 WeeklyAnalysisRun を
@@ -121,13 +130,19 @@ export async function computeConfidenceDiagnostics(
     select: { id: true, targetTo: true, structuredOutput: true },
   })
 
-  const rollingByCell = new Map<string, { ruleVersion: string; entries: WeightedJudgment[] }>()
+  const rollingByCell = new Map<string, RollingCell>()
   const snapshots: ConfidenceDiagnosticsSnapshot[] = []
 
   for (const run of runs) {
     if (!run.structuredOutput || !run.targetTo) continue
     const parsed = structuredOutputSchema.safeParse(run.structuredOutput)
-    if (!parsed.success || !parsed.data.review) continue
+    if (!parsed.success) {
+      logger.error(
+        `invalid structuredOutput for WeeklyAnalysisRun ${run.id}: ${parsed.error.message}`,
+      )
+      continue
+    }
+    if (!parsed.data.review) continue
     if (parsed.data.review.strategyVersion.startsWith('risk-stratified/1')) continue
 
     const relevantJudgments = parsed.data.review.judgments.filter(
@@ -137,8 +152,12 @@ export async function computeConfidenceDiagnostics(
         judgment.classifierEvaluable !== false,
     )
 
+    // このラウンドで更新されたセルのみ再集計・再出力する。触れていないセルまで
+    // 毎ラウンド summarize/emit すると累積セル数 × ラウンド数で無駄な計算が積み上がるため。
+    const touchedCellKeys = new Set<string>()
     for (const judgment of relevantJudgments) {
-      const cellKey = `${judgment.labelKey} ${judgment.classifierValue}`
+      const cellKey = JSON.stringify([judgment.labelKey, judgment.classifierValue])
+      touchedCellKeys.add(cellKey)
       const existing = rollingByCell.get(cellKey)
       const weight = judgment.populationCount ?? 1
       if (existing?.ruleVersion === judgment.ruleVersion) {
@@ -146,18 +165,21 @@ export async function computeConfidenceDiagnostics(
       } else {
         // ruleVersion が変わった時点でそのセルの累積をリセットする。
         rollingByCell.set(cellKey, {
+          labelKey: judgment.labelKey,
+          classifierValue: judgment.classifierValue,
           ruleVersion: judgment.ruleVersion,
           entries: [{ judgment, weight }],
         })
       }
     }
 
-    for (const [cellKey, cell] of rollingByCell) {
-      const [labelKey, classifierValueRaw] = cellKey.split(' ')
+    for (const cellKey of touchedCellKeys) {
+      const cell = rollingByCell.get(cellKey)
+      if (!cell) continue
       snapshots.push({
-        labelKey,
+        labelKey: cell.labelKey,
         ruleVersion: cell.ruleVersion,
-        classifierValue: classifierValueRaw === 'true',
+        classifierValue: cell.classifierValue,
         asOf: run.targetTo,
         bins: groupByBin(cell.entries),
       })

@@ -130,8 +130,8 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
       const candidates = await source.listRecentCandidates(targetFrom, targetTo, 1, 'bounded-seed')
       const own = candidates.filter((candidate) => candidate.labelDefinitionId === label.id)
 
-      // 旧実装は LIMIT poolSize*10 で全体を絞り込んだ後に value ごとの stratum を取っていたため、
-      // 唯一の value=true 候補が母集団最古であればこの LIMIT で除外され得た。
+      // value ごとの stratum を取る前に全体を LIMIT で絞り込む実装だと、
+      // 唯一の value=true 候補が母集団最古の場合にその LIMIT で除外され得る境界ケース。
       expect(own.map((candidate) => candidate.value).toSorted()).toEqual([false, true])
       expect(own.find((candidate) => candidate.value)?.accountId).toBe(accountIds[0])
     } finally {

@@ -79,9 +79,6 @@ export const spamRule: LabelRule = {
 
     const value = hasSolicitation && (hasBaitRetweetPattern || hasMassFollowingPattern)
 
-    // hasSolicitation は value 判定の必須ゲートとしてのみ使い、evidenceScore の合成には含めない。
-    // ゲートを combineRequired に含めて固定値 0.5 として扱うと、
-    // value=true の全ケースが補強シグナルの強弱に関わらず同じ evidenceScore に潰れてしまうため。
     const retweetScore = rampScore(retweetRatio, 0.8, 0.2, 'higher-is-positive')
     const followingCountScore = rampScore(
       followingCount,
@@ -96,9 +93,16 @@ export const spamRule: LabelRule = {
       5,
       'higher-is-positive',
     )
-    const evidenceScore = combineAlternatives([
-      retweetScore,
-      combineRequired([followingCountScore, followingRatioScore]),
+    // hasSolicitation を combineRequired の一員に含めることで、
+    // 勧誘が無い bio では他シグナルの強弱に関わらず evidenceScore を 0 に落とす。
+    // 含めないと勧誘無しでも大量フォロー等の副シグナルだけで evidenceScore が高止まりし、
+    // value=false の confidence が不当に低くなるため。
+    const evidenceScore = combineRequired([
+      hasSolicitation ? 1 : 0,
+      combineAlternatives([
+        retweetScore,
+        combineRequired([followingCountScore, followingRatioScore]),
+      ]),
     ])
 
     return {

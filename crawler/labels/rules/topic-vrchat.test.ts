@@ -166,4 +166,12 @@ describe('topicVrchatRule', () => {
     const result = topicVrchatRule.evaluate(buildBundle('日常アカウントです'))
     expect(result.evaluable).toBe(true)
   })
+
+  it('bio が null でもツイートで VRChat キーワードにマッチすれば evaluable: true・confidence: 0.8 になる', () => {
+    const bundle = buildBundle(null, [{ fullText: '今日は友達と VRChat で遊びました！' }])
+    const result = topicVrchatRule.evaluate(bundle)
+    expect(result.value).toBe(true)
+    expect(result.evaluable).toBe(true)
+    expect(result.confidence).toBe(0.8)
+  })
 })

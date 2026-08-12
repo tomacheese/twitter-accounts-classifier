@@ -15,7 +15,7 @@ Treat `references/evaluation-methodology.md` as the source of truth for evaluati
 
 - Confirm the current checkout is a disposable worktree and is not `master`.
 - Confirm `WEEKLY_ANALYSIS_RUN_ID`, `WEEKLY_REVIEW_PLAN_FILE`, and `WEEKLY_REVIEW_RESULT_FILE` are set.
-- Read `WEEKLY_REVIEW_PLAN_FILE` and verify `seed == WEEKLY_ANALYSIS_RUN_ID` and `strategyVersion == risk-stratified/1`.
+- Read `WEEKLY_REVIEW_PLAN_FILE` and verify `seed == WEEKLY_ANALYSIS_RUN_ID` and `strategyVersion == risk-stratified/2`.
 - If the plan is missing or invalid, do not fall back to ad hoc sampling. Mark `WeeklyAnalysisRun` failed and stop.
 - Investigation queries against the database must be read-only. Database writes are limited to run-state/PR bookkeeping and explicitly authorized remediation.
 

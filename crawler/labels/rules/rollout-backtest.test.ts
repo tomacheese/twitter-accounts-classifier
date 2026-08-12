@@ -4,9 +4,8 @@ import { spamRule } from './spam'
 import { crossTargetTemplatedReplyRule } from './cross-target-templated-reply'
 import type { AccountFeatureBundle } from '../types'
 
-// data/config.json のデプロイ先固有設定に想定される confidenceThreshold との
-// 境界での回帰を防ぐバックテスト。しきい値の実値はデプロイ時に運用者が
-// 実際の data/config.json から確認すること (rollout チェックリスト参照)。
+// data/config.json のデプロイ先固有 confidenceThreshold の境界回帰を防ぐバックテスト。
+// しきい値の実値はデプロイ時に運用者が実際の data/config.json で確認すること。
 const BOT_CONFIDENCE_THRESHOLD = 0.5
 const SPAM_CONFIDENCE_THRESHOLD = 0.5
 const CROSS_TARGET_TEMPLATED_REPLY_CONFIDENCE_THRESHOLD = 0.7
@@ -113,8 +112,7 @@ describe('rollout backtest: cross_target_templated_reply gate boundary', () => {
     }
     const result = crossTargetTemplatedReplyRule.evaluate(bundle)
     expect(result.value).toBe(true)
-    // count=5,6 は現行本番挙動でも通過しないことが分かっている既知の境界であり、
-    // 本 PR による回帰ではない (count=7 以上で新旧の confidence がほぼ一致する)。
+    // count=5,6 は現行本番挙動でも通過しない既知の境界であり、この変更による回帰ではない。
     expect(result.confidence).toBeLessThan(CROSS_TARGET_TEMPLATED_REPLY_CONFIDENCE_THRESHOLD)
   })
 

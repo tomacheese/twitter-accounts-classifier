@@ -62,11 +62,9 @@ export interface WeeklyReviewSample {
   priorityScore: number
   selectionSignals: WeeklyReviewSelectionSignal[]
   /**
-   * random_positive/random_negative サンプルにのみ設定する。targeted サンプルは持たない。
-   * この値は candidate-pool inclusion probability (poolSize / populationCount) の分母であり、
-   * このサンプルが最終的に WeeklyReviewPlan.samples に選ばれた実際の確率
-   * (final weekly-review sample selection probability、ハッシュ層化抽出のタイブレークや
-   * 実行ごとの budget にも依存する) そのものではない。
+   * random_positive/random_negative サンプルにのみ設定する (targeted サンプルは持たない)。
+   * candidate-pool inclusion probability (poolSize / populationCount) の分母であり、
+   * 最終的な selection probability (ハッシュ層化抽出・budget にも依存する) とは異なる。
    */
   populationCount?: number
 }
@@ -227,8 +225,11 @@ export function buildWeeklyReviewPlan(input: BuildWeeklyReviewPlanInput): Weekly
       if (selected.size >= input.budget) break
       // evaluable=false の candidate は support 不足で不偏 audit の代表例として使えないため、
       // random baseline の対象からは外し targeted fill 側の insufficient_support に委ねる。
+      // recent_change candidate は listRecentCandidates のハッシュ層化抽出を経ておらず
+      // populationCount が前提とする inclusion probability と噛み合わないため、
+      // random baseline の対象からは外し targeted fill 側の recent_change に委ねる。
       const candidate = pool
-        .filter((item) => item.value === value && item.evaluable)
+        .filter((item) => item.value === value && item.evaluable && !item.changeType)
         .toSorted((a, b) =>
           stableRank(input.seed, `${a.labelDefinitionId}:${a.accountId}:baseline`).localeCompare(
             stableRank(input.seed, `${b.labelDefinitionId}:${b.accountId}:baseline`),

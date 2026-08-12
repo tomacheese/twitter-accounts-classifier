@@ -48,7 +48,12 @@ export const replyHijackSwarmRule: LabelRule = {
     const looksReplyFocused = hasEnoughSample && replyRatio >= REPLY_RATIO_THRESHOLD
 
     const value = isSwarmMember && looksReplyFocused
-    const sizeScore = rampScore(size, MIN_DISTINCT_AUTHORS, 10, 'higher-is-positive')
+    const sizeScore = rampScore(
+      size,
+      MIN_DISTINCT_AUTHORS,
+      MIN_DISTINCT_AUTHORS,
+      'higher-is-positive',
+    )
     const replyRatioScore = hasEnoughSample
       ? rampScore(replyRatio, REPLY_RATIO_THRESHOLD, 0.5, 'higher-is-positive')
       : 0
@@ -56,8 +61,9 @@ export const replyHijackSwarmRule: LabelRule = {
 
     return {
       value,
-      confidence: toConfidence(value, evidenceScore),
+      confidence: toConfidence(value, evidenceScore, hasEnoughSample),
       reason: `replyHijackSwarmSize=${size}, replyRatio=${replyRatio.toFixed(2)} (n=${sampled.length})`,
+      evaluable: hasEnoughSample,
     }
   },
 }

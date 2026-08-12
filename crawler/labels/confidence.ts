@@ -4,11 +4,14 @@ function validateBetaBinomialInputs(
   priorAlpha: number,
   priorBeta: number,
 ): void {
+  if (successCount < 0) {
+    throw new RangeError(`successCount (${successCount}) must be non-negative`)
+  }
   if (totalCount < successCount) {
     throw new RangeError(`totalCount (${totalCount}) must be >= successCount (${successCount})`)
   }
-  if (priorAlpha < 0 || priorBeta < 0) {
-    throw new RangeError('priorAlpha and priorBeta must be non-negative')
+  if (priorAlpha <= 0 || priorBeta <= 0) {
+    throw new RangeError('priorAlpha and priorBeta must be positive')
   }
 }
 
@@ -120,8 +123,7 @@ export function smoothedRate(
  * Beta(priorAlpha + successCount, priorBeta + totalCount - successCount) の生存関数として、
  * 正則化不完全ベータ関数の継続分数近似により計算する。
  * 「ratio >= threshold」型の判定境界を持つルール (follow graph、ad_reply_hijack など) の evidenceScore はこちらを使う。
- * successCount/totalCount が threshold ちょうどのとき、概ね 0.5 前後を返す
- * (n が極端に小さい場合を除き、判定境界とおおむね整合する)。
+ * successCount/totalCount が threshold ちょうどのとき、概ね 0.5 前後を返す (判定境界とおおむね整合する)。
  * @param successCount - 観測された成功回数
  * @param totalCount - 観測された総試行回数
  * @param threshold - 判定閾値 [0, 1]
@@ -142,7 +144,6 @@ export function posteriorProbabilityAtLeast(
   }
   const alpha = priorAlpha + successCount
   const beta = priorBeta + totalCount - successCount
-  // P(p >= threshold) = 1 - I_threshold(alpha, beta)
   return 1 - regularizedIncompleteBeta(threshold, alpha, beta)
 }
 

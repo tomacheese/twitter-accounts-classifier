@@ -15,7 +15,12 @@ export const templatedReplyNetworkRule: LabelRule = {
   evaluate(bundle) {
     const networkSize = bundle.templatedReplyNetworkSize ?? 0
     const value = networkSize >= MIN_NETWORK_SIZE
-    const evidenceScore = rampScore(networkSize, MIN_NETWORK_SIZE, 15, 'higher-is-positive')
+    const evidenceScore = rampScore(
+      networkSize,
+      MIN_NETWORK_SIZE,
+      MIN_NETWORK_SIZE,
+      'higher-is-positive',
+    )
     return {
       value,
       confidence: toConfidence(value, evidenceScore),
