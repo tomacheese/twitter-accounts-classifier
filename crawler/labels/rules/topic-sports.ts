@@ -1,3 +1,4 @@
+import { combineAlternatives, toConfidence } from '../confidence'
 import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 import type { LabelRule } from '../types'
 
@@ -11,20 +12,28 @@ import type { LabelRule } from '../types'
 const SPORTS_PATTERN =
   /\b(baseball|soccer|basketball|NBA|MLB|NPB)\b|(?<![eEｅＥ])スポーツ|野球|サッカー|バスケ(ットボール)?|Jリーグ/i
 
+const KEYWORD_SCORE = 0.8
+
 export const topicSportsRule: LabelRule = {
   key: 'topic_sports',
   description: 'プロフィールでスポーツを中心的な関心事として挙げている',
-  version: '1.2.0',
+  version: '1.2.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && SPORTS_PATTERN.test(bio)
-    const followGraphMatch = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_sports)
-    const value = keywordMatch || followGraphMatch
+    const followGraph = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_sports)
+    const value = keywordMatch || followGraph.matched
+    const evidenceScore = combineAlternatives([
+      keywordMatch ? KEYWORD_SCORE : 0,
+      followGraph.evidenceScore,
+    ])
+    const evaluable = bio !== null || followGraph.evaluable
     return {
       value,
-      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
-      reason: `bio sports-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
+      confidence: toConfidence(value, evidenceScore, evaluable),
+      reason: `bio sports-keyword match=${keywordMatch}, follow-graph match=${followGraph.matched}`,
+      evaluable,
     }
   },
 }

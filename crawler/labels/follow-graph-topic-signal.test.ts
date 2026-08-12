@@ -8,7 +8,12 @@ describe('hasFollowGraphTopicSignal', () => {
   })
 
   it('returns matched=false, evidenceScore=0, evaluable=false when totalCount is below the minimum sample', () => {
-    const result = hasFollowGraphTopicSignal({ followeeTotalCount: 5, followeeLabeledCount: 5 })
+    const result = hasFollowGraphTopicSignal({
+      followeeTotalCount: 5,
+      followeeLabeledCount: 5,
+      followerTotalCount: 0,
+      followerLabeledCount: 0,
+    })
     expect(result.matched).toBe(false)
     expect(result.evidenceScore).toBe(0)
     expect(result.evaluable).toBe(false)
@@ -18,6 +23,8 @@ describe('hasFollowGraphTopicSignal', () => {
     const result = hasFollowGraphTopicSignal({
       followeeTotalCount: 100,
       followeeLabeledCount: 90,
+      followerTotalCount: 0,
+      followerLabeledCount: 0,
     })
     expect(result.matched).toBe(true)
     expect(result.evaluable).toBe(true)
@@ -28,6 +35,8 @@ describe('hasFollowGraphTopicSignal', () => {
     const result = hasFollowGraphTopicSignal({
       followeeTotalCount: 100,
       followeeLabeledCount: 5,
+      followerTotalCount: 0,
+      followerLabeledCount: 0,
     })
     expect(result.matched).toBe(false)
     expect(result.evaluable).toBe(true)
@@ -36,7 +45,12 @@ describe('hasFollowGraphTopicSignal', () => {
 
   it('respects overridden thresholds', () => {
     const result = hasFollowGraphTopicSignal(
-      { followeeTotalCount: 10, followeeLabeledCount: 5 },
+      {
+        followeeTotalCount: 10,
+        followeeLabeledCount: 5,
+        followerTotalCount: 0,
+        followerLabeledCount: 0,
+      },
       { minFolloweeSample: 5, minFolloweeLabeledRatio: 0.4 },
     )
     expect(result.matched).toBe(true)

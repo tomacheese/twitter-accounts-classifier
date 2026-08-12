@@ -1,3 +1,4 @@
+import { combineAlternatives, toConfidence } from '../confidence'
 import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 import type { LabelRule } from '../types'
 
@@ -7,20 +8,28 @@ import type { LabelRule } from '../types'
 const MUSIC_PATTERN =
   /\b(music|singer|musician|band|guitarist|vocalist|DJ)\b|音楽|バンド|作曲|シンガー|ミュージシャン/i
 
+const KEYWORD_SCORE = 0.8
+
 export const topicMusicRule: LabelRule = {
   key: 'topic_music',
   description: 'プロフィールで音楽を中心的な関心事として挙げている',
-  version: '1.1.0',
+  version: '1.1.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && MUSIC_PATTERN.test(bio)
-    const followGraphMatch = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_music)
-    const value = keywordMatch || followGraphMatch
+    const followGraph = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_music)
+    const value = keywordMatch || followGraph.matched
+    const evidenceScore = combineAlternatives([
+      keywordMatch ? KEYWORD_SCORE : 0,
+      followGraph.evidenceScore,
+    ])
+    const evaluable = bio !== null || followGraph.evaluable
     return {
       value,
-      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
-      reason: `bio music-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
+      confidence: toConfidence(value, evidenceScore, evaluable),
+      reason: `bio music-keyword match=${keywordMatch}, follow-graph match=${followGraph.matched}`,
+      evaluable,
     }
   },
 }

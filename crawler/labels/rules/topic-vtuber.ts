@@ -1,3 +1,4 @@
+import { combineAlternatives, toConfidence } from '../confidence'
 import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 import type { LabelRule } from '../types'
 
@@ -6,20 +7,28 @@ import type { LabelRule } from '../types'
 // 特定の VTuber 事務所への所属は、ファン層・活動者としての強いシグナルのため対象語に含める。
 const VTUBER_PATTERN = /\bvtuber\b|にじさんじ|ホロライブ|hololive/i
 
+const KEYWORD_SCORE = 0.8
+
 export const topicVtuberRule: LabelRule = {
   key: 'topic_vtuber',
   description: 'プロフィールで VTuber (視聴/活動) を中心的な関心事として挙げている',
-  version: '1.1.0',
+  version: '1.1.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && VTUBER_PATTERN.test(bio)
-    const followGraphMatch = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_vtuber)
-    const value = keywordMatch || followGraphMatch
+    const followGraph = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_vtuber)
+    const value = keywordMatch || followGraph.matched
+    const evidenceScore = combineAlternatives([
+      keywordMatch ? KEYWORD_SCORE : 0,
+      followGraph.evidenceScore,
+    ])
+    const evaluable = bio !== null || followGraph.evaluable
     return {
       value,
-      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
-      reason: `bio vtuber-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
+      confidence: toConfidence(value, evidenceScore, evaluable),
+      reason: `bio vtuber-keyword match=${keywordMatch}, follow-graph match=${followGraph.matched}`,
+      evaluable,
     }
   },
 }
