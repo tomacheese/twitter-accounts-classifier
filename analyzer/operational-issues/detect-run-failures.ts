@@ -158,7 +158,7 @@ interface StageDefinition {
  * (`analyzer:${kind}`) のまま扱い、cross-WorkItem の一括 resolve は行わない
  * (何が復旧したか errorCode から判別できない失敗を、安易に他の成功で消さないため)。
  */
-const STAGE_DEFINITIONS: Record<string, Record<string, StageDefinition>> = {
+const STAGE_DEFINITIONS: Partial<Record<string, Partial<Record<string, StageDefinition>>>> = {
   label_aggregate_refresh: {
     // snapshot 再構築と summary publish は triggerType によらず毎回実行されるため、
     // どの triggerType の成功でも supersede してよい。
@@ -256,6 +256,7 @@ export async function detectAnalysisStageFailure(
     const stages = STAGE_DEFINITIONS[input.kind]
     if (stages) {
       for (const stageDef of Object.values(stages)) {
+        if (!stageDef) continue
         const stageComponent = `analyzer:${input.kind}:${stageDef.stage}`
 
         // 同一 WorkItem 自身の stage issue は、cutoff なしで必ず resolve する。

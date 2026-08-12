@@ -111,12 +111,21 @@ async function main(): Promise<void> {
   const remaining = results.filter((result) => apply && result.activeCountAfter > 0)
   if (remaining.length > 0) {
     for (const result of remaining) {
-      logger.error(`${result.component}: still ${result.activeCountAfter} active issue(s) after cleanup`)
+      logger.error(
+        `${result.component}: still ${result.activeCountAfter} active issue(s) after cleanup`,
+      )
     }
     process.exitCode = 1
   }
 }
 
+// このモジュールを import しただけでは実行されないようにするガード。
+// 直接実行 (`node dist/scripts/cleanup-deprecated-work-item-kinds.js`) した場合のみ動作する。
+// require/module は、CommonJS を採用する本プロジェクトでこれを判定するのに適した手段である。
+// eslint-disable-next-line unicorn/prefer-module
 if (require.main === module) {
-  void main()
+  main().catch((error: unknown) => {
+    logger.error('cleanup failed', error as Error)
+    process.exitCode = 1
+  })
 }
