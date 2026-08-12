@@ -1,5 +1,10 @@
+import { Logger } from '@book000/node-utils'
 import type { PrismaClient } from '../generated/prisma'
+import { getPrismaClient, disconnectPrisma } from '../db/client'
 import { detectRunFailures } from '../operational-issues/detect-run-failures'
+import { publishAttentionAndOverview } from '../worker-processors'
+
+const logger = Logger.configure('analyzer:cleanup-deprecated-work-item-kinds')
 
 /** 一度だけ強制的に resolve してよい component と、その適用条件。 */
 interface LegacyComponentTarget {
@@ -68,4 +73,50 @@ export async function cleanupDeprecatedWorkItemKindIssues(
     results.push({ component: target.component, activeCountBefore, activeCountAfter })
   }
   return results
+}
+
+async function main(): Promise<void> {
+  const apply = process.argv.includes('--apply')
+  const beforeArg = process.argv.find((arg) => arg.startsWith('--before='))
+  if (!beforeArg) {
+    logger.error('missing required --before=<ISO timestamp> (fix a deploy cutoff before running)')
+    process.exitCode = 1
+    return
+  }
+  const before = new Date(beforeArg.slice('--before='.length))
+
+  const prisma = getPrismaClient()
+  await prisma.$connect()
+  const now = new Date()
+
+  const results = await cleanupDeprecatedWorkItemKindIssues(prisma, { apply, now, before })
+  for (const result of results) {
+    logger.info(
+      `${result.component}: ${result.activeCountBefore} active issue(s) before, ` +
+        `${result.activeCountAfter} after`,
+    )
+  }
+
+  if (apply) {
+    await publishAttentionAndOverview(prisma, now)
+    logger.info('re-published attention/overview projections')
+  } else {
+    logger.info('dry-run: pass --apply to resolve and re-publish projections')
+  }
+
+  await disconnectPrisma()
+
+  // post-condition: apply 後に対象 active issue が残っていれば、実行したこと自体ではなく
+  // 実際に解消できたことを完了条件として非 0 exit にする。
+  const remaining = results.filter((result) => apply && result.activeCountAfter > 0)
+  if (remaining.length > 0) {
+    for (const result of remaining) {
+      logger.error(`${result.component}: still ${result.activeCountAfter} active issue(s) after cleanup`)
+    }
+    process.exitCode = 1
+  }
+}
+
+if (require.main === module) {
+  void main()
 }
