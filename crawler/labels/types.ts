@@ -105,18 +105,30 @@ export interface AccountFeatureBundle {
 export interface LabelRuleResult {
   value: boolean
   /**
-   * 陽性判定（`value: true`）をどれだけの証拠が裏付けているかを表す、
-   * おおよそ `[0, 1]` の範囲の値。`confidence` は `value` と組み合わせて初めて意味を持つ。
-   * `value` が `false` でも `confidence` は非ゼロになり得る（陰性側の兆候の強さを表す場合がある）。
-   * `value` を確認せずに `confidence` 単体で意味があるものとみなさないこと。
+   * 現在の `value` がどれだけ確からしいかを表す、校正されていない heuristic な決定スコア `[0, 1]`。
+   * 真の確率 `P(value が正しい)` としては扱わない。
+   * 証拠が全く無い場合、`value=true` なら 0、`value=false` なら 1 に近づく
+   * (陽性の気配が無いこと自体が陰性側の強い根拠になるため)。
    */
   confidence: number
   reason: string
+  /**
+   * サンプル不足などの理由で `value` を意味のある形で判定できなかったかどうか。
+   * `false` の場合、`confidence` は `value`/evidenceScore に関わらず 0.5 (中立値) になる。
+   * 省略時は `true` (通常どおり判定できた) として扱う。
+   */
+  evaluable?: boolean
 }
 
 export interface LabelRule {
   key: string
   description: string
+  /**
+   * ルールの判定ロジックのバージョン。判定ロジックだけでなく、
+   * confidence/evidence の算出式を変更する場合も必ず bump すること。
+   * blocker はこの値と `AccountLabelLatest.ruleVersion` の一致を要求するため、
+   * bump しないまま算出式だけ変えると新旧の confidence が同一 `ruleVersion` の下で混在してしまう。
+   */
   version: string
   /**
    * `hasFollowGraphTopicSignal()` を呼び follow-graph signal を利用するルールが明示的に true を宣言する。
