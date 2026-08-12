@@ -1,3 +1,4 @@
+import { combineAlternatives, combineRequired, rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 // 「フォロバ」「相互フォロー」「無言フォロー」「DMください」のような通常の礼儀表現は、
@@ -64,7 +65,7 @@ export const spamRule: LabelRule = {
   key: 'spam',
   description:
     'プロフィールで出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある',
-  version: '1.7.0',
+  version: '1.8.0',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
     const hasSolicitation = bio !== null && hasGenuineSolicitation(bio)
@@ -76,17 +77,33 @@ export const spamRule: LabelRule = {
 
     const hasMassFollowingPattern = isMassFollowingPattern(followingCount, followersCount)
 
-    let signals = 0
-    if (hasSolicitation) signals += 1
-    if (hasBaitRetweetPattern) signals += 1
-    if (hasMassFollowingPattern) signals += 1
-
     const value = hasSolicitation && (hasBaitRetweetPattern || hasMassFollowingPattern)
-    const confidence = signals === 0 ? 0 : signals / 3
+
+    // hasSolicitation は value 判定の必須ゲートとしてのみ使い、evidenceScore の合成には含めない。
+    // ゲートを combineRequired に含めて固定値 0.5 として扱うと、
+    // value=true の全ケースが補強シグナルの強弱に関わらず同じ evidenceScore に潰れてしまうため。
+    const retweetScore = rampScore(retweetRatio, 0.8, 0.2, 'higher-is-positive')
+    const followingCountScore = rampScore(
+      followingCount,
+      MASS_FOLLOWING_MIN_COUNT,
+      500,
+      'higher-is-positive',
+    )
+    const followingRatio = followersCount > 0 ? followingCount / followersCount : followingCount
+    const followingRatioScore = rampScore(
+      followingRatio,
+      MASS_FOLLOWING_RATIO,
+      5,
+      'higher-is-positive',
+    )
+    const evidenceScore = combineAlternatives([
+      retweetScore,
+      combineRequired([followingCountScore, followingRatioScore]),
+    ])
 
     return {
       value,
-      confidence,
+      confidence: toConfidence(value, evidenceScore),
       reason: `bio solicitation=${hasSolicitation}, retweetRatio=${retweetRatio.toFixed(2)} (n=${sampled.length}), followingCount=${followingCount}, followersCount=${followersCount}`,
     }
   },
