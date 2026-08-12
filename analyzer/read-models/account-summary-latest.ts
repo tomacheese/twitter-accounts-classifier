@@ -117,21 +117,27 @@ export async function upsertAccountClassificationLatest(
   rows: AccountClassificationLatestRow[],
 ): Promise<void> {
   if (rows.length === 0) return
+  // 同一トランザクション内で labelDefinitionId ごとに複数回発火する
+  // FOR EACH ROW トリガーのロック取得順序を常に昇順に固定し、
+  // 呼び出し元間でのデッドロックを避ける (compaction も同じ昇順で処理する)。
+  const sortedRows = [...rows].sort((a, b) =>
+    a.labelDefinitionId.localeCompare(b.labelDefinitionId),
+  )
   await prisma.$executeRaw`
     INSERT INTO "AccountClassificationLatest" (
       "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion",
       "observedAt", "sourceObservationId"
     )
     SELECT * FROM UNNEST(
-      ${rows.map((row) => row.accountId)}::text[],
-      ${rows.map((row) => row.labelDefinitionId)}::text[],
-      ${rows.map((row) => row.value)}::boolean[],
-      ${rows.map((row) => row.confidence)}::double precision[],
-      ${rows.map((row) => row.reason)}::text[],
-      ${rows.map((row) => row.method)}::text[],
-      ${rows.map((row) => row.ruleVersion)}::text[],
-      ${rows.map((row) => row.observedAt)}::timestamp[],
-      ${rows.map((row) => row.sourceObservationId)}::text[]
+      ${sortedRows.map((row) => row.accountId)}::text[],
+      ${sortedRows.map((row) => row.labelDefinitionId)}::text[],
+      ${sortedRows.map((row) => row.value)}::boolean[],
+      ${sortedRows.map((row) => row.confidence)}::double precision[],
+      ${sortedRows.map((row) => row.reason)}::text[],
+      ${sortedRows.map((row) => row.method)}::text[],
+      ${sortedRows.map((row) => row.ruleVersion)}::text[],
+      ${sortedRows.map((row) => row.observedAt)}::timestamp[],
+      ${sortedRows.map((row) => row.sourceObservationId)}::text[]
     ) AS u(
       "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion",
       "observedAt", "sourceObservationId"
