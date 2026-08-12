@@ -128,6 +128,7 @@ model AccountLabel {
   reason            String
   method            String
   ruleVersion       String
+  evaluable         Boolean         @default(true)
   labeledAt         DateTime        @default(now())
   // 発生源追跡: どの Crawl・relabel・Weekly Review・backfill が作った行かを監査可能にする。
   // 既存行は sourceKind = "legacy"、sourceId = null とし、推定 backfill しない。
@@ -162,6 +163,7 @@ model AccountLabelLatest {
   reason            String
   method            String
   ruleVersion       String
+  evaluable         Boolean         @default(true)
   labeledAt         DateTime
   sourceKind        String          @default("legacy")
   sourceId          String?
