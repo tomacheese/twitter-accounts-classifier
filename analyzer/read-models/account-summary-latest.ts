@@ -120,9 +120,7 @@ export async function upsertAccountClassificationLatest(
   // 同一トランザクション内で labelDefinitionId ごとに複数回発火する
   // FOR EACH ROW トリガーのロック取得順序を常に昇順に固定し、
   // 呼び出し元間でのデッドロックを避ける (compaction も同じ昇順で処理する)。
-  const sortedRows = [...rows].sort((a, b) =>
-    a.labelDefinitionId.localeCompare(b.labelDefinitionId),
-  )
+  const sortedRows = rows.toSorted((a, b) => a.labelDefinitionId.localeCompare(b.labelDefinitionId))
   await prisma.$executeRaw`
     INSERT INTO "AccountClassificationLatest" (
       "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion",

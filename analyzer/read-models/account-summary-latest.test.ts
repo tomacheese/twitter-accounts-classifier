@@ -199,7 +199,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
 
 describe('upsertAccountClassificationLatest row ordering', () => {
   it('sorts rows by labelDefinitionId ascending before building the UNNEST arrays', async () => {
-    const executeRaw = vi.fn(() => Promise.resolve(0))
+    const executeRaw = vi.fn<(...args: unknown[]) => Promise<number>>(() => Promise.resolve(0))
     const fakePrisma = { $executeRaw: executeRaw } as unknown as PrismaClient
 
     await upsertAccountClassificationLatest(fakePrisma, [
@@ -228,7 +228,7 @@ describe('upsertAccountClassificationLatest row ordering', () => {
     ])
 
     expect(executeRaw).toHaveBeenCalledTimes(1)
-    const [, , labelDefinitionIds] = executeRaw.mock.calls[0]
+    const labelDefinitionIds = executeRaw.mock.calls[0][2]
     expect(labelDefinitionIds).toEqual(['label_a', 'label_z'])
   })
 })

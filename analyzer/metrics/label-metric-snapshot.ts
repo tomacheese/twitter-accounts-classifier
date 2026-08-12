@@ -206,7 +206,7 @@ export async function buildLabelAggregateSnapshotSet(
 
   const freshnessThresholds = input.freshnessThresholdsMs
   const labelIds = labelDefinitions.map((label) => label.id)
-  const sortedLabelIds = [...labelIds].sort()
+  const sortedLabelIds = labelIds.toSorted()
 
   const snapshotAt = await prisma.$transaction(
     async (tx) => {
@@ -274,7 +274,9 @@ export async function buildLabelAggregateSnapshotSet(
               `,
             ])
 
-      const groupByLabel = <T extends { labelDefinitionId: string }>(rows: T[]): Map<string, T[]> => {
+      const groupByLabel = <T extends { labelDefinitionId: string }>(
+        rows: T[],
+      ): Map<string, T[]> => {
         const map = new Map<string, T[]>()
         for (const row of rows) {
           const group = map.get(row.labelDefinitionId) ?? []

@@ -51,7 +51,9 @@ describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
       if (sql.includes('FROM "AccountSummaryLatest"')) return Promise.resolve([{ count: 1n }])
       return Promise.resolve([])
     })
-    const executeRaw = vi.fn(() => Promise.resolve(0))
+    const executeRaw = vi.fn<(strings: TemplateStringsArray) => Promise<number>>(() =>
+      Promise.resolve(0),
+    )
     const fakeTx = {
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
@@ -553,8 +555,9 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
 
     const insertRow = (observedAt: Date, value: boolean) =>
-      prisma.$transaction((tx) =>
-        tx.$executeRaw`
+      prisma.$transaction(
+        (tx) =>
+          tx.$executeRaw`
           INSERT INTO "AccountClassificationLatest"
             ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "observedAt")
           VALUES ('acct_concurrent_insert', ${label.id}, ${value}, 0.5, 'r', 'rule', 'v1', ${observedAt})
@@ -574,7 +577,10 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
 
     const finalRow = await prisma.accountClassificationLatest.findUniqueOrThrow({
       where: {
-        accountId_labelDefinitionId: { accountId: 'acct_concurrent_insert', labelDefinitionId: label.id },
+        accountId_labelDefinitionId: {
+          accountId: 'acct_concurrent_insert',
+          labelDefinitionId: label.id,
+        },
       },
     })
     const naive = await naiveValueCounts(label.id)
@@ -925,7 +931,10 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
 
     const bucketAfterInsert = await prisma.accountClassificationFreshnessBucket.findUniqueOrThrow({
       where: {
-        labelDefinitionId_observedAtBucket: { labelDefinitionId: label.id, observedAtBucket: agedBucket },
+        labelDefinitionId_observedAtBucket: {
+          labelDefinitionId: label.id,
+          observedAtBucket: agedBucket,
+        },
       },
     })
     const sentinelAfterInsert = await prisma.accountClassificationFreshnessBucket.findUnique({
@@ -954,11 +963,15 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         sourceObservationId: null,
       },
     ])
-    const bucketAfterDecrement = await prisma.accountClassificationFreshnessBucket.findUniqueOrThrow({
-      where: {
-        labelDefinitionId_observedAtBucket: { labelDefinitionId: label.id, observedAtBucket: agedBucket },
-      },
-    })
+    const bucketAfterDecrement =
+      await prisma.accountClassificationFreshnessBucket.findUniqueOrThrow({
+        where: {
+          labelDefinitionId_observedAtBucket: {
+            labelDefinitionId: label.id,
+            observedAtBucket: agedBucket,
+          },
+        },
+      })
     expect(bucketAfterDecrement.count).toBe(1)
 
     await prisma.$transaction((tx) => compactFreshnessBucketsForTest(tx, label.id))
@@ -1018,14 +1031,20 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     // Y→X、acct_deadlock_2 は X→Y)、choke point 内部のソートにより
     // 実際の書き込み順序は両者とも X→Y に揃うため、デッドロックしないことを検証する。
     const later = new Date(now.getTime() + 60 * 1000)
-    const updateForward = upsertAccountClassificationLatest(prisma, [
-      baseRow('acct_deadlock_1', labelY.id, false),
-      baseRow('acct_deadlock_1', labelX.id, false),
-    ].map((row) => ({ ...row, observedAt: later })))
-    const updateBackward = upsertAccountClassificationLatest(prisma, [
-      baseRow('acct_deadlock_2', labelX.id, false),
-      baseRow('acct_deadlock_2', labelY.id, false),
-    ].map((row) => ({ ...row, observedAt: later })))
+    const updateForward = upsertAccountClassificationLatest(
+      prisma,
+      [
+        baseRow('acct_deadlock_1', labelY.id, false),
+        baseRow('acct_deadlock_1', labelX.id, false),
+      ].map((row) => ({ ...row, observedAt: later })),
+    )
+    const updateBackward = upsertAccountClassificationLatest(
+      prisma,
+      [
+        baseRow('acct_deadlock_2', labelX.id, false),
+        baseRow('acct_deadlock_2', labelY.id, false),
+      ].map((row) => ({ ...row, observedAt: later })),
+    )
 
     await expect(Promise.all([updateForward, updateBackward])).resolves.toBeDefined()
 
@@ -1041,109 +1060,118 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
   })
 })
 
-describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet output compatibility', () => {
-  const prisma = getPrismaClient()
+describe.skipIf(!process.env.DATABASE_URL)(
+  'buildLabelAggregateSnapshotSet output compatibility',
+  () => {
+    const prisma = getPrismaClient()
 
-  beforeEach(async () => {
-    await prisma.labelMetricSnapshot.deleteMany()
-    await prisma.accountClassificationValueCount.deleteMany()
-    await prisma.accountClassificationConfidenceBucketCount.deleteMany()
-    await prisma.accountClassificationRuleVersionCount.deleteMany()
-    await prisma.accountClassificationFreshnessBucket.deleteMany()
-    await prisma.accountClassificationLatest.deleteMany()
-    await prisma.accountSummaryLatest.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
-    await prisma.accountLabel.deleteMany()
-    await prisma.labelDefinition.deleteMany()
-    await prisma.account.deleteMany()
-  })
-
-  it('新しい読み取り経路で構築したsnapshotが旧実装相当の直接集計と同じ値になる', async () => {
-    const label = await prisma.labelDefinition.create({
-      data: { key: 'test_output_compat', description: 'テスト用ラベル' },
-    })
-    const now = new Date()
-    for (const [id, value, confidence, ruleVersion, ageMs] of [
-      ['acct_compat_1', true, 0.91, 'v1', 60 * 60 * 1000],
-      ['acct_compat_2', true, 0.42, 'v2', 6 * 60 * 60 * 1000],
-      ['acct_compat_3', false, 0.15, 'v1', 24 * 60 * 60 * 1000],
-    ] as const) {
-      await prisma.account.create({
-        data: {
-          id,
-          screenName: id,
-          displayName: id,
-          followersCount: 0,
-          followingCount: 0,
-          tweetCount: 0,
-          accountCreatedAt: new Date(),
-          lastCrawledAt: new Date(),
-        },
-      })
-      await prisma.accountSummaryLatest.create({
-        data: {
-          accountId: id,
-          normalizedScreenName: id,
-          normalizedDisplayName: id,
-          searchDocument: id,
-          profileObservedAt: now,
-          activeLabelKeys: [],
-          activeLabelCount: 0,
-          classificationObservedAt: now,
-        },
-      })
-      await prisma.accountClassificationLatest.create({
-        data: {
-          accountId: id,
-          labelDefinitionId: label.id,
-          value,
-          confidence,
-          reason: `reason_${id}`,
-          method: 'rule',
-          ruleVersion,
-          observedAt: new Date(now.getTime() - ageMs),
-        },
-      })
-    }
-
-    const freshnessThresholdsMs = {
-      delayedAfterMs: 3 * 60 * 60 * 1000,
-      staleAfterMs: 12 * 60 * 60 * 1000,
-    }
-    const result = await buildLabelAggregateSnapshotSet(prisma, {
-      triggerWorkItemId: 'work_item_output_compat',
-      policyHash: 'hash',
-      analyzerVersion: 'test',
-      thresholds: { minCoverage: 0, maxStaleRatio: 1 },
-      freshnessThresholdsMs,
-    })
-    const snapshot = await prisma.labelMetricSnapshot.findFirstOrThrow({
-      where: { triggerWorkItemId: 'work_item_output_compat', labelDefinitionId: label.id },
+    beforeEach(async () => {
+      await prisma.labelMetricSnapshot.deleteMany()
+      await prisma.accountClassificationValueCount.deleteMany()
+      await prisma.accountClassificationConfidenceBucketCount.deleteMany()
+      await prisma.accountClassificationRuleVersionCount.deleteMany()
+      await prisma.accountClassificationFreshnessBucket.deleteMany()
+      await prisma.accountClassificationLatest.deleteMany()
+      await prisma.accountSummaryLatest.deleteMany()
+      await prisma.accountLabelLatest.deleteMany()
+      await prisma.accountLabel.deleteMany()
+      await prisma.labelDefinition.deleteMany()
+      await prisma.account.deleteMany()
     })
 
-    // 旧実装と同じ SQL 形状 (AccountClassificationLatest を直接 GROUP BY) で
-    // 期待値を計算する参照クエリ。
-    const referenceRows = await prisma.$queryRaw<
-      { value: boolean; reason: string; ruleVersion: string; count: bigint; confidenceSum: number }[]
-    >`
+    it('新しい読み取り経路で構築したsnapshotが旧実装相当の直接集計と同じ値になる', async () => {
+      const label = await prisma.labelDefinition.create({
+        data: { key: 'test_output_compat', description: 'テスト用ラベル' },
+      })
+      const now = new Date()
+      for (const [id, value, confidence, ruleVersion, ageMs] of [
+        ['acct_compat_1', true, 0.91, 'v1', 60 * 60 * 1000],
+        ['acct_compat_2', true, 0.42, 'v2', 6 * 60 * 60 * 1000],
+        ['acct_compat_3', false, 0.15, 'v1', 24 * 60 * 60 * 1000],
+      ] as const) {
+        await prisma.account.create({
+          data: {
+            id,
+            screenName: id,
+            displayName: id,
+            followersCount: 0,
+            followingCount: 0,
+            tweetCount: 0,
+            accountCreatedAt: new Date(),
+            lastCrawledAt: new Date(),
+          },
+        })
+        await prisma.accountSummaryLatest.create({
+          data: {
+            accountId: id,
+            normalizedScreenName: id,
+            normalizedDisplayName: id,
+            searchDocument: id,
+            profileObservedAt: now,
+            activeLabelKeys: [],
+            activeLabelCount: 0,
+            classificationObservedAt: now,
+          },
+        })
+        await prisma.accountClassificationLatest.create({
+          data: {
+            accountId: id,
+            labelDefinitionId: label.id,
+            value,
+            confidence,
+            reason: `reason_${id}`,
+            method: 'rule',
+            ruleVersion,
+            observedAt: new Date(now.getTime() - ageMs),
+          },
+        })
+      }
+
+      const freshnessThresholdsMs = {
+        delayedAfterMs: 3 * 60 * 60 * 1000,
+        staleAfterMs: 12 * 60 * 60 * 1000,
+      }
+      const result = await buildLabelAggregateSnapshotSet(prisma, {
+        triggerWorkItemId: 'work_item_output_compat',
+        policyHash: 'hash',
+        analyzerVersion: 'test',
+        thresholds: { minCoverage: 0, maxStaleRatio: 1 },
+        freshnessThresholdsMs,
+      })
+      const snapshot = await prisma.labelMetricSnapshot.findFirstOrThrow({
+        where: { triggerWorkItemId: 'work_item_output_compat', labelDefinitionId: label.id },
+      })
+
+      // 旧実装と同じ SQL 形状 (AccountClassificationLatest を直接 GROUP BY) で
+      // 期待値を計算する参照クエリ。
+      const referenceRows = await prisma.$queryRaw<
+        {
+          value: boolean
+          reason: string
+          ruleVersion: string
+          count: bigint
+          confidenceSum: number
+        }[]
+      >`
       SELECT "value", "reason", "ruleVersion", COUNT(*) AS count, SUM("confidence") AS "confidenceSum"
       FROM "AccountClassificationLatest"
       WHERE "labelDefinitionId" = ${label.id}
       GROUP BY 1, 2, 3
     `
-    const expectedEvaluatedCount = referenceRows.reduce((sum, row) => sum + Number(row.count), 0)
-    const expectedTrueCount = referenceRows
-      .filter((row) => row.value)
-      .reduce((sum, row) => sum + Number(row.count), 0)
-    const expectedReasonDistribution: Record<string, number> = {}
-    for (const row of referenceRows.filter((row) => row.value)) {
-      expectedReasonDistribution[row.reason] =
-        (expectedReasonDistribution[row.reason] ?? 0) + Number(row.count)
-    }
+      const expectedEvaluatedCount = referenceRows.reduce((sum, row) => sum + Number(row.count), 0)
+      const expectedTrueCount = referenceRows
+        .filter((row) => row.value)
+        .reduce((sum, row) => sum + Number(row.count), 0)
+      const expectedReasonDistribution: Record<string, number> = {}
+      for (const row of referenceRows.filter((row) => row.value)) {
+        expectedReasonDistribution[row.reason] =
+          (expectedReasonDistribution[row.reason] ?? 0) + Number(row.count)
+      }
 
-    expect(result.reused).toBe(false)
-    expect(snapshot.evaluatedCount).toBe(expectedEvaluatedCount)
-    expect(snapshot.trueCount).toBe(expectedTrueCount)
-    expect(snapshot.reasonDistribution).toEqual(expectedReasonDistribution)
-  })
-})
+      expect(result.reused).toBe(false)
+      expect(snapshot.evaluatedCount).toBe(expectedEvaluatedCount)
+      expect(snapshot.trueCount).toBe(expectedTrueCount)
+      expect(snapshot.reasonDistribution).toEqual(expectedReasonDistribution)
+    })
+  },
+)

@@ -41,7 +41,10 @@ const NOISE_ACCOUNT_COUNT = 2000
 
 describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Scan', () => {
   const labelId = `label_seqscan_${randomUUID()}`
-  const noiseLabelIds = Array.from({ length: NOISE_LABEL_COUNT }, (_, index) => `${labelId}_noise_${index}`)
+  const noiseLabelIds = Array.from(
+    { length: NOISE_LABEL_COUNT },
+    (_, index) => `${labelId}_noise_${index}`,
+  )
 
   beforeAll(async () => {
     await prisma.labelDefinition.create({
@@ -171,7 +174,7 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
     ]
     for (const sql of queries) {
       const plan = await explain(sql)
-      const table = sql.match(/FROM "(\w+)"/)?.[1] ?? ''
+      const table = /FROM "(\w+)"/.exec(sql)?.[1] ?? ''
       expect(collectSeqScans(plan, table)).toHaveLength(0)
     }
   })
