@@ -135,7 +135,7 @@ function getPolicy(): { policy: ReturnType<typeof loadPolicy>; policyHash: strin
  * @param prisma - Prisma クライアント
  * @param sourceWatermarkAt - 集計の基準時刻
  */
-async function publishAttentionAndOverview(
+export async function publishAttentionAndOverview(
   prisma: PrismaClient,
   sourceWatermarkAt: Date,
 ): Promise<void> {
