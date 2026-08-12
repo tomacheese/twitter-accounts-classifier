@@ -182,4 +182,51 @@ describe('buildFollowGraphLabelIndex label filtering', () => {
       expect(sql).not.toContain('= ANY(')
     }
   })
+
+  it('accountIds が chunk size を超える場合、chunk ごとに直列でクエリを実行し結果をマージする', async () => {
+    vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '2')
+    const followeeCalls: unknown[][] = []
+    const followerCalls: unknown[][] = []
+    const queryRaw = vi.fn().mockImplementation((strings: unknown, ...values: unknown[]) => {
+      const sql = Array.isArray(strings) ? strings.join('') : ''
+      if (sql.includes('"followerId" AS "accountId"')) {
+        followeeCalls.push(values)
+        return Promise.resolve([
+          {
+            accountId:
+              (values.find((v) => Array.isArray(v)) as string[] | undefined)?.[0] ?? 'unknown',
+            labelDefinitionId: 'ld-food',
+            labeledCount: 1,
+            totalCount: 1,
+          },
+        ])
+      }
+      followerCalls.push(values)
+      return Promise.resolve([])
+    })
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const index = await buildFollowGraphLabelIndex(prisma, new Map([['topic_food', 'ld-food']]), {
+      accountIds: ['alice', 'bob', 'carol'],
+    })
+
+    // chunk size 2 に対し 3 件の accountIds なので、chunk は [alice, bob] と [carol] の2つに分かれる。
+    expect(followeeCalls).toHaveLength(2)
+    expect(followerCalls).toHaveLength(2)
+    expect(index.signalsFor('alice').topic_food.followeeLabeledCount).toBe(1)
+    vi.unstubAllEnvs()
+  })
+
+  it('accountIds が chunk size ちょうどの場合、1 chunk だけで処理する', async () => {
+    vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '2')
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await buildFollowGraphLabelIndex(prisma, new Map([['topic_food', 'ld-food']]), {
+      accountIds: ['alice', 'bob'],
+    })
+
+    expect(queryRaw).toHaveBeenCalledTimes(2)
+    vi.unstubAllEnvs()
+  })
 })

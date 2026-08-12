@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from '../generated/prisma'
+import { getRelabelerWorkerChunkSize } from '../config/env'
 
 /**
  * あるアカウントのフォロー先・フォロワーにおける、特定ラベルの既存付与状況。
@@ -62,63 +63,85 @@ export async function buildFollowGraphLabelIndex(
   const accountIds = options?.accountIds
 
   // Prisma.sql/Prisma.empty による条件付き SQL 合成は $queryRaw モックの呼び出し引数に断片が反映されず、
-  // テストで WHERE 句の有無を検証できない。そのため accountIds の有無で完全に別クエリに分岐させている。
-  const followeeRows = accountIds
-    ? await prisma.$queryRaw<AggregateRow[]>`
-      SELECT
-        edges."accountId",
-        all_latest."labelDefinitionId",
-        COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
-        COUNT(*)::int AS "totalCount"
-      FROM (
-        SELECT "followerId" AS "accountId", "followeeId" FROM "Follow"
-        UNION
-        SELECT "accountId", "followeeId" FROM "LabelingFollowSample"
-      ) edges
-      JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
-      WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
-        AND edges."accountId" = ANY(${accountIds})
-      GROUP BY edges."accountId", all_latest."labelDefinitionId"
-    `
-    : await prisma.$queryRaw<AggregateRow[]>`
-      SELECT
-        edges."accountId",
-        all_latest."labelDefinitionId",
-        COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
-        COUNT(*)::int AS "totalCount"
-      FROM (
-        SELECT "followerId" AS "accountId", "followeeId" FROM "Follow"
-        UNION
-        SELECT "accountId", "followeeId" FROM "LabelingFollowSample"
-      ) edges
-      JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
-      WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
-      GROUP BY edges."accountId", all_latest."labelDefinitionId"
-    `
-  const followerRows = accountIds
-    ? await prisma.$queryRaw<AggregateRow[]>`
-      SELECT
-        f."followeeId" AS "accountId",
-        all_latest."labelDefinitionId",
-        COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
-        COUNT(*)::int AS "totalCount"
-      FROM "Follow" f
-      JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = f."followerId"
-      WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
-        AND f."followeeId" = ANY(${accountIds})
-      GROUP BY f."followeeId", all_latest."labelDefinitionId"
-    `
-    : await prisma.$queryRaw<AggregateRow[]>`
-      SELECT
-        f."followeeId" AS "accountId",
-        all_latest."labelDefinitionId",
-        COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
-        COUNT(*)::int AS "totalCount"
-      FROM "Follow" f
-      JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = f."followerId"
-      WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
-      GROUP BY f."followeeId", all_latest."labelDefinitionId"
-    `
+  // テストで WHERE 句の有無を検証できない。そのため ids の有無で完全に別クエリに分岐させている。
+  async function fetchFolloweeRows(ids?: string[]): Promise<AggregateRow[]> {
+    return ids
+      ? prisma.$queryRaw<AggregateRow[]>`
+        SELECT
+          edges."accountId",
+          all_latest."labelDefinitionId",
+          COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
+          COUNT(*)::int AS "totalCount"
+        FROM (
+          SELECT "followerId" AS "accountId", "followeeId" FROM "Follow"
+          UNION
+          SELECT "accountId", "followeeId" FROM "LabelingFollowSample"
+        ) edges
+        JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
+        WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
+          AND edges."accountId" = ANY(${ids})
+        GROUP BY edges."accountId", all_latest."labelDefinitionId"
+      `
+      : prisma.$queryRaw<AggregateRow[]>`
+        SELECT
+          edges."accountId",
+          all_latest."labelDefinitionId",
+          COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
+          COUNT(*)::int AS "totalCount"
+        FROM (
+          SELECT "followerId" AS "accountId", "followeeId" FROM "Follow"
+          UNION
+          SELECT "accountId", "followeeId" FROM "LabelingFollowSample"
+        ) edges
+        JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
+        WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
+        GROUP BY edges."accountId", all_latest."labelDefinitionId"
+      `
+  }
+
+  async function fetchFollowerRows(ids?: string[]): Promise<AggregateRow[]> {
+    return ids
+      ? prisma.$queryRaw<AggregateRow[]>`
+        SELECT
+          f."followeeId" AS "accountId",
+          all_latest."labelDefinitionId",
+          COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
+          COUNT(*)::int AS "totalCount"
+        FROM "Follow" f
+        JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = f."followerId"
+        WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
+          AND f."followeeId" = ANY(${ids})
+        GROUP BY f."followeeId", all_latest."labelDefinitionId"
+      `
+      : prisma.$queryRaw<AggregateRow[]>`
+        SELECT
+          f."followeeId" AS "accountId",
+          all_latest."labelDefinitionId",
+          COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
+          COUNT(*)::int AS "totalCount"
+        FROM "Follow" f
+        JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = f."followerId"
+        WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
+        GROUP BY f."followeeId", all_latest."labelDefinitionId"
+      `
+  }
+
+  const followeeRows: AggregateRow[] = []
+  const followerRows: AggregateRow[] = []
+
+  if (accountIds) {
+    // クエリ latency を chunk size で頭打ちにするため、accountIds を分割して直列実行する。
+    // 並列化すると同時に DB へ投げるクエリ本数が増え、DB 負荷低減という目的に反するため採用しない。
+    const chunkSize = getRelabelerWorkerChunkSize()
+    for (let i = 0; i < accountIds.length; i += chunkSize) {
+      const chunk = accountIds.slice(i, i + chunkSize)
+      followeeRows.push(...(await fetchFolloweeRows(chunk)))
+      followerRows.push(...(await fetchFollowerRows(chunk)))
+    }
+  } else {
+    followeeRows.push(...(await fetchFolloweeRows()))
+    followerRows.push(...(await fetchFollowerRows()))
+  }
 
   const signals = new Map<string, Map<string, FollowGraphLabelSignal>>()
 
