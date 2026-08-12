@@ -174,4 +174,18 @@ describe('topicVrchatRule', () => {
     expect(result.evaluable).toBe(true)
     expect(result.confidence).toBe(0.8)
   })
+
+  it('bio が null でも自身のツイートがあればキーワードに一致しなくても evaluable: true になる', () => {
+    const bundle = buildBundle(null, [{ fullText: '今日は良い天気です' }])
+    const result = topicVrchatRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(true)
+  })
+
+  it('自身のツイートがリツイートのみの場合は evaluable: false のままになる', () => {
+    const bundle = buildBundle(null, [{ fullText: '今日は良い天気です', isRetweet: true }])
+    const result = topicVrchatRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+  })
 })

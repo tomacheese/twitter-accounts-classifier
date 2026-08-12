@@ -17,9 +17,8 @@ export const topicVrchatRule: LabelRule = {
   evaluate(bundle) {
     const { bio } = bundle.account
     const bioMatch = bio !== null && VRCHAT_PATTERN.test(bio)
-    const tweetMatch = bundle.recentTweets
-      .filter((tweet) => !tweet.isRetweet)
-      .some((tweet) => VRCHAT_PATTERN.test(tweet.fullText))
+    const ownTweets = bundle.recentTweets.filter((tweet) => !tweet.isRetweet)
+    const tweetMatch = ownTweets.some((tweet) => VRCHAT_PATTERN.test(tweet.fullText))
     const keywordMatch = bioMatch || tweetMatch
     const followGraph = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_vrchat)
     const value = keywordMatch || followGraph.matched
@@ -27,7 +26,10 @@ export const topicVrchatRule: LabelRule = {
       keywordMatch ? KEYWORD_SCORE : 0,
       followGraph.evidenceScore,
     ])
-    const evaluable = bio !== null || tweetMatch || followGraph.evaluable
+    // tweetMatch はキーワードに一致した場合のみ true になるため、
+    // 「本文を確認したが一致しなかった」陰性の判定材料を evaluable から漏らさないよう、
+    // ツイートの有無そのもの (ownTweets.length > 0) で判定する。
+    const evaluable = bio !== null || ownTweets.length > 0 || followGraph.evaluable
     return {
       value,
       confidence: toConfidence(value, evidenceScore, evaluable),
