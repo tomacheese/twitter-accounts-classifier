@@ -64,13 +64,15 @@ describe('createCookieIssuerClient', () => {
   it('本番と同様の約110.7秒のbusy区間を経ても既定値のretry budget内で成功する', async () => {
     const busyUntilMs = 110_700
     let elapsedMs = 0
-    const fetchImpl = vi.fn().mockImplementation(() =>
-      Promise.resolve(
-        elapsedMs < busyUntilMs
-          ? new Response('busy', { status: 409 })
-          : jsonResponse({ status: 'ok', ct0: 'c0', auth_token: 'a0' }),
-      ),
-    )
+    const fetchImpl = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(
+          elapsedMs < busyUntilMs
+            ? new Response('busy', { status: 409 })
+            : jsonResponse({ status: 'ok', ct0: 'c0', auth_token: 'a0' }),
+        ),
+      )
     const sleepImpl = vi.fn().mockImplementation((ms: number) => {
       elapsedMs += ms
       return Promise.resolve()
@@ -94,9 +96,7 @@ describe('createCookieIssuerClient', () => {
   it('既定のmaxAttemptsを使い切った場合、busyと識別できるメッセージで失敗する', async () => {
     const fetchImpl = vi
       .fn()
-      .mockImplementation(() =>
-        Promise.resolve(new Response('busy', { status: 409 })),
-      )
+      .mockImplementation(() => Promise.resolve(new Response('busy', { status: 409 })))
     const sleepImpl = vi.fn().mockResolvedValue(undefined)
     const client = createCookieIssuerClient({
       baseUrl: 'http://issuer.local',
@@ -119,9 +119,7 @@ describe('createCookieIssuerClient', () => {
   it('maxAttemptsを増やしてもmaxTotalWaitMsに達したら停止し、busyと識別できるメッセージで失敗する', async () => {
     const fetchImpl = vi
       .fn()
-      .mockImplementation(() =>
-        Promise.resolve(new Response('busy', { status: 409 })),
-      )
+      .mockImplementation(() => Promise.resolve(new Response('busy', { status: 409 })))
     const sleepImpl = vi.fn().mockResolvedValue(undefined)
     const client = createCookieIssuerClient({
       baseUrl: 'http://issuer.local',
@@ -149,9 +147,7 @@ describe('createCookieIssuerClient', () => {
   it('clientNameを指定した場合、X-Client-Name headerを付与する', async () => {
     const fetchImpl = vi
       .fn()
-      .mockResolvedValue(
-        jsonResponse({ status: 'ok', ct0: 'c0', auth_token: 'a0' }),
-      )
+      .mockResolvedValue(jsonResponse({ status: 'ok', ct0: 'c0', auth_token: 'a0' }))
     const client = createCookieIssuerClient({
       baseUrl: 'http://issuer.local',
       clientName: 'crawler',
@@ -171,9 +167,7 @@ describe('createCookieIssuerClient', () => {
   it('clientNameを指定しない場合、X-Client-Name headerを付与しない', async () => {
     const fetchImpl = vi
       .fn()
-      .mockResolvedValue(
-        jsonResponse({ status: 'ok', ct0: 'c0', auth_token: 'a0' }),
-      )
+      .mockResolvedValue(jsonResponse({ status: 'ok', ct0: 'c0', auth_token: 'a0' }))
     const client = createCookieIssuerClient({ baseUrl: 'http://issuer.local', fetchImpl })
 
     await client.issueCookies({ username: 'x', password: 'y', otp_secret: null })
