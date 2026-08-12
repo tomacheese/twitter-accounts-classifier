@@ -7,48 +7,10 @@ import * as labelRepository from './db/label-repository'
 import * as followGraphIndexModule from './labels/follow-graph-label-index'
 import * as replyCorpusModule from './db/reply-corpus'
 import {
-  claimAccountRelabelBatch,
   evaluateAccountRelabelItems,
   runRelabelWorkerCycleOnce,
   scanForStaleAccounts,
 } from './relabel-worker'
-
-describe('claimAccountRelabelBatch', () => {
-  it('batchSize 件を 1 回の DB roundtrip で claim する', async () => {
-    const first = { id: 'wi-1', triggerId: 'alice' } as never
-    const second = { id: 'wi-2', triggerId: 'bob' } as never
-    const queryRaw = vi.fn().mockResolvedValue([first, second])
-    const transaction = vi.fn()
-    const prisma = { $queryRaw: queryRaw, $transaction: transaction } as unknown as PrismaClient
-
-    const items = await claimAccountRelabelBatch(prisma, {
-      batchSize: 10,
-      leaseOwner: 'test-worker',
-    })
-
-    expect(items.map((item) => item.triggerId)).toEqual(['alice', 'bob'])
-    expect(queryRaw).toHaveBeenCalledTimes(1)
-    expect(transaction).not.toHaveBeenCalled()
-  })
-
-  it('claim 対象がない場合は空配列を返す', async () => {
-    const claimSpy = vi.spyOn(workItemRepository, 'claimWorkItemBatch').mockResolvedValue([])
-    const prisma = {} as PrismaClient
-
-    const items = await claimAccountRelabelBatch(prisma, {
-      batchSize: 5,
-      leaseOwner: 'test-worker',
-    })
-
-    expect(items).toEqual([])
-    expect(claimSpy).toHaveBeenCalledWith(prisma, {
-      kinds: ['account_relabel'],
-      batchSize: 5,
-      leaseOwner: 'test-worker',
-      leaseDurationMs: 5 * 60 * 1000,
-    })
-  })
-})
 
 describe('evaluateAccountRelabelItems', () => {
   it('claim 済みの work item を評価・complete まで処理する', async () => {
@@ -277,89 +239,222 @@ describe('scanForStaleAccounts', () => {
   })
 })
 
+function makeCursorPrisma(overrides: Record<string, unknown> = {}): PrismaClient {
+  return {
+    relabelScanCursor: {
+      findUnique: vi.fn().mockResolvedValue({ id: 'singleton', lastScannedAccountId: null }),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
+    account: { findMany: vi.fn().mockResolvedValue([]) },
+    accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+    analysisWorkItem: { update: vi.fn().mockResolvedValue({}) },
+    ...overrides,
+  } as unknown as PrismaClient
+}
+
 describe('runRelabelWorkerCycleOnce', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('claim 件数が 0 件の cycle では buildFollowGraphLabelIndex・loadReplyCorpus を呼ばない', async () => {
+  it('peek 候補が 0 件の場合、buildFollowGraphLabelIndex・loadReplyCorpus・claim を一切行わない', async () => {
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
-    vi.spyOn(workItemRepository, 'claimWorkItemBatch').mockResolvedValue([])
+    const peekSpy = vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([])
+    const claimSpy = vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds')
     const followGraphSpy = vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
     const replyCorpusSpy = vi.spyOn(replyCorpusModule, 'loadReplyCorpus')
-    const prisma = {
-      relabelScanCursor: {
-        findUnique: vi.fn().mockResolvedValue({ id: 'singleton', lastScannedAccountId: null }),
-        upsert: vi.fn().mockResolvedValue({}),
-      },
-      account: { findMany: vi.fn().mockResolvedValue([]) },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
-    } as unknown as PrismaClient
+    const prisma = makeCursorPrisma()
 
     await runRelabelWorkerCycleOnce(prisma)
 
+    expect(peekSpy).toHaveBeenCalled()
+    expect(claimSpy).not.toHaveBeenCalled()
     expect(followGraphSpy).not.toHaveBeenCalled()
     expect(replyCorpusSpy).not.toHaveBeenCalled()
   })
 
-  it('buildFollowGraphLabelIndex には usesFollowGraphSignal を持つルールのラベルだけを渡す', async () => {
-    // フィルタ後も残ることを検証するため、実際に usesFollowGraphSignal: true を持つルールの key を使う。
+  it('buildFollowGraphLabelIndex には peek した全 accountId を1回だけ渡し、usesFollowGraphSignal を持つルールのラベルだけを渡す', async () => {
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(
       new Map([
         ['topic_anime', 'ld-follow'],
         ['ad_pr_hashtag', 'ld-no-follow'],
       ]),
     )
-    vi.spyOn(workItemRepository, 'claimWorkItemBatch').mockResolvedValue([
+    vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
+      { id: 'wi-1', triggerId: 'alice' },
+      { id: 'wi-2', triggerId: 'bob' },
+    ])
+    vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([
       { id: 'wi-1', triggerId: 'alice' } as never,
+      { id: 'wi-2', triggerId: 'bob' } as never,
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItem').mockResolvedValue('succeeded')
     const followGraphSpy = vi
       .spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
       .mockResolvedValue({ signalsFor: () => ({}) })
-    const prisma = {
-      relabelScanCursor: {
-        findUnique: vi.fn().mockResolvedValue({ id: 'singleton', lastScannedAccountId: null }),
-        upsert: vi.fn().mockResolvedValue({}),
-      },
+    const prisma = makeCursorPrisma({
       account: {
         findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue(null),
       },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
-      analysisWorkItem: { update: vi.fn().mockResolvedValue({}) },
-    } as unknown as PrismaClient
+    })
 
     await runRelabelWorkerCycleOnce(prisma)
 
+    expect(followGraphSpy).toHaveBeenCalledTimes(1)
     expect(followGraphSpy).toHaveBeenCalledWith(prisma, new Map([['topic_anime', 'ld-follow']]), {
-      accountIds: ['alice'],
+      accountIds: ['alice', 'bob'],
     })
   })
 
-  it('index 構築が失敗した場合、claim 済みの item に lastErrorSummary を書き残して例外を再送出する', async () => {
+  it('index 構築が候補確定後・claim 前に失敗した場合、1 件も claim されず lastErrorSummary も書かれない', async () => {
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
-    vi.spyOn(workItemRepository, 'claimWorkItemBatch').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' } as never,
+    vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
+      { id: 'wi-1', triggerId: 'alice' },
     ])
+    const claimSpy = vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds')
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockRejectedValue(new Error('db timeout'))
     const updateSpy = vi.fn().mockResolvedValue({})
-    const prisma = {
-      relabelScanCursor: {
-        findUnique: vi.fn().mockResolvedValue({ id: 'singleton', lastScannedAccountId: null }),
-        upsert: vi.fn().mockResolvedValue({}),
-      },
-      account: { findMany: vi.fn().mockResolvedValue([]) },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
-      analysisWorkItem: { update: updateSpy },
-    } as unknown as PrismaClient
+    const prisma = makeCursorPrisma({ analysisWorkItem: { update: updateSpy } })
 
     await expect(runRelabelWorkerCycleOnce(prisma)).rejects.toThrow('db timeout')
 
-    expect(updateSpy).toHaveBeenCalledWith({
-      where: { id: 'wi-1' },
-      data: { lastErrorSummary: expect.stringContaining('db timeout') },
+    expect(claimSpy).not.toHaveBeenCalled()
+    expect(updateSpy).not.toHaveBeenCalled()
+  })
+
+  it('peek した WorkItem id 集合だけを RELABELER_WORKER_CHUNK_SIZE ごとの chunk で claim し、候補外を補充しない', async () => {
+    vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '2')
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
+    vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
+      { id: 'wi-1', triggerId: 'alice' },
+      { id: 'wi-2', triggerId: 'bob' },
+      { id: 'wi-3', triggerId: 'carol' },
+    ])
+    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
+      signalsFor: () => ({}),
+    })
+    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItem').mockResolvedValue('succeeded')
+    const claimSpy = vi
+      .spyOn(workItemRepository, 'claimWorkItemBatchByIds')
+      .mockImplementation((_prisma, { ids }) =>
+        Promise.resolve(ids.map((id) => ({ id, triggerId: `t-${id}` }) as never)),
+      )
+    const prisma = makeCursorPrisma({
+      account: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    })
+
+    await runRelabelWorkerCycleOnce(prisma)
+
+    expect(claimSpy).toHaveBeenCalledTimes(2)
+    expect(claimSpy).toHaveBeenNthCalledWith(
+      1,
+      prisma,
+      expect.objectContaining({ ids: ['wi-1', 'wi-2'] }),
+    )
+    expect(claimSpy).toHaveBeenNthCalledWith(2, prisma, expect.objectContaining({ ids: ['wi-3'] }))
+  })
+
+  it('競合で一部の候補が claim できなかった場合、その分を他の WorkItem で補充しない', async () => {
+    vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '2')
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
+    vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
+      { id: 'wi-1', triggerId: 'alice' },
+      { id: 'wi-2', triggerId: 'bob' },
+    ])
+    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
+      signalsFor: () => ({}),
+    })
+    const completeSpy = vi
+      .spyOn(workItemRepository, 'completeAccountRelabelWorkItem')
+      .mockResolvedValue('succeeded')
+    // wi-2 は別ワーカーとの競合で SKIP LOCKED により claim できなかったことを模す。
+    vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([
+      { id: 'wi-1', triggerId: 'alice' } as never,
+    ])
+    const prisma = makeCursorPrisma({
+      account: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    })
+
+    await runRelabelWorkerCycleOnce(prisma)
+
+    expect(completeSpy).toHaveBeenCalledTimes(1)
+    expect(completeSpy).toHaveBeenCalledWith(prisma, {
+      workItemId: 'wi-1',
+      leaseOwner: expect.any(String),
+    })
+  })
+
+  it('自己フィードバック防止: chunk A の評価後も chunk B の評価には同じ followGraphLabelIndex インスタンスを使う', async () => {
+    vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '1')
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
+    vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
+      { id: 'wi-1', triggerId: 'alice' },
+      { id: 'wi-2', triggerId: 'bob' },
+    ])
+    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    const sharedIndex = { signalsFor: () => ({}) }
+    const followGraphSpy = vi
+      .spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
+      .mockResolvedValue(sharedIndex)
+    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItem').mockResolvedValue('succeeded')
+    vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockImplementation((_prisma, { ids }) =>
+      Promise.resolve(
+        ids.map((id) => ({ id, triggerId: id === 'wi-1' ? 'alice' : 'bob' }) as never),
+      ),
+    )
+    const findUniqueMock = vi.fn().mockResolvedValue(null)
+    const prisma = makeCursorPrisma({
+      account: { findMany: vi.fn().mockResolvedValue([]), findUnique: findUniqueMock },
+    })
+
+    await runRelabelWorkerCycleOnce(prisma)
+
+    // followGraphLabelIndex は cycle 全体で1回しか構築されず、2 chunk とも同じインスタンスを参照する。
+    expect(followGraphSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('2 chunk 目の claim が失敗した場合、1 chunk 目は complete 済みのまま例外を再送出する (blast radius は chunk size 以下)', async () => {
+    vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '1')
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
+    vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
+      { id: 'wi-1', triggerId: 'alice' },
+      { id: 'wi-2', triggerId: 'bob' },
+    ])
+    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
+      signalsFor: () => ({}),
+    })
+    const completeSpy = vi
+      .spyOn(workItemRepository, 'completeAccountRelabelWorkItem')
+      .mockResolvedValue('succeeded')
+    vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds')
+      .mockResolvedValueOnce([{ id: 'wi-1', triggerId: 'alice' } as never])
+      .mockRejectedValueOnce(new Error('claim crashed'))
+    const prisma = makeCursorPrisma({
+      account: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    })
+
+    await expect(runRelabelWorkerCycleOnce(prisma)).rejects.toThrow('claim crashed')
+
+    // wi-2 は claim 自体が失敗しており lease されていないため、書き残す lastErrorSummary は無い。
+    // 1 chunk 目 (wi-1) は既に complete 済みで、2 chunk 目の失敗による影響を受けない。
+    expect(completeSpy).toHaveBeenCalledTimes(1)
+    expect(completeSpy).toHaveBeenCalledWith(prisma, {
+      workItemId: 'wi-1',
+      leaseOwner: expect.any(String),
     })
   })
 })
