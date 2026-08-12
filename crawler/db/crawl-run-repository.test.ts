@@ -292,10 +292,8 @@ describe('finishCrawlRun', () => {
     })
   })
 
-  // analyzer/operations/build-crawl-cycle.test.ts の
-  // 「finishCrawlRun が enqueue する label_aggregate_refresh と同じ
-  // kind/triggerType/triggerId で WorkItem を検索する」が、ここで固定する
-  // kind/triggerType/triggerId の形状を consumer 側から再利用して契約を確認する。
+  // consumer 側 (analyzer/operations/build-crawl-cycle.test.ts) がここで固定する
+  // kind/triggerType/triggerId をそのまま再利用し、契約の崩れを検出する。
   it('enqueues a label_aggregate_refresh AnalysisWorkItem for the finished run', async () => {
     const update = vi.fn().mockResolvedValue({})
     const upsert = vi.fn().mockResolvedValue({})

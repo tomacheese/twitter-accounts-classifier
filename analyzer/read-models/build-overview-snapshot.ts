@@ -141,8 +141,7 @@ export async function buildOverviewSnapshot(
     // Stage は crawl cycle 単位の一時的な失敗、ReadModelState は経過時間で
     // 落ちる鮮度そのものであり、いずれか一方だけを見ると
     // 「Stage は succeeded だが更新が止まっている」状態を見逃す。
-    // skipped は本来この pipeline では発生しないが、過去互換のため
-    // failed/stale と同様に必須系の未完了を示す状態として扱う。
+    // skipped はこの pipeline では発生しないが、過去互換のため failed/stale と同様に扱う。
     hasFailedOrStaleCoreStage:
       coreStages.some(
         (stage) =>

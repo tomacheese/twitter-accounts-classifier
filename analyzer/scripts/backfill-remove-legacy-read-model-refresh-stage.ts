@@ -1,12 +1,11 @@
 import type { PrismaClient } from '../generated/prisma'
-import { getPrismaClient } from '../db/client'
+import { getPrismaClient, disconnectPrisma } from '../db/client'
 import { buildOrUpdateCrawlCycle } from '../operations/build-crawl-cycle'
+import { NEVER_ENQUEUED_ERROR_SUMMARY } from '../operations/cycle-common'
 
 /**
- * phantom な read_model_refresh stage (work item was never enqueued による failed) を
- * 持つ crawl cycle の起点 CrawlRun ID 一覧を返す。
- * 実際に read_model_refresh を処理していた旧 pipeline の cycle は
- * analysisRunId が入っているため対象に含まれない。
+ * phantom な read_model_refresh stage を持つ crawl cycle の起点 CrawlRun ID 一覧を返す。
+ * 実際に処理していた旧 pipeline の cycle は analysisRunId が入っているため対象外になる。
  * 同じ cycle に label_aggregate_refresh の Stage が存在することも条件に含め、
  * 新 pipeline 移行後に作られた cycle だけを対象にする。
  * @param prisma - Prisma クライアント
@@ -21,7 +20,8 @@ export async function findPhantomCycleCrawlRunIds(prisma: PrismaClient): Promise
           stageKey: 'read_model_refresh',
           status: 'failed',
           attemptCount: 0,
-          errorSummary: 'work item was never enqueued',
+          analysisRunId: null,
+          errorSummary: NEVER_ENQUEUED_ERROR_SUMMARY,
         },
       },
       AND: {
@@ -35,7 +35,7 @@ export async function findPhantomCycleCrawlRunIds(prisma: PrismaClient): Promise
 
 /**
  * read_model_refresh WorkItem の残存件数を status 別に集計する。
- * 0 件であれば processReadModelRefresh()/worker kind を別 Issue で削除できる。
+ * 0 件であれば processReadModelRefresh()/worker kind を削除できる。
  * @param prisma - Prisma クライアント
  * @returns status ごとの件数
  */
@@ -109,8 +109,10 @@ async function main(): Promise<void> {
 
 // eslint-disable-next-line unicorn/prefer-module
 if (require.main === module) {
-  main().catch((error: unknown) => {
-    console.error(error)
-    process.exitCode = 1
-  })
+  main()
+    .catch((error: unknown) => {
+      console.error(error)
+      process.exitCode = 1
+    })
+    .finally(() => disconnectPrisma())
 }

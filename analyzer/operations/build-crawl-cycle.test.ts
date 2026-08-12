@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { PrismaClient } from '../generated/prisma'
 import { getPrismaClient } from '../db/client'
 import { buildOrUpdateCrawlCycle } from './build-crawl-cycle'
+import { NEVER_ENQUEUED_ERROR_SUMMARY } from './cycle-common'
 
 /**
  * @returns buildOrUpdateCrawlCycle が参照するメソッドのみ差し替え可能な Prisma クライアントのモックと、
@@ -332,8 +333,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     })
     expect(cycleAfter.modelVersion).toBe('2')
     expect(cycleAfter.status).toBe('succeeded')
-    // read_model_refresh は phantom (analysisRunId: null かつ未 enqueue エラー概要) では
-    // ないため、deleteObsoleteOperationStages() の対象にはならず残り続ける。
+    // read_model_refresh は phantom ではないため、deleteObsoleteOperationStages() で削除されない。
     const stagesAfter = await prisma.operationStage.findMany({
       where: { cycleId: legacyCycle.id },
     })
@@ -344,13 +344,66 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     ])
   })
 
+  it('phantom な read_model_refresh stage は再構築時に削除される', async () => {
+    const crawlRun = await prisma.crawlRun.create({
+      data: {
+        id: `crawl-${randomUUID()}`,
+        startedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        finishedAt: new Date(),
+        status: 'success',
+      },
+    })
+    const cycle = await prisma.operationCycle.create({
+      data: {
+        kind: 'crawl',
+        sourceType: 'crawl_run',
+        sourceId: crawlRun.id,
+        triggeredAt: crawlRun.startedAt,
+        status: 'partial',
+        modelVersion: '2',
+      },
+    })
+    await prisma.operationStage.create({
+      data: {
+        cycleId: cycle.id,
+        stageKey: 'read_model_refresh',
+        sequence: 3,
+        requiredness: 'required',
+        status: 'failed',
+        attemptCount: 0,
+        errorSummary: NEVER_ENQUEUED_ERROR_SUMMARY,
+      },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'label_aggregate_refresh',
+        triggerType: 'crawl_run',
+        triggerId: crawlRun.id,
+        status: 'succeeded',
+      },
+    })
+    await prisma.analysisRun.create({
+      data: {
+        workItemId: workItem.id,
+        attemptNumber: 1,
+        finishedAt: new Date(),
+        status: 'succeeded',
+      },
+    })
+
+    await buildOrUpdateCrawlCycle(prisma, { crawlRunId: crawlRun.id })
+
+    const stagesAfter = await prisma.operationStage.findMany({ where: { cycleId: cycle.id } })
+    expect(stagesAfter.map((stage) => stage.stageKey).toSorted()).toEqual([
+      'crawl',
+      'label_aggregate_refresh',
+    ])
+  })
+
   it('finishCrawlRun が enqueue する label_aggregate_refresh と同じ kind/triggerType/triggerId で WorkItem を検索する', async () => {
-    // crawler/db/crawl-run-repository.test.ts の
-    // 「enqueues a label_aggregate_refresh AnalysisWorkItem for the finished run」で
-    // 固定している producer 側の形状 (kind: 'label_aggregate_refresh',
-    // triggerType: 'crawl_run', triggerId: <CrawlRun.id>) と、
-    // このテストで作成する WorkItem の形状が一致することで、
-    // producer と consumer の契約が崩れていないことを確認する。
+    // producer 側 (crawler/db/crawl-run-repository.test.ts) の kind/triggerType/triggerId と
+    // 一致しないと、ここでの契約の崩れが検出されない。
     const crawlRun = await prisma.crawlRun.create({
       data: {
         id: `crawl-${randomUUID()}`,

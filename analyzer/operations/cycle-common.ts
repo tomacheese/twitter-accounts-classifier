@@ -3,8 +3,7 @@ import type { PrismaClient } from '../generated/prisma'
 /**
  * 起点 Run の完了時には必ず AnalysisWorkItem が enqueue される前提のもとで、
  * WorkItem 自体が存在しない場合に埋め込むエラー概要。
- * この文字列と analysisRunId: null の組み合わせを、廃止済み stage 削除の
- * phantom 判定条件としても再利用する。
+ * この文字列と analysisRunId: null の組み合わせは、廃止済み stage 削除の phantom 判定条件としても再利用する。
  */
 export const NEVER_ENQUEUED_ERROR_SUMMARY = 'work item was never enqueued'
 
@@ -293,7 +292,7 @@ export async function upsertCycleWithStages(
         finishedAt,
         errorCode: stage.errorCode ?? null,
         errorSummary: stage.errorSummary ?? null,
-        analysisRunId: stage.analysisRunId,
+        analysisRunId: stage.analysisRunId ?? null,
       },
     })
   }
@@ -303,9 +302,8 @@ export async function upsertCycleWithStages(
 
 /**
  * 現行の stage topology に存在しない OperationStage を削除する。
- * WHERE 句自体を phantom 条件 (WorkItem 未 enqueue 由来の失敗) に限定することで、
- * この関数がどの呼び出し経路から実行されても、旧 pipeline の正当な実行履歴を
- * 誤って削除しない構造的な安全性を持たせる。
+ * WHERE 句を phantom 条件 (WorkItem 未 enqueue 由来の失敗) に限定しており、
+ * 呼び出し経路によらず旧 pipeline の正当な実行履歴を誤って削除しない。
  * @param prisma - Prisma クライアント
  * @param cycleId - 対象 OperationCycle の ID
  * @param keepStageKeys - 現行 topology で保持すべき stageKey の一覧

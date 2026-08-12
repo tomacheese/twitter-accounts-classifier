@@ -1,3 +1,4 @@
+import { Logger } from '@book000/node-utils'
 import type { PrismaClient } from '../generated/prisma'
 import {
   applyUpstreamBlocking,
@@ -7,10 +8,12 @@ import {
   upsertCycleWithStages,
   type CycleStageInput,
   type StageStatus,
+  type WorkItemStage,
 } from './cycle-common'
 
-const ANALYSIS_WORK_ITEM_STAGE_KINDS = ['label_aggregate_refresh'] as const
-const CRAWL_CYCLE_STAGE_KEYS = ['crawl', ...ANALYSIS_WORK_ITEM_STAGE_KINDS]
+const CRAWL_CYCLE_STAGE_KEYS = ['crawl', 'label_aggregate_refresh']
+
+const logger = Logger.configure('analyzer:build-crawl-cycle')
 
 /**
  * @param crawlRunStatus - CrawlRun.status の値
@@ -26,34 +29,26 @@ function deriveCrawlStageStatus(crawlRunStatus: string): StageStatus {
 
 /**
  * 廃止済み read_model_refresh の実行履歴が残る旧 v1 cycle かどうかを判定する。
- * 旧 pipeline 時代の CrawlRun には label_aggregate_refresh の WorkItem が
- * 存在しないため、この関数を素通りさせて再構築すると新規の phantom failure を
- * 生んでしまう。読み取りのみ行い、判定結果に応じて呼び出し元が書き込みを止める。
+ * 旧 pipeline 時代の CrawlRun は label_aggregate_refresh の WorkItem を持たないため、
+ * 素通りさせて再構築すると新規の phantom failure を生んでしまう。
+ * 読み取りのみ行い、判定結果に応じて呼び出し元が書き込みを止める。
  * @param prisma - Prisma クライアント
  * @param crawlRunId - 対象 CrawlRun の ID
+ * @param labelAggregateRefreshStage - 呼び出し元が既に取得済みの label_aggregate_refresh Stage
  * @returns 旧 v1 cycle なら true
  */
 async function isLegacyReadModelRefreshCycle(
   prisma: PrismaClient,
   crawlRunId: string,
+  labelAggregateRefreshStage: WorkItemStage,
 ): Promise<boolean> {
-  const [readModelRefreshStages, currentWorkItem] = await Promise.all([
-    prisma.operationStage.findMany({
-      where: {
-        stageKey: 'read_model_refresh',
-        cycle: { sourceType: 'crawl_run', sourceId: crawlRunId },
-      },
-    }),
-    prisma.analysisWorkItem.findUnique({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'label_aggregate_refresh',
-          triggerType: 'crawl_run',
-          triggerId: crawlRunId,
-        },
-      },
-    }),
-  ])
+  const readModelRefreshStages = await prisma.operationStage.findMany({
+    where: {
+      stageKey: 'read_model_refresh',
+      cycle: { sourceType: 'crawl_run', sourceId: crawlRunId },
+    },
+    select: { analysisRunId: true, errorSummary: true },
+  })
   // phantom 条件 (analysisRunId: null かつ未 enqueue エラー概要) の否定を SQL の WHERE 句に
   // 組み込むと、errorSummary が null (phantom 文字列とは無関係) の行が三値論理で
   // 除外されてしまうため、判定はここでアプリケーション側で行う。
@@ -61,7 +56,7 @@ async function isLegacyReadModelRefreshCycle(
     (stage) =>
       !(stage.analysisRunId === null && stage.errorSummary === NEVER_ENQUEUED_ERROR_SUMMARY),
   )
-  return hasLegacyStage && currentWorkItem === null
+  return hasLegacyStage && !labelAggregateRefreshStage.workItemExists
 }
 
 /**
@@ -82,11 +77,25 @@ export async function buildOrUpdateCrawlCycle(
   prisma: PrismaClient,
   input: BuildOrUpdateCrawlCycleInput,
 ): Promise<void> {
-  if (await isLegacyReadModelRefreshCycle(prisma, input.crawlRunId)) return
+  const labelAggregateRefreshStage = await deriveWorkItemStage(
+    prisma,
+    'label_aggregate_refresh',
+    'crawl_run',
+    input.crawlRunId,
+  )
+
+  if (await isLegacyReadModelRefreshCycle(prisma, input.crawlRunId, labelAggregateRefreshStage)) {
+    logger.info(`legacy read_model_refresh cycle, skip rebuild: crawlRunId=${input.crawlRunId}`)
+    return
+  }
 
   const crawlRun = await prisma.crawlRun.findUniqueOrThrow({ where: { id: input.crawlRunId } })
 
   const crawlStageStatus = deriveCrawlStageStatus(crawlRun.status)
+  const labelAggregateRefreshStatus = applyUpstreamBlocking(
+    labelAggregateRefreshStage,
+    crawlStageStatus,
+  )
   const stages: CycleStageInput[] = [
     {
       stageKey: 'crawl',
@@ -96,21 +105,13 @@ export async function buildOrUpdateCrawlCycle(
       startedAt: crawlRun.startedAt,
       finishedAt: crawlRun.finishedAt ?? undefined,
     },
-  ]
-
-  let previousStageStatus: StageStatus = crawlStageStatus
-  for (const kind of ANALYSIS_WORK_ITEM_STAGE_KINDS) {
-    const rawStage = await deriveWorkItemStage(prisma, kind, 'crawl_run', input.crawlRunId)
-    const stage = applyUpstreamBlocking(rawStage, previousStageStatus)
-
-    stages.push({
-      stageKey: kind,
+    {
+      stageKey: 'label_aggregate_refresh',
       sourceType: 'analysis_work_item',
       sourceId: crawlRun.id,
-      ...stage,
-    })
-    previousStageStatus = stage.status
-  }
+      ...labelAggregateRefreshStatus,
+    },
+  ]
 
   await prisma.$transaction(async (tx) => {
     const { cycleId } = await upsertCycleWithStages(tx as unknown as PrismaClient, {
