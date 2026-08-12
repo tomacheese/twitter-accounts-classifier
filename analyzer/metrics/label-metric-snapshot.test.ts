@@ -761,4 +761,213 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
       expect(row.count).toBe(naive.get(row.value) ?? 0)
     }
   })
+
+  it('未 compaction の古いバケットへの再書き込みは sentinel ではなく実際のバケット行から decrement する', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_uncompacted_decrement', description: 'テスト用ラベル' },
+    })
+    await prisma.account.create({
+      data: {
+        id: 'acct_uncompacted',
+        screenName: 'acct_uncompacted',
+        displayName: 'acct_uncompacted',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date(),
+      },
+    })
+    const freshAt = new Date(Date.now() - 60 * 60 * 1000)
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_uncompacted',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.5,
+        reason: 'r',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: freshAt,
+        sourceObservationId: null,
+      },
+    ])
+    const literalBucket = new Date(freshAt)
+    literalBucket.setUTCSeconds(0, 0)
+    const agedLiteralBucket = new Date(literalBucket.getTime() - 8 * 24 * 60 * 60 * 1000)
+
+    // このテストの主眼は、バケット行はそのままで実時刻だけが7日を超えた
+    // 状態を作ることである。トリガーを一時的に無効化し、
+    // AccountClassificationLatest.observedAt とバケットのキーを同じ古い時刻に
+    // 揃える (compaction は実行しない = まだ sentinel には丸め込まれていない)。
+    // 無効化せずに書き換えると、この UPDATE 自体がトリガーを発火させ、
+    // 検証したい状態を作る前に集計が変わってしまうため無効化する。
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`ALTER TABLE "AccountClassificationLatest" DISABLE TRIGGER account_classification_latest_aggregate_trigger`
+      await tx.$executeRaw`
+        UPDATE "AccountClassificationLatest" SET "observedAt" = ${agedLiteralBucket}
+        WHERE "accountId" = 'acct_uncompacted' AND "labelDefinitionId" = ${label.id}
+      `
+      await tx.$executeRaw`
+        UPDATE "AccountClassificationFreshnessBucket" SET "observedAtBucket" = ${agedLiteralBucket}
+        WHERE "labelDefinitionId" = ${label.id} AND "observedAtBucket" = ${literalBucket}
+      `
+      await tx.$executeRaw`ALTER TABLE "AccountClassificationLatest" ENABLE TRIGGER account_classification_latest_aggregate_trigger`
+    })
+
+    // 同じ account の分類を更新する。OLD.observedAt は上記の書き換えで
+    // agedLiteralBucket と揃っているため、date_trunc('minute', OLD.observedAt)
+    // は実際に count を保持しているバケット行を正しく指す。トリガーがこのキーの
+    // 存在確認を経て decrement することを、バケットの count が正しく 0 になり、
+    // sentinel が誤って減算されないことで確認する。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_uncompacted',
+        labelDefinitionId: label.id,
+        value: false,
+        confidence: 0.9,
+        reason: 'updated',
+        method: 'rule',
+        ruleVersion: 'v2',
+        observedAt: new Date(),
+        sourceObservationId: null,
+      },
+    ])
+
+    const bucketAfterUpdate = await prisma.accountClassificationFreshnessBucket.findUnique({
+      where: {
+        labelDefinitionId_observedAtBucket: {
+          labelDefinitionId: label.id,
+          observedAtBucket: agedLiteralBucket,
+        },
+      },
+    })
+    const sentinelAfterUpdate = await prisma.accountClassificationFreshnessBucket.findUnique({
+      where: {
+        labelDefinitionId_observedAtBucket: {
+          labelDefinitionId: label.id,
+          observedAtBucket: new Date('1970-01-01T00:00:00Z'),
+        },
+      },
+    })
+    // 実際に count を保持していたバケット行から decrement された結果、
+    // 行自体が削除される (count <= 0)。sentinel は今回の update では触れられない。
+    expect(bucketAfterUpdate).toBeNull()
+    expect(sentinelAfterUpdate?.count ?? 0).toBe(0)
+
+    await prisma.$transaction((tx) => compactFreshnessBucketsForTest(tx, label.id))
+    const naive = await prisma.$queryRaw<{ count: bigint }[]>`
+      SELECT COUNT(*) AS count FROM "AccountClassificationLatest"
+      WHERE "labelDefinitionId" = ${label.id}
+    `
+    const buckets = await prisma.accountClassificationFreshnessBucket.findMany({
+      where: { labelDefinitionId: label.id },
+    })
+    expect(buckets.reduce((sum, b) => sum + b.count, 0)).toBe(Number(naive[0].count))
+  })
+
+  it('同一分単位バケットを共有する2 account目のbootstrap書き込みは既存バケット行へ増える(sentinelへ分裂しない)', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_bucket_split_consistency', description: 'テスト用ラベル' },
+    })
+    for (const id of ['acct_split_a', 'acct_split_b']) {
+      await prisma.account.create({
+        data: {
+          id,
+          screenName: id,
+          displayName: id,
+          followersCount: 0,
+          followingCount: 0,
+          tweetCount: 0,
+          accountCreatedAt: new Date(),
+          lastCrawledAt: new Date(),
+        },
+      })
+    }
+    const freshAt = new Date(Date.now() - 60 * 60 * 1000)
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_split_a',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.5,
+        reason: 'r',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: freshAt,
+        sourceObservationId: null,
+      },
+    ])
+    const literalBucket = new Date(freshAt)
+    literalBucket.setUTCSeconds(0, 0)
+    // A のバケットが7日を超えた状態を、compaction を実行せずに作る。
+    const agedBucket = new Date(literalBucket.getTime() - 8 * 24 * 60 * 60 * 1000)
+    await prisma.$executeRaw`
+      UPDATE "AccountClassificationFreshnessBucket"
+      SET "observedAtBucket" = ${agedBucket}
+      WHERE "labelDefinitionId" = ${label.id} AND "observedAtBucket" = ${literalBucket}
+    `
+    // B を、A と同じ分単位に切り捨てられる observedAt (= agedBucket) で
+    // bootstrap 相当の初回 insert する。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_split_b',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.6,
+        reason: 'r',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: agedBucket,
+        sourceObservationId: null,
+      },
+    ])
+
+    const bucketAfterInsert = await prisma.accountClassificationFreshnessBucket.findUniqueOrThrow({
+      where: {
+        labelDefinitionId_observedAtBucket: { labelDefinitionId: label.id, observedAtBucket: agedBucket },
+      },
+    })
+    const sentinelAfterInsert = await prisma.accountClassificationFreshnessBucket.findUnique({
+      where: {
+        labelDefinitionId_observedAtBucket: {
+          labelDefinitionId: label.id,
+          observedAtBucket: new Date('1970-01-01T00:00:00Z'),
+        },
+      },
+    })
+    // B の increment は sentinel ではなく A のバケット行へ加算される。
+    expect(bucketAfterInsert.count).toBe(2)
+    expect(sentinelAfterInsert?.count ?? 0).toBe(0)
+
+    // B の分類を更新し、その decrement も同じバケット行から行われることを確認する。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_split_b',
+        labelDefinitionId: label.id,
+        value: false,
+        confidence: 0.1,
+        reason: 'updated',
+        method: 'rule',
+        ruleVersion: 'v2',
+        observedAt: new Date(),
+        sourceObservationId: null,
+      },
+    ])
+    const bucketAfterDecrement = await prisma.accountClassificationFreshnessBucket.findUniqueOrThrow({
+      where: {
+        labelDefinitionId_observedAtBucket: { labelDefinitionId: label.id, observedAtBucket: agedBucket },
+      },
+    })
+    expect(bucketAfterDecrement.count).toBe(1)
+
+    await prisma.$transaction((tx) => compactFreshnessBucketsForTest(tx, label.id))
+    const naive = await prisma.$queryRaw<{ count: bigint }[]>`
+      SELECT COUNT(*) AS count FROM "AccountClassificationLatest" WHERE "labelDefinitionId" = ${label.id}
+    `
+    const buckets = await prisma.accountClassificationFreshnessBucket.findMany({
+      where: { labelDefinitionId: label.id },
+    })
+    expect(buckets.reduce((sum, b) => sum + b.count, 0)).toBe(Number(naive[0].count))
+  })
 })
