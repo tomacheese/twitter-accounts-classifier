@@ -1,9 +1,25 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { getPrismaClient } from '../db/client'
+import { upsertAccountClassificationLatest } from '../read-models/account-summary-latest'
 import {
   buildLabelAggregateSnapshotSet,
   deriveCompletenessFromCoverage,
 } from './label-metric-snapshot'
+
+/**
+ * AccountClassificationLatest から素朴に GROUP BY した value 別件数を返す。
+ * トリガー維持テーブルとの突き合わせ用。
+ * @param labelDefinitionId - 対象の labelDefinitionId
+ * @returns value ごとの件数マップ
+ */
+async function naiveValueCounts(labelDefinitionId: string): Promise<Map<boolean, number>> {
+  const prisma = getPrismaClient()
+  const rows = await prisma.$queryRaw<{ value: boolean; count: bigint }[]>`
+    SELECT "value", COUNT(*) AS count FROM "AccountClassificationLatest"
+    WHERE "labelDefinitionId" = ${labelDefinitionId} GROUP BY 1
+  `
+  return new Map(rows.map((row) => [row.value, Number(row.count)]))
+}
 
 describe('deriveCompletenessFromCoverage', () => {
   it('returns unknown when coverage is below minCoverage', () => {
@@ -337,5 +353,202 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
       where: { triggerWorkItemId: 'work_item_population_equiv', labelDefinitionId: label.id },
     })
     expect(snapshot.populationCount).toBe(3)
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregate trigger', () => {
+  const prisma = getPrismaClient()
+
+  beforeEach(async () => {
+    await prisma.accountClassificationValueCount.deleteMany()
+    await prisma.accountClassificationConfidenceBucketCount.deleteMany()
+    await prisma.accountClassificationRuleVersionCount.deleteMany()
+    await prisma.accountClassificationFreshnessBucket.deleteMany()
+    await prisma.accountClassificationLatest.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountLabel.deleteMany()
+    await prisma.labelDefinition.deleteMany()
+    await prisma.account.deleteMany()
+  })
+
+  it('複数 account・複数 update を経た後もトリガー維持テーブルが素朴な集計と一致する', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_trigger_correctness', description: 'テスト用ラベル' },
+    })
+    for (const id of ['acct_trig_1', 'acct_trig_2']) {
+      await prisma.account.create({
+        data: {
+          id,
+          screenName: id,
+          displayName: id,
+          followersCount: 0,
+          followingCount: 0,
+          tweetCount: 0,
+          accountCreatedAt: new Date(),
+          lastCrawledAt: new Date(),
+        },
+      })
+    }
+
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_1',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'r1',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-13T00:00:00Z'),
+        sourceObservationId: null,
+      },
+      {
+        accountId: 'acct_trig_2',
+        labelDefinitionId: label.id,
+        value: false,
+        confidence: 0.2,
+        reason: 'r2',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-13T00:00:00Z'),
+        sourceObservationId: null,
+      },
+    ])
+    // acct_trig_1 を false へ更新する (value のトリガー decrement/increment を経由させる)。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_1',
+        labelDefinitionId: label.id,
+        value: false,
+        confidence: 0.3,
+        reason: 'r1_updated',
+        method: 'rule',
+        ruleVersion: 'v2',
+        observedAt: new Date('2026-08-13T00:01:00Z'),
+        sourceObservationId: null,
+      },
+    ])
+
+    const valueCountRows = await prisma.accountClassificationValueCount.findMany({
+      where: { labelDefinitionId: label.id },
+    })
+    const naive = await naiveValueCounts(label.id)
+    for (const row of valueCountRows) {
+      expect(row.count).toBe(naive.get(row.value) ?? 0)
+    }
+    expect(valueCountRows.reduce((sum, row) => sum + row.count, 0)).toBe(2)
+  })
+
+  it('同一 key への並行更新後も逐次実行と同じ集計になる', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_trigger_concurrent', description: 'テスト用ラベル' },
+    })
+    await prisma.account.create({
+      data: {
+        id: 'acct_concurrent',
+        screenName: 'acct_concurrent',
+        displayName: 'acct_concurrent',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date(),
+      },
+    })
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_concurrent',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.5,
+        reason: 'initial',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-13T00:00:00Z'),
+        sourceObservationId: null,
+      },
+    ])
+
+    // 片方のトランザクションを一時停止させ、もう片方を先に commit させることで
+    // 「更新前の値を読んで decrement/increment する」旧方式なら壊れていたはずの
+    // 並行 upsert を再現する。
+    const txA = prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        UPDATE "AccountClassificationLatest" SET "value" = false, "confidence" = 0.1,
+          "observedAt" = ${new Date('2026-08-13T00:01:00Z')}
+        WHERE "accountId" = 'acct_concurrent' AND "labelDefinitionId" = ${label.id}
+      `
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const txB = prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        UPDATE "AccountClassificationLatest" SET "value" = true, "confidence" = 0.2,
+          "observedAt" = ${new Date('2026-08-13T00:02:00Z')}
+        WHERE "accountId" = 'acct_concurrent' AND "labelDefinitionId" = ${label.id}
+      `
+    })
+    await Promise.all([txA, txB])
+
+    const naive = await naiveValueCounts(label.id)
+    const valueCountRows = await prisma.accountClassificationValueCount.findMany({
+      where: { labelDefinitionId: label.id },
+    })
+    for (const row of valueCountRows) {
+      expect(row.count).toBe(naive.get(row.value) ?? 0)
+    }
+  })
+
+  it('同一 key への新規 (初回 insert) 並行書き込みも逐次実行と同じ集計になる', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_trigger_concurrent_insert', description: 'テスト用ラベル' },
+    })
+    await prisma.account.create({
+      data: {
+        id: 'acct_concurrent_insert',
+        screenName: 'acct_concurrent_insert',
+        displayName: 'acct_concurrent_insert',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date(),
+      },
+    })
+
+    const insertRow = (observedAt: Date, value: boolean) =>
+      prisma.$transaction((tx) =>
+        tx.$executeRaw`
+          INSERT INTO "AccountClassificationLatest"
+            ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "observedAt")
+          VALUES ('acct_concurrent_insert', ${label.id}, ${value}, 0.5, 'r', 'rule', 'v1', ${observedAt})
+          ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE SET
+            "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "observedAt" = EXCLUDED."observedAt"
+          WHERE "AccountClassificationLatest"."observedAt" <= EXCLUDED."observedAt"
+        `,
+      )
+
+    // 2 つの候補書き込みを重ねて実行し、最終的に採用された observedAt 側の
+    // value だけが集計されることを検証する (先着した側は WHERE 条件で実際には
+    // 更新されず、INSERT トリガーが 1 回だけ発火する)。
+    await Promise.all([
+      insertRow(new Date('2026-08-13T00:03:00Z'), true),
+      insertRow(new Date('2026-08-13T00:04:00Z'), false),
+    ])
+
+    const finalRow = await prisma.accountClassificationLatest.findUniqueOrThrow({
+      where: {
+        accountId_labelDefinitionId: { accountId: 'acct_concurrent_insert', labelDefinitionId: label.id },
+      },
+    })
+    const naive = await naiveValueCounts(label.id)
+    const valueCountRows = await prisma.accountClassificationValueCount.findMany({
+      where: { labelDefinitionId: label.id },
+    })
+    for (const row of valueCountRows) {
+      expect(row.count).toBe(naive.get(row.value) ?? 0)
+    }
+    expect(valueCountRows.reduce((sum, row) => sum + row.count, 0)).toBe(1)
+    expect(finalRow.value).toBe(false)
   })
 })
