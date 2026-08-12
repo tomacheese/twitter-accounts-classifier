@@ -19,6 +19,12 @@ export interface DetectRunFailuresInput {
   severity?: string
   /** Occurrence の重複判定キー。既定は runId。 */
   observationKey?: string
+  /**
+   * 指定時、この時刻より後に検出された (lastDetectedAt が新しい) active issue は
+   * 一括解消の対象から除外する。並列処理で settle 順序が入れ替わっても、
+   * 自分より後に発生した failure まで誤って消さないためのカットオフ。
+   */
+  supersedeCutoff?: Date
 }
 
 const FAILED_STATUSES = new Set(['failed', 'timeout', 'dead'])
@@ -39,7 +45,12 @@ export async function detectRunFailures(
 ): Promise<void> {
   if (RECOVERED_STATUSES.has(input.runStatus)) {
     const issues = await prisma.operationalIssue.findMany({
-      where: { component: input.component, type: 'run_failure', status: 'active' },
+      where: {
+        component: input.component,
+        type: 'run_failure',
+        status: 'active',
+        ...(input.supersedeCutoff ? { lastDetectedAt: { lte: input.supersedeCutoff } } : {}),
+      },
     })
     for (const issue of issues) {
       await prisma.operationalIssue.update({

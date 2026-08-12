@@ -134,6 +134,48 @@ describe.skipIf(!process.env.DATABASE_URL)('detectRunFailures', () => {
     })
     expect(issue.status).toBe('active')
   })
+
+  it('supersedeCutoff より後に検出された active issue は resolve しない', async () => {
+    const oldFailedRunId = `crawl-${randomUUID()}`
+    const newFailedRunId = `crawl-${randomUUID()}`
+    const recoveredRunId = `crawl-${randomUUID()}`
+
+    // 古い failure (cutoff より前)
+    await detectRunFailures(prisma, {
+      component: 'crawl',
+      runId: oldFailedRunId,
+      runStatus: 'failed',
+      errorSummary: 'boom',
+      now: new Date('2026-08-09T00:00:00Z'),
+    })
+    // 新しい failure (cutoff より後)
+    await detectRunFailures(prisma, {
+      component: 'crawl',
+      runId: newFailedRunId,
+      runStatus: 'failed',
+      errorSummary: 'boom',
+      now: new Date('2026-08-09T02:00:00Z'),
+      observationKey: newFailedRunId,
+    })
+
+    // cutoff は古い failure の直後、新しい failure より前の時刻
+    await detectRunFailures(prisma, {
+      component: 'crawl',
+      runId: recoveredRunId,
+      runStatus: 'succeeded',
+      errorSummary: null,
+      now: new Date('2026-08-09T03:00:00Z'),
+      supersedeCutoff: new Date('2026-08-09T01:00:00Z'),
+    })
+
+    const issues = await prisma.operationalIssue.findMany({
+      where: { component: 'crawl', type: 'run_failure' },
+      orderBy: { firstDetectedAt: 'asc' },
+    })
+    expect(issues).toHaveLength(2)
+    expect(issues[0]?.status).toBe('resolved')
+    expect(issues[1]?.status).toBe('active')
+  })
 })
 
 describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
