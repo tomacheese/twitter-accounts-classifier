@@ -3,6 +3,7 @@ import { getPrismaClient } from '../db/client'
 import { upsertAccountClassificationLatest } from '../read-models/account-summary-latest'
 import {
   buildLabelAggregateSnapshotSet,
+  compactFreshnessBucketsForTest,
   deriveCompletenessFromCoverage,
 } from './label-metric-snapshot'
 
@@ -643,5 +644,121 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     expect(
       buckets.filter((bucket) => bucket !== sentinelBucket).reduce((sum, b) => sum + b.count, 0),
     ).toBe(1)
+  })
+
+  it('追加の書き込みなしで7日を超えたバケットが compaction で sentinel に丸め込まれる', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_compaction_time_only', description: 'テスト用ラベル' },
+    })
+    await prisma.account.create({
+      data: {
+        id: 'acct_compaction_stale',
+        screenName: 'acct_compaction_stale',
+        displayName: 'acct_compaction_stale',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date(),
+      },
+    })
+    const freshAt = new Date(Date.now() - 60 * 60 * 1000)
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_compaction_stale',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.5,
+        reason: 'r',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: freshAt,
+        sourceObservationId: null,
+      },
+    ])
+    const literalBucket = new Date(freshAt)
+    literalBucket.setUTCSeconds(0, 0)
+    // トリガーを再発火させずに「時間経過だけで stale になった」状況を作るため、
+    // バケット行を直接 8 日前へ書き換える (アプリケーションコードでは発生しないが、
+    // 時間経過のみの境界を単体で確認するためのテスト専用操作)。
+    await prisma.$executeRaw`
+      UPDATE "AccountClassificationFreshnessBucket"
+      SET "observedAtBucket" = ${new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)}
+      WHERE "labelDefinitionId" = ${label.id} AND "observedAtBucket" = ${literalBucket}
+    `
+
+    await prisma.$transaction((tx) => compactFreshnessBucketsForTest(tx, label.id))
+
+    const buckets = await prisma.accountClassificationFreshnessBucket.findMany({
+      where: { labelDefinitionId: label.id },
+    })
+    expect(buckets).toHaveLength(1)
+    expect(buckets[0].observedAtBucket.getTime()).toBe(new Date('1970-01-01T00:00:00Z').getTime())
+    expect(buckets[0].count).toBe(1)
+  })
+
+  it('compaction とトリガーが並行しても総 count が壊れず、デッドロックしない', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_compaction_concurrent', description: 'テスト用ラベル' },
+    })
+    for (const id of ['acct_compaction_a', 'acct_compaction_b']) {
+      await prisma.account.create({
+        data: {
+          id,
+          screenName: id,
+          displayName: id,
+          followersCount: 0,
+          followingCount: 0,
+          tweetCount: 0,
+          accountCreatedAt: new Date(),
+          lastCrawledAt: new Date(),
+        },
+      })
+    }
+    const staleAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_compaction_a',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.5,
+        reason: 'r',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: staleAt,
+        sourceObservationId: null,
+      },
+    ])
+
+    const compaction = prisma.$transaction(async (tx) => {
+      await compactFreshnessBucketsForTest(tx, label.id)
+      await new Promise((resolve) => setTimeout(resolve, 150))
+    })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    // bootstrap 経路を模して、observedAt が 7 日を超える通常の分類更新
+    // (トリガー側も sentinel を触るケース) を同時に発火させる。
+    const trigger = upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_compaction_b',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.5,
+        reason: 'r',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000),
+        sourceObservationId: null,
+      },
+    ])
+
+    await expect(Promise.all([compaction, trigger])).resolves.toBeDefined()
+
+    const naive = await naiveValueCounts(label.id)
+    const valueCountRows = await prisma.accountClassificationValueCount.findMany({
+      where: { labelDefinitionId: label.id },
+    })
+    for (const row of valueCountRows) {
+      expect(row.count).toBe(naive.get(row.value) ?? 0)
+    }
   })
 })

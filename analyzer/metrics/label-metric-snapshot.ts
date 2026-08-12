@@ -390,3 +390,5 @@ export async function buildLabelAggregateSnapshotSet(
 
   return { triggerWorkItemId: input.triggerWorkItemId, snapshotAt, reused: false }
 }
+
+export { compactFreshnessBuckets as compactFreshnessBucketsForTest }
