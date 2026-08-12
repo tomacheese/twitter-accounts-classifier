@@ -736,6 +736,7 @@ export async function processPostCompletionRefresh(
   })
   const outcome: WorkItemOutcome = {
     status: originalWorkItem.status as WorkItemOutcome['status'],
+    errorCode: originalWorkItem.lastErrorCode ?? undefined,
     errorSummary: originalWorkItem.lastErrorSummary ?? undefined,
   }
   await handleWorkItemSettled(prisma, originalWorkItem, outcome)
