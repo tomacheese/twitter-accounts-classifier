@@ -24,17 +24,17 @@ describe('deriveCompletenessFromCoverage', () => {
 })
 
 describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
-  it('aggregates all label definitions with one classification query', async () => {
+  it('reads population count from AccountSummaryLatest and aggregates from the 4 count tables', async () => {
     const snapshotAt = new Date('2026-08-09T00:00:00Z')
     const queryRaw = vi.fn((strings: TemplateStringsArray) => {
       const sql = strings.join('?')
       if (sql.includes('SELECT now() AS now')) return Promise.resolve([{ now: snapshotAt }])
-      if (sql.includes('COUNT(DISTINCT')) return Promise.resolve([{ count: 1n }])
+      if (sql.includes('FROM "AccountClassificationFreshnessBucket"') && sql.includes('WHERE'))
+        return Promise.resolve([])
+      if (sql.includes('FROM "AccountSummaryLatest"')) return Promise.resolve([{ count: 1n }])
       return Promise.resolve([])
     })
-    const executeRaw = vi.fn((strings: TemplateStringsArray) =>
-      Promise.resolve(strings.length - strings.length),
-    )
+    const executeRaw = vi.fn(() => Promise.resolve(0))
     const fakeTx = {
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
@@ -53,15 +53,13 @@ describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
       policyHash: 'hash',
       analyzerVersion: 'test',
       thresholds: { minCoverage: 0, maxStaleRatio: 1 },
-      freshnessThresholdsMs: { delayedAfterMs: 1, staleAfterMs: 2 },
+      freshnessThresholdsMs: { delayedAfterMs: 10 * 60 * 1000, staleAfterMs: 20 * 60 * 1000 },
     })
 
-    expect(queryRaw).toHaveBeenCalledTimes(3)
-    const firstQuery = queryRaw.mock.calls[0][0]
-    const secondQuery = queryRaw.mock.calls[1][0]
-    expect(firstQuery.join('?')).toContain('SELECT now() AS now')
-    expect(secondQuery.join('?')).toContain('COUNT(DISTINCT')
-    expect(executeRaw).toHaveBeenCalledTimes(1)
+    const populationQuery = queryRaw.mock.calls
+      .map((call) => call[0].join('?'))
+      .find((sql: string) => sql.includes('FROM "AccountSummaryLatest"'))
+    expect(populationQuery).toContain('classificationObservedAt')
     expect(executeRaw.mock.calls[0][0].join('?')).toContain("SET LOCAL work_mem = '256MB'")
   })
 })
@@ -80,7 +78,7 @@ describe('buildLabelAggregateSnapshotSet transaction options', () => {
       policyHash: 'hash',
       analyzerVersion: 'test',
       thresholds: { minCoverage: 0, maxStaleRatio: 1 },
-      freshnessThresholdsMs: { delayedAfterMs: 1, staleAfterMs: 2 },
+      freshnessThresholdsMs: { delayedAfterMs: 10 * 60 * 1000, staleAfterMs: 20 * 60 * 1000 },
     })
 
     expect(transaction).toHaveBeenCalledWith(
@@ -95,7 +93,12 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
 
   beforeEach(async () => {
     await prisma.labelMetricSnapshot.deleteMany()
+    await prisma.accountClassificationValueCount.deleteMany()
+    await prisma.accountClassificationConfidenceBucketCount.deleteMany()
+    await prisma.accountClassificationRuleVersionCount.deleteMany()
+    await prisma.accountClassificationFreshnessBucket.deleteMany()
     await prisma.accountClassificationLatest.deleteMany()
+    await prisma.accountSummaryLatest.deleteMany()
     await prisma.accountLabelLatest.deleteMany()
     await prisma.accountLabel.deleteMany()
     await prisma.labelDefinition.deleteMany()
@@ -132,6 +135,18 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
         method: 'rule',
         ruleVersion: 'v1',
         observedAt: new Date(),
+      },
+    })
+    await prisma.accountSummaryLatest.create({
+      data: {
+        accountId: account.id,
+        normalizedScreenName: account.screenName,
+        normalizedDisplayName: account.displayName,
+        searchDocument: account.screenName,
+        profileObservedAt: new Date(),
+        activeLabelKeys: [],
+        activeLabelCount: 0,
+        classificationObservedAt: new Date(),
       },
     })
 
