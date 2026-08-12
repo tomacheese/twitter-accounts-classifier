@@ -372,7 +372,7 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'spam', description: '架空のテスト用ラベル' },
+      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersion: 'v1' },
     })
     await prisma.accountLabelLatest.create({
       data: {
@@ -524,7 +524,7 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'spam', description: '架空のテスト用ラベル' },
+      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersion: 'v1' },
     })
     await prisma.accountLabelLatest.create({
       data: {
