@@ -148,27 +148,23 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
         latest.reason,
         latest."ruleVersion",
         latest."labeledAt",
-        recent_change."changeType"
-      FROM (
-        SELECT
-          change."accountId",
-          change."labelDefinitionId",
-          change."changeType",
-          change."changedAt",
-          row_number() OVER (
-            PARTITION BY change."accountId", change."labelDefinitionId"
-            ORDER BY change."changedAt" DESC, change.id DESC
-          ) AS rank
-        FROM "AccountLabelChange" change
-        WHERE change."changedAt" >= ${targetFrom}
-          AND change."changedAt" <= ${targetTo}
-      ) recent_change
+        change."changeType"
+      FROM "AccountLabelChange" change
       JOIN "AccountLabelLatest" latest
-        ON latest."accountId" = recent_change."accountId"
-       AND latest."labelDefinitionId" = recent_change."labelDefinitionId"
+        ON latest."accountId" = change."accountId"
+       AND latest."labelDefinitionId" = change."labelDefinitionId"
       JOIN "LabelDefinition" definition ON definition.id = latest."labelDefinitionId"
-      WHERE recent_change.rank = 1
-      ORDER BY recent_change."changedAt" DESC
+      WHERE change."changedAt" >= ${targetFrom}
+        AND change."changedAt" <= ${targetTo}
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "AccountLabelChange" newer
+          WHERE newer."accountId" = change."accountId"
+            AND newer."labelDefinitionId" = change."labelDefinitionId"
+            AND newer."changedAt" > change."changedAt"
+            AND newer."changedAt" <= ${targetTo}
+        )
+      ORDER BY change."changedAt" DESC, change.id DESC
       LIMIT ${limit}
     `)
   }

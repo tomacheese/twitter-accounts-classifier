@@ -924,6 +924,7 @@ model AccountLabelChange {
   @@unique([accountId, labelDefinitionId, changedAt])
   @@index([accountId, changedAt(sort: Desc)])
   @@index([labelDefinitionId, changedAt(sort: Desc), id(sort: Desc)])
+  @@index([changedAt(sort: Desc), id(sort: Desc)])
 }
 
 model LabelSummaryCurrent {
