@@ -135,8 +135,52 @@ export interface DetectAnalysisStageFailureInput {
   status: 'succeeded' | 'failed' | 'dead'
   /** 記録するエラー概要。 */
   errorSummary: string | undefined
+  /** 失敗種別。LabelAggregateRefreshError 由来でない失敗では undefined になる。 */
+  errorCode: string | undefined
+  /** WorkItem の起点種別 (crawl_run/schedule/weekly_analysis_run 等)。 */
+  triggerType: string
+  /** WorkItem の enqueue 時刻。settle 順序の逆転を弾くカットオフに使う。 */
+  createdAt: Date
   /** 判定の基準時刻。 */
   now: Date
+}
+
+/** 特定 kind の失敗 stage 定義。 */
+interface StageDefinition {
+  /** component に `analyzer:${kind}:${stage}` として付与する stage 名。 */
+  stage: string
+  /** この stage の failure を supersede してよい、成功した WorkItem の triggerType 条件。 */
+  supersededBy: (successTriggerType: string) => boolean
+}
+
+/**
+ * kind → errorCode → stage 定義。定義が無い kind/errorCode の組は generic component
+ * (`analyzer:${kind}`) のまま扱い、cross-WorkItem の一括 resolve は行わない
+ * (何が復旧したか errorCode から判別できない失敗を、安易に他の成功で消さないため)。
+ */
+const STAGE_DEFINITIONS: Record<string, Record<string, StageDefinition>> = {
+  label_aggregate_refresh: {
+    // snapshot 再構築と summary publish は triggerType によらず毎回実行されるため、
+    // どの triggerType の成功でも supersede してよい。
+    label_aggregate_snapshot_failed: { stage: 'snapshot', supersededBy: () => true },
+    label_summary_publish_failed: { stage: 'summary_publish', supersededBy: () => true },
+    // finding generation は triggerType === 'crawl_run' のときしか実行されないため、
+    // crawl_run 起点の成功だけが「finding generation が実際に再実行され成功した」ことを証明できる。
+    label_finding_generation_failed: {
+      stage: 'finding_generation',
+      supersededBy: (triggerType) => triggerType === 'crawl_run',
+    },
+  },
+}
+
+/**
+ * @param kind - WorkItem の kind
+ * @param errorCode - 失敗種別 (未分類なら undefined)
+ * @returns component 名。stage 定義があれば stage-specific、無ければ generic。
+ */
+function resolveComponent(kind: string, errorCode: string | undefined): string {
+  const stageDef = errorCode ? STAGE_DEFINITIONS[kind]?.[errorCode] : undefined
+  return stageDef ? `analyzer:${kind}:${stageDef.stage}` : `analyzer:${kind}`
 }
 
 /**
@@ -195,9 +239,8 @@ export async function detectAnalysisStageFailure(
   prisma: PrismaClient,
   input: DetectAnalysisStageFailureInput,
 ): Promise<void> {
-  const component = `analyzer:${input.kind}`
-
   if (input.status === 'succeeded') {
+    const component = `analyzer:${input.kind}`
     const fingerprint = computeFingerprint('run_failure', { component, runId: input.workItemId })
     await resolveIssueOnSuccess(
       prisma,
@@ -210,7 +253,7 @@ export async function detectAnalysisStageFailure(
   }
 
   await detectRunFailures(prisma, {
-    component,
+    component: resolveComponent(input.kind, input.errorCode),
     runId: input.workItemId,
     runStatus: input.status,
     errorSummary: input.errorSummary ?? null,

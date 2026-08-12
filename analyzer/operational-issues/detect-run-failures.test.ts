@@ -194,6 +194,9 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
       attemptNumber: 5,
       status: 'dead',
       errorSummary: 'boom',
+      errorCode: undefined,
+      triggerType: 'schedule',
+      createdAt: new Date(),
       now: new Date(),
     })
 
@@ -210,6 +213,9 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
       attemptNumber: 1,
       status: 'succeeded',
       errorSummary: undefined,
+      errorCode: undefined,
+      triggerType: 'schedule',
+      createdAt: new Date(),
       now: new Date(),
     })
 
@@ -226,6 +232,9 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
         attemptNumber,
         status: 'failed',
         errorSummary: 'boom',
+        errorCode: undefined,
+        triggerType: 'schedule',
+        createdAt: new Date(),
         now: new Date(),
       })
     }
@@ -245,6 +254,9 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
       attemptNumber: 1,
       status: 'failed',
       errorSummary: 'boom',
+      errorCode: undefined,
+      triggerType: 'schedule',
+      createdAt: new Date(),
       now: new Date(),
     })
     const issueAfterFailure = await prisma.operationalIssue.findFirstOrThrow()
@@ -256,6 +268,9 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
       attemptNumber: 2,
       status: 'succeeded',
       errorSummary: undefined,
+      errorCode: undefined,
+      triggerType: 'schedule',
+      createdAt: new Date(),
       now: new Date(),
     })
 
@@ -274,6 +289,9 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
       attemptNumber: 1,
       status: 'failed',
       errorSummary: 'boom',
+      errorCode: undefined,
+      triggerType: 'schedule',
+      createdAt: new Date(),
       now: new Date(),
     })
     const issue = await prisma.operationalIssue.findFirstOrThrow()
@@ -285,6 +303,9 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
         attemptNumber: 2,
         status: 'succeeded',
         errorSummary: undefined,
+        errorCode: undefined,
+        triggerType: 'schedule',
+        createdAt: new Date(),
         now: new Date(),
       })
     }
@@ -293,6 +314,44 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
       where: { issueId: issue.id, stateTransition: 'resolved' },
     })
     expect(occurrences).toHaveLength(1)
+  })
+
+  it('errorCode が stage 定義に一致する failed WorkItem は stage-specific component で issue を作る', async () => {
+    const workItemId = `work-item-${randomUUID()}`
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'label_aggregate_refresh',
+      workItemId,
+      attemptNumber: 1,
+      status: 'failed',
+      errorSummary: 'transaction timeout',
+      errorCode: 'label_aggregate_snapshot_failed',
+      triggerType: 'schedule',
+      createdAt: new Date(),
+      now: new Date(),
+    })
+
+    const issues = await prisma.operationalIssue.findMany()
+    expect(issues).toHaveLength(1)
+    expect(issues[0]?.component).toBe('analyzer:label_aggregate_refresh:snapshot')
+  })
+
+  it('errorCode が stage 定義に一致しない failed WorkItem は generic component のまま issue を作る', async () => {
+    const workItemId = `work-item-${randomUUID()}`
+    await detectAnalysisStageFailure(prisma, {
+      kind: 'label_aggregate_refresh',
+      workItemId,
+      attemptNumber: 1,
+      status: 'failed',
+      errorSummary: 'unexpected',
+      errorCode: undefined,
+      triggerType: 'schedule',
+      createdAt: new Date(),
+      now: new Date(),
+    })
+
+    const issues = await prisma.operationalIssue.findMany()
+    expect(issues).toHaveLength(1)
+    expect(issues[0]?.component).toBe('analyzer:label_aggregate_refresh')
   })
 })
 
