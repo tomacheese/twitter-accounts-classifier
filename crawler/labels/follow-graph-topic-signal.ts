@@ -1,3 +1,4 @@
+import { posteriorProbabilityAtLeast } from './confidence'
 import type { FollowGraphLabelSignal } from './follow-graph-label-index'
 
 // サンプルの分母がこれ未満では少数の偶然の一致で発火してしまうため、この値を下限とする。
@@ -10,18 +11,34 @@ export interface FollowGraphTopicSignalOptions {
   minFolloweeLabeledRatio?: number
 }
 
+export interface FollowGraphTopicSignalResult {
+  /** 既存と同じ判定: totalCount >= MIN_FOLLOWEE_SAMPLE && labeledCount / totalCount >= MIN_FOLLOWEE_LABELED_RATIO。 */
+  matched: boolean
+  /** totalCount < MIN_FOLLOWEE_SAMPLE の場合は 0。それ以外は posteriorProbabilityAtLeast(labeledCount, totalCount, MIN_FOLLOWEE_LABELED_RATIO)。 */
+  evidenceScore: number
+  /** totalCount >= MIN_FOLLOWEE_SAMPLE かどうか。follow graph 単独で判定材料になり得るかを表す。 */
+  evaluable: boolean
+}
+
 /**
  * @param signal - 対象ラベルの `bundle.followGraphLabelSignals` エントリ
  * @param options - しきい値の上書き（省略時はデフォルトのしきい値を使う）
- * @returns フォロー先側のサンプル数・ラベル済み比率がしきい値を満たすか
+ * @returns フォロー先側のサンプル数・ラベル済み比率に基づく matched/evidenceScore/evaluable
  */
 export function hasFollowGraphTopicSignal(
   signal: FollowGraphLabelSignal | undefined,
   options: FollowGraphTopicSignalOptions = {},
-): boolean {
-  if (!signal) return false
+): FollowGraphTopicSignalResult {
   const minSample = options.minFolloweeSample ?? MIN_FOLLOWEE_SAMPLE
   const minRatio = options.minFolloweeLabeledRatio ?? MIN_FOLLOWEE_LABELED_RATIO
-  if (signal.followeeTotalCount < minSample) return false
-  return signal.followeeLabeledCount / signal.followeeTotalCount >= minRatio
+  if (!signal || signal.followeeTotalCount < minSample) {
+    return { matched: false, evidenceScore: 0, evaluable: false }
+  }
+  const matched = signal.followeeLabeledCount / signal.followeeTotalCount >= minRatio
+  const evidenceScore = posteriorProbabilityAtLeast(
+    signal.followeeLabeledCount,
+    signal.followeeTotalCount,
+    minRatio,
+  )
+  return { matched, evidenceScore, evaluable: true }
 }
