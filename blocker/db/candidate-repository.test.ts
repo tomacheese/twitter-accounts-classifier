@@ -113,6 +113,23 @@ describe('selectBlockCandidates SQL shape', () => {
     expect(sql).toContain(`ba."result" = 'success'`)
   })
 
+  it('requires AccountLabelLatest.ruleVersion to match LabelDefinition.currentRuleVersion', async () => {
+    const prisma = fakePrismaReturning([])
+
+    await selectBlockCandidates(
+      prisma as never,
+      'blocker-1',
+      { targetLabels: [{ label: 'bot', confidenceThreshold: 0.5 }] },
+      50,
+      3,
+      21_600,
+    )
+
+    const [strings] = prisma.$queryRaw.mock.calls[0]
+    const sql = (strings as readonly string[]).join('')
+    expect(sql).toContain('"ruleVersion" = rl."currentRuleVersion"')
+  })
+
   it('未解決 outbox entry がある候補を BlockOutboxEntry への NOT EXISTS で除外する', async () => {
     const prisma = fakePrismaReturning([])
 
