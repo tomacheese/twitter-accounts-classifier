@@ -1,5 +1,10 @@
 import { Logger } from '@book000/node-utils'
-import { createCookieIssuerClient, createOpenApiClient, closeOpenApiClient } from 'twitter-client'
+import {
+  createCookieIssuerClient,
+  createOpenApiClient,
+  closeOpenApiClient,
+  type IssuedCookies,
+} from 'twitter-client'
 import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertComponentBuildIdentity } from './build-identity'
@@ -49,30 +54,42 @@ export interface RunBlockCycleDependencies {
   touchBlockRunHeartbeat: typeof touchBlockRunHeartbeat
   runBlockAccountCycle: typeof runBlockAccountCycle
   notifyDiscord: typeof notifyDiscord
-  /** アカウント単位で認証し直し、そのアカウントが持つ停滞 outbox entry を補修する。 */
+  /**
+   * アカウント単位で停滞 outbox entry を補修する。
+   * `cookies` が渡された場合はそれを再利用し、Cookie Issuer への発行 request を行わない。
+   * 未指定の場合は自前で発行する (block 本処理の認証自体が失敗し cookies を確保できなかった場合のフォールバック)。
+   */
   reconcileAccountOutbox: (
     account: Extract<BlockerAccountConfig, { blockEnabled: true }>,
     prisma: PrismaClient,
+    cookies?: IssuedCookies,
   ) => Promise<void>
 }
 
 /**
- * 認証をこの関数内で行うのは、reconciliation が block cycle 本体とは別に常に全アカウントに対して実行される (block 対象候補が無いアカウントでも停滞 entry の有無を確認する必要がある) ためである。
+ * `cookies` が渡された場合は block 本処理で取得済みの認証情報を再利用し、
+ * Cookie Issuer への発行 request を追加で行わない。
+ * 未指定の場合 (block 本処理の認証自体が失敗した場合) は自前で発行する。
  * @param account - reconciliation 対象のアカウント設定
  * @param prisma - Prisma クライアント
+ * @param cookies - block 本処理で取得済みの認証情報 (再利用する場合)
  */
 async function reconcileAccountOutbox(
   account: Extract<BlockerAccountConfig, { blockEnabled: true }>,
   prisma: PrismaClient,
+  cookies?: IssuedCookies,
 ): Promise<void> {
-  const cookies = await createCookieIssuerClient({
-    baseUrl: getCookieIssuerBaseUrl(),
-  }).issueCookiesWithRetry({
-    username: account.username,
-    password: account.password,
-    otp_secret: account.otpSecret,
-  })
-  const client = await createOpenApiClient(cookies)
+  const issuedCookies =
+    cookies ??
+    (await createCookieIssuerClient({
+      baseUrl: getCookieIssuerBaseUrl(),
+      clientName: 'blocker',
+    }).issueCookiesWithRetry({
+      username: account.username,
+      password: account.password,
+      otp_secret: account.otpSecret,
+    }))
+  const client = await createOpenApiClient(issuedCookies)
   try {
     const blockerId = await resolveOwnAccountId(client, account.username)
     await reconcileOutboxEntries(
@@ -102,6 +119,9 @@ async function reconcileAccountOutbox(
  * (`crawl.ts` の各アカウントループと同じ考え方)。
  * いずれかのアカウントが失敗した場合は `BlockRun` 自体の status も `'failed'` にする:
  * 個々の `BlockAccountRun` にしか失敗が残らないと、放置しても誰も気付けない。
+ * block 本処理と reconciliation を同じ loop 内で連続して行うことで、
+ * 各アカウントの Cookie Issuer 認証を最大 1 回に抑え、
+ * `BlockRun` が `completed` になった時点で対象アカウント全員の reconciliation も完了させる。
  * @param deps - このサイクルに必要な依存関数一式
  */
 export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<void> {
@@ -117,13 +137,18 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
 
   for (const account of targetAccounts) {
     await deps.touchBlockRunHeartbeat(deps.prisma, run.id, new Date(), staleThresholdMs)
+    let capturedCookies: IssuedCookies | undefined
     try {
       const summary = await deps.runBlockAccountCycle(
         {
-          issueCookies: (issuedAccount) =>
-            createCookieIssuerClient({ baseUrl: getCookieIssuerBaseUrl() }).issueCookiesWithRetry(
-              issuedAccount,
-            ),
+          issueCookies: async (issuedAccount) => {
+            const cookies = await createCookieIssuerClient({
+              baseUrl: getCookieIssuerBaseUrl(),
+              clientName: 'blocker',
+            }).issueCookiesWithRetry(issuedAccount)
+            capturedCookies = cookies
+            return cookies
+          },
           createOpenApiClient,
           closeOpenApiClient,
           selectBlockCandidates,
@@ -151,6 +176,13 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
       captureException(error, { username: account.username })
       summaries.push({ username: account.username, blockedCount: 0, failedCount: 0, failed: true })
     }
+
+    try {
+      await deps.reconcileAccountOutbox(account, deps.prisma, capturedCookies)
+    } catch (error) {
+      logger.error(`Failed to reconcile outbox entries for ${account.username}`, error as Error)
+      captureException(error, { username: account.username })
+    }
   }
 
   await deps.notifyDiscord(deps.config.discordWebhookUrl, summaries)
@@ -160,15 +192,6 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
       ? 'partial'
       : 'completed'
   await deps.finishBlockRun(deps.prisma, run.id, new Date(), runStatus)
-
-  for (const account of targetAccounts) {
-    try {
-      await deps.reconcileAccountOutbox(account, deps.prisma)
-    } catch (error) {
-      logger.error(`Failed to reconcile outbox entries for ${account.username}`, error as Error)
-      captureException(error, { username: account.username })
-    }
-  }
 }
 
 async function main(): Promise<void> {
