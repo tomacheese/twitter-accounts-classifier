@@ -1040,3 +1040,110 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     }
   })
 })
+
+describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet output compatibility', () => {
+  const prisma = getPrismaClient()
+
+  beforeEach(async () => {
+    await prisma.labelMetricSnapshot.deleteMany()
+    await prisma.accountClassificationValueCount.deleteMany()
+    await prisma.accountClassificationConfidenceBucketCount.deleteMany()
+    await prisma.accountClassificationRuleVersionCount.deleteMany()
+    await prisma.accountClassificationFreshnessBucket.deleteMany()
+    await prisma.accountClassificationLatest.deleteMany()
+    await prisma.accountSummaryLatest.deleteMany()
+    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountLabel.deleteMany()
+    await prisma.labelDefinition.deleteMany()
+    await prisma.account.deleteMany()
+  })
+
+  it('新しい読み取り経路で構築したsnapshotが旧実装相当の直接集計と同じ値になる', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_output_compat', description: 'テスト用ラベル' },
+    })
+    const now = new Date()
+    for (const [id, value, confidence, ruleVersion, ageMs] of [
+      ['acct_compat_1', true, 0.91, 'v1', 60 * 60 * 1000],
+      ['acct_compat_2', true, 0.42, 'v2', 6 * 60 * 60 * 1000],
+      ['acct_compat_3', false, 0.15, 'v1', 24 * 60 * 60 * 1000],
+    ] as const) {
+      await prisma.account.create({
+        data: {
+          id,
+          screenName: id,
+          displayName: id,
+          followersCount: 0,
+          followingCount: 0,
+          tweetCount: 0,
+          accountCreatedAt: new Date(),
+          lastCrawledAt: new Date(),
+        },
+      })
+      await prisma.accountSummaryLatest.create({
+        data: {
+          accountId: id,
+          normalizedScreenName: id,
+          normalizedDisplayName: id,
+          searchDocument: id,
+          profileObservedAt: now,
+          activeLabelKeys: [],
+          activeLabelCount: 0,
+          classificationObservedAt: now,
+        },
+      })
+      await prisma.accountClassificationLatest.create({
+        data: {
+          accountId: id,
+          labelDefinitionId: label.id,
+          value,
+          confidence,
+          reason: `reason_${id}`,
+          method: 'rule',
+          ruleVersion,
+          observedAt: new Date(now.getTime() - ageMs),
+        },
+      })
+    }
+
+    const freshnessThresholdsMs = {
+      delayedAfterMs: 3 * 60 * 60 * 1000,
+      staleAfterMs: 12 * 60 * 60 * 1000,
+    }
+    const result = await buildLabelAggregateSnapshotSet(prisma, {
+      triggerWorkItemId: 'work_item_output_compat',
+      policyHash: 'hash',
+      analyzerVersion: 'test',
+      thresholds: { minCoverage: 0, maxStaleRatio: 1 },
+      freshnessThresholdsMs,
+    })
+    const snapshot = await prisma.labelMetricSnapshot.findFirstOrThrow({
+      where: { triggerWorkItemId: 'work_item_output_compat', labelDefinitionId: label.id },
+    })
+
+    // 旧実装と同じ SQL 形状 (AccountClassificationLatest を直接 GROUP BY) で
+    // 期待値を計算する参照クエリ。
+    const referenceRows = await prisma.$queryRaw<
+      { value: boolean; reason: string; ruleVersion: string; count: bigint; confidenceSum: number }[]
+    >`
+      SELECT "value", "reason", "ruleVersion", COUNT(*) AS count, SUM("confidence") AS "confidenceSum"
+      FROM "AccountClassificationLatest"
+      WHERE "labelDefinitionId" = ${label.id}
+      GROUP BY 1, 2, 3
+    `
+    const expectedEvaluatedCount = referenceRows.reduce((sum, row) => sum + Number(row.count), 0)
+    const expectedTrueCount = referenceRows
+      .filter((row) => row.value)
+      .reduce((sum, row) => sum + Number(row.count), 0)
+    const expectedReasonDistribution: Record<string, number> = {}
+    for (const row of referenceRows.filter((row) => row.value)) {
+      expectedReasonDistribution[row.reason] =
+        (expectedReasonDistribution[row.reason] ?? 0) + Number(row.count)
+    }
+
+    expect(result.reused).toBe(false)
+    expect(snapshot.evaluatedCount).toBe(expectedEvaluatedCount)
+    expect(snapshot.trueCount).toBe(expectedTrueCount)
+    expect(snapshot.reasonDistribution).toEqual(expectedReasonDistribution)
+  })
+})
