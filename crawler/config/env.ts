@@ -124,3 +124,19 @@ export function getRelabelerWorkerBatchSize(): number {
 export function getRelabelerWorkerConcurrency(): number {
   return parsePositiveIntEnv('RELABELER_WORKER_CONCURRENCY', 1)
 }
+
+/**
+ * follow-graph index 構築の1回の SQL 呼び出し、および claim/evaluate 1 回あたりの account 件数。
+ * @returns worker chunk size
+ */
+export function getRelabelerWorkerChunkSize(): number {
+  return parsePositiveIntEnv('RELABELER_WORKER_CHUNK_SIZE', 1000)
+}
+
+/**
+ * scanForStaleAccounts が AccountLabelLatest を lookup する際の1回あたりの account 件数。
+ * @returns label lookup chunk size
+ */
+export function getRelabelerLabelLookupChunkSize(): number {
+  return parsePositiveIntEnv('RELABELER_LABEL_LOOKUP_CHUNK_SIZE', 1000)
+}

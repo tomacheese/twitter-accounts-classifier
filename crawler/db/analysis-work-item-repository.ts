@@ -117,23 +117,63 @@ export interface ClaimNextWorkItemInput {
   leaseDurationMs: number
 }
 
-export interface ClaimWorkItemBatchInput extends ClaimNextWorkItemInput {
-  batchSize: number
+export interface WorkItemCandidate {
+  id: string
+  triggerId: string
+}
+
+export interface PeekWorkItemCandidatesInput {
+  kinds: string[]
+  limit: number
 }
 
 /**
- * FOR UPDATE SKIP LOCKED で最大 batchSize 件を 1 SQL で claim する。
- * 候補選択と lease 更新を同じ statement にまとめるため、1 件ずつ transaction を
- * 繰り返さずに複数 WorkItem を原子的に確保できる。
+ * claim 前の候補選択と同じ絞り込み条件・並び順で、lease を更新せず id・triggerId だけを読み取る。
+ * follow-graph index のような重い前処理を、claim する前に候補の accountId 全体に対して
+ * 1回だけ構築したい場合に使う。
  * @param prisma - Prisma クライアント
- * @param input - claim 対象の kind、batch size、lease 情報
- * @returns claim した WorkItem 一覧
+ * @param input - 対象 kind と上限件数
+ * @returns 候補 WorkItem の id・triggerId 一覧 (claim 時と同じ並び順)
  */
-export async function claimWorkItemBatch(
+export async function peekWorkItemCandidates(
   prisma: PrismaClient,
-  input: ClaimWorkItemBatchInput,
+  input: PeekWorkItemCandidatesInput,
+): Promise<WorkItemCandidate[]> {
+  if (input.limit <= 0) return []
+
+  const now = new Date()
+  return prisma.$queryRaw<WorkItemCandidate[]>`
+    SELECT "id", "triggerId"
+    FROM "AnalysisWorkItem"
+    WHERE "kind" = ANY(${input.kinds})
+      AND "status" IN ('queued', 'leased', 'failed')
+      AND "availableAt" <= ${now}
+      AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < ${now})
+      AND "attemptCount" < "maxAttempts"
+    ORDER BY "priority" DESC, "availableAt" ASC
+    LIMIT ${input.limit}
+  `
+}
+
+export interface ClaimWorkItemBatchByIdsInput {
+  ids: string[]
+  leaseOwner: string
+  leaseDurationMs: number
+}
+
+/**
+ * peekWorkItemCandidates 等で固定した id 集合だけを対象に、ORDER BY/LIMIT による候補選択を
+ * 行わず id = ANY(...) で対象を限定して FOR UPDATE SKIP LOCKED で claim する。
+ * 競合で既に claim 済みの id は SKIP LOCKED により結果から自然に除外される。
+ * @param prisma - Prisma クライアント
+ * @param input - claim 対象の id 一覧と lease 情報
+ * @returns 実際に claim できた WorkItem 一覧
+ */
+export async function claimWorkItemBatchByIds(
+  prisma: PrismaClient,
+  input: ClaimWorkItemBatchByIdsInput,
 ): Promise<AnalysisWorkItem[]> {
-  if (input.batchSize <= 0) return []
+  if (input.ids.length === 0) return []
 
   const now = new Date()
   const leaseExpiresAt = new Date(now.getTime() + input.leaseDurationMs)
@@ -142,13 +182,11 @@ export async function claimWorkItemBatch(
     WITH claimable AS (
       SELECT "id"
       FROM "AnalysisWorkItem"
-      WHERE "kind" = ANY(${input.kinds})
+      WHERE "id" = ANY(${input.ids})
         AND "status" IN ('queued', 'leased', 'failed')
         AND "availableAt" <= ${now}
         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < ${now})
         AND "attemptCount" < "maxAttempts"
-      ORDER BY "priority" DESC, "availableAt" ASC
-      LIMIT ${input.batchSize}
       FOR UPDATE SKIP LOCKED
     )
     UPDATE "AnalysisWorkItem" AS item
