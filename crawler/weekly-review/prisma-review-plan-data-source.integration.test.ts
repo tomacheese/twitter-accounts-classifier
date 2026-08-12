@@ -395,15 +395,25 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
           labeledAt: now,
         },
       })
-      await prisma.accountLabelChange.create({
-        data: {
-          accountId,
-          labelDefinitionId: label.id,
-          changeType: 'removed',
-          previousValue: true,
-          newValue: false,
-          changedAt: now,
-        },
+      await prisma.accountLabelChange.createMany({
+        data: [
+          {
+            accountId,
+            labelDefinitionId: label.id,
+            changeType: 'added',
+            previousValue: false,
+            newValue: true,
+            changedAt: previous,
+          },
+          {
+            accountId,
+            labelDefinitionId: label.id,
+            changeType: 'removed',
+            previousValue: true,
+            newValue: false,
+            changedAt: now,
+          },
+        ],
       })
 
       const data = await loadWeeklyReviewPlanningData(
@@ -419,7 +429,7 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
         trueCount: 1,
         totalCount: 10,
         activeFindingCount: 1,
-        recentChangeCount: 1,
+        recentChangeCount: 2,
         latestMetrics: { prevalence: 0.2, coverage: 0.8, staleRatio: 0.1 },
         previousMetrics: { prevalence: 0.1, coverage: 0.95, staleRatio: 0 },
       })

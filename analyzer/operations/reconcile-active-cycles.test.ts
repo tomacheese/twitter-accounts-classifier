@@ -140,7 +140,7 @@ describe.skipIf(!process.env.DATABASE_URL)('reconcileActiveOperationCycles', () 
         status: 'success',
       },
     })
-    for (const kind of ['label_aggregate_refresh', 'read_model_refresh']) {
+    for (const kind of ['label_aggregate_refresh']) {
       await prisma.analysisWorkItem.create({
         data: { kind, triggerType: 'crawl_run', triggerId: crawlRun.id, status: 'succeeded' },
       })

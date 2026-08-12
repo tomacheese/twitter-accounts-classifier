@@ -14,7 +14,7 @@ import { parseIsoDurationMs } from './findings/lifecycle'
 import { buildOrUpdateCrawlCycle } from './operations/build-crawl-cycle'
 import { buildOrUpdateWeeklyReviewCycle } from './operations/build-weekly-review-cycle'
 import { buildOrUpdateBlockCycle } from './operations/build-block-cycle'
-import type { WorkItemOutcome } from './worker-loop'
+import { WORK_ITEM_COMPLETION_TRIGGER_TYPE, type WorkItemOutcome } from './worker-loop'
 import { publishGeneration } from './read-models/publish'
 import { buildLabelSummary } from './read-models/build-label-summary'
 import { buildAttentionItems } from './read-models/build-attention-items'
@@ -135,7 +135,7 @@ function getPolicy(): { policy: ReturnType<typeof loadPolicy>; policyHash: strin
  * @param prisma - Prisma クライアント
  * @param sourceWatermarkAt - 集計の基準時刻
  */
-async function publishAttentionAndOverview(
+export async function publishAttentionAndOverview(
   prisma: PrismaClient,
   sourceWatermarkAt: Date,
 ): Promise<void> {
@@ -669,6 +669,19 @@ export async function refreshReadModelFreshnessFromPolicy(prisma: PrismaClient):
 }
 
 /**
+ * OperationCycle を持たないことが仕様上明確な triggerType。
+ * Crawl/Block/Weekly Review のような OperationCycle の対象ではない。
+ */
+const NON_CYCLE_TRIGGER_TYPES = new Set([
+  'account_classification_observation',
+  'review_finding_occurrence',
+  'account_summary_bootstrap_chunk',
+  'bootstrap_completion',
+  RETENTION_SWEEP_TRIGGER_TYPE,
+  WORK_ITEM_COMPLETION_TRIGGER_TYPE,
+])
+
+/**
  * WorkItem の終了状態が確定した後に、対応する OperationCycle を再計算し、
  * analyzer 自身の失敗を OperationalIssue へ昇格する。
  * @param prisma - Prisma クライアント
@@ -688,6 +701,9 @@ export async function handleWorkItemSettled(
     attemptNumber: workItem.attemptCount,
     status: outcome.status,
     errorSummary: outcome.errorSummary,
+    errorCode: outcome.errorCode,
+    triggerType: workItem.triggerType,
+    createdAt: workItem.createdAt,
     now: new Date(),
   })
 
@@ -705,7 +721,9 @@ export async function handleWorkItemSettled(
       break
     }
     default: {
-      logger.warn(`no operation cycle builder for trigger type: ${workItem.triggerType}`)
+      if (!NON_CYCLE_TRIGGER_TYPES.has(workItem.triggerType)) {
+        logger.warn(`no operation cycle builder for trigger type: ${workItem.triggerType}`)
+      }
     }
   }
 
@@ -733,6 +751,7 @@ export async function processPostCompletionRefresh(
   })
   const outcome: WorkItemOutcome = {
     status: originalWorkItem.status as WorkItemOutcome['status'],
+    errorCode: originalWorkItem.lastErrorCode ?? undefined,
     errorSummary: originalWorkItem.lastErrorSummary ?? undefined,
   }
   await handleWorkItemSettled(prisma, originalWorkItem, outcome)

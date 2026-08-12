@@ -623,13 +623,21 @@ async function runAuthorUnitPhase(
           retryOptions(deps, trackAuthorRetryWait),
         )
       } catch (error) {
-        const message = `Failed to fetch labeling follow sample for author ${authorId}, continuing without it`
-        logger.error(message, error as Error)
+        const diagnostics = getResponseErrorDiagnostics(error)
+        const message = diagnostics
+          ? `Failed to fetch labeling follow sample for author ${authorId}, continuing without it (${formatResponseErrorDiagnostics(diagnostics)})`
+          : `Failed to fetch labeling follow sample for author ${authorId}, continuing without it`
+        if (isResponseError(error)) {
+          logger.error(message, toSafeResponseErrorForLog(error))
+        } else {
+          logger.error(message, error as Error)
+        }
         authorWarnings.push({
           type: 'labeling_follow_sample_failed',
           message,
           authorId,
           errorMessage: toErrorMessage(error),
+          ...diagnostics,
           appVersion: APP_VERSION,
         })
       }
