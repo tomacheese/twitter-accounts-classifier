@@ -251,4 +251,91 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     expect(snapshot.staleCount).toBe(1)
     expect(snapshot.evaluatedCount).toBe(3)
   })
+
+  it('AccountSummaryLatest 基準の populationCount が AccountClassificationLatest の distinct accountId 数と一致する', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_population_equiv', description: 'テスト用ラベル' },
+    })
+    for (const id of ['acct_pop_1', 'acct_pop_2', 'acct_pop_3']) {
+      await prisma.account.create({
+        data: {
+          id,
+          screenName: id,
+          displayName: id,
+          followersCount: 0,
+          followingCount: 0,
+          tweetCount: 0,
+          accountCreatedAt: new Date(),
+          lastCrawledAt: new Date(),
+        },
+      })
+      await prisma.accountClassificationLatest.create({
+        data: {
+          accountId: id,
+          labelDefinitionId: label.id,
+          value: true,
+          confidence: 0.9,
+          reason: 'r',
+          method: 'rule',
+          ruleVersion: 'v1',
+          observedAt: new Date(),
+        },
+      })
+      await prisma.accountSummaryLatest.create({
+        data: {
+          accountId: id,
+          normalizedScreenName: id,
+          normalizedDisplayName: id,
+          searchDocument: id,
+          profileObservedAt: new Date(),
+          activeLabelKeys: [],
+          activeLabelCount: 0,
+          classificationObservedAt: new Date(),
+        },
+      })
+    }
+    // populationCount の定義には現れない account (AccountClassificationLatest に
+    // 行がない) が母集団を膨らませないことも同時に確認する。
+    await prisma.account.create({
+      data: {
+        id: 'acct_pop_unclassified',
+        screenName: 'acct_pop_unclassified',
+        displayName: 'acct_pop_unclassified',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date(),
+      },
+    })
+    await prisma.accountSummaryLatest.create({
+      data: {
+        accountId: 'acct_pop_unclassified',
+        normalizedScreenName: 'acct_pop_unclassified',
+        normalizedDisplayName: 'acct_pop_unclassified',
+        searchDocument: 'acct_pop_unclassified',
+        profileObservedAt: new Date(),
+        activeLabelKeys: [],
+        activeLabelCount: 0,
+        classificationObservedAt: null,
+      },
+    })
+
+    const result = await buildLabelAggregateSnapshotSet(prisma, {
+      triggerWorkItemId: 'work_item_population_equiv',
+      policyHash: 'hash',
+      analyzerVersion: 'test',
+      thresholds: { minCoverage: 0, maxStaleRatio: 1 },
+      freshnessThresholdsMs: {
+        delayedAfterMs: 3 * 60 * 60 * 1000,
+        staleAfterMs: 12 * 60 * 60 * 1000,
+      },
+    })
+
+    expect(result.reused).toBe(false)
+    const snapshot = await prisma.labelMetricSnapshot.findFirstOrThrow({
+      where: { triggerWorkItemId: 'work_item_population_equiv', labelDefinitionId: label.id },
+    })
+    expect(snapshot.populationCount).toBe(3)
+  })
 })
