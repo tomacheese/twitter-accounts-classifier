@@ -1,3 +1,4 @@
+import { posteriorProbabilityAtLeast, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 // 転職勧誘・広告案件系の語だけでなく暗号資産のギブアウェイ/エアドロップ勧誘も含めているのは、
@@ -15,7 +16,7 @@ export const adReplyHijackRule: LabelRule = {
   key: 'ad_reply_hijack',
   description:
     '無関係なツイートへの返信を乗っ取り、広告・転職勧誘・暗号資産のギブアウェイ/エアドロップ勧誘を宣伝している',
-  version: '1.1.0',
+  version: '1.2.0',
   evaluate(bundle) {
     const replies = bundle.recentTweets.filter((t) => t.isReply)
     const adPitchReplies = replies.filter((t) => AD_JOB_PITCH_PATTERN.test(t.fullText))
@@ -23,12 +24,15 @@ export const adReplyHijackRule: LabelRule = {
     const hasEnoughSample = replies.length >= MIN_REPLY_SAMPLE
 
     const value = hasEnoughSample && adReplyRatio >= AD_REPLY_RATIO_THRESHOLD
-    const confidence = hasEnoughSample ? adReplyRatio : 0
+    const evidenceScore = hasEnoughSample
+      ? posteriorProbabilityAtLeast(adPitchReplies.length, replies.length, AD_REPLY_RATIO_THRESHOLD)
+      : 0
 
     return {
       value,
-      confidence,
+      confidence: toConfidence(value, evidenceScore, hasEnoughSample),
       reason: `adPitchReplies=${adPitchReplies.length}/${replies.length} (ratio=${adReplyRatio.toFixed(2)})`,
+      evaluable: hasEnoughSample,
     }
   },
 }
