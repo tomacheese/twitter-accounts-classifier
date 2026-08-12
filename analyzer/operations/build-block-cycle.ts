@@ -71,5 +71,6 @@ export async function buildOrUpdateBlockCycle(
     startedAt: run.startedAt,
     finishedAt: run.finishedAt ?? undefined,
     stages,
+    modelVersion: '1',
   })
 }

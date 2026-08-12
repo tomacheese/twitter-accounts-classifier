@@ -72,5 +72,6 @@ export async function buildOrUpdateWeeklyReviewCycle(
     startedAt: run.startedAt,
     finishedAt: run.finishedAt ?? undefined,
     stages,
+    modelVersion: '1',
   })
 }

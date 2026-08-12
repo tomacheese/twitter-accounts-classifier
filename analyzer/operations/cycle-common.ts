@@ -1,5 +1,13 @@
 import type { PrismaClient } from '../generated/prisma'
 
+/**
+ * 起点 Run の完了時には必ず AnalysisWorkItem が enqueue される前提のもとで、
+ * WorkItem 自体が存在しない場合に埋め込むエラー概要。
+ * この文字列と analysisRunId: null の組み合わせを、廃止済み stage 削除の
+ * phantom 判定条件としても再利用する。
+ */
+export const NEVER_ENQUEUED_ERROR_SUMMARY = 'work item was never enqueued'
+
 /** OperationStage 1 件の状態。 */
 export type StageStatus =
   | 'waiting'
@@ -126,7 +134,7 @@ export async function deriveWorkItemStage(
       status: 'failed',
       attemptCount: 0,
       errorCode: undefined,
-      errorSummary: 'work item was never enqueued',
+      errorSummary: NEVER_ENQUEUED_ERROR_SUMMARY,
       analysisRunId: undefined,
       startedAt: undefined,
       finishedAt: undefined,
@@ -210,17 +218,24 @@ export interface UpsertCycleWithStagesInput {
   finishedAt: Date | undefined
   /** 先頭が起点 Stage となる Stage 列。 */
   stages: CycleStageInput[]
+  /**
+   * OperationCycle.modelVersion。呼び出し側の stage topology のバージョンを表す。
+   * この関数は crawl/block/weekly_review すべての Cycle 種別で共有されるため、
+   * ここでハードコードすると他の Cycle 種別の modelVersion を書き換えてしまう。
+   */
+  modelVersion: string
 }
 
 /**
  * Cycle 全体の状態を Stage 列から再計算し、Cycle と Stage をまとめて upsert する。
  * @param prisma - Prisma クライアント
  * @param input - Cycle のメタデータと Stage 列
+ * @returns upsert した OperationCycle の ID
  */
 export async function upsertCycleWithStages(
   prisma: PrismaClient,
   input: UpsertCycleWithStagesInput,
-): Promise<void> {
+): Promise<{ cycleId: string }> {
   const cycleStatus = deriveCycleStatus(input.stages.map((stage) => stage.status))
   const attentionRequired =
     cycleStatus === 'partial' || cycleStatus === 'failed' || cycleStatus === 'stale'
@@ -238,13 +253,14 @@ export async function upsertCycleWithStages(
       status: cycleStatus,
       attentionRequired,
       currentStageKey,
-      modelVersion: '1',
+      modelVersion: input.modelVersion,
     },
     update: {
       status: cycleStatus,
       finishedAt: input.finishedAt,
       attentionRequired,
       currentStageKey,
+      modelVersion: input.modelVersion,
     },
   })
 
@@ -281,4 +297,30 @@ export async function upsertCycleWithStages(
       },
     })
   }
+
+  return { cycleId: cycle.id }
+}
+
+/**
+ * 現行の stage topology に存在しない OperationStage を削除する。
+ * WHERE 句自体を phantom 条件 (WorkItem 未 enqueue 由来の失敗) に限定することで、
+ * この関数がどの呼び出し経路から実行されても、旧 pipeline の正当な実行履歴を
+ * 誤って削除しない構造的な安全性を持たせる。
+ * @param prisma - Prisma クライアント
+ * @param cycleId - 対象 OperationCycle の ID
+ * @param keepStageKeys - 現行 topology で保持すべき stageKey の一覧
+ */
+export async function deleteObsoleteOperationStages(
+  prisma: PrismaClient,
+  cycleId: string,
+  keepStageKeys: string[],
+): Promise<void> {
+  await prisma.operationStage.deleteMany({
+    where: {
+      cycleId,
+      stageKey: { notIn: keepStageKeys },
+      analysisRunId: null,
+      errorSummary: NEVER_ENQUEUED_ERROR_SUMMARY,
+    },
+  })
 }

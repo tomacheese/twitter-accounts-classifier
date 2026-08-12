@@ -93,5 +93,6 @@ export async function buildOrUpdateCrawlCycle(
     startedAt: crawlRun.startedAt,
     finishedAt: crawlRun.finishedAt ?? undefined,
     stages,
+    modelVersion: '2',
   })
 }
