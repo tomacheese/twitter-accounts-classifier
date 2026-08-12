@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import type { PrismaClient } from './generated/prisma'
 import { LabelRuleRegistry } from './labels/registry'
 import type { LabelRule } from './labels/types'
@@ -153,6 +153,10 @@ describe('scanForStaleAccounts', () => {
     vi.restoreAllMocks()
   })
 
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('カーソル位置から bounded 件数だけ scan し、stale な account を requestAccountRelabelBulk する', async () => {
     const requestSpy = vi.spyOn(workItemRepository, 'requestAccountRelabelBulk').mockResolvedValue()
     const prisma = {
@@ -235,7 +239,6 @@ describe('scanForStaleAccounts', () => {
       const where = (call as { where: { labelDefinitionId: { in: string[] } } }).where
       expect(where.labelDefinitionId).toEqual({ in: ['def-1'] })
     }
-    vi.unstubAllEnvs()
   })
 })
 
@@ -255,6 +258,10 @@ function makeCursorPrisma(overrides: Record<string, unknown> = {}): PrismaClient
 describe('runRelabelWorkerCycleOnce', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
   })
 
   it('peek 候補が 0 件の場合、buildFollowGraphLabelIndex・loadReplyCorpus・claim を一切行わない', async () => {
@@ -305,6 +312,7 @@ describe('runRelabelWorkerCycleOnce', () => {
     expect(followGraphSpy).toHaveBeenCalledTimes(1)
     expect(followGraphSpy).toHaveBeenCalledWith(prisma, new Map([['topic_anime', 'ld-follow']]), {
       accountIds: ['alice', 'bob'],
+      chunkSize: 1000,
     })
   })
 

@@ -95,7 +95,7 @@ export interface EvaluateAccountRelabelItemsResult {
  * account 単位の try/catch で例外を吸収しているため、chunk を跨いだ Promise.all 並列化でも、
  * 1 account の失敗が他の account やチャンクを巻き込むことはない。
  * @param prisma - Prisma クライアント
- * @param items - claimAccountRelabelBatch で claim 済みの work item 一覧
+ * @param items - claimAccountRelabelBatchByIds で claim 済みの work item 一覧
  * @param options - 評価に使うルールレジストリ・共有インデックス・並行度・lease owner 名
  * @returns succeeded (requeue 含む) にできた件数
  */
@@ -229,12 +229,11 @@ export async function scanForStaleAccounts(
   const latestRows: { accountId: string; labelDefinitionId: string; ruleVersion: string }[] = []
   for (let i = 0; i < accountIds.length; i += lookupChunkSize) {
     const chunk = accountIds.slice(i, i + lookupChunkSize)
-    latestRows.push(
-      ...(await prisma.accountLabelLatest.findMany({
-        where: { accountId: { in: chunk }, labelDefinitionId: { in: targetLabelDefinitionIds } },
-        select: { accountId: true, labelDefinitionId: true, ruleVersion: true },
-      })),
-    )
+    const rows = await prisma.accountLabelLatest.findMany({
+      where: { accountId: { in: chunk }, labelDefinitionId: { in: targetLabelDefinitionIds } },
+      select: { accountId: true, labelDefinitionId: true, ruleVersion: true },
+    })
+    for (const row of rows) latestRows.push(row)
   }
   const latestByKey = new Map(
     latestRows.map((row) => [`${row.accountId}:${row.labelDefinitionId}`, row.ruleVersion]),
@@ -262,7 +261,7 @@ export async function scanForStaleAccounts(
 }
 
 /**
- * 1 cycle 分の producer (incremental scan) + worker (claim → bounded index 構築 → evaluate) を実行する。
+ * 1 cycle 分の producer (incremental scan) + worker (peek → bounded index 構築 → chunk 単位の claim/evaluate) を実行する。
  * DB クライアントの確保・解放を呼び出し元の runRelabelWorkerCycle に委ねているのは、
  * テストで prisma を差し替えられるようにするため。
  * @param prisma - Prisma クライアント
@@ -309,14 +308,14 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
         registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
       ),
     )
-    // 評価対象全件 (候補集合全体) を1回で構築し、以降の chunk 評価が同じインスタンスを共有する。
-    // これにより、ある chunk の評価による AccountLabelLatest 更新を、
-    // 同じ cycle の後続 chunk の follow-graph signal が参照してしまう自己フィードバックを避ける。
+    // ある chunk の評価による AccountLabelLatest 更新を、同じ cycle の後続 chunk の
+    // follow-graph signal が参照してしまう自己フィードバックを避けるための構築である。
     followGraphLabelIndex = await buildFollowGraphLabelIndex(
       prisma,
       followGraphLabelDefinitionIds,
       {
         accountIds: candidateAccountIds,
+        chunkSize: getRelabelerWorkerChunkSize(),
       },
     )
   } catch (error) {
@@ -329,44 +328,53 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
   const chunkSize = getRelabelerWorkerChunkSize()
   let totalClaimed = 0
   let totalSucceeded = 0
-  for (let i = 0; i < candidateWorkItemIds.length; i += chunkSize) {
-    const idsChunk = candidateWorkItemIds.slice(i, i + chunkSize)
-    // 他ワーカーとの競合で一部が既に claim 済みの場合、SKIP LOCKED により自然に除外される。
-    // 除外分を候補外の WorkItem で補充することはせず、次 cycle の scan/peek に委ねる。
-    const claimedChunk = await claimAccountRelabelBatchByIds(prisma, { ids: idsChunk, leaseOwner })
-    if (claimedChunk.length === 0) continue
-    totalClaimed += claimedChunk.length
+  try {
+    for (let i = 0; i < candidateWorkItemIds.length; i += chunkSize) {
+      const idsChunk = candidateWorkItemIds.slice(i, i + chunkSize)
+      let claimedChunk: AnalysisWorkItem[] = []
+      try {
+        // 他ワーカーとの競合で一部が既に claim 済みの場合、SKIP LOCKED により自然に除外される。
+        // 除外分を候補外の WorkItem で補充することはせず、次 cycle の scan/peek に委ねる。
+        claimedChunk = await claimAccountRelabelBatchByIds(prisma, { ids: idsChunk, leaseOwner })
+        if (claimedChunk.length === 0) continue
+        totalClaimed += claimedChunk.length
 
-    try {
-      const evaluateResult = await evaluateAccountRelabelItems(prisma, claimedChunk, {
-        registry,
-        labelDefinitionIds,
-        duplicateReplyIndex,
-        replyHijackIndex,
-        followGraphLabelIndex,
-        concurrency,
-        leaseOwner,
-      })
-      totalSucceeded += evaluateResult.succeeded
-    } catch (error) {
-      // 取り残されるのはこの chunk の claim 済み item だけであり、
-      // 既に complete 済みの前段の chunk は影響を受けない (blast radius は chunk size 以下)。
-      logger.error('Relabel drain failed while evaluating a chunk', error as Error)
-      captureException(error, { source: 'relabel-worker.runRelabelWorkerCycleOnce' })
-      await Promise.all(
-        claimedChunk.map((item) =>
-          prisma.analysisWorkItem
-            .update({
-              where: { id: item.id },
-              data: { lastErrorSummary: String(error).slice(0, 500) },
-            })
-            .catch(() => undefined),
-        ),
-      )
-      throw error
+        const evaluateResult = await evaluateAccountRelabelItems(prisma, claimedChunk, {
+          registry,
+          labelDefinitionIds,
+          duplicateReplyIndex,
+          replyHijackIndex,
+          followGraphLabelIndex,
+          concurrency,
+          leaseOwner,
+        })
+        totalSucceeded += evaluateResult.succeeded
+      } catch (error) {
+        // 取り残されるのはこの chunk の claim 済み item だけであり、既に complete 済みの
+        // 前段の chunk は影響を受けない。claim 自体が失敗した場合は何も lease されていない。
+        logger.error(
+          `Relabel drain failed in a chunk (claimed so far: ${totalClaimed}, succeeded so far: ${totalSucceeded})`,
+          error as Error,
+        )
+        captureException(error, { source: 'relabel-worker.runRelabelWorkerCycleOnce' })
+        if (claimedChunk.length > 0) {
+          await Promise.all(
+            claimedChunk.map((item) =>
+              prisma.analysisWorkItem
+                .update({
+                  where: { id: item.id },
+                  data: { lastErrorSummary: String(error).slice(0, 500) },
+                })
+                .catch(() => undefined),
+            ),
+          )
+        }
+        throw error
+      }
     }
+  } finally {
+    logger.info(`Relabel drain: ${totalClaimed} claimed, ${totalSucceeded} succeeded`)
   }
-  logger.info(`Relabel drain: ${totalClaimed} claimed, ${totalSucceeded} succeeded`)
 }
 
 /**

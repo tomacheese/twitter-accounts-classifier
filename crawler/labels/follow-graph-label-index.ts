@@ -1,5 +1,4 @@
 import { Prisma, type PrismaClient } from '../generated/prisma'
-import { getRelabelerWorkerChunkSize } from '../config/env'
 
 /**
  * あるアカウントのフォロー先・フォロワーにおける、特定ラベルの既存付与状況。
@@ -33,6 +32,8 @@ interface AggregateRow {
 export interface BuildFollowGraphLabelIndexOptions {
   /** 指定時、シグナルを構築する対象 (集計クエリの WHERE 対象) をこの account 群に限定する。省略時は全 account が対象。 */
   accountIds?: string[]
+  /** accountIds 指定時、集計クエリをこの件数ごとに分割して直列実行する。省略時は分割しない。 */
+  chunkSize?: number
 }
 
 /**
@@ -129,18 +130,20 @@ export async function buildFollowGraphLabelIndex(
   const followeeRows: AggregateRow[] = []
   const followerRows: AggregateRow[] = []
 
-  if (accountIds) {
+  if (accountIds && accountIds.length > 0) {
     // クエリ latency を chunk size で頭打ちにするため、accountIds を分割して直列実行する。
     // 並列化すると同時に DB へ投げるクエリ本数が増え、DB 負荷低減という目的に反するため採用しない。
-    const chunkSize = getRelabelerWorkerChunkSize()
+    // chunk size は呼び出し側の事情 (relabeler の運用設定など) に属するため、
+    // このモジュール自身は env を読まず options 経由でのみ受け取る。
+    const chunkSize = options.chunkSize ?? accountIds.length
     for (let i = 0; i < accountIds.length; i += chunkSize) {
       const chunk = accountIds.slice(i, i + chunkSize)
-      followeeRows.push(...(await fetchFolloweeRows(chunk)))
-      followerRows.push(...(await fetchFollowerRows(chunk)))
+      for (const row of await fetchFolloweeRows(chunk)) followeeRows.push(row)
+      for (const row of await fetchFollowerRows(chunk)) followerRows.push(row)
     }
-  } else {
-    followeeRows.push(...(await fetchFolloweeRows()))
-    followerRows.push(...(await fetchFollowerRows()))
+  } else if (!accountIds) {
+    for (const row of await fetchFolloweeRows()) followeeRows.push(row)
+    for (const row of await fetchFollowerRows()) followerRows.push(row)
   }
 
   const signals = new Map<string, Map<string, FollowGraphLabelSignal>>()

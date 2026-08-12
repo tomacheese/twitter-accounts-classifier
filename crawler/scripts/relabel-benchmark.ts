@@ -68,8 +68,8 @@ async function seed(prisma: PrismaClient, count: number): Promise<void> {
 
 /**
  * follow-graph 集計クエリ・AccountLabelLatest lookup クエリを現実的な cardinality で再現するため、
- * 各 account に Follow エッジと AccountLabelLatest 行を追加でシードする。現行ルール分に加えて
- * 廃止済みラベル分も混在させ、labelDefinitionId 絞り込みの効果を計測できるようにする。
+ * 各 account に Follow エッジと AccountLabelLatest 行を追加でシードする。
+ * 廃止済みラベルも1件混在させ、labelDefinitionId 絞り込みの効果を計測できるようにする。
  * @param prisma - シード投入に使う Prisma クライアント
  * @param accountIds - シード済み account の id 一覧
  * @param registry - currentRuleVersion 解決に使うルールレジストリ
@@ -114,22 +114,33 @@ async function seedFollowGraphAndLabels(
   }
 }
 
+const MAX_WORKER_DRAIN_CYCLES = 10_000
+
 /**
  * account_relabel の WorkItem queue が空になるまで runRelabelWorkerCycleOnce を回し、
- * サイクル数・経過時間・throughput を計測する。follow-graph index 構築と
- * AccountLabelLatest lookup の chunk size 効果を計測する本命のベンチマークパス。
+ * サイクル数・経過時間・throughput を計測する。
+ * chunk size を変えた比較に使う本命のベンチマークパス。
+ * WorkItem は本関数の呼び出し前に enqueue 済みであることを前提とし、
+ * 実行前に必ず1サイクル回してから残件数を確認する。
+ * attemptCount 上限に達した WorkItem は queued/failed のまま残り得るため、
+ * 上限サイクル数に達した場合は打ち切って警告を出す。
  * @param prisma - 実行に使う Prisma クライアント
  */
 async function runWorkerDrainBenchmark(prisma: PrismaClient): Promise<void> {
   const start = Date.now()
   let cycles = 0
-  for (;;) {
-    const pending = await prisma.analysisWorkItem.count({
-      where: { kind: 'account_relabel', status: { in: ['queued', 'failed'] } },
-    })
-    if (pending === 0) break
+  let pending: number
+  do {
     cycles++
     await runRelabelWorkerCycleOnce(prisma)
+    pending = await prisma.analysisWorkItem.count({
+      where: { kind: 'account_relabel', status: { in: ['queued', 'failed'] } },
+    })
+  } while (pending > 0 && cycles < MAX_WORKER_DRAIN_CYCLES)
+  if (pending > 0) {
+    console.warn(
+      `Stopped after ${MAX_WORKER_DRAIN_CYCLES} cycles with ${pending} WorkItem(s) still pending (attemptCount 上限到達の可能性)`,
+    )
   }
   const elapsedMinutes = (Date.now() - start) / 60_000
   console.log(

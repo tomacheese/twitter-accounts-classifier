@@ -183,8 +183,7 @@ describe('buildFollowGraphLabelIndex label filtering', () => {
     }
   })
 
-  it('accountIds が chunk size を超える場合、chunk ごとに直列でクエリを実行し結果をマージする', async () => {
-    vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '2')
+  it('accountIds が chunkSize を超える場合、chunk ごとに直列でクエリを実行し結果をマージする', async () => {
     const followeeCalls: unknown[][] = []
     const followerCalls: unknown[][] = []
     const queryRaw = vi.fn().mockImplementation((strings: unknown, ...values: unknown[]) => {
@@ -208,25 +207,35 @@ describe('buildFollowGraphLabelIndex label filtering', () => {
 
     const index = await buildFollowGraphLabelIndex(prisma, new Map([['topic_food', 'ld-food']]), {
       accountIds: ['alice', 'bob', 'carol'],
+      chunkSize: 2,
     })
 
     // chunk size 2 に対し 3 件の accountIds なので、chunk は [alice, bob] と [carol] の2つに分かれる。
     expect(followeeCalls).toHaveLength(2)
     expect(followerCalls).toHaveLength(2)
     expect(index.signalsFor('alice').topic_food.followeeLabeledCount).toBe(1)
-    vi.unstubAllEnvs()
   })
 
-  it('accountIds が chunk size ちょうどの場合、1 chunk だけで処理する', async () => {
-    vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '2')
+  it('accountIds が chunkSize ちょうどの場合、1 chunk だけで処理する', async () => {
     const queryRaw = vi.fn().mockResolvedValue([])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
     await buildFollowGraphLabelIndex(prisma, new Map([['topic_food', 'ld-food']]), {
       accountIds: ['alice', 'bob'],
+      chunkSize: 2,
     })
 
     expect(queryRaw).toHaveBeenCalledTimes(2)
-    vi.unstubAllEnvs()
+  })
+
+  it('chunkSize を省略した場合は分割せず1回で処理する', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await buildFollowGraphLabelIndex(prisma, new Map([['topic_food', 'ld-food']]), {
+      accountIds: ['alice', 'bob', 'carol'],
+    })
+
+    expect(queryRaw).toHaveBeenCalledTimes(2)
   })
 })

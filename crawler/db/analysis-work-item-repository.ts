@@ -117,53 +117,6 @@ export interface ClaimNextWorkItemInput {
   leaseDurationMs: number
 }
 
-export interface ClaimWorkItemBatchInput extends ClaimNextWorkItemInput {
-  batchSize: number
-}
-
-/**
- * FOR UPDATE SKIP LOCKED で最大 batchSize 件を 1 SQL で claim する。
- * 候補選択と lease 更新を同じ statement にまとめるため、1 件ずつ transaction を
- * 繰り返さずに複数 WorkItem を原子的に確保できる。
- * @param prisma - Prisma クライアント
- * @param input - claim 対象の kind、batch size、lease 情報
- * @returns claim した WorkItem 一覧
- */
-export async function claimWorkItemBatch(
-  prisma: PrismaClient,
-  input: ClaimWorkItemBatchInput,
-): Promise<AnalysisWorkItem[]> {
-  if (input.batchSize <= 0) return []
-
-  const now = new Date()
-  const leaseExpiresAt = new Date(now.getTime() + input.leaseDurationMs)
-
-  return prisma.$queryRaw<AnalysisWorkItem[]>`
-    WITH claimable AS (
-      SELECT "id"
-      FROM "AnalysisWorkItem"
-      WHERE "kind" = ANY(${input.kinds})
-        AND "status" IN ('queued', 'leased', 'failed')
-        AND "availableAt" <= ${now}
-        AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < ${now})
-        AND "attemptCount" < "maxAttempts"
-      ORDER BY "priority" DESC, "availableAt" ASC
-      LIMIT ${input.batchSize}
-      FOR UPDATE SKIP LOCKED
-    )
-    UPDATE "AnalysisWorkItem" AS item
-    SET
-      "status" = 'leased',
-      "leaseOwner" = ${input.leaseOwner},
-      "leaseExpiresAt" = ${leaseExpiresAt},
-      "attemptCount" = item."attemptCount" + 1,
-      "updatedAt" = ${now}
-    FROM claimable
-    WHERE item."id" = claimable."id"
-    RETURNING item.*
-  `
-}
-
 export interface WorkItemCandidate {
   id: string
   triggerId: string
@@ -175,9 +128,9 @@ export interface PeekWorkItemCandidatesInput {
 }
 
 /**
- * claimWorkItemBatch と同じ絞り込み条件・並び順で、lease を更新せずに候補の id・triggerId だけを
- * 読み取る。follow-graph index のような重い前処理を、実際に claim する前に候補の accountId 全体へ
- * 対して1回構築したい場合に使う。
+ * claim 前の候補選択と同じ絞り込み条件・並び順で、lease を更新せず id・triggerId だけを読み取る。
+ * follow-graph index のような重い前処理を、claim する前に候補の accountId 全体に対して
+ * 1回だけ構築したい場合に使う。
  * @param prisma - Prisma クライアント
  * @param input - 対象 kind と上限件数
  * @returns 候補 WorkItem の id・triggerId 一覧 (claim 時と同じ並び順)
@@ -209,10 +162,9 @@ export interface ClaimWorkItemBatchByIdsInput {
 }
 
 /**
- * peekWorkItemCandidates 等で固定した id 集合だけを対象に FOR UPDATE SKIP LOCKED で claim する。
- * claimWorkItemBatch と異なり ORDER BY/LIMIT による候補選択は行わず、id = ANY(...) で対象を限定する。
- * 競合で既に claim 済みの id は SKIP LOCKED により結果から自然に除外され、呼び出し側がそれを他の id
- * で補うことはしない。
+ * peekWorkItemCandidates 等で固定した id 集合だけを対象に、ORDER BY/LIMIT による候補選択を
+ * 行わず id = ANY(...) で対象を限定して FOR UPDATE SKIP LOCKED で claim する。
+ * 競合で既に claim 済みの id は SKIP LOCKED により結果から自然に除外される。
  * @param prisma - Prisma クライアント
  * @param input - claim 対象の id 一覧と lease 情報
  * @returns 実際に claim できた WorkItem 一覧
