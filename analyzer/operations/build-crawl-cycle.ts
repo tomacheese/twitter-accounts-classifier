@@ -1,13 +1,16 @@
 import type { PrismaClient } from '../generated/prisma'
 import {
   applyUpstreamBlocking,
+  deleteObsoleteOperationStages,
   deriveWorkItemStage,
+  NEVER_ENQUEUED_ERROR_SUMMARY,
   upsertCycleWithStages,
   type CycleStageInput,
   type StageStatus,
 } from './cycle-common'
 
-const ANALYSIS_WORK_ITEM_STAGE_KINDS = ['label_aggregate_refresh', 'read_model_refresh'] as const
+const ANALYSIS_WORK_ITEM_STAGE_KINDS = ['label_aggregate_refresh'] as const
+const CRAWL_CYCLE_STAGE_KEYS = ['crawl', ...ANALYSIS_WORK_ITEM_STAGE_KINDS]
 
 /**
  * @param crawlRunStatus - CrawlRun.status の値
@@ -22,6 +25,46 @@ function deriveCrawlStageStatus(crawlRunStatus: string): StageStatus {
 }
 
 /**
+ * 廃止済み read_model_refresh の実行履歴が残る旧 v1 cycle かどうかを判定する。
+ * 旧 pipeline 時代の CrawlRun には label_aggregate_refresh の WorkItem が
+ * 存在しないため、この関数を素通りさせて再構築すると新規の phantom failure を
+ * 生んでしまう。読み取りのみ行い、判定結果に応じて呼び出し元が書き込みを止める。
+ * @param prisma - Prisma クライアント
+ * @param crawlRunId - 対象 CrawlRun の ID
+ * @returns 旧 v1 cycle なら true
+ */
+async function isLegacyReadModelRefreshCycle(
+  prisma: PrismaClient,
+  crawlRunId: string,
+): Promise<boolean> {
+  const [readModelRefreshStages, currentWorkItem] = await Promise.all([
+    prisma.operationStage.findMany({
+      where: {
+        stageKey: 'read_model_refresh',
+        cycle: { sourceType: 'crawl_run', sourceId: crawlRunId },
+      },
+    }),
+    prisma.analysisWorkItem.findUnique({
+      where: {
+        kind_triggerType_triggerId: {
+          kind: 'label_aggregate_refresh',
+          triggerType: 'crawl_run',
+          triggerId: crawlRunId,
+        },
+      },
+    }),
+  ])
+  // phantom 条件 (analysisRunId: null かつ未 enqueue エラー概要) の否定を SQL の WHERE 句に
+  // 組み込むと、errorSummary が null (phantom 文字列とは無関係) の行が三値論理で
+  // 除外されてしまうため、判定はここでアプリケーション側で行う。
+  const hasLegacyStage = readModelRefreshStages.some(
+    (stage) =>
+      !(stage.analysisRunId === null && stage.errorSummary === NEVER_ENQUEUED_ERROR_SUMMARY),
+  )
+  return hasLegacyStage && currentWorkItem === null
+}
+
+/**
  * buildOrUpdateCrawlCycle の入力。
  */
 export interface BuildOrUpdateCrawlCycleInput {
@@ -30,7 +73,7 @@ export interface BuildOrUpdateCrawlCycleInput {
 }
 
 /**
- * CrawlRun 1 件を起点に 4 Stage を upsert し、Cycle 全体の状態を再計算する。
+ * CrawlRun 1 件を起点に 2 Stage を upsert し、Cycle 全体の状態を再計算する。
  * Operations 画面は正本テーブルではなくこの Cycle/Stage のみを読む。
  * @param prisma - Prisma クライアント
  * @param input - 対象 CrawlRun
@@ -39,6 +82,8 @@ export async function buildOrUpdateCrawlCycle(
   prisma: PrismaClient,
   input: BuildOrUpdateCrawlCycleInput,
 ): Promise<void> {
+  if (await isLegacyReadModelRefreshCycle(prisma, input.crawlRunId)) return
+
   const crawlRun = await prisma.crawlRun.findUniqueOrThrow({ where: { id: input.crawlRunId } })
 
   const crawlStageStatus = deriveCrawlStageStatus(crawlRun.status)
@@ -58,41 +103,30 @@ export async function buildOrUpdateCrawlCycle(
     const rawStage = await deriveWorkItemStage(prisma, kind, 'crawl_run', input.crawlRunId)
     const stage = applyUpstreamBlocking(rawStage, previousStageStatus)
 
-    // processReadModelRefresh() は partial/failed CrawlRun では read model 公開を
-    // 見送って正常終了するため、WorkItem 自体は succeeded になる。この succeeded を
-    // そのまま表示すると必須後続処理が完了していないことが Operations から見えなくなるため、
-    // ここで skipped + 理由へ差し替える (WorkItem の実状態は変更しない)。
-    const isReadModelRefreshSkippedForIncompleteCrawl =
-      kind === 'read_model_refresh' &&
-      crawlRun.status !== 'success' &&
-      crawlRun.status !== 'partial' &&
-      stage.status === 'succeeded'
-
-    const finalStatus: StageStatus = isReadModelRefreshSkippedForIncompleteCrawl
-      ? 'skipped'
-      : stage.status
-
     stages.push({
       stageKey: kind,
       sourceType: 'analysis_work_item',
       sourceId: crawlRun.id,
       ...stage,
-      status: finalStatus,
-      ...(isReadModelRefreshSkippedForIncompleteCrawl
-        ? { errorSummary: `crawl run is ${crawlRun.status}: read model refresh skipped` }
-        : {}),
     })
-    previousStageStatus = finalStatus
+    previousStageStatus = stage.status
   }
 
-  await upsertCycleWithStages(prisma, {
-    kind: 'crawl',
-    sourceType: 'crawl_run',
-    sourceId: crawlRun.id,
-    triggeredAt: crawlRun.startedAt,
-    startedAt: crawlRun.startedAt,
-    finishedAt: crawlRun.finishedAt ?? undefined,
-    stages,
-    modelVersion: '2',
+  await prisma.$transaction(async (tx) => {
+    const { cycleId } = await upsertCycleWithStages(tx as unknown as PrismaClient, {
+      kind: 'crawl',
+      sourceType: 'crawl_run',
+      sourceId: crawlRun.id,
+      triggeredAt: crawlRun.startedAt,
+      startedAt: crawlRun.startedAt,
+      finishedAt: crawlRun.finishedAt ?? undefined,
+      stages,
+      modelVersion: '2',
+    })
+    await deleteObsoleteOperationStages(
+      tx as unknown as PrismaClient,
+      cycleId,
+      CRAWL_CYCLE_STAGE_KEYS,
+    )
   })
 }
