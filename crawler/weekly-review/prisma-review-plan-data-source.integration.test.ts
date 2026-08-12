@@ -76,7 +76,7 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
     }
   })
 
-  it('候補探索は label ごとの直近 poolSize*10 行より古い履歴まで走査しない', async () => {
+  it('poolSize*10 の LIMIT で除外されていた古い candidate も value ごとの候補に含める', async () => {
     const suffix = randomUUID().slice(0, 8)
     const label = await prisma.labelDefinition.create({
       data: {
@@ -130,8 +130,158 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
       const candidates = await source.listRecentCandidates(targetFrom, targetTo, 1, 'bounded-seed')
       const own = candidates.filter((candidate) => candidate.labelDefinitionId === label.id)
 
-      expect(own.map((candidate) => candidate.value)).toEqual([false])
-      expect(own[0]?.accountId).not.toBe(accountIds[0])
+      // 旧実装は LIMIT poolSize*10 で全体を絞り込んだ後に value ごとの stratum を取っていたため、
+      // 唯一の value=true 候補が母集団最古であればこの LIMIT で除外され得た。
+      expect(own.map((candidate) => candidate.value).toSorted()).toEqual([false, true])
+      expect(own.find((candidate) => candidate.value)?.accountId).toBe(accountIds[0])
+    } finally {
+      await prisma.accountLabel.deleteMany({ where: { labelDefinitionId: label.id } })
+      await prisma.account.deleteMany({ where: { id: { in: accountIds } } })
+      await prisma.labelDefinition.deleteMany({ where: { id: label.id } })
+    }
+  })
+
+  it('候補探索は LIMIT poolSize*10 で切り詰めた最新部分集合ではなく期間内全件からサンプリングする', async () => {
+    const suffix = randomUUID().slice(0, 8)
+    const label = await prisma.labelDefinition.create({
+      data: {
+        key: `weekly_review_full_frame_${suffix}`,
+        description: '架空の full-frame candidate テストラベル',
+        currentRuleVersion: '1.0.0',
+      },
+    })
+    const targetFrom = new Date('2026-08-01T00:00:00Z')
+    const targetTo = new Date('2026-08-08T00:00:00Z')
+    const populationSize = 200
+    const accountIds = Array.from(
+      { length: populationSize },
+      (_, index) => `frame_${index}_${suffix}`,
+    )
+    // labeledAt はインデックスが大きいほど新しいので、newest 50 件は index 150〜199。
+    const newestFiftyThreshold = new Date(targetFrom.getTime() + 150 * 1000)
+
+    try {
+      await prisma.account.createMany({
+        data: accountIds.map((accountId) => ({
+          id: accountId,
+          screenName: accountId,
+          displayName: 'Synthetic Account',
+          followersCount: 1,
+          followingCount: 1,
+          tweetCount: 1,
+          accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
+        })),
+      })
+      await prisma.accountLabel.createMany({
+        data: accountIds.map((accountId, index) => ({
+          accountId,
+          labelDefinitionId: label.id,
+          value: false,
+          confidence: 0.1,
+          reason: 'synthetic full-frame negative',
+          method: 'rule',
+          ruleVersion: '1.0.0',
+          labeledAt: new Date(targetFrom.getTime() + index * 1000),
+        })),
+      })
+
+      const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
+      const rows = await source.listRecentCandidates(targetFrom, targetTo, 5, 'full-frame-seed')
+      const own = rows.filter((row) => row.labelDefinitionId === label.id)
+
+      expect(own.length).toBeLessThanOrEqual(10)
+      const oldestSelectedLabeledAt = Math.min(...own.map((row) => row.labeledAt.getTime()))
+      expect(oldestSelectedLabeledAt).toBeLessThan(newestFiftyThreshold.getTime())
+    } finally {
+      await prisma.accountLabel.deleteMany({ where: { labelDefinitionId: label.id } })
+      await prisma.account.deleteMany({ where: { id: { in: accountIds } } })
+      await prisma.labelDefinition.deleteMany({ where: { id: label.id } })
+    }
+  })
+
+  it('listPopulationCounts は sample frame と同じ DISTINCT ON キーで重複排除した件数を返す', async () => {
+    const suffix = randomUUID().slice(0, 8)
+    const label = await prisma.labelDefinition.create({
+      data: {
+        key: `weekly_review_population_${suffix}`,
+        description: '架空の population count テストラベル',
+        currentRuleVersion: '1.0.0',
+      },
+    })
+    const targetFrom = new Date('2026-08-01T00:00:00Z')
+    const targetTo = new Date('2026-08-08T00:00:00Z')
+    const accountIds = Array.from({ length: 3 }, (_, index) => `population_${index}_${suffix}`)
+
+    try {
+      await prisma.account.createMany({
+        data: accountIds.map((accountId) => ({
+          id: accountId,
+          screenName: accountId,
+          displayName: 'Synthetic Account',
+          followersCount: 1,
+          followingCount: 1,
+          tweetCount: 1,
+          accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
+        })),
+      })
+      // 同一アカウントの relabel 履歴が複数残っていても、
+      // DISTINCT ON (accountId, labelDefinitionId) により重複カウントされないことを確認する。
+      await prisma.accountLabel.createMany({
+        data: [
+          {
+            accountId: accountIds[0],
+            labelDefinitionId: label.id,
+            value: true,
+            confidence: 0.2,
+            reason: 'synthetic stale positive',
+            method: 'rule',
+            ruleVersion: '1.0.0',
+            labeledAt: new Date('2026-08-02T00:00:00Z'),
+          },
+          {
+            accountId: accountIds[0],
+            labelDefinitionId: label.id,
+            value: true,
+            confidence: 0.9,
+            reason: 'synthetic latest positive',
+            method: 'rule',
+            ruleVersion: '1.0.0',
+            labeledAt: new Date('2026-08-03T00:00:00Z'),
+          },
+          {
+            accountId: accountIds[1],
+            labelDefinitionId: label.id,
+            value: true,
+            confidence: 0.8,
+            reason: 'synthetic positive',
+            method: 'rule',
+            ruleVersion: '1.0.0',
+            labeledAt: new Date('2026-08-04T00:00:00Z'),
+          },
+          {
+            accountId: accountIds[2],
+            labelDefinitionId: label.id,
+            value: false,
+            confidence: 0.1,
+            reason: 'synthetic negative',
+            method: 'rule',
+            ruleVersion: '1.0.0',
+            labeledAt: new Date('2026-08-05T00:00:00Z'),
+          },
+        ],
+      })
+
+      const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
+      const populationCounts = await source.listPopulationCounts(targetFrom, targetTo)
+      const trueCountRow = populationCounts.find(
+        (row) => row.labelDefinitionId === label.id && row.value,
+      )
+      const falseCountRow = populationCounts.find(
+        (row) => row.labelDefinitionId === label.id && !row.value,
+      )
+
+      expect(trueCountRow?.count).toBe(2)
+      expect(falseCountRow?.count).toBe(1)
     } finally {
       await prisma.accountLabel.deleteMany({ where: { labelDefinitionId: label.id } })
       await prisma.account.deleteMany({ where: { id: { in: accountIds } } })

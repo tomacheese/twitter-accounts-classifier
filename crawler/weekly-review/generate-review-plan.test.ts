@@ -27,6 +27,9 @@ function emptySource(): WeeklyReviewPlanningDataSource {
     listChangeCandidates() {
       return Promise.resolve([])
     },
+    listPopulationCounts() {
+      return Promise.resolve([])
+    },
   }
 }
 
@@ -51,7 +54,7 @@ describe('generateWeeklyReviewPlan', () => {
     expect(plan).toMatchObject({
       seed: 'run-1',
       budget: 240,
-      strategyVersion: 'risk-stratified/1',
+      strategyVersion: 'risk-stratified/2',
       targetFrom: '2026-08-05T00:00:00.000Z',
       targetTo: '2026-08-12T00:00:00.000Z',
     })
@@ -61,10 +64,10 @@ describe('generateWeeklyReviewPlan', () => {
         metadata: {
           targetFrom: new Date('2026-08-05T00:00:00Z'),
           targetTo: startedAt,
-          analysisVersion: 'risk-stratified/1',
+          analysisVersion: 'risk-stratified/2',
           reviewPlan: expect.objectContaining({
             seed: 'run-1',
-            strategyVersion: 'risk-stratified/1',
+            strategyVersion: 'risk-stratified/2',
             budget: 240,
           }),
         },

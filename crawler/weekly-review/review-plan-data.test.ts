@@ -31,6 +31,7 @@ describe('assemblePlanningData', () => {
       recentChangeCounts: [{ labelDefinitionId: 'l1', count: 4 }],
       candidates: [],
       changeCandidates: [],
+      populationCounts: [],
     }
 
     const result = assemblePlanningData(rows)
@@ -58,6 +59,7 @@ describe('assemblePlanningData', () => {
       reason: 'near miss',
       ruleVersion: '1.0.0',
       labeledAt: new Date('2026-08-08T00:00:00Z'),
+      evaluable: true,
     }
     const rows: PlanningDataRows = {
       definitions: [{ id: 'l1', key: 'spam_alpha', currentRuleVersion: '1.0.0' }],
@@ -67,6 +69,7 @@ describe('assemblePlanningData', () => {
       recentChangeCounts: [],
       candidates: [common],
       changeCandidates: [{ ...common, changeType: 'removed' }],
+      populationCounts: [],
     }
 
     const result = assemblePlanningData(rows)
@@ -83,6 +86,7 @@ describe('assemblePlanningData', () => {
       recentChangeCounts: [],
       candidates: [],
       changeCandidates: [],
+      populationCounts: [],
     }
 
     const result = assemblePlanningData(rows)
@@ -104,6 +108,7 @@ describe('assemblePlanningData', () => {
       recentChangeCounts: [],
       candidates: [],
       changeCandidates: [],
+      populationCounts: [],
     }
     const source: WeeklyReviewPlanningDataSource = {
       listDefinitions() {
@@ -136,6 +141,10 @@ describe('assemblePlanningData', () => {
         calls.push(`changes:${targetFrom.toISOString()}:${targetTo.toISOString()}:${limit}`)
         return Promise.resolve(emptyRows.changeCandidates)
       },
+      listPopulationCounts(targetFrom, targetTo) {
+        calls.push(`population-counts:${targetFrom.toISOString()}:${targetTo.toISOString()}`)
+        return Promise.resolve(emptyRows.populationCounts)
+      },
     }
     const targetFrom = new Date('2026-08-01T00:00:00Z')
     const targetTo = new Date('2026-08-08T00:00:00Z')
@@ -155,6 +164,7 @@ describe('assemblePlanningData', () => {
       `change-counts:${targetFrom.toISOString()}:${targetTo.toISOString()}`,
       `candidates:${targetFrom.toISOString()}:${targetTo.toISOString()}:600:run-seed`,
       `changes:${targetFrom.toISOString()}:${targetTo.toISOString()}:600`,
+      `population-counts:${targetFrom.toISOString()}:${targetTo.toISOString()}`,
     ])
   })
 })
