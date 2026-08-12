@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { getPrismaClient } from '../db/client'
 import { ingestWeeklyReviewFindings } from './ingest'
@@ -81,6 +81,13 @@ describe.skipIf(!process.env.DATABASE_URL)('ingestWeeklyReviewFindings', () => {
     await prisma.reviewFinding.deleteMany()
   })
 
+  afterEach(async () => {
+    await prisma.analysisWorkItem.deleteMany()
+    await prisma.findingEvidence.deleteMany()
+    await prisma.reviewFindingOccurrence.deleteMany()
+    await prisma.reviewFinding.deleteMany()
+  })
+
   it('同一 fingerprint の既存 active Finding がある場合、新規 Finding を作らず Occurrence と Evidence を追加する', async () => {
     const structuredOutput = buildStructuredOutput({})
     const dimensions = structuredOutput.findings[0]?.dimensions ?? {}
@@ -115,6 +122,53 @@ describe.skipIf(!process.env.DATABASE_URL)('ingestWeeklyReviewFindings', () => {
       where: { findingId: findingsAfterSecond[0]?.id },
     })
     expect(evidences).toHaveLength(2)
+  })
+
+  it('schemaVersion 2 は sampling strategy を FindingEvidence に保存する', async () => {
+    const base = buildStructuredOutput({})
+    const structuredOutput: StructuredOutput = {
+      ...base,
+      schemaVersion: 2,
+      review: {
+        strategyVersion: 'risk-stratified/1',
+        seed: 'weekly-run-1',
+        budget: 240,
+        plannedSampleCount: 1,
+        reviewedSampleCount: 1,
+        randomAuditCount: 1,
+        targetedAuditCount: 0,
+        uncertainCount: 0,
+        skippedCount: 0,
+        incompletePhases: [],
+        judgments: [
+          {
+            sampleId: 'label-1:account-1',
+            accountId: 'account-1',
+            labelDefinitionId: 'label-1',
+            labelKey: 'test_label',
+            sampleKind: 'random_positive',
+            classifierValue: true,
+            classifierConfidence: 0.8,
+            ruleVersion: '1.0.0',
+            verdict: 'correct',
+            judgeConfidence: 0.9,
+            evidenceReference: 'sample/1',
+            reviewedBy: 'weekly-review-judge',
+          },
+        ],
+      },
+    }
+
+    await ingestWeeklyReviewFindings(prisma, {
+      weeklyAnalysisRunId: `weekly-${randomUUID()}`,
+      structuredOutput,
+      policy,
+    })
+
+    const evidence = await prisma.findingEvidence.findFirstOrThrow({
+      where: { kind: 'weekly_review_structured_output' },
+    })
+    expect(evidence.sampleStrategyVersion).toBe('risk-stratified/1')
   })
 
   it('suggestedSeverity が critical でも maxWeeklyReviewSeverityWithoutCorroboration を超える場合は降格する', async () => {

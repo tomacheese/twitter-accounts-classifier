@@ -53,6 +53,7 @@ export TIMEOUT_MARKER="$STALE_CASE/timeout-called"
 export TMUX_COUNT="$STALE_CASE/tmux-count"
 export TMUX_ARGS="$STALE_CASE/tmux-args"
 export TMUX_DATABASE_URL="$STALE_CASE/tmux-database-url"
+export REVIEW_PLAN_CALLED="$STALE_CASE/review-plan-called"
 cat > "$STALE_CASE/repo/.env.weekly-review" <<'ENV'
 DATABASE_URL=postgresql://weekly_review:test-password@192.0.2.10:5432/testdb
 ENV
@@ -86,6 +87,19 @@ case "$*" in
     ;;
   *'weekly-analysis-run.ts fail'*) printf '%s\n' '{"ok":true}' ;;
   *'weekly-analysis-run.ts cancel-backends'*) printf '%s\n' '{"cancelled":0}' ;;
+  *'weekly-review-plan.ts build'*)
+    touch "$REVIEW_PLAN_CALLED"
+    output=''
+    previous=''
+    for argument in "$@"; do
+      if [ "$previous" = '--output' ]; then output="$argument"; break; fi
+      previous="$argument"
+    done
+    [ -n "$output" ] || exit 98
+    mkdir -p "$(dirname "$output")"
+    printf '%s\n' '{"schemaVersion":1,"strategyVersion":"risk-stratified/1","samples":[]}' > "$output"
+    printf '%s\n' '{"sampleCount":0}'
+    ;;
   *) printf '%s\n' '{}' ;;
 esac
 SCRIPT
@@ -120,12 +134,19 @@ STALE_STATUS=$?
 set -e
 [ "$STALE_STATUS" -eq 0 ] || fail "stale supervisor did not finish cleanly (status=$STALE_STATUS)"
 [ -e "$TIMEOUT_MARKER" ] || fail 'stale WeeklyAnalysisRun was not transitioned to timeout'
+[ -e "$REVIEW_PLAN_CALLED" ] || fail 'review plan was not generated before launching Claude'
 grep -q 'exceeded staleAfterAt=' "$STALE_CASE/repo/logs/weekly-analyze.log" || \
   fail 'stale timeout was not recorded in the supervisor log'
 grep -Fq -- "-e PATH=$STALE_SHIMS:" "$TMUX_ARGS" || \
   fail 'tmux session did not receive the cron-repaired PATH explicitly'
 grep -Fq -- '-e DATABASE_URL -e WEEKLY_ANALYSIS_RUN_ID=run1' "$TMUX_ARGS" || \
   fail 'tmux session did not inherit the weekly-review DATABASE_URL by variable name'
+grep -Fq -- '-e WEEKLY_REVIEW_PLAN_FILE=' "$TMUX_ARGS" || \
+  fail 'tmux session did not receive the review plan file path'
+grep -Fq -- '-e WEEKLY_REVIEW_RESULT_FILE=' "$TMUX_ARGS" || \
+  fail 'tmux session did not receive the canonical review result file path'
+grep -Fq -- '--agent weekly-review-coordinator' "$TMUX_ARGS" || \
+  fail 'weekly review did not launch with the coordinator agent'
 grep -Fq -- '-e PGAPPNAME=weekly-crawl-review-run1' "$TMUX_ARGS" || \
   fail 'tmux session did not receive the run-scoped PostgreSQL application_name'
 grep -qx 'postgresql://weekly_review:test-password@192.0.2.10:5432/testdb?application_name=weekly-crawl-review-run1' "$TMUX_DATABASE_URL" || \
@@ -212,6 +233,18 @@ case "$*" in
   *'weekly-analysis-run.ts list-running'*) printf '%s\n' '[]' ;;
   *'weekly-analysis-run.ts get'*) printf '%s\n' '{"id":"run1","status":"success"}' ;;
   *'weekly-analysis-run.ts cancel-backends'*) printf '%s\n' '{"cancelled":0}' ;;
+  *'weekly-review-plan.ts build'*)
+    output=''
+    previous=''
+    for argument in "$@"; do
+      if [ "$previous" = '--output' ]; then output="$argument"; break; fi
+      previous="$argument"
+    done
+    [ -n "$output" ] || exit 98
+    mkdir -p "$(dirname "$output")"
+    printf '%s\n' '{"schemaVersion":1,"strategyVersion":"risk-stratified/1","samples":[]}' > "$output"
+    printf '%s\n' '{"sampleCount":0}'
+    ;;
   *) printf '%s\n' '{}' ;;
 esac
 SCRIPT

@@ -13,6 +13,7 @@
     "format": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "precheck": "pnpm run db:generate",
     "check": "run-p lint typecheck test",
     "db:generate": "prisma generate --schema=../prisma/schema.prisma --generator blockerClient"
   },

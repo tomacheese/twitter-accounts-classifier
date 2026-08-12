@@ -57,6 +57,8 @@ export interface WeeklyAnalysisRunRecord {
   sampledAccountIds: unknown
   findings: string | null
   commitSha: string | null
+  hasReviewPlan: boolean
+  hasStructuredOutput: boolean
 }
 
 export interface WeeklyAnalysisRunMutationResult {
@@ -83,6 +85,8 @@ function toRecord(run: WeeklyAnalysisRun): WeeklyAnalysisRunRecord {
     sampledAccountIds: run.sampledAccountIds,
     findings: run.findings,
     commitSha: run.commitSha,
+    hasReviewPlan: run.reviewPlan !== null,
+    hasStructuredOutput: run.structuredOutput !== null,
   }
 }
 

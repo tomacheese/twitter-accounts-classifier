@@ -112,15 +112,40 @@ describe('getWeeklyReviewCycleDetail', () => {
     const cycle = { ...baseCycle, kind: 'weekly_review', sourceId: 'weekly-run-1' }
     const { prisma, weeklyAnalysisRunFindUnique } = createMockPrisma({
       cycle,
-      weeklyAnalysisRun: { findings: '週次レビューの日本語サマリ' },
+      weeklyAnalysisRun: {
+        findings: '週次レビューの日本語サマリ',
+        structuredOutput: {
+          schemaVersion: 2,
+          review: {
+            strategyVersion: 'risk-stratified/1',
+            plannedSampleCount: 12,
+            reviewedSampleCount: 10,
+            randomAuditCount: 4,
+            targetedAuditCount: 8,
+            uncertainCount: 1,
+            skippedCount: 2,
+            incompletePhases: ['external_research'],
+          },
+        },
+      },
     })
 
     const detail = await getWeeklyReviewCycleDetail(prisma, 'cycle-1')
 
     expect(detail?.findings).toBe('週次レビューの日本語サマリ')
+    expect(detail?.quality).toEqual({
+      strategyVersion: 'risk-stratified/1',
+      plannedSampleCount: 12,
+      reviewedSampleCount: 10,
+      randomAuditCount: 4,
+      targetedAuditCount: 8,
+      uncertainCount: 1,
+      skippedCount: 2,
+      incompletePhases: ['external_research'],
+    })
     expect(weeklyAnalysisRunFindUnique.mock.calls[0]?.[0]).toEqual({
       where: { id: 'weekly-run-1' },
-      select: { findings: true },
+      select: { findings: true, structuredOutput: true },
     })
   })
 
@@ -131,6 +156,7 @@ describe('getWeeklyReviewCycleDetail', () => {
     const detail = await getWeeklyReviewCycleDetail(prisma, 'cycle-1')
 
     expect(detail?.findings).toBeNull()
+    expect(detail?.quality).toBeNull()
   })
 })
 

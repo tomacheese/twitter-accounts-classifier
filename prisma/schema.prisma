@@ -221,6 +221,7 @@ model WeeklyAnalysisRun {
   modelIdentity     String?
   toolIdentity      String?
   policyHash        String?
+  reviewPlan        Json?
   structuredOutput  Json?
 
   @@index([status, startedAt(sort: Desc), id(sort: Desc)])

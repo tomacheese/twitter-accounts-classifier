@@ -19,6 +19,7 @@ const baseDetail: WeeklyReviewOperationCycleDetailView = {
   sourceId: 'weekly-run-1',
   stages: [],
   findings: null,
+  quality: null,
 }
 
 describe('WeeklyReviewCycleDetailPage', () => {
@@ -46,5 +47,32 @@ describe('WeeklyReviewCycleDetailPage', () => {
     )
 
     expect(html).toContain('No findings recorded.')
+  })
+
+  it('structured review quality の planned/reviewed/uncertain/skipped を表示する', async () => {
+    process.env.VIEWER_NEW_UI_SECTIONS = 'operations'
+    vi.mocked(getWeeklyReviewCycleDetail).mockResolvedValue({
+      ...baseDetail,
+      quality: {
+        strategyVersion: 'risk-stratified/1',
+        plannedSampleCount: 240,
+        reviewedSampleCount: 236,
+        randomAuditCount: 80,
+        targetedAuditCount: 160,
+        uncertainCount: 4,
+        skippedCount: 4,
+        incompletePhases: ['external_research'],
+      },
+    })
+
+    const html = renderToStaticMarkup(
+      await WeeklyReviewCycleDetailPage({ params: Promise.resolve({ cycleId: 'cycle-1' }) }),
+    )
+
+    expect(html).toContain('Review quality')
+    expect(html).toContain('risk-stratified/1')
+    expect(html).toContain('240')
+    expect(html).toContain('236')
+    expect(html).toContain('external_research')
   })
 })

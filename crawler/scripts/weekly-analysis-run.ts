@@ -16,6 +16,11 @@ import {
 } from '../db/weekly-analysis-run-repository'
 import { getWeeklyAnalysisStaleThresholdSeconds } from '../config/env'
 import { retryWeeklyAnalysisComplete } from './weekly-analysis-complete-retry'
+import {
+  extractPlannedAccountIds,
+  validateReviewResultAgainstPlan,
+} from '../weekly-review/validate-review-result'
+import { structuredOutputSchema } from '../weekly-review/structured-output-schema'
 
 const logger = Logger.configure('weekly-analysis-run')
 
@@ -42,7 +47,12 @@ function reportMutationResult(result: WeeklyAnalysisRunMutationResult): void {
  */
 async function readStructuredOutputFile(filePath: string): Promise<unknown> {
   const content = await readFile(filePath, 'utf8')
-  return JSON.parse(content) as unknown
+  const raw = JSON.parse(content) as unknown
+  const parsed = structuredOutputSchema.safeParse(raw)
+  if (!parsed.success) {
+    throw new Error(`invalid weekly review structured output: ${parsed.error.message}`)
+  }
+  return raw
 }
 
 async function main(): Promise<void> {
@@ -135,11 +145,25 @@ async function main(): Promise<void> {
           values['structured-output-file'] === undefined
             ? undefined
             : await readStructuredOutputFile(values['structured-output-file'])
+        const plannedRun = await prisma.weeklyAnalysisRun.findUnique({
+          where: { id },
+          select: { reviewPlan: true },
+        })
+        if (!plannedRun) throw new Error(`WeeklyAnalysisRun not found: ${id}`)
+        let sampledAccountIds: unknown =
+          values['sampled-account-ids'] === undefined
+            ? undefined
+            : (JSON.parse(values['sampled-account-ids']) as unknown)
+        if (plannedRun.reviewPlan !== null) {
+          if (structuredOutput === undefined) {
+            throw new Error('--structured-output-file is required when a review plan exists')
+          }
+          validateReviewResultAgainstPlan(plannedRun.reviewPlan, structuredOutput)
+          sampledAccountIds = extractPlannedAccountIds(plannedRun.reviewPlan)
+        }
         const completeParams = {
           ...(structuredOutput !== undefined && { structuredOutput }),
-          ...(values['sampled-account-ids'] !== undefined && {
-            sampledAccountIds: JSON.parse(values['sampled-account-ids']) as unknown,
-          }),
+          ...(sampledAccountIds !== undefined && { sampledAccountIds }),
           ...(values.findings !== undefined && { findings: values.findings }),
           ...(values['commit-sha'] !== undefined && { commitSha: values['commit-sha'] }),
           ...(values['pull-request-number'] !== undefined && {
