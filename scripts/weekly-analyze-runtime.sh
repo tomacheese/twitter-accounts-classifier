@@ -49,6 +49,42 @@ weekly_analyze_stale_after_passed() {
   [ "$_weekly_analyze_now_epoch" -gt "$_weekly_analyze_stale_epoch" ]
 }
 
+weekly_analyze_terminate_process_group() {
+  _weekly_analyze_pid="$1"
+  _weekly_analyze_expected_cwd="$2"
+  _weekly_analyze_grace_seconds="${3:-5}"
+
+  case "$_weekly_analyze_pid" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  /bin/kill -0 "$_weekly_analyze_pid" 2>/dev/null || return 0
+
+  _weekly_analyze_pgid="$(ps -o pgid= -p "$_weekly_analyze_pid" 2>/dev/null | tr -d '[:space:]')"
+  if [ "$_weekly_analyze_pgid" != "$_weekly_analyze_pid" ]; then
+    echo "[weekly-analyze] refusing to terminate pane pid $_weekly_analyze_pid because it is not its process-group leader" >&2
+    return 1
+  fi
+
+  _weekly_analyze_actual_cwd="$(readlink "/proc/$_weekly_analyze_pid/cwd" 2>/dev/null || true)"
+  case "$_weekly_analyze_actual_cwd" in
+    "$_weekly_analyze_expected_cwd"|"$_weekly_analyze_expected_cwd"/*) ;;
+    *)
+      echo "[weekly-analyze] refusing to terminate pane pid $_weekly_analyze_pid because cwd is outside the run worktree" >&2
+      return 1
+      ;;
+  esac
+
+  /bin/kill -TERM -- "-$_weekly_analyze_pgid" 2>/dev/null || true
+  _weekly_analyze_deadline=$(($(date +%s) + _weekly_analyze_grace_seconds))
+  while /bin/kill -0 -- "-$_weekly_analyze_pgid" 2>/dev/null; do
+    if [ "$(date +%s)" -ge "$_weekly_analyze_deadline" ]; then
+      /bin/kill -KILL -- "-$_weekly_analyze_pgid" 2>/dev/null || true
+      break
+    fi
+    sleep 1
+  done
+}
+
 
 weekly_analyze_database_url_with_application_name() {
   _weekly_analyze_database_url="$1"

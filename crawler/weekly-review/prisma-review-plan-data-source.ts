@@ -91,34 +91,44 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
         recent."ruleVersion",
         recent."labeledAt"
       FROM "LabelDefinition" definition
-      CROSS JOIN (VALUES (TRUE), (FALSE)) AS stratum(value)
       CROSS JOIN LATERAL (
         SELECT
-          bounded."accountId",
-          bounded.value,
-          bounded.confidence,
-          bounded.reason,
-          bounded."ruleVersion",
-          bounded."labeledAt"
+          ranked."accountId",
+          ranked.value,
+          ranked.confidence,
+          ranked.reason,
+          ranked."ruleVersion",
+          ranked."labeledAt"
         FROM (
           SELECT
-            label."accountId",
-            label.value,
-            label.confidence,
-            label.reason,
-            label."ruleVersion",
-            label."labeledAt",
-            label.id
-          FROM "AccountLabel" label
-          WHERE label."labelDefinitionId" = definition.id
-            AND label.value = stratum.value
-            AND label."labeledAt" >= ${targetFrom}
-            AND label."labeledAt" <= ${targetTo}
-          ORDER BY label."labeledAt" DESC, label.id DESC
-          LIMIT ${poolSize * 10}
-        ) bounded
-        ORDER BY md5(bounded."accountId" || ':' || definition.id || ':' || ${seed}), bounded.id DESC
-        LIMIT ${poolSize}
+            bounded."accountId",
+            bounded.value,
+            bounded.confidence,
+            bounded.reason,
+            bounded."ruleVersion",
+            bounded."labeledAt",
+            row_number() OVER (
+              PARTITION BY bounded.value
+              ORDER BY md5(bounded."accountId" || ':' || definition.id || ':' || ${seed}), bounded.id DESC
+            ) AS stratum_rank
+          FROM (
+            SELECT
+              label."accountId",
+              label.value,
+              label.confidence,
+              label.reason,
+              label."ruleVersion",
+              label."labeledAt",
+              label.id
+            FROM "AccountLabel" label
+            WHERE label."labelDefinitionId" = definition.id
+              AND label."labeledAt" >= ${targetFrom}
+              AND label."labeledAt" <= ${targetTo}
+            ORDER BY label."labeledAt" DESC, label.id DESC
+            LIMIT ${poolSize * 10}
+          ) bounded
+        ) ranked
+        WHERE ranked.stratum_rank <= ${poolSize}
       ) recent
     `)
   }

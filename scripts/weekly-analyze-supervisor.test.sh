@@ -214,7 +214,8 @@ cat > "$SUCCESS_CASE/repo/.env.weekly-review" <<'ENV'
 DATABASE_URL=postgresql://weekly_review:test-password@192.0.2.10:5432/testdb
 ENV
 SUCCESS_SHIMS="$SUCCESS_CASE/home/.local/share/mise/shims"
-export SUCCESS_TMUX_COUNT="$SUCCESS_CASE/tmux-count"
+export SUCCESS_TMUX_EVENTS="$SUCCESS_CASE/tmux-events"
+export SUCCESS_TMUX_KILLED="$SUCCESS_CASE/tmux-killed"
 cat > "$SUCCESS_SHIMS/claude" <<'SCRIPT'
 #!/bin/sh
 if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then
@@ -250,14 +251,25 @@ esac
 SCRIPT
 cat > "$SUCCESS_SHIMS/tmux" <<'SCRIPT'
 #!/bin/sh
-if [ "${1:-}" = has-session ]; then
-  count=0
-  [ -f "$SUCCESS_TMUX_COUNT" ] && count="$(cat "$SUCCESS_TMUX_COUNT")"
-  count=$((count + 1))
-  printf '%s' "$count" > "$SUCCESS_TMUX_COUNT"
-  [ "$count" -eq 1 ]
-  exit $?
-fi
+case "${1:-}" in
+  has-session)
+    [ ! -e "$SUCCESS_TMUX_KILLED" ]
+    exit $?
+    ;;
+  display-message)
+    printf '%s\n' '999999'
+    ;;
+  pipe-pane)
+    case " $* " in
+      *' -o '*) ;;
+      *) printf '%s\n' 'pipe-disabled' >> "$SUCCESS_TMUX_EVENTS" ;;
+    esac
+    ;;
+  kill-session)
+    printf '%s\n' 'kill-session' >> "$SUCCESS_TMUX_EVENTS"
+    touch "$SUCCESS_TMUX_KILLED"
+    ;;
+esac
 exit 0
 SCRIPT
 chmod +x "$SUCCESS_SHIMS/claude" "$SUCCESS_SHIMS/pnpm" "$SUCCESS_SHIMS/tmux" \
@@ -273,12 +285,19 @@ chmod +x "$SUCCESS_SHIMS/claude" "$SUCCESS_SHIMS/pnpm" "$SUCCESS_SHIMS/tmux" \
   git commit -q -m init
 )
 set +e
-timeout 6s env HOME="$SUCCESS_CASE/home" PATH="$SUCCESS_SHIMS:/usr/local/bin:/usr/bin:/bin" \
+timeout 6s env WEEKLY_REVIEW_TMUX_GRACE_SECONDS=0 WEEKLY_REVIEW_PROCESS_GRACE_SECONDS=0 \
+  HOME="$SUCCESS_CASE/home" PATH="$SUCCESS_SHIMS:/usr/local/bin:/usr/bin:/bin" \
   /bin/sh "$SUCCESS_CASE/repo/scripts/weekly-analyze.sh"
 SUCCESS_STATUS=$?
 set -e
 [ "$SUCCESS_STATUS" -eq 0 ] || fail "successful supervisor cleanup failed (status=$SUCCESS_STATUS)"
 grep -q 'pruning diagnostics older than retention window' "$SUCCESS_CASE/repo/logs/weekly-analyze.log" || \
   fail 'successful supervisor did not reach diagnostics cleanup after removing its worktree'
+[ -e "$SUCCESS_TMUX_KILLED" ] || fail 'successful supervisor did not forcibly terminate lingering tmux session'
+EXPECTED_TMUX_EVENTS='pipe-disabled
+kill-session'
+ACTUAL_TMUX_EVENTS="$(cat "$SUCCESS_TMUX_EVENTS" 2>/dev/null || true)"
+[ "$ACTUAL_TMUX_EVENTS" = "$EXPECTED_TMUX_EVENTS" ] || \
+  fail "tmux forced-cleanup order was unexpected: $ACTUAL_TMUX_EVENTS"
 
 echo '[weekly-analyze-supervisor.test] ok'
