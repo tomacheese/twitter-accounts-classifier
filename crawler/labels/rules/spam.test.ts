@@ -200,4 +200,16 @@ describe('spamRule', () => {
     )
     expect(result.value).toBe(false)
   })
+
+  it('gives a higher confidence to a stronger reinforcing signal among value=true cases', () => {
+    const weak = spamRule.evaluate(
+      makeBundle({ bio: '副業紹介します', followersCount: 100, followingCount: 500 }),
+    )
+    const strong = spamRule.evaluate(
+      makeBundle({ bio: '副業紹介します', followersCount: 50, followingCount: 1000 }),
+    )
+    expect(weak.value).toBe(true)
+    expect(strong.value).toBe(true)
+    expect(strong.confidence).toBeGreaterThan(weak.confidence)
+  })
 })

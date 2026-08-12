@@ -1,3 +1,4 @@
+import { rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 // 完全な言語判定ではなく日本語スクリプト(ひらがな/カタカナ/漢字)の有無のみを判定する。
@@ -31,7 +32,7 @@ export const replyLanguageMismatchRule: LabelRule = {
   key: 'reply_language_mismatch',
   description:
     '自身のツイートは特定の言語体系にほぼ偏っているが、リプライ(自身のリプライを自己リツイートしているものを含む)では無関係な対象読者向けに突然言語が切り替わる。エンゲージメント稼ぎボットネットワークの特徴',
-  version: '1.2.0',
+  version: '1.3.0',
   evaluate(bundle) {
     const { screenName } = bundle.account
     const ownPosts = bundle.recentTweets.filter(
@@ -63,12 +64,19 @@ export const replyLanguageMismatchRule: LabelRule = {
     const mismatch = Math.abs(ownJapaneseRatio - replyJapaneseRatio)
 
     const value = hasEnoughSample && mismatch >= SCRIPT_MISMATCH_THRESHOLD
-    const confidence = hasEnoughSample ? mismatch : 0
+    // サンプル数が多いほど閾値超過分に対し早く 1.0 へ飽和するよう、
+    // rampWidth をサンプルサイズの平方根に反比例させる (統計量そのものは smoothedRate 等で縮小しない)。
+    const minSampleSide = Math.min(ownPosts.length, replies.length)
+    const rampWidth = hasEnoughSample ? 0.3 * Math.sqrt(MIN_SAMPLE_PER_SIDE / minSampleSide) : 0.3
+    const evidenceScore = hasEnoughSample
+      ? rampScore(mismatch, SCRIPT_MISMATCH_THRESHOLD, rampWidth, 'higher-is-positive')
+      : 0
 
     return {
       value,
-      confidence,
+      confidence: toConfidence(value, evidenceScore, hasEnoughSample),
       reason: `ownJapaneseRatio=${ownJapaneseRatio.toFixed(2)} (n=${ownPosts.length}), replyJapaneseRatio=${replyJapaneseRatio.toFixed(2)} (n=${replies.length})`,
+      evaluable: hasEnoughSample,
     }
   },
 }

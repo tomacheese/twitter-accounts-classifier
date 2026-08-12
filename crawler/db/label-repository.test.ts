@@ -169,6 +169,7 @@ describe('recordAccountLabelsBulk', () => {
       ['because a', 'because b'],
       ['rule-a', 'rule-b'],
       ['1.0.0', '2.0.0'],
+      [true, true],
       // 発生源の 3 列は AccountLabel・AccountLabelLatest の両方へ同じ値を渡す。
       'relabel',
       null,
@@ -294,6 +295,52 @@ describe('recordAccountLabelsBulk', () => {
     expect(sqlText).toContain('LEFT JOIN "AccountLabelLatest"')
     expect(sqlText).toContain('al."confidence" IS DISTINCT FROM')
     expect(sqlText).toContain('al."reason" IS DISTINCT FROM')
+  })
+})
+
+describe('recordAccountLabelsBulk evaluable column', () => {
+  it('passes evaluable (defaulting to true) through UNNEST and writes it to both tables', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await recordAccountLabelsBulk(prisma, {
+      accountId: 'account-1',
+      labels: [
+        {
+          labelDefinitionId: 'label-1',
+          result: { value: true, confidence: 0.8, reason: 'test', evaluable: false },
+          method: 'crawl',
+          ruleVersion: '1.0.0',
+        },
+      ],
+      sourceKind: 'crawl',
+    })
+
+    const [sql, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    const sqlText = sql.join('')
+    expect(sqlText).toContain('"evaluable"')
+    expect(values).toContainEqual([false])
+  })
+
+  it('defaults evaluable to true when the rule result omits it', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await recordAccountLabelsBulk(prisma, {
+      accountId: 'account-1',
+      labels: [
+        {
+          labelDefinitionId: 'label-1',
+          result: { value: true, confidence: 0.8, reason: 'test' },
+          method: 'crawl',
+          ruleVersion: '1.0.0',
+        },
+      ],
+      sourceKind: 'crawl',
+    })
+
+    const [, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    expect(values).toContainEqual([true])
   })
 })
 

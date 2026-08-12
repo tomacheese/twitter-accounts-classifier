@@ -50,7 +50,7 @@ describe('topicIllustrationRule', () => {
     ).toBe(false)
   })
 
-  it('bio・ツイートにキーワードを含まず、フォローグラフシグナルがしきい値を満たす場合は value: true・confidence: 0.5 になる', () => {
+  it('bio・ツイートにキーワードを含まず、フォローグラフシグナルがしきい値を満たす場合は value: true・confidence が 0.5 超になる', () => {
     const bundle = {
       ...makeBundle({}),
       followGraphLabelSignals: {
@@ -64,7 +64,7 @@ describe('topicIllustrationRule', () => {
     }
     const result = topicIllustrationRule.evaluate(bundle)
     expect(result.value).toBe(true)
-    expect(result.confidence).toBe(0.5)
+    expect(result.confidence).toBeGreaterThan(0.5)
   })
 
   it('フォローグラフシグナルがしきい値未満の場合は value: false のままになる', () => {
@@ -81,5 +81,27 @@ describe('topicIllustrationRule', () => {
     }
     const result = topicIllustrationRule.evaluate(bundle)
     expect(result.value).toBe(false)
+  })
+  it('bio が無くフォローグラフのサンプルも不足している場合、evaluable: false・confidence: 0.5 になる', () => {
+    const bundle = {
+      ...makeBundle({}),
+      followGraphLabelSignals: {
+        topic_illustration: {
+          followeeLabeledCount: 1,
+          followeeTotalCount: 3,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    }
+    const result = topicIllustrationRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBeCloseTo(0.5)
+  })
+
+  it('bio があればフォローグラフのサンプルが不足していても evaluable: true になる', () => {
+    const result = topicIllustrationRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
+    expect(result.evaluable).toBe(true)
   })
 })

@@ -26,6 +26,12 @@ export interface PlanningCandidateRow extends Omit<PlanningCandidate, 'changeTyp
   changeType?: string
 }
 
+export interface PlanningPopulationCountRow {
+  labelDefinitionId: string
+  value: boolean
+  count: number
+}
+
 export interface PlanningDataRows {
   definitions: PlanningDefinitionRow[]
   aggregates: PlanningAggregateRow[]
@@ -34,11 +40,13 @@ export interface PlanningDataRows {
   recentChangeCounts: PlanningCountRow[]
   candidates: PlanningCandidateRow[]
   changeCandidates: PlanningCandidateRow[]
+  populationCounts: PlanningPopulationCountRow[]
 }
 
 export interface PlanningData {
   labels: PlanningLabel[]
   candidates: PlanningCandidate[]
+  populationCounts: Map<string, number>
 }
 
 function metrics(row: PlanningSnapshotRow | undefined): PlanningMetrics | undefined {
@@ -93,7 +101,11 @@ export function assemblePlanningData(rows: PlanningDataRows): PlanningData {
     candidates.set(key, existing ? { ...existing, changeType: row.changeType } : row)
   }
 
-  return { labels, candidates: [...candidates.values()] }
+  const populationCounts = new Map(
+    rows.populationCounts.map((row) => [`${row.labelDefinitionId}:${row.value}`, row.count]),
+  )
+
+  return { labels, candidates: [...candidates.values()], populationCounts }
 }
 
 export interface WeeklyReviewPlanningDataSource {
@@ -113,6 +125,14 @@ export interface WeeklyReviewPlanningDataSource {
     targetTo: Date,
     limit: number,
   ): Promise<PlanningCandidateRow[]>
+  /**
+   * `targetFrom`〜`targetTo` の期間内に labeled された、当該ラベル×value のアカウント数
+   * (relabel 履歴の行数ではない) を返す。`listRecentCandidates` と同じ
+   * `DISTINCT ON (accountId, labelDefinitionId)` の sampling unit で集計するため、
+   * 無作為抽出プールの inclusion probability (`poolSize / populationCount`) を
+   * 近似する母集団件数として使える (population frame が sample frame と一致する)。
+   */
+  listPopulationCounts(targetFrom: Date, targetTo: Date): Promise<PlanningPopulationCountRow[]>
 }
 
 export interface LoadWeeklyReviewPlanningDataOptions {
@@ -134,6 +154,7 @@ export async function loadWeeklyReviewPlanningData(
     recentChangeCounts,
     candidates,
     changeCandidates,
+    populationCounts,
   ] = await Promise.all([
     source.listDefinitions(),
     source.listAggregates(),
@@ -147,6 +168,7 @@ export async function loadWeeklyReviewPlanningData(
       options.seed,
     ),
     source.listChangeCandidates(options.targetFrom, options.targetTo, options.candidatePoolSize),
+    source.listPopulationCounts(options.targetFrom, options.targetTo),
   ])
 
   return assemblePlanningData({
@@ -157,5 +179,6 @@ export async function loadWeeklyReviewPlanningData(
     recentChangeCounts,
     candidates,
     changeCandidates,
+    populationCounts,
   })
 }

@@ -1,3 +1,4 @@
+import { combineAlternatives, toConfidence } from '../confidence'
 import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 import type { LabelRule } from '../types'
 
@@ -8,22 +9,30 @@ import type { LabelRule } from '../types'
 // 日本語は本プロジェクトの topic_* ルール群の慣例に倣い部分一致としている。
 const ILLUSTRATION_PATTERN = /イラスト|絵師|絵描き|\billustrator\b|pixiv/i
 
+const KEYWORD_SCORE = 0.8
+
 export const topicIllustrationRule: LabelRule = {
   key: 'topic_illustration',
   description: 'プロフィールでイラスト制作/投稿を中心的な関心事として挙げている',
-  version: '1.1.0',
+  version: '1.1.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && ILLUSTRATION_PATTERN.test(bio)
-    const followGraphMatch = hasFollowGraphTopicSignal(
+    const followGraph = hasFollowGraphTopicSignal(
       bundle.followGraphLabelSignals?.topic_illustration,
     )
-    const value = keywordMatch || followGraphMatch
+    const value = keywordMatch || followGraph.matched
+    const evidenceScore = combineAlternatives([
+      keywordMatch ? KEYWORD_SCORE : 0,
+      followGraph.evidenceScore,
+    ])
+    const evaluable = bio !== null || followGraph.evaluable
     return {
       value,
-      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
-      reason: `bio illustration-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
+      confidence: toConfidence(value, evidenceScore, evaluable),
+      reason: `bio illustration-keyword match=${keywordMatch}, follow-graph match=${followGraph.matched}`,
+      evaluable,
     }
   },
 }

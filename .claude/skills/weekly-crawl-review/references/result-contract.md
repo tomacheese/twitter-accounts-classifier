@@ -17,6 +17,8 @@ Each item in `review.judgments` must contain:
 - evidenceReference
 - reviewedBy
 - unavailableReason: when needed
+- populationCount: when the sample is `random_positive`/`random_negative`, carry over the plan's population count for that label/value
+- classifierEvaluable: when needed, carry over the rule's `evaluable` at labeling time
 
 `review` must contain strategyVersion, seed, budget, plannedSampleCount, reviewedSampleCount, randomAuditCount, targetedAuditCount, uncertainCount, skippedCount, incompletePhases, and judgments. Aggregate counts must equal values mechanically recomputed from judgments.
 

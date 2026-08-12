@@ -102,4 +102,10 @@ describe('adReplyHijackRule', () => {
     const result = adReplyHijackRule.evaluate(makeBundle(tweets))
     expect(result.value).toBe(false)
   })
+
+  it('is not evaluable when the reply sample is below the minimum', () => {
+    const result = adReplyHijackRule.evaluate(makeBundle([]))
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBeCloseTo(0.5)
+  })
 })

@@ -39,6 +39,17 @@ function regularTweets(count: number, intervalMs: number): AccountFeatureBundle[
   }))
 }
 
+function makeVelocityBundle(options: { replyRatioOverride: number }): AccountFeatureBundle {
+  const oneYearAgo = new Date('2025-01-01T00:00:00Z')
+  const sampleSize = 1000
+  const replyCount = Math.round(sampleSize * options.replyRatioOverride)
+  const tweets = regularTweets(sampleSize, 60e3).map((tweet, i) => ({
+    ...tweet,
+    isReply: i < replyCount,
+  }))
+  return makeBundle({ tweetCount: 100_000, accountCreatedAt: oneYearAgo }, tweets)
+}
+
 describe('botRule', () => {
   it('is true for a high-velocity account with regular intervals and no replies', () => {
     const oneYearAgo = new Date('2025-01-01T00:00:00Z')
@@ -218,5 +229,15 @@ describe('botRule', () => {
       makeBundle({ tweetCount: 200_000, accountCreatedAt: oneYearAgo }, tweets),
     )
     expect(result.value).toBe(false)
+  })
+
+  it('lowers confidence when replyRatio only marginally clears the threshold, even if other signals are strong', () => {
+    const strong = makeVelocityBundle({ replyRatioOverride: 0 })
+    const marginal = makeVelocityBundle({ replyRatioOverride: 0.049 })
+    const strongResult = botRule.evaluate(strong)
+    const marginalResult = botRule.evaluate(marginal)
+    expect(strongResult.value).toBe(true)
+    expect(marginalResult.value).toBe(true)
+    expect(marginalResult.confidence).toBeLessThan(strongResult.confidence)
   })
 })

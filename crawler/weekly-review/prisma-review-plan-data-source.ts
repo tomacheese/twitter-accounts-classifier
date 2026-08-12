@@ -4,6 +4,7 @@ import type {
   PlanningCandidateRow,
   PlanningCountRow,
   PlanningDefinitionRow,
+  PlanningPopulationCountRow,
   PlanningSnapshotRow,
   WeeklyReviewPlanningDataSource,
 } from './review-plan-data'
@@ -89,7 +90,8 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
         recent.confidence,
         recent.reason,
         recent."ruleVersion",
-        recent."labeledAt"
+        recent."labeledAt",
+        recent.evaluable
       FROM "LabelDefinition" definition
       CROSS JOIN LATERAL (
         SELECT
@@ -98,38 +100,68 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
           ranked.confidence,
           ranked.reason,
           ranked."ruleVersion",
-          ranked."labeledAt"
+          ranked."labeledAt",
+          ranked.evaluable
         FROM (
           SELECT
-            bounded."accountId",
-            bounded.value,
-            bounded.confidence,
-            bounded.reason,
-            bounded."ruleVersion",
-            bounded."labeledAt",
+            deduped."accountId",
+            deduped.value,
+            deduped.confidence,
+            deduped.reason,
+            deduped."ruleVersion",
+            deduped."labeledAt",
+            deduped.evaluable,
             row_number() OVER (
-              PARTITION BY bounded.value
-              ORDER BY md5(bounded."accountId" || ':' || definition.id || ':' || ${seed}), bounded.id DESC
+              PARTITION BY deduped.value
+              ORDER BY md5(deduped."accountId" || ':' || definition.id || ':' || ${seed})
             ) AS stratum_rank
           FROM (
-            SELECT
+            -- sample frame = 期間内の各 accountId × labelDefinitionId の最新1件 (dedupe 後の期間内全件)。
+            -- listPopulationCounts と同じ DISTINCT ON キー・LIMIT なしで揃え、
+            -- inclusion probability がゼロの行を population frame に含めない。
+            SELECT DISTINCT ON (label."labelDefinitionId", label."accountId")
               label."accountId",
               label.value,
               label.confidence,
               label.reason,
               label."ruleVersion",
               label."labeledAt",
-              label.id
+              label.evaluable
             FROM "AccountLabel" label
             WHERE label."labelDefinitionId" = definition.id
               AND label."labeledAt" >= ${targetFrom}
               AND label."labeledAt" <= ${targetTo}
-            ORDER BY label."labeledAt" DESC, label.id DESC
-            LIMIT ${poolSize * 10}
-          ) bounded
+            ORDER BY label."labelDefinitionId", label."accountId", label."labeledAt" DESC, label.id DESC
+          ) deduped
         ) ranked
         WHERE ranked.stratum_rank <= ${poolSize}
       ) recent
+    `)
+  }
+
+  /**
+   * `targetFrom`〜`targetTo` の期間内に labeled された、ラベル×value ごとのアカウント数
+   * (relabel 履歴の行数ではなく account 単位の重複排除後) を返す。
+   * `listRecentCandidates` の抽出母集団と揃えるため `evaluable` でも絞り込む。
+   */
+  public async listPopulationCounts(
+    targetFrom: Date,
+    targetTo: Date,
+  ): Promise<PlanningPopulationCountRow[]> {
+    return this.prisma.$queryRaw<PlanningPopulationCountRow[]>(Prisma.sql`
+      SELECT deduped."labelDefinitionId", deduped.value, COUNT(*)::int AS count
+      FROM (
+        SELECT DISTINCT ON (label."labelDefinitionId", label."accountId")
+          label."accountId",
+          label."labelDefinitionId",
+          label.value
+        FROM "AccountLabel" label
+        WHERE label."labeledAt" >= ${targetFrom}
+          AND label."labeledAt" <= ${targetTo}
+          AND label.evaluable
+        ORDER BY label."labelDefinitionId", label."accountId", label."labeledAt" DESC, label.id DESC
+      ) deduped
+      GROUP BY deduped."labelDefinitionId", deduped.value
     `)
   }
 
@@ -148,6 +180,7 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
         latest.reason,
         latest."ruleVersion",
         latest."labeledAt",
+        latest.evaluable,
         change."changeType"
       FROM "AccountLabelChange" change
       JOIN "AccountLabelLatest" latest

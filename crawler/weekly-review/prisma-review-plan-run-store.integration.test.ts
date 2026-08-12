@@ -28,11 +28,11 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewRunPlanStore', () 
       const run = await store.getRun(id)
       expect(run).toEqual({ id, startedAt })
 
-      const reviewPlan = { schemaVersion: 1, strategyVersion: 'risk-stratified/1', samples: [] }
+      const reviewPlan = { schemaVersion: 1, strategyVersion: 'risk-stratified/2', samples: [] }
       await store.recordPlanMetadata(id, {
         targetFrom: new Date('2026-08-05T00:00:00Z'),
         targetTo: startedAt,
-        analysisVersion: 'risk-stratified/1',
+        analysisVersion: 'risk-stratified/2',
         reviewPlan: reviewPlan as never,
       })
 
@@ -40,7 +40,7 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewRunPlanStore', () 
       expect(updated).toMatchObject({
         targetFrom: new Date('2026-08-05T00:00:00Z'),
         targetTo: startedAt,
-        analysisVersion: 'risk-stratified/1',
+        analysisVersion: 'risk-stratified/2',
         reviewPlan,
       })
     } finally {
@@ -68,10 +68,10 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewRunPlanStore', () 
         store.recordPlanMetadata(id, {
           targetFrom: new Date('2026-08-05T00:00:00Z'),
           targetTo: startedAt,
-          analysisVersion: 'risk-stratified/1',
+          analysisVersion: 'risk-stratified/2',
           reviewPlan: {
             schemaVersion: 1,
-            strategyVersion: 'risk-stratified/1',
+            strategyVersion: 'risk-stratified/2',
             seed: id,
             budget: 1,
             targetFrom: '2026-08-05T00:00:00.000Z',

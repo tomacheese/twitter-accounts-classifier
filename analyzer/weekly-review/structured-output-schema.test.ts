@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { structuredOutputSchema } from './structured-output-schema'
+import {
+  structuredOutputSchema,
+  weeklyReviewSampleJudgmentSchema,
+} from './structured-output-schema'
 
 const validOutput = {
   schemaVersion: 1,
@@ -145,5 +148,49 @@ describe('structuredOutputSchema', () => {
       },
     })
     expect(result.success).toBe(false)
+  })
+
+  it('accepts the new positive_evidence_negative and insufficient_support sample kinds', () => {
+    const judgment = {
+      sampleId: 's1',
+      accountId: 'a1',
+      labelDefinitionId: 'l1',
+      labelKey: 'label_one',
+      sampleKind: 'positive_evidence_negative',
+      classifierValue: false,
+      classifierConfidence: 0.3,
+      ruleVersion: '1.0.0',
+      verdict: 'correct',
+      judgeConfidence: 0.9,
+      evidenceReference: 'ref',
+      reviewedBy: 'reviewer',
+      populationCount: 100,
+      classifierEvaluable: true,
+    }
+    expect(weeklyReviewSampleJudgmentSchema.safeParse(judgment).success).toBe(true)
+    expect(
+      weeklyReviewSampleJudgmentSchema.safeParse({
+        ...judgment,
+        sampleKind: 'insufficient_support',
+      }).success,
+    ).toBe(true)
+  })
+
+  it('still accepts the legacy high_confidence_negative sample kind for backward compatibility', () => {
+    const judgment = {
+      sampleId: 's1',
+      accountId: 'a1',
+      labelDefinitionId: 'l1',
+      labelKey: 'label_one',
+      sampleKind: 'high_confidence_negative',
+      classifierValue: false,
+      classifierConfidence: 1,
+      ruleVersion: '1.0.0',
+      verdict: 'correct',
+      judgeConfidence: 0.9,
+      evidenceReference: 'ref',
+      reviewedBy: 'reviewer',
+    }
+    expect(weeklyReviewSampleJudgmentSchema.safeParse(judgment).success).toBe(true)
   })
 })

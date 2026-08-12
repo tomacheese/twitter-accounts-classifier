@@ -1,3 +1,4 @@
+import { combineRequired, rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 const MIN_DISTINCT_AUTHORS = 5
@@ -35,7 +36,7 @@ export const replyHijackSwarmRule: LabelRule = {
   key: 'reply_hijack_swarm',
   description:
     '別々のアカウントが1件ずつ、似た言い回しの低努力リプライを1つの高エンゲージメントツイートに乗せてインプレッションを稼ぐ「一斉提灯リプライ」ネットワークの一員であり、かつ自身のアカウントもオリジナル投稿がほぼない低努力アカウントである',
-  version: '1.3.0',
+  version: '1.4.0',
   evaluate(bundle) {
     const size = bundle.replyHijackSwarmSize ?? 0
     const isSwarmMember = size >= MIN_DISTINCT_AUTHORS
@@ -47,12 +48,22 @@ export const replyHijackSwarmRule: LabelRule = {
     const looksReplyFocused = hasEnoughSample && replyRatio >= REPLY_RATIO_THRESHOLD
 
     const value = isSwarmMember && looksReplyFocused
-    const confidence = value ? Math.min(1, size / 15) : 0
+    const sizeScore = rampScore(
+      size,
+      MIN_DISTINCT_AUTHORS,
+      MIN_DISTINCT_AUTHORS,
+      'higher-is-positive',
+    )
+    const replyRatioScore = hasEnoughSample
+      ? rampScore(replyRatio, REPLY_RATIO_THRESHOLD, 0.5, 'higher-is-positive')
+      : 0
+    const evidenceScore = combineRequired([sizeScore, replyRatioScore])
 
     return {
       value,
-      confidence,
+      confidence: toConfidence(value, evidenceScore, hasEnoughSample),
       reason: `replyHijackSwarmSize=${size}, replyRatio=${replyRatio.toFixed(2)} (n=${sampled.length})`,
+      evaluable: hasEnoughSample,
     }
   },
 }

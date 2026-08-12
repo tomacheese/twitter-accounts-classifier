@@ -50,6 +50,7 @@ export async function generateWeeklyReviewPlan(
     targetTo,
     labels: planningData.labels,
     candidates: planningData.candidates,
+    populationCounts: planningData.populationCounts,
   })
 
   await dependencies.store.recordPlanMetadata(run.id, {

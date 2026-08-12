@@ -10,4 +10,12 @@ describe('ALL_LABEL_RULES', () => {
     }).not.toThrow()
     expect(registry.getAll()).toHaveLength(ALL_LABEL_RULES.length)
   })
+
+  it('bumps the version for every rule that uses the follow graph signal', () => {
+    const followGraphRules = ALL_LABEL_RULES.filter((rule) => rule.usesFollowGraphSignal)
+    expect(followGraphRules.length).toBeGreaterThan(0)
+    for (const rule of followGraphRules) {
+      expect(rule.version).toBeTruthy()
+    }
+  })
 })

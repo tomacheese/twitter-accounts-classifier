@@ -1,3 +1,4 @@
+import { combineAlternatives, combineRequired, rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 // 「フォロバ」「相互フォロー」「無言フォロー」「DMください」のような通常の礼儀表現は、
@@ -64,7 +65,7 @@ export const spamRule: LabelRule = {
   key: 'spam',
   description:
     'プロフィールで出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある',
-  version: '1.7.0',
+  version: '1.8.0',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
     const hasSolicitation = bio !== null && hasGenuineSolicitation(bio)
@@ -76,17 +77,37 @@ export const spamRule: LabelRule = {
 
     const hasMassFollowingPattern = isMassFollowingPattern(followingCount, followersCount)
 
-    let signals = 0
-    if (hasSolicitation) signals += 1
-    if (hasBaitRetweetPattern) signals += 1
-    if (hasMassFollowingPattern) signals += 1
-
     const value = hasSolicitation && (hasBaitRetweetPattern || hasMassFollowingPattern)
-    const confidence = signals === 0 ? 0 : signals / 3
+
+    const retweetScore = rampScore(retweetRatio, 0.8, 0.2, 'higher-is-positive')
+    const followingCountScore = rampScore(
+      followingCount,
+      MASS_FOLLOWING_MIN_COUNT,
+      500,
+      'higher-is-positive',
+    )
+    const followingRatio = followersCount > 0 ? followingCount / followersCount : followingCount
+    const followingRatioScore = rampScore(
+      followingRatio,
+      MASS_FOLLOWING_RATIO,
+      5,
+      'higher-is-positive',
+    )
+    // hasSolicitation を combineRequired の一員に含めることで、
+    // 勧誘が無い bio では他シグナルの強弱に関わらず evidenceScore を 0 に落とす。
+    // 含めないと勧誘無しでも大量フォロー等の副シグナルだけで evidenceScore が高止まりし、
+    // value=false の confidence が不当に低くなるため。
+    const evidenceScore = combineRequired([
+      hasSolicitation ? 1 : 0,
+      combineAlternatives([
+        retweetScore,
+        combineRequired([followingCountScore, followingRatioScore]),
+      ]),
+    ])
 
     return {
       value,
-      confidence,
+      confidence: toConfidence(value, evidenceScore),
       reason: `bio solicitation=${hasSolicitation}, retweetRatio=${retweetRatio.toFixed(2)} (n=${sampled.length}), followingCount=${followingCount}, followersCount=${followersCount}`,
     }
   },

@@ -1,3 +1,4 @@
+import { combineAlternatives, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 
@@ -30,20 +31,28 @@ function hasGenuineCryptoMention(bio: string): boolean {
   return matches.some((match) => !isRejectedMention(bio, match))
 }
 
+const KEYWORD_SCORE = 0.8
+
 export const topicCryptoRule: LabelRule = {
   key: 'topic_crypto',
   description: 'プロフィールで暗号資産/web3 を中心的な関心事として挙げている',
-  version: '1.3.0',
+  version: '1.3.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && hasGenuineCryptoMention(bio)
-    const followGraphMatch = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_crypto)
-    const value = keywordMatch || followGraphMatch
+    const followGraph = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_crypto)
+    const value = keywordMatch || followGraph.matched
+    const evidenceScore = combineAlternatives([
+      keywordMatch ? KEYWORD_SCORE : 0,
+      followGraph.evidenceScore,
+    ])
+    const evaluable = bio !== null || followGraph.evaluable
     return {
       value,
-      confidence: keywordMatch ? 0.8 : followGraphMatch ? 0.5 : 0,
-      reason: `bio crypto-keyword match=${keywordMatch}, follow-graph match=${followGraphMatch}`,
+      confidence: toConfidence(value, evidenceScore, evaluable),
+      reason: `bio crypto-keyword match=${keywordMatch}, follow-graph match=${followGraph.matched}`,
+      evaluable,
     }
   },
 }

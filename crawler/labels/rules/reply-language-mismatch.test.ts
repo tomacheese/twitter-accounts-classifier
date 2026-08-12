@@ -135,4 +135,10 @@ describe('replyLanguageMismatchRule', () => {
     )
     expect(result.value).toBe(false)
   })
+
+  it('is not evaluable when either side has fewer samples than MIN_SAMPLE_PER_SIDE', () => {
+    const result = replyLanguageMismatchRule.evaluate(makeBundle({}, []))
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBeCloseTo(0.5)
+  })
 })

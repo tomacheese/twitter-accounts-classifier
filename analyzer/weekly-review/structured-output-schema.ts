@@ -6,10 +6,12 @@ export const weeklyReviewSampleKindSchema = z.enum([
   'random_negative',
   'recent_change',
   'high_confidence_negative',
+  'positive_evidence_negative',
   'low_confidence_positive',
   'old_rule_version',
   'rare_reason',
   'risk_targeted',
+  'insufficient_support',
 ])
 
 export const weeklyReviewVerdictSchema = z.enum([
@@ -34,6 +36,8 @@ export const weeklyReviewSampleJudgmentSchema = z.object({
   evidenceReference: z.string().min(1),
   reviewedBy: z.string().min(1),
   unavailableReason: z.string().min(1).optional(),
+  populationCount: z.number().int().min(0).optional(),
+  classifierEvaluable: z.boolean().optional(),
 })
 
 export const weeklyReviewSummarySchema = z
