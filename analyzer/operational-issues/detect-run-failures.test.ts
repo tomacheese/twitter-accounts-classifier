@@ -365,7 +365,9 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
       errorCode: 'label_aggregate_snapshot_failed',
       triggerType: 'schedule',
       createdAt: new Date('2026-08-09T00:00:00Z'),
-      now: new Date('2026-08-09T00:00:00Z'),
+      // 後続の cross-resolve が使う supersedeCutoff (成功側の createdAt) より後にすることで、
+      // このテストが検証したい cutoff なしの同一 WorkItem 経路だけが resolve できることを確認する。
+      now: new Date('2026-08-09T00:10:00Z'),
     })
     const issue = await prisma.operationalIssue.findFirstOrThrow()
     expect(issue.status).toBe('active')
@@ -379,7 +381,7 @@ describe.skipIf(!process.env.DATABASE_URL)('detectAnalysisStageFailure', () => {
       errorCode: undefined,
       triggerType: 'schedule',
       createdAt: new Date('2026-08-09T00:00:00Z'),
-      now: new Date('2026-08-09T00:05:00Z'),
+      now: new Date('2026-08-09T00:15:00Z'),
     })
 
     const resolved = await prisma.operationalIssue.findUniqueOrThrow({ where: { id: issue.id } })

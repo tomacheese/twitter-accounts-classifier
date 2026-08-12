@@ -8,12 +8,11 @@ const logger = Logger.configure('analyzer:cleanup-deprecated-work-item-kinds')
 
 /** 一度だけ強制的に resolve してよい component と、その適用条件。 */
 interface LegacyComponentTarget {
+  /** 対象 component。 */
   component: string
   /**
-   * true: 二度と新規 activate されない component (廃止済み kind) なので、active issue を
-   * 無条件で全件対象にする。
-   * false: 現行コードでも新規 activate され得る component なので、`before` カットオフ
-   * より前に検出された issue だけを対象にする。
+   * true: 廃止済み kind で二度と新規 activate されないため、active issue を無条件で全件対象にする。
+   * false: 現行コードでも新規 activate されるため、`before` カットオフ以下の issue だけを対象にする。
    */
   unconditional: boolean
 }
@@ -21,12 +20,13 @@ interface LegacyComponentTarget {
 export const LEGACY_COMPONENT_TARGETS: LegacyComponentTarget[] = [
   // 廃止済み kind。二度と WorkItem が処理されないため無条件で resolve してよい。
   { component: 'analyzer:label_metrics', unconditional: true },
-  // stage 分離導入前の generic component。導入後も未分類 failure の activate 先として
-  // 使われ続けるため、deploy 前のカットオフより前の issue だけを対象にする。
+  // stage 分離導入前の generic component。cutoff 以前の issue だけを対象にする。
   { component: 'analyzer:label_aggregate_refresh', unconditional: false },
 ]
 
+/** component ごとの cleanup 結果。 */
 export interface CleanupResult {
+  /** 対象 component。 */
   component: string
   /** resolve 前の対象 active issue 件数。 */
   activeCountBefore: number
@@ -37,7 +37,7 @@ export interface CleanupResult {
 /**
  * 対象 component に残った active な run_failure issue を集計し、
  * apply が true のときだけ resolve する。
- * `unconditional: false` の component は `before` より前に検出された issue だけを対象にし、
+ * `unconditional: false` の component は `before` 以下の時刻に検出された issue だけを対象にし、
  * deploy 後に新しく発生した未分類 failure まで一緒に resolve しないようにする。
  * @param prisma - Prisma クライアント
  * @param options - apply フラグ (false なら集計のみ)、判定基準時刻、deploy 前カットオフ時刻
@@ -75,6 +75,9 @@ export async function cleanupDeprecatedWorkItemKindIssues(
   return results
 }
 
+// 本番コンテナには package.json が同梱されないため、npm script は本番では実行できない。
+// 本番では `docker compose run --rm analyzer node dist/scripts/cleanup-deprecated-work-item-kinds.js --apply --before=<ISO>` を使う。
+// npm script はソースチェックアウトがあるローカル開発環境向け。
 async function main(): Promise<void> {
   const apply = process.argv.includes('--apply')
   const beforeArg = process.argv.find((arg) => arg.startsWith('--before='))
@@ -84,6 +87,11 @@ async function main(): Promise<void> {
     return
   }
   const before = new Date(beforeArg.slice('--before='.length))
+  if (Number.isNaN(before.getTime())) {
+    logger.error(`invalid --before value: ${beforeArg}`)
+    process.exitCode = 1
+    return
+  }
 
   const prisma = getPrismaClient()
   await prisma.$connect()
@@ -104,10 +112,7 @@ async function main(): Promise<void> {
     logger.info('dry-run: pass --apply to resolve and re-publish projections')
   }
 
-  await disconnectPrisma()
-
-  // post-condition: apply 後に対象 active issue が残っていれば、実行したこと自体ではなく
-  // 実際に解消できたことを完了条件として非 0 exit にする。
+  // post-condition: 実行したこと自体ではなく、実際に解消できたことを完了条件にする。
   const remaining = results.filter((result) => apply && result.activeCountAfter > 0)
   if (remaining.length > 0) {
     for (const result of remaining) {
@@ -119,13 +124,13 @@ async function main(): Promise<void> {
   }
 }
 
-// このモジュールを import しただけでは実行されないようにするガード。
-// 直接実行 (`node dist/scripts/cleanup-deprecated-work-item-kinds.js`) した場合のみ動作する。
-// require/module は、CommonJS を採用する本プロジェクトでこれを判定するのに適した手段である。
+// ESM の import.meta.url ではなく require.main を使うのは、本プロジェクトが CommonJS だからである。
 // eslint-disable-next-line unicorn/prefer-module
 if (require.main === module) {
-  main().catch((error: unknown) => {
-    logger.error('cleanup failed', error as Error)
-    process.exitCode = 1
-  })
+  main()
+    .catch((error: unknown) => {
+      logger.error('cleanup failed', error as Error)
+      process.exitCode = 1
+    })
+    .finally(() => disconnectPrisma())
 }

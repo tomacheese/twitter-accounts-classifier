@@ -273,8 +273,7 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     const issue = await prisma.operationalIssue.findFirstOrThrow()
     expect(issue.component).toBe('analyzer:label_aggregate_refresh:snapshot')
 
-    // handleWorkItemSettled の post-completion hook が一度失敗し、durable retry として
-    // post_completion_refresh 経由で同じ元 WorkItem を再処理する状況を再現する。
+    // handleWorkItemSettled の post-completion hook が一度失敗し、durable retry として post_completion_refresh 経由で同じ元 WorkItem を再処理する状況を再現する。
     const originalWorkItem = await prisma.analysisWorkItem.create({
       data: {
         id: workItemId,
