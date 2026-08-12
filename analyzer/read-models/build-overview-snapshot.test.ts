@@ -195,7 +195,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
     expect(snapshot.operationalStatus).toBe('unknown')
   })
 
-  it('必須 Stage が skipped (partial CrawlRun による見送り) なら operationalStatus は critical になる', async () => {
+  it('必須 Stage が skipped なら operationalStatus は critical になる', async () => {
     const cycle = await prisma.operationCycle.create({
       data: {
         kind: 'crawl',
@@ -203,17 +203,17 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
         sourceId: `crawl-${randomUUID()}`,
         triggeredAt: new Date(),
         status: 'partial',
-        modelVersion: '1',
+        modelVersion: '2',
       },
     })
     await prisma.operationStage.create({
       data: {
         cycleId: cycle.id,
-        stageKey: 'read_model_refresh',
-        sequence: 4,
+        stageKey: 'label_aggregate_refresh',
+        sequence: 2,
         requiredness: 'required',
         status: 'skipped',
-        errorSummary: 'crawl run is partial: read model refresh skipped',
+        errorSummary: 'stub reason for skip',
       },
     })
 
@@ -224,6 +224,94 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOverviewSnapshot', () => {
 
     const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
     expect(snapshot.operationalStatus).toBe('critical')
+  })
+
+  it('廃止済み read_model_refresh stage が failed でも operationalStatus に影響しない', async () => {
+    const cycle = await prisma.operationCycle.create({
+      data: {
+        kind: 'crawl',
+        sourceType: 'crawl_run',
+        sourceId: `crawl-${randomUUID()}`,
+        triggeredAt: new Date(),
+        status: 'succeeded',
+        modelVersion: '2',
+      },
+    })
+    await prisma.operationStage.create({
+      data: {
+        cycleId: cycle.id,
+        stageKey: 'crawl',
+        sequence: 1,
+        requiredness: 'required',
+        status: 'succeeded',
+      },
+    })
+    await prisma.operationStage.create({
+      data: {
+        cycleId: cycle.id,
+        stageKey: 'label_aggregate_refresh',
+        sequence: 2,
+        requiredness: 'required',
+        status: 'succeeded',
+      },
+    })
+    await prisma.operationStage.create({
+      data: {
+        cycleId: cycle.id,
+        stageKey: 'read_model_refresh',
+        sequence: 3,
+        requiredness: 'required',
+        status: 'failed',
+        errorSummary: 'work item was never enqueued',
+      },
+    })
+
+    const result = await buildOverviewSnapshot(prisma, {
+      generationId: randomUUID(),
+      sourceWatermarkAt: new Date(),
+    })
+
+    const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
+    expect(snapshot.operationalStatus).toBe('healthy')
+  })
+
+  it('必須 2 Stage の topology で partial な crawl cycle は operationalStatus を critical にしない', async () => {
+    const cycle = await prisma.operationCycle.create({
+      data: {
+        kind: 'crawl',
+        sourceType: 'crawl_run',
+        sourceId: `crawl-${randomUUID()}`,
+        triggeredAt: new Date(),
+        status: 'partial',
+        modelVersion: '2',
+      },
+    })
+    await prisma.operationStage.create({
+      data: {
+        cycleId: cycle.id,
+        stageKey: 'crawl',
+        sequence: 1,
+        requiredness: 'required',
+        status: 'partial',
+      },
+    })
+    await prisma.operationStage.create({
+      data: {
+        cycleId: cycle.id,
+        stageKey: 'label_aggregate_refresh',
+        sequence: 2,
+        requiredness: 'required',
+        status: 'succeeded',
+      },
+    })
+
+    const result = await buildOverviewSnapshot(prisma, {
+      generationId: randomUUID(),
+      sourceWatermarkAt: new Date(),
+    })
+
+    const snapshot = await prisma.overviewSnapshot.findUniqueOrThrow({ where: { id: result.id } })
+    expect(snapshot.operationalStatus).toBe('healthy')
   })
 
   it('overview_snapshot 自身の旧 ReadModelState は build 中の判定に含めない', async () => {

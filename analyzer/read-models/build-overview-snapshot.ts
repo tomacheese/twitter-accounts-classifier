@@ -121,7 +121,7 @@ export async function buildOverviewSnapshot(
     prisma.readModelPointer.findUnique({ where: { modelKey: 'block_relation' } }),
   ])
 
-  const coreStageKeys = new Set(['crawl', 'label_aggregate_refresh', 'read_model_refresh'])
+  const coreStageKeys = new Set(['crawl', 'label_aggregate_refresh'])
   const coreStages = (latestCycle?.stages ?? []).filter((stage) =>
     coreStageKeys.has(stage.stageKey),
   )
@@ -141,8 +141,7 @@ export async function buildOverviewSnapshot(
     // Stage は crawl cycle 単位の一時的な失敗、ReadModelState は経過時間で
     // 落ちる鮮度そのものであり、いずれか一方だけを見ると
     // 「Stage は succeeded だが更新が止まっている」状態を見逃す。
-    // skipped は partial な CrawlRun で必須後続処理 (read_model_refresh) が
-    // 意図的に見送られた際の明示状態であり、failed/stale と同様に必須系の未完了を示す。
+    // skipped はこの pipeline では発生しないが、過去互換のため failed/stale と同様に扱う。
     hasFailedOrStaleCoreStage:
       coreStages.some(
         (stage) =>

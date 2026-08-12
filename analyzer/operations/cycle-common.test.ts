@@ -2,23 +2,31 @@ import { describe, it, expect, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
 import {
   applyUpstreamBlocking,
+  deleteObsoleteOperationStages,
   deriveCycleStatus,
   deriveWorkItemStage,
+  NEVER_ENQUEUED_ERROR_SUMMARY,
   type WorkItemStage,
 } from './cycle-common'
 
 /**
- * @returns analysisWorkItem.findUnique を差し替え可能な Prisma クライアントのモックと、
- * その差し替え用の関数
+ * @returns analysisWorkItem.findUnique / operationStage.deleteMany を差し替え可能な
+ * Prisma クライアントのモックと、その差し替え用の関数
  */
 function createMockPrismaClient(): {
   prisma: PrismaClient
   findUnique: ReturnType<typeof vi.fn>
+  deleteMany: ReturnType<typeof vi.fn>
 } {
   const findUnique = vi.fn()
+  const deleteMany = vi.fn()
   return {
-    prisma: { analysisWorkItem: { findUnique } } as unknown as PrismaClient,
+    prisma: {
+      analysisWorkItem: { findUnique },
+      operationStage: { deleteMany },
+    } as unknown as PrismaClient,
     findUnique,
+    deleteMany,
   }
 }
 
@@ -171,5 +179,23 @@ describe('applyUpstreamBlocking', () => {
     }
     const result = applyUpstreamBlocking(stage, 'waiting')
     expect(result.status).toBe('waiting')
+  })
+})
+
+describe('deleteObsoleteOperationStages', () => {
+  it('phantom 条件 (analysisRunId: null かつ未 enqueue エラー概要) に限定して削除する', async () => {
+    const { prisma, deleteMany } = createMockPrismaClient()
+    deleteMany.mockResolvedValue({ count: 1 })
+
+    await deleteObsoleteOperationStages(prisma, 'cycle-1', ['label_aggregate_refresh'])
+
+    expect(deleteMany).toHaveBeenCalledWith({
+      where: {
+        cycleId: 'cycle-1',
+        stageKey: { notIn: ['label_aggregate_refresh'] },
+        analysisRunId: null,
+        errorSummary: NEVER_ENQUEUED_ERROR_SUMMARY,
+      },
+    })
   })
 })

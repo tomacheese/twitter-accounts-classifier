@@ -292,6 +292,8 @@ describe('finishCrawlRun', () => {
     })
   })
 
+  // consumer 側 (analyzer/operations/build-crawl-cycle.test.ts) がここで固定する
+  // kind/triggerType/triggerId をそのまま再利用し、契約の崩れを検出する。
   it('enqueues a label_aggregate_refresh AnalysisWorkItem for the finished run', async () => {
     const update = vi.fn().mockResolvedValue({})
     const upsert = vi.fn().mockResolvedValue({})

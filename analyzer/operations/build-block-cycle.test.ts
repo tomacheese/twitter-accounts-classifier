@@ -84,4 +84,15 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateBlockCycle', () => {
     expect(cycle.status).toBe('failed')
     expect(cycle.attentionRequired).toBe(true)
   })
+
+  it('modelVersion は crawl cycle 側の変更と独立して 1 のまま保たれる', async () => {
+    const runId = await createRun('success')
+
+    await buildOrUpdateBlockCycle(prisma, { blockRunId: runId })
+
+    const cycle = await prisma.operationCycle.findUniqueOrThrow({
+      where: { sourceType_sourceId: { sourceType: 'block_run', sourceId: runId } },
+    })
+    expect(cycle.modelVersion).toBe('1')
+  })
 })
