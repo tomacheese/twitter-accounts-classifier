@@ -1761,6 +1761,7 @@ async function main(): Promise<void> {
   await upsertComponentBuildIdentity(prisma, 'crawler')
   const cookieIssuer = createCookieIssuerClient({
     baseUrl: getCookieIssuerBaseUrl(),
+    clientName: 'crawler',
   })
 
   const staleThresholdMs = getCrawlIntervalSeconds() * getCrawlStaleThresholdMultiplier() * 1000

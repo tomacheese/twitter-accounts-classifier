@@ -1,6 +1,23 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { runBlockCycle } from './index'
 import type { BlockerAppConfig } from './config/load-config'
+
+const issueCookiesWithRetry = vi.fn()
+vi.mock('twitter-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('twitter-client')>()
+  return {
+    ...actual,
+    createCookieIssuerClient: vi.fn(() => ({
+      issueCookies: vi.fn(),
+      issueCookiesWithRetry,
+    })),
+  }
+})
+
+beforeEach(() => {
+  process.env.COOKIE_ISSUER_URL = 'https://cookie-issuer.example.com'
+  issueCookiesWithRetry.mockReset()
+})
 
 describe('runBlockCycle', () => {
   it('skips accounts with block_enabled=false and runs the rest', async () => {
@@ -62,6 +79,7 @@ describe('runBlockCycle', () => {
     expect(reconcileAccountOutbox).toHaveBeenCalledWith(
       expect.objectContaining({ username: 'alice' }),
       deps.prisma,
+      undefined,
     )
   })
 
@@ -243,5 +261,94 @@ describe('runBlockCycle', () => {
     await runBlockCycle(deps as never)
 
     expect(reconcileAccountOutbox).toHaveBeenCalledTimes(2)
+  })
+
+  it('block 本処理が成功した場合、reconciliation は cookies を再利用し Cookie Issuer へ追加 request しない', async () => {
+    const config: BlockerAppConfig = {
+      accounts: [
+        {
+          email: 'a@example.com',
+          username: 'alice',
+          password: 'p',
+          otpSecret: null,
+          blockEnabled: true,
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+        },
+      ],
+      discordWebhookUrl: null,
+    }
+    const issuedCookies = { ct0: 'c0', authToken: 'a0' }
+    issueCookiesWithRetry.mockResolvedValue(issuedCookies)
+    const runBlockAccountCycle = vi
+      .fn()
+      .mockImplementation(
+        async (accountDeps: { issueCookies: (a: unknown) => Promise<unknown> }) => {
+          await accountDeps.issueCookies({
+            username: 'alice',
+            password: 'p',
+            otp_secret: null,
+          })
+          return { username: 'alice', blockedCount: 0, failedCount: 0, failed: false }
+        },
+      )
+    const reconcileAccountOutbox = vi.fn().mockResolvedValue(undefined)
+    const deps = {
+      config,
+      startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1', completedUsernames: [] }),
+      finishBlockRun: vi.fn().mockResolvedValue(undefined),
+      touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
+      runBlockAccountCycle,
+      notifyDiscord: vi.fn().mockResolvedValue(undefined),
+      reconcileAccountOutbox,
+      prisma: {},
+    }
+
+    await runBlockCycle(deps as never)
+
+    expect(issueCookiesWithRetry).toHaveBeenCalledTimes(1)
+    expect(reconcileAccountOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({ username: 'alice' }),
+      deps.prisma,
+      issuedCookies,
+    )
+  })
+
+  it('block 本処理の認証自体が失敗した場合、reconciliation は cookies 無しで呼ばれる (自前で再発行するフォールバック)', async () => {
+    const config: BlockerAppConfig = {
+      accounts: [
+        {
+          email: 'a@example.com',
+          username: 'alice',
+          password: 'p',
+          otpSecret: null,
+          blockEnabled: true,
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+        },
+      ],
+      discordWebhookUrl: null,
+    }
+    // issueCookies を呼ばずに失敗するケース (認証以前の失敗を再現)
+    const runBlockAccountCycle = vi
+      .fn()
+      .mockResolvedValue({ username: 'alice', blockedCount: 0, failedCount: 0, failed: true })
+    const reconcileAccountOutbox = vi.fn().mockResolvedValue(undefined)
+    const deps = {
+      config,
+      startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1', completedUsernames: [] }),
+      finishBlockRun: vi.fn().mockResolvedValue(undefined),
+      touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
+      runBlockAccountCycle,
+      notifyDiscord: vi.fn().mockResolvedValue(undefined),
+      reconcileAccountOutbox,
+      prisma: {},
+    }
+
+    await runBlockCycle(deps as never)
+
+    expect(reconcileAccountOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({ username: 'alice' }),
+      deps.prisma,
+      undefined,
+    )
   })
 })

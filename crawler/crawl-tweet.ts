@@ -127,6 +127,7 @@ async function main(): Promise<void> {
   const [account] = config.accounts
   const cookieIssuer = createCookieIssuerClient({
     baseUrl: getCookieIssuerBaseUrl(),
+    clientName: 'crawler',
   })
 
   const cookies = await cookieIssuer.issueCookiesWithRetry({
