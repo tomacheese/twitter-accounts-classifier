@@ -316,6 +316,130 @@ describe('runCrawlCycle', () => {
     )
   })
 
+  it.each([403, 404, 429, 500])(
+    'records safe HTTP diagnostics for a labeling follow sample ResponseError %i',
+    async (status) => {
+      const author = rawUser('author1')
+      const tweet = rawTweet('tweet1', author)
+      const error = responseError(
+        status,
+        new Headers({
+          'Retry-After': '60',
+          'X-Rate-Limit-Limit': '100',
+          'X-Rate-Limit-Remaining': '0',
+          'X-Rate-Limit-Reset': '1760000000',
+          cookie: 'session=diagnostic-test-cookie',
+        }),
+      )
+      const loggerError = vi
+        .spyOn(Logger.configure('crawl'), 'error')
+        .mockImplementation(() => undefined)
+      const deps = makeDeps({
+        createOpenApiClient: vi.fn().mockResolvedValue({
+          client: {
+            getTweetApi: () => ({
+              getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+              getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            }),
+            getUserApi: () => ({
+              getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+              getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+              getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            }),
+            getUserListApi: () => ({
+              getFollowing: vi.fn().mockRejectedValue(error),
+              getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
+            getBlocksApi: () => ({
+              getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
+          },
+        }),
+      })
+
+      try {
+        await runCrawlCycle(deps)
+
+        expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+          expect.objectContaining({
+            followSample: null,
+            warnings: expect.arrayContaining([
+              {
+                type: 'labeling_follow_sample_failed',
+                message: expect.stringContaining(`httpStatus=${String(status)}`),
+                authorId: 'author1',
+                errorMessage: 'Response returned an error code',
+                httpStatus: status,
+                retryAfterSeconds: 60,
+                rateLimitLimit: 100,
+                rateLimitRemaining: 0,
+                rateLimitReset: 1_760_000_000,
+                appVersion: expect.any(String),
+              },
+            ]),
+          }),
+        )
+        const [message] = loggerError.mock.calls[0] ?? []
+        expect(message).toContain(`httpStatus=${String(status)}`)
+        expect(message).not.toContain('diagnostic-test')
+        expect(loggerError).toHaveBeenCalledWith(
+          message,
+          expect.objectContaining({ name: 'ResponseError', message: 'ResponseError' }),
+        )
+      } finally {
+        loggerError.mockRestore()
+      }
+    },
+  )
+
+  it('records only the error message, without HTTP diagnostics, for a labeling follow sample network error', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockRejectedValue(new Error('network error')),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        followSample: null,
+        warnings: expect.arrayContaining([
+          {
+            type: 'labeling_follow_sample_failed',
+            message: expect.not.stringContaining('httpStatus='),
+            authorId: 'author1',
+            errorMessage: 'network error',
+            appVersion: expect.any(String),
+          },
+        ]),
+      }),
+    )
+  })
+
   it('passes the registry to ensureLabelDefinitions so every registered rule gets a LabelDefinition', async () => {
     const deps = makeDeps()
     await runCrawlCycle(deps)
