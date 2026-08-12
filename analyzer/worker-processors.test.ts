@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { Logger } from '@book000/node-utils'
 import { getPrismaClient } from './db/client'
 import * as labelMetricSnapshotModule from './metrics/label-metric-snapshot'
 import * as publishModule from './read-models/publish'
@@ -35,6 +36,34 @@ function makeCycleRefreshWorkItem(overrides: {
     availableAt: new Date(),
     leaseOwner: 'worker-1',
     leaseExpiresAt: new Date(),
+    attemptCount: 1,
+    maxAttempts: 5,
+    dependencyKey: null,
+    staleRequestedAt: null,
+    lastErrorCode: null,
+    lastErrorSummary: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+}
+
+/**
+ * @param overrides - AnalysisWorkItem へ上書きするフィールド
+ * @returns テスト用の完了済み WorkItem
+ */
+function makeSettledWorkItem(overrides: {
+  triggerType: string
+}): Parameters<typeof handleWorkItemSettled>[1] {
+  return {
+    id: `work-item-${randomUUID()}`,
+    kind: 'read_model_refresh',
+    triggerType: overrides.triggerType,
+    triggerId: 'trigger-1',
+    status: 'succeeded',
+    priority: 0,
+    availableAt: new Date(),
+    leaseOwner: null,
+    leaseExpiresAt: null,
     attemptCount: 1,
     maxAttempts: 5,
     dependencyKey: null,
@@ -214,6 +243,32 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     })
     expect(attentionPointer).not.toBeNull()
     expect(overviewPointer).not.toBeNull()
+  })
+
+  it('handleWorkItemSettled は OperationCycle を持たない既知の triggerType では WARN を出さない', async () => {
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn')
+
+    await handleWorkItemSettled(
+      prisma,
+      makeSettledWorkItem({ triggerType: 'account_classification_observation' }),
+      { status: 'succeeded' },
+    )
+
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it('handleWorkItemSettled は未知の triggerType では WARN を出す', async () => {
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn')
+
+    await handleWorkItemSettled(prisma, makeSettledWorkItem({ triggerType: 'unknown_trigger' }), {
+      status: 'succeeded',
+    })
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'no operation cycle builder for trigger type: unknown_trigger',
+    )
+    warnSpy.mockRestore()
   })
 
   it('processPostCompletionRefresh は元 WorkItem の終了状態を復元して Attention/Overview を publish する', async () => {
