@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../../../lib/prisma', () => ({
   getPrismaClient: vi.fn().mockReturnValue({
     readModelState: { findUnique: vi.fn().mockResolvedValue(null) },
+    detectionPolicyVersion: { findFirst: vi.fn().mockResolvedValue(null) },
+    labelEvidenceEpoch: { findFirst: vi.fn().mockResolvedValue(null) },
+    detectorState: { findUnique: vi.fn().mockResolvedValue(null) },
   }),
 }))
 
