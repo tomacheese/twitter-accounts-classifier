@@ -259,9 +259,30 @@ describe('runCrawlCycle', () => {
 
     expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
       expect.objectContaining({
-        followSample: { ids: [], authors: [], reachedEnd: true },
+        followSample: { ids: [], authors: [], reachedEnd: true, requestCount: 1 },
+        followSampleRequestCount: 1,
       }),
     )
+  })
+
+  it('login account の following/followers sync を optional follow sample より先に実行する', async () => {
+    const order: string[] = []
+    const deps = makeDeps({
+      syncFollowing: vi.fn().mockImplementation(async () => {
+        order.push('following')
+      }),
+      syncFollowers: vi.fn().mockImplementation(async () => {
+        order.push('followers')
+      }),
+      persistAuthorResultAtomic: vi.fn().mockImplementation(async () => {
+        order.push('author')
+        return { observationId: 'observation1', labelsAppliedCount: 1 }
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(order).toEqual(['following', 'followers', 'author'])
   })
 
   it('フォロー先サンプルの取得に失敗しても、投稿者本体のラベリングは継続する', async () => {
@@ -316,7 +337,7 @@ describe('runCrawlCycle', () => {
     )
   })
 
-  it.each([403, 404, 429, 500])(
+  it.each([403, 404, 500])(
     'records safe HTTP diagnostics for a labeling follow sample ResponseError %i',
     async (status) => {
       const author = rawUser('author1')
@@ -381,13 +402,14 @@ describe('runCrawlCycle', () => {
             ]),
           }),
         )
-        const [message] = loggerError.mock.calls[0] ?? []
+        const matchingLog = loggerError.mock.calls.find(([message]) =>
+          String(message).includes('labeling follow sample') &&
+          String(message).includes(`httpStatus=${String(status)}`),
+        )
+        const [message, loggedError] = matchingLog ?? []
         expect(message).toContain(`httpStatus=${String(status)}`)
         expect(message).not.toContain('diagnostic-test')
-        expect(loggerError).toHaveBeenCalledWith(
-          message,
-          expect.objectContaining({ name: 'ResponseError', message: 'ResponseError' }),
-        )
+        expect(loggedError).toMatchObject({ name: 'ResponseError', message: 'ResponseError' })
       } finally {
         loggerError.mockRestore()
       }
@@ -436,6 +458,55 @@ describe('runCrawlCycle', () => {
             appVersion: expect.any(String),
           },
         ]),
+      }),
+    )
+  })
+
+  it('treats a labeling follow sample 429 as an intentional rate-limit skip', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+    const error = responseError(
+      429,
+      new Headers({
+        'x-rate-limit-limit': '100',
+        'x-rate-limit-remaining': '0',
+        'x-rate-limit-reset': '1760000000',
+        'retry-after': '60',
+      }),
+    )
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockRejectedValue(error),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        followSample: null,
+        followSampleStatus: 'rate_limit_skipped',
+        followSampleRequestCount: 1,
+        warnings: [],
       }),
     )
   })

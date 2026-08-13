@@ -7,7 +7,12 @@ import { getLastResponseMatching, wrapFetchWithResponseCapture } from './respons
 
 describe('wrapFetchWithResponseCapture', () => {
   it('captures a response url/status/body without altering what the caller receives', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(new Response('{"ok":true}', { status: 200 }))
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response('{"ok":true}', {
+        status: 200,
+        headers: { 'x-rate-limit-remaining': '499', cookie: 'must-not-be-captured' },
+      }),
+    )
     const wrapped = wrapFetchWithResponseCapture(fetchImpl as unknown as typeof fetch)
 
     const response = await wrapped('https://x.com/graphql/abc/CaptureBasicTest')
@@ -19,7 +24,9 @@ describe('wrapFetchWithResponseCapture', () => {
       url: 'https://x.com/graphql/abc/CaptureBasicTest',
       status: 200,
       body: '{"ok":true}',
+      rateLimitRemaining: 499,
     })
+    expect(captured).not.toHaveProperty('headers')
     expect(captured?.capturedAt).toBeInstanceOf(Date)
   })
 

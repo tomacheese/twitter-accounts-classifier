@@ -51,6 +51,7 @@ describe('fetchFollowing', () => {
     expect(result.ids).toEqual(['1', '2', '3'])
     expect(result.authors.map((a) => a.id)).toEqual(['1', '2', '3'])
     expect(result.reachedEnd).toBe(true)
+    expect(result.requestCount).toBe(2)
     expect(getFollowing).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ userId: 'me', cursor: undefined }),
@@ -89,6 +90,36 @@ describe('fetchFollowing', () => {
     const client: FollowListApiLike = { getFollowing, getFollowers: vi.fn() }
 
     await expect(fetchFollowing(client, 'me', 100)).rejects.toThrow('rate limited')
+  })
+
+  it('retries only the failed middle page without fetching the first page again', async () => {
+    const getFollowing = vi
+      .fn()
+      .mockResolvedValueOnce(page(['1'], 'cursor-a'))
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce(page(['2'], undefined))
+    const retryPageImpl = async <T>(fn: () => Promise<T>): Promise<T> => {
+      try {
+        return await fn()
+      } catch {
+        return fn()
+      }
+    }
+    const client: FollowListApiLike = { getFollowing, getFollowers: vi.fn() }
+
+    const result = await fetchFollowing(client, 'me', 100, { retryPage: retryPageImpl })
+
+    expect(result.ids).toEqual(['1', '2'])
+    expect(getFollowing).toHaveBeenCalledTimes(3)
+    expect(result.requestCount).toBe(3)
+    expect(getFollowing).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ userId: 'me', cursor: 'cursor-a' }),
+    )
+    expect(getFollowing).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ userId: 'me', cursor: 'cursor-a' }),
+    )
   })
 
   it('marks reachedEnd false when the cursor-exhausting page also overshoots the limit', async () => {

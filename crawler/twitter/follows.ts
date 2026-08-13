@@ -31,19 +31,35 @@ export interface FollowListResult {
    * 呼び出し側はこの値でエッジ削除の可否を判断する。
    */
   reachedEnd: boolean
+  /** この一覧取得で実際に送信した API リクエスト数。ページ単位の retry も含む。 */
+  requestCount?: number
+}
+
+export interface FollowListFetchOptions {
+  retryPage?: <T>(fetchPage: () => Promise<T>) => Promise<T>
+  onPageAttempt?: () => void
 }
 
 async function paginate(
   fetchPage: (cursor: string | undefined) => Promise<FollowListPage>,
   limit: number,
+  options: FollowListFetchOptions,
 ): Promise<FollowListResult> {
   const ids: string[] = []
   const authors: AccountProfileInput[] = []
   let cursor: string | undefined
   let reachedEnd = false
+  let requestCount = 0
 
   while (ids.length < limit) {
-    const page = await fetchPage(cursor)
+    const requestPage = () => {
+      options.onPageAttempt?.()
+      requestCount += 1
+      return fetchPage(cursor)
+    }
+    const page = options.retryPage
+      ? await options.retryPage(requestPage)
+      : await requestPage()
     for (const raw of page.data) {
       ids.push(raw.restId)
       authors.push(toAccountProfileInput(raw))
@@ -63,6 +79,7 @@ async function paginate(
     ids: ids.slice(0, limit),
     authors: authors.slice(0, limit),
     reachedEnd: reachedEnd && !truncated,
+    requestCount,
   }
 }
 
@@ -76,8 +93,13 @@ export async function fetchFollowing(
   client: FollowListApiLike,
   userId: string,
   limit: number,
+  options: FollowListFetchOptions = {},
 ): Promise<FollowListResult> {
-  return paginate((cursor) => client.getFollowing({ userId, cursor, count: PAGE_SIZE }), limit)
+  return paginate(
+    (cursor) => client.getFollowing({ userId, cursor, count: PAGE_SIZE }),
+    limit,
+    options,
+  )
 }
 
 /**
@@ -90,8 +112,13 @@ export async function fetchFollowers(
   client: FollowListApiLike,
   userId: string,
   limit: number,
+  options: FollowListFetchOptions = {},
 ): Promise<FollowListResult> {
-  return paginate((cursor) => client.getFollowers({ userId, cursor, count: PAGE_SIZE }), limit)
+  return paginate(
+    (cursor) => client.getFollowers({ userId, cursor, count: PAGE_SIZE }),
+    limit,
+    options,
+  )
 }
 
 async function convertFollowListResponse(
