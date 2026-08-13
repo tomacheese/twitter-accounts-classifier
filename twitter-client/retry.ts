@@ -1,5 +1,7 @@
-/** リトライする価値がある HTTP ステータスコード: リクエストタイムアウト・レート制限・一時的なサーバー側障害。 */
-const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
+import { getResponseErrorDiagnostics } from './response-diagnostics'
+
+/** リトライする価値がある HTTP ステータスコード: リクエストタイムアウト・一時的なサーバー側障害。 */
+const RETRYABLE_STATUS_CODES = new Set([408, 500, 502, 503, 504])
 
 /**
  * `twitter-openapi-typescript`・`cycletls` が投げるエラーがリトライする価値があるかを判定する。
@@ -7,7 +9,8 @@ const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
  * `instanceof` ではなく `.name` によるダックタイピングで判定している。
  * 両クラスとも常にこの `name` を設定することがドキュメントされている。
  *
- * `ResponseError` (2xx 以外のレスポンス時) はタイムアウト・レート制限・サーバー側障害のみリトライ対象とする。
+ * `ResponseError` (2xx 以外のレスポンス時) はタイムアウト・一時的なサーバー側障害のみリトライ対象とする。
+ * 429 は endpoint ごとの quota と reset 時刻を考慮する必要があるため、固定 backoff のここでは扱わない。
  * 401/404 等 4xx は認証不備やアカウント停止などリトライで解決しない問題を示すため対象外にする。
  * `FetchError` (リクエスト自体が失敗。例: TLS ハンドシェイクリセット) はステータスを持たず、
  * ネットワークの一時的な不調こそリトライで対処すべきものであるため、
@@ -29,6 +32,12 @@ export interface RetryOptions {
   maxAttempts?: number
   delayMs?: number
   sleepImpl?: (ms: number) => Promise<void>
+}
+
+export interface RateLimitRetryOptions {
+  maxWaitMs?: number
+  sleepImpl?: (ms: number) => Promise<void>
+  now?: () => number
 }
 
 /**
@@ -61,4 +70,32 @@ export async function withTwitterRetry<T>(
   }
 
   throw lastError
+}
+
+/**
+ * priority endpoint の 429 だけを server 指定の reset 時刻まで最大 1 回待機して再試行する。
+ */
+export async function withTwitterRateLimitRetry<T>(
+  fn: () => Promise<T>,
+  options: RateLimitRetryOptions = {},
+): Promise<T> {
+  const maxWaitMs = options.maxWaitMs ?? 60_000
+  const now = options.now ?? Date.now
+  const sleepImpl =
+    options.sleepImpl ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
+  try {
+    return await fn()
+  } catch (error) {
+    const diagnostics = getResponseErrorDiagnostics(error)
+    if (diagnostics?.httpStatus !== 429) throw error
+    let waitMs: number | undefined
+    if (diagnostics.retryAfterSeconds !== undefined) {
+      waitMs = diagnostics.retryAfterSeconds * 1000
+    } else if (diagnostics.rateLimitReset !== undefined) {
+      waitMs = diagnostics.rateLimitReset * 1000 - now()
+    }
+    if (waitMs === undefined || waitMs < 0 || waitMs > maxWaitMs) throw error
+    await sleepImpl(waitMs)
+    return fn()
+  }
 }

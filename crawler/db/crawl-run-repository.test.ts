@@ -507,6 +507,10 @@ describe('crawl author checkpoints', () => {
       warnings: [],
       durationMs: 100,
       retryWaitMs: 0,
+      followSampleStatus: 'fetched',
+      followSampleRequestCount: 1,
+      followSampleRateLimitRemaining: 0,
+      followSampleRateLimitReset: 1_760_000_000,
       appVersion: 'test',
     })
 
@@ -526,6 +530,10 @@ describe('crawl author checkpoints', () => {
         profileCount: 1,
         labelsAppliedCount: 2,
         warnings: [],
+        followSampleStatus: 'fetched',
+        followSampleRequestCount: 1,
+        followSampleRateLimitRemaining: 0,
+        followSampleRateLimitReset: 1_760_000_000,
         durationMs: 100,
         retryWaitMs: 0,
         appVersion: 'test',
@@ -537,6 +545,10 @@ describe('crawl author checkpoints', () => {
         warnings: [],
         durationMs: 100,
         retryWaitMs: 0,
+        followSampleStatus: 'fetched',
+        followSampleRequestCount: 1,
+        followSampleRateLimitRemaining: 0,
+        followSampleRateLimitReset: 1_760_000_000,
         appVersion: 'test',
         completedAt: expect.any(Date),
       },
@@ -551,6 +563,10 @@ describe('crawl author checkpoints', () => {
         profileCount: 1,
         labelsAppliedCount: 2,
         warnings: [],
+        followSampleStatus: 'fetched',
+        followSampleRequestCount: 1,
+        followSampleRateLimitRemaining: 0,
+        followSampleRateLimitReset: 1_760_000_000,
       },
       {
         authorId: 'author2',
@@ -558,6 +574,10 @@ describe('crawl author checkpoints', () => {
         profileCount: 0,
         labelsAppliedCount: 0,
         warnings: [{ type: 'author_processing_failed', message: 'm', errorMessage: 'e' }],
+        followSampleStatus: null,
+        followSampleRequestCount: 0,
+        followSampleRateLimitRemaining: null,
+        followSampleRateLimitReset: null,
       },
     ])
     const prisma = {
@@ -568,7 +588,19 @@ describe('crawl author checkpoints', () => {
 
     expect(result).toEqual(
       new Map([
-        ['author1', { status: 'success', profileCount: 1, labelsAppliedCount: 2, warnings: [] }],
+        [
+          'author1',
+          {
+            status: 'success',
+            profileCount: 1,
+            labelsAppliedCount: 2,
+            warnings: [],
+            followSampleStatus: 'fetched',
+            followSampleRequestCount: 1,
+            followSampleRateLimitRemaining: 0,
+            followSampleRateLimitReset: 1_760_000_000,
+          },
+        ],
         [
           'author2',
           {
@@ -576,6 +608,10 @@ describe('crawl author checkpoints', () => {
             profileCount: 0,
             labelsAppliedCount: 0,
             warnings: [{ type: 'author_processing_failed', message: 'm', errorMessage: 'e' }],
+            followSampleStatus: null,
+            followSampleRequestCount: 0,
+            followSampleRateLimitRemaining: null,
+            followSampleRateLimitReset: null,
           },
         ],
       ]),
@@ -588,6 +624,10 @@ describe('crawl author checkpoints', () => {
         profileCount: true,
         labelsAppliedCount: true,
         warnings: true,
+        followSampleStatus: true,
+        followSampleRequestCount: true,
+        followSampleRateLimitRemaining: true,
+        followSampleRateLimitReset: true,
       },
     })
   })

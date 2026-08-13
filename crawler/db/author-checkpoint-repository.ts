@@ -14,7 +14,11 @@ import {
   replaceLabelingFollowSampleWithinTx,
 } from './labeling-follow-sample-repository'
 import { recordCrawlAccountLabelsAtomicWithinTx } from './label-repository'
-import { recordCrawlAuthorCheckpoint, type CrawlWarning } from './crawl-run-repository'
+import {
+  recordCrawlAuthorCheckpoint,
+  type CrawlWarning,
+  type FollowSampleStatus,
+} from './crawl-run-repository'
 
 const logger = Logger.configure('author-checkpoint-repository')
 
@@ -36,6 +40,10 @@ export interface PersistAuthorResultAtomicParams {
   recentTweetsFallbackAuthors: AccountProfileInput[]
   /** remote fetch に失敗した場合は null。null の場合サンプル書き込みは skip する。 */
   followSample: FollowListResult | null
+  followSampleStatus?: FollowSampleStatus
+  followSampleRequestCount?: number
+  followSampleRateLimitRemaining?: number | null
+  followSampleRateLimitReset?: number | null
   registry: LabelRuleRegistry
   labelDefinitionIds: Map<string, string>
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
@@ -148,6 +156,10 @@ export async function persistAuthorResultAtomic(
         warnings: params.warnings,
         durationMs: params.durationMs,
         retryWaitMs: params.retryWaitMs,
+        followSampleStatus: params.followSampleStatus ?? null,
+        followSampleRequestCount: params.followSampleRequestCount ?? 0,
+        followSampleRateLimitRemaining: params.followSampleRateLimitRemaining ?? null,
+        followSampleRateLimitReset: params.followSampleRateLimitReset ?? null,
         appVersion: params.appVersion,
       })
 

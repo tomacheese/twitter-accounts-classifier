@@ -3,6 +3,9 @@ export interface CapturedResponse {
   status: number
   body: string
   capturedAt: Date
+  rateLimitLimit?: number
+  rateLimitRemaining?: number
+  rateLimitReset?: number
 }
 
 /**
@@ -33,10 +36,29 @@ let responseBuffer: CapturedResponse[] = []
  * @param status - レスポンスの HTTP ステータス
  * @param body - レスポンス本文のテキスト
  */
-function recordResponse(url: string, status: number, body: string): void {
+function readNumericHeader(headers: Headers, name: string): number | undefined {
+  const value = headers.get(name)
+  if (!value || !/^\d+$/.test(value)) return undefined
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : undefined
+}
+
+function recordResponse(url: string, response: Response, body: string): void {
   const truncatedBody =
     body.length > MAX_BODY_LENGTH ? body.slice(0, MAX_BODY_LENGTH) + TRUNCATION_MARKER : body
-  responseBuffer.push({ url, status, body: truncatedBody, capturedAt: new Date() })
+  const captured: CapturedResponse = {
+    url,
+    status: response.status,
+    body: truncatedBody,
+    capturedAt: new Date(),
+  }
+  const rateLimitLimit = readNumericHeader(response.headers, 'x-rate-limit-limit')
+  if (rateLimitLimit !== undefined) captured.rateLimitLimit = rateLimitLimit
+  const rateLimitRemaining = readNumericHeader(response.headers, 'x-rate-limit-remaining')
+  if (rateLimitRemaining !== undefined) captured.rateLimitRemaining = rateLimitRemaining
+  const rateLimitReset = readNumericHeader(response.headers, 'x-rate-limit-reset')
+  if (rateLimitReset !== undefined) captured.rateLimitReset = rateLimitReset
+  responseBuffer.push(captured)
   if (responseBuffer.length > MAX_CAPTURED_RESPONSES) {
     responseBuffer = responseBuffer.slice(responseBuffer.length - MAX_CAPTURED_RESPONSES)
   }
@@ -62,7 +84,7 @@ export function wrapFetchWithResponseCapture(fetchImpl: typeof fetch): typeof fe
     // ここで発生したエラーは記録を諦めるだけに留める。
     try {
       const body = await response.clone().text()
-      recordResponse(url, response.status, body)
+      recordResponse(url, response, body)
     } catch {
       /* empty */
     }

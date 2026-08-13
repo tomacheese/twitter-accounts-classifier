@@ -233,6 +233,8 @@ export async function completeCrawlAccountCheckpoint(
 }
 
 export type CrawlAuthorCheckpointStatus = 'success' | 'unavailable' | 'failed'
+export type FollowSampleStatus =
+  'fetched' | 'budget_skipped' | 'rate_limit_skipped' | 'failed' | null
 
 export interface CrawlAuthorCheckpointParams {
   crawlRunId: string
@@ -244,6 +246,10 @@ export interface CrawlAuthorCheckpointParams {
   warnings: CrawlWarning[]
   durationMs?: number
   retryWaitMs?: number
+  followSampleStatus?: FollowSampleStatus
+  followSampleRequestCount?: number
+  followSampleRateLimitRemaining?: number | null
+  followSampleRateLimitReset?: number | null
   appVersion: string
 }
 
@@ -252,6 +258,14 @@ export interface CrawlAuthorCheckpointRecord {
   profileCount: number
   labelsAppliedCount: number
   warnings: CrawlWarning[]
+  followSampleStatus: FollowSampleStatus
+  followSampleRequestCount: number
+  followSampleRateLimitRemaining: number | null
+  followSampleRateLimitReset: number | null
+}
+
+function isFollowSampleStatus(value: unknown): value is Exclude<FollowSampleStatus, null> {
+  return ['fetched', 'budget_skipped', 'rate_limit_skipped', 'failed'].includes(value as string)
 }
 
 /**
@@ -293,6 +307,10 @@ export async function loadCrawlAuthorCheckpoints(
       profileCount: true,
       labelsAppliedCount: true,
       warnings: true,
+      followSampleStatus: true,
+      followSampleRequestCount: true,
+      followSampleRateLimitRemaining: true,
+      followSampleRateLimitReset: true,
     },
   })
   const knownStatuses: ReadonlySet<CrawlAuthorCheckpointStatus> = new Set([
@@ -313,6 +331,12 @@ export async function loadCrawlAuthorCheckpoints(
         warnings: Array.isArray(checkpoint.warnings)
           ? (checkpoint.warnings as unknown as CrawlWarning[])
           : [],
+        followSampleStatus: isFollowSampleStatus(checkpoint.followSampleStatus)
+          ? checkpoint.followSampleStatus
+          : null,
+        followSampleRequestCount: checkpoint.followSampleRequestCount,
+        followSampleRateLimitRemaining: checkpoint.followSampleRateLimitRemaining,
+        followSampleRateLimitReset: checkpoint.followSampleRateLimitReset,
       },
     ]),
   )

@@ -371,6 +371,10 @@ model CrawlAuthorCheckpoint {
   warnings           Json     @default("[]")
   durationMs         Int?
   retryWaitMs        Int?
+  followSampleStatus String?
+  followSampleRequestCount Int @default(0)
+  followSampleRateLimitRemaining Int?
+  followSampleRateLimitReset Int?
   appVersion         String   @default("unknown")
   completedAt        DateTime @default(now())
 

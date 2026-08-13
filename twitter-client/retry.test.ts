@@ -8,6 +8,13 @@ function responseError(status: number): Error {
   return error
 }
 
+function rateLimitedError(headers: Headers): Error {
+  const error = responseError(429)
+  ;(error as unknown as { response: { status: number; headers: Headers } }).response.headers =
+    headers
+  return error
+}
+
 function fetchError(): Error {
   const error = new Error('fetch failed')
   error.name = 'FetchError'
@@ -15,11 +22,14 @@ function fetchError(): Error {
 }
 
 describe('isRetryableTwitterError', () => {
-  it('treats 408, 429 and 5xx ResponseErrors as retryable', () => {
+  it('treats 408 and 5xx ResponseErrors as retryable', () => {
     expect(isRetryableTwitterError(responseError(408))).toBe(true)
-    expect(isRetryableTwitterError(responseError(429))).toBe(true)
     expect(isRetryableTwitterError(responseError(500))).toBe(true)
     expect(isRetryableTwitterError(responseError(503))).toBe(true)
+  })
+
+  it('does not send 429 responses through fixed-delay retry scheduling', () => {
+    expect(isRetryableTwitterError(responseError(429))).toBe(false)
   })
 
   it('treats 4xx ResponseErrors other than 429 as not retryable', () => {
@@ -50,13 +60,23 @@ describe('withTwitterRetry', () => {
 
   it('retries a retryable failure and succeeds within maxAttempts', async () => {
     const sleepImpl = vi.fn().mockResolvedValue(undefined)
-    const fn = vi.fn().mockRejectedValueOnce(responseError(429)).mockResolvedValueOnce('ok')
+    const fn = vi.fn().mockRejectedValueOnce(responseError(500)).mockResolvedValueOnce('ok')
 
     const result = await withTwitterRetry(fn, { maxAttempts: 3, delayMs: 10, sleepImpl })
 
     expect(result).toBe('ok')
     expect(fn).toHaveBeenCalledTimes(2)
     expect(sleepImpl).toHaveBeenCalledWith(10)
+  })
+
+  it('rethrows a 429 without fixed-delay retrying', async () => {
+    const sleepImpl = vi.fn().mockResolvedValue(undefined)
+    const error = responseError(429)
+    const fn = vi.fn().mockRejectedValue(error)
+
+    await expect(withTwitterRetry(fn, { sleepImpl })).rejects.toBe(error)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(sleepImpl).not.toHaveBeenCalled()
   })
 
   it('rethrows immediately without sleeping when the error is not retryable', async () => {
@@ -77,5 +97,31 @@ describe('withTwitterRetry', () => {
     await expect(withTwitterRetry(fn, { maxAttempts: 2, sleepImpl })).rejects.toBe(error)
     expect(fn).toHaveBeenCalledTimes(2)
     expect(sleepImpl).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('withTwitterRateLimitRetry', () => {
+  it('waits once using Retry-After before retrying a priority request', async () => {
+    const sleepImpl = vi.fn().mockResolvedValue(undefined)
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(rateLimitedError(new Headers({ 'retry-after': '60' })))
+      .mockResolvedValueOnce('ok')
+
+    const { withTwitterRateLimitRetry } = await import('./retry')
+    await expect(withTwitterRateLimitRetry(fn, { sleepImpl })).resolves.toBe('ok')
+    expect(sleepImpl).toHaveBeenCalledWith(60_000)
+    expect(fn).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not retry a priority request when reset wait exceeds 60 seconds', async () => {
+    const sleepImpl = vi.fn().mockResolvedValue(undefined)
+    const error = rateLimitedError(new Headers({ 'retry-after': '61' }))
+    const fn = vi.fn().mockRejectedValue(error)
+
+    const { withTwitterRateLimitRetry } = await import('./retry')
+    await expect(withTwitterRateLimitRetry(fn, { sleepImpl })).rejects.toBe(error)
+    expect(sleepImpl).not.toHaveBeenCalled()
+    expect(fn).toHaveBeenCalledTimes(1)
   })
 })

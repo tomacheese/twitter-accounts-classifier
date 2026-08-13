@@ -41,6 +41,7 @@ import {
   isResponseError,
   toSafeResponseErrorForLog,
   withTwitterRetry,
+  withTwitterRateLimitRetry,
   withTimeout,
   mergeTweetAdFlags,
   toAccountProfileInput,
@@ -78,6 +79,10 @@ import {
   type FollowListApiLike,
   type FollowListResult,
 } from './twitter/follows'
+import {
+  FollowRateLimitBudget,
+  OptionalFollowingSkipError,
+} from './twitter/follow-rate-limit-budget'
 import {
   syncFollowers as syncFollowersEdges,
   syncFollowing as syncFollowingEdges,
@@ -216,6 +221,19 @@ function retryOptions(
       await deps.sleep(ms)
     },
   }
+}
+
+function priorityRateLimitRetry(
+  deps: CrawlDependencies,
+  trackRetryWait: (ms: number) => void,
+): <T>(fn: () => Promise<T>) => Promise<T> {
+  return async (fn) =>
+    withTwitterRateLimitRetry(() => withTwitterRetry(fn, retryOptions(deps, trackRetryWait)), {
+      sleepImpl: async (ms) => {
+        trackRetryWait(ms)
+        await deps.sleep(ms)
+      },
+    })
 }
 
 /** measurePhaseDuration の結果。 */
@@ -487,6 +505,7 @@ async function runAuthorUnitPhase(
   timelineSnapshot: TimelineSnapshot,
   repliesResult: RepliesResult,
   client: CrawlOpenApiClient,
+  followRateLimitBudget: FollowRateLimitBudget,
   trackRetryWait: (ms: number) => void,
 ): Promise<AccountCycleMetrics> {
   const userApi = client.getUserApi()
@@ -569,6 +588,14 @@ async function runAuthorUnitPhase(
     if (checkpoint.status === 'success') succeededAuthorIds.add(authorId)
     labelsAppliedCount += checkpoint.labelsAppliedCount
     warnings.push(...checkpoint.warnings)
+    followRateLimitBudget.restoreOptionalFollowingRequests(checkpoint.followSampleRequestCount)
+    followRateLimitBudget.restoreFollowingQuota({
+      rateLimitRemaining: checkpoint.followSampleRateLimitRemaining ?? undefined,
+      rateLimitReset: checkpoint.followSampleRateLimitReset ?? undefined,
+    })
+    if (checkpoint.followSampleStatus === 'rate_limit_skipped') {
+      followRateLimitBudget.restoreOptionalFollowingRateLimit()
+    }
   }
 
   for (const [authorIndex, authorId] of uniqueAuthorIds.entries()) {
@@ -585,6 +612,11 @@ async function runAuthorUnitPhase(
     const authorRetryWait = { ms: 0 }
     const trackAuthorRetryWait = createScopedRetryWaitTracker(trackRetryWait, authorRetryWait)
     const authorWarnings: CrawlWarning[] = []
+    let followSampleStatus: 'fetched' | 'budget_skipped' | 'rate_limit_skipped' | 'failed' | null =
+      null
+    let followSampleRequestCount = 0
+    let followSampleRateLimitRemaining: number | undefined
+    let followSampleRateLimitReset: number | undefined
 
     try {
       // embedded profile は追加の API 呼び出しなしで得られるため、
@@ -613,33 +645,58 @@ async function runAuthorUnitPhase(
       // 失敗してもキーワードベースのラベリングまで止めない。
       let followSample: FollowListResult | null = null
       try {
-        followSample = await withTwitterRetry(
-          () =>
-            fetchFollowing(
-              client.getUserListApi(),
-              authorId,
-              deps.limits.followEdgesPerLabeledAccount,
-            ),
-          retryOptions(deps, trackAuthorRetryWait),
-        )
-      } catch (error) {
-        const diagnostics = getResponseErrorDiagnostics(error)
-        const message = diagnostics
-          ? `Failed to fetch labeling follow sample for author ${authorId}, continuing without it (${formatResponseErrorDiagnostics(diagnostics)})`
-          : `Failed to fetch labeling follow sample for author ${authorId}, continuing without it`
-        if (isResponseError(error)) {
-          logger.error(message, toSafeResponseErrorForLog(error))
-        } else {
-          logger.error(message, error as Error)
-        }
-        authorWarnings.push({
-          type: 'labeling_follow_sample_failed',
-          message,
+        followSample = await fetchFollowing(
+          client.getUserListApi(),
           authorId,
-          errorMessage: toErrorMessage(error),
-          ...diagnostics,
-          appVersion: APP_VERSION,
+          deps.limits.followEdgesPerLabeledAccount,
+          {
+            retryPage: (fn) => withTwitterRetry(fn, retryOptions(deps, trackAuthorRetryWait)),
+            onPageAttempt: () => {
+              const decision = followRateLimitBudget.acquireOptionalFollowing()
+              if (decision !== 'allowed') throw new OptionalFollowingSkipError(decision)
+              followSampleRequestCount += 1
+            },
+          },
+        )
+        const captured = getLastResponseMatching('Following')
+        followSampleRateLimitRemaining = captured?.rateLimitRemaining
+        followSampleRateLimitReset = captured?.rateLimitReset
+        followRateLimitBudget.recordSuccess('Following', {
+          rateLimitLimit: captured?.rateLimitLimit,
+          rateLimitRemaining: captured?.rateLimitRemaining,
+          rateLimitReset: captured?.rateLimitReset,
         })
+        followSampleStatus = 'fetched'
+      } catch (error) {
+        if (error instanceof OptionalFollowingSkipError) {
+          followSampleStatus = error.decision
+        } else {
+          const diagnostics = getResponseErrorDiagnostics(error)
+          if (diagnostics?.httpStatus === 429) {
+            followRateLimitBudget.recordRateLimited('Following', diagnostics)
+            followSampleRateLimitRemaining = diagnostics.rateLimitRemaining
+            followSampleRateLimitReset = diagnostics.rateLimitReset
+            followSampleStatus = 'rate_limit_skipped'
+          } else {
+            followSampleStatus = 'failed'
+            const message = diagnostics
+              ? `Failed to fetch labeling follow sample for author ${authorId}, continuing without it (${formatResponseErrorDiagnostics(diagnostics)})`
+              : `Failed to fetch labeling follow sample for author ${authorId}, continuing without it`
+            if (isResponseError(error)) {
+              logger.error(message, toSafeResponseErrorForLog(error))
+            } else {
+              logger.error(message, error as Error)
+            }
+            authorWarnings.push({
+              type: 'labeling_follow_sample_failed',
+              message,
+              authorId,
+              errorMessage: toErrorMessage(error),
+              ...diagnostics,
+              appVersion: APP_VERSION,
+            })
+          }
+        }
       }
 
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
@@ -655,6 +712,10 @@ async function runAuthorUnitPhase(
           additionalOwnTweets: [...authorTimelineTweets, ...authorOtherReplies],
           recentTweetsFallbackAuthors: fallbackAuthors,
           followSample,
+          followSampleStatus,
+          followSampleRequestCount,
+          followSampleRateLimitRemaining,
+          followSampleRateLimitReset,
           registry,
           labelDefinitionIds,
           duplicateReplyIndex,
@@ -687,6 +748,10 @@ async function runAuthorUnitPhase(
             warnings: authorWarnings,
             durationMs: Date.now() - authorStartedAt,
             retryWaitMs: authorRetryWait.ms,
+            followSampleStatus,
+            followSampleRequestCount,
+            followSampleRateLimitRemaining,
+            followSampleRateLimitReset,
             appVersion: APP_VERSION,
           })
         } catch (checkpointError) {
@@ -725,6 +790,10 @@ async function runAuthorUnitPhase(
             warnings: [...authorWarnings, warning],
             durationMs: Date.now() - authorStartedAt,
             retryWaitMs: authorRetryWait.ms,
+            followSampleStatus,
+            followSampleRequestCount,
+            followSampleRateLimitRemaining,
+            followSampleRateLimitReset,
             appVersion: APP_VERSION,
           })
         } catch (checkpointError) {
@@ -784,6 +853,7 @@ async function syncFollowingPhase(
   deps: CrawlDependencies,
   account: AppConfig['accounts'][number],
   client: CrawlOpenApiClient,
+  followRateLimitBudget: FollowRateLimitBudget,
   trackRetryWait: (ms: number) => void,
 ): Promise<FollowingCheckpointData> {
   let userId: string
@@ -816,14 +886,24 @@ async function syncFollowingPhase(
   }
 
   try {
-    const following = await withTwitterRetry(
-      () => fetchFollowing(client.getUserListApi(), userId, deps.limits.followEdgesPerAccount),
-      retryOptions(deps, trackRetryWait),
+    const following = await fetchFollowing(
+      client.getUserListApi(),
+      userId,
+      deps.limits.followEdgesPerAccount,
+      { retryPage: priorityRateLimitRetry(deps, trackRetryWait) },
     )
+    const captured = getLastResponseMatching('Following')
+    followRateLimitBudget.recordSuccess('Following', captured ?? {})
     await deps.syncFollowing(userId, following)
     return { userId, synced: true, warnings: [] }
   } catch (error) {
-    const message = `Failed to sync following for ${account.username}`
+    const diagnostics = getResponseErrorDiagnostics(error)
+    if (diagnostics?.httpStatus === 429) {
+      followRateLimitBudget.recordRateLimited('Following', diagnostics)
+    }
+    const message = diagnostics
+      ? `Failed to sync following for ${account.username} (${formatResponseErrorDiagnostics(diagnostics)})`
+      : `Failed to sync following for ${account.username}`
     logger.error(message, error as Error)
     return {
       userId,
@@ -834,6 +914,7 @@ async function syncFollowingPhase(
           message,
           username: account.username,
           errorMessage: toErrorMessage(error),
+          ...diagnostics,
           appVersion: APP_VERSION,
         },
       ],
@@ -845,19 +926,30 @@ async function syncFollowersPhase(
   deps: CrawlDependencies,
   account: AppConfig['accounts'][number],
   client: CrawlOpenApiClient,
+  followRateLimitBudget: FollowRateLimitBudget,
   userId: string | null,
   trackRetryWait: (ms: number) => void,
 ): Promise<FollowersCheckpointData> {
   if (!userId) return { synced: false, warnings: [] }
   try {
-    const followers = await withTwitterRetry(
-      () => fetchFollowers(client.getUserListApi(), userId, deps.limits.followEdgesPerAccount),
-      retryOptions(deps, trackRetryWait),
+    const followers = await fetchFollowers(
+      client.getUserListApi(),
+      userId,
+      deps.limits.followEdgesPerAccount,
+      { retryPage: priorityRateLimitRetry(deps, trackRetryWait) },
     )
+    const captured = getLastResponseMatching('Followers')
+    followRateLimitBudget.recordSuccess('Followers', captured ?? {})
     await deps.syncFollowers(userId, followers)
     return { synced: true, warnings: [] }
   } catch (error) {
-    const message = `Failed to sync followers for ${account.username}`
+    const diagnostics = getResponseErrorDiagnostics(error)
+    if (diagnostics?.httpStatus === 429) {
+      followRateLimitBudget.recordRateLimited('Followers', diagnostics)
+    }
+    const message = diagnostics
+      ? `Failed to sync followers for ${account.username} (${formatResponseErrorDiagnostics(diagnostics)})`
+      : `Failed to sync followers for ${account.username}`
     logger.error(message, error as Error)
     return {
       synced: false,
@@ -867,6 +959,7 @@ async function syncFollowersPhase(
           message,
           username: account.username,
           errorMessage: toErrorMessage(error),
+          ...diagnostics,
           appVersion: APP_VERSION,
         },
       ],
@@ -1330,6 +1423,7 @@ async function runAccountCycle(
               const openApiContext = await deps.createOpenApiClient(cookies, cycletlsPort)
               cycleTlsCleanups.push(() => deps.closeOpenApiClient(openApiContext))
               try {
+                const followRateLimitBudget = new FollowRateLimitBudget({ now: Date.now })
                 if (needsTimeline) {
                   if (!trendsContext) {
                     throw new Error('Missing trends context for timeline checkpoint')
@@ -1380,6 +1474,51 @@ async function runAccountCycle(
                     }),
                   })
                 }
+                if (needsFollowing) {
+                  const followingPhase = await measurePhaseDuration((trackRetryWait) =>
+                    syncFollowingPhase(
+                      deps,
+                      account,
+                      openApiContext.client,
+                      followRateLimitBudget,
+                      trackRetryWait,
+                    ),
+                  )
+                  following = followingPhase.value
+                  await deps.completeCrawlAccountCheckpoint({
+                    crawlRunId,
+                    username: account.username,
+                    phase: 'following',
+                    data: toCheckpointData({
+                      ...following,
+                      durationMs: followingPhase.durationMs,
+                      retryWaitMs: followingPhase.retryWaitMs,
+                    }),
+                  })
+                }
+                if (needsFollowers) {
+                  const followersPhase = await measurePhaseDuration((trackRetryWait) =>
+                    syncFollowersPhase(
+                      deps,
+                      account,
+                      openApiContext.client,
+                      followRateLimitBudget,
+                      following?.userId ?? null,
+                      trackRetryWait,
+                    ),
+                  )
+                  followers = followersPhase.value
+                  await deps.completeCrawlAccountCheckpoint({
+                    crawlRunId,
+                    username: account.username,
+                    phase: 'followers',
+                    data: toCheckpointData({
+                      ...followers,
+                      durationMs: followersPhase.durationMs,
+                      retryWaitMs: followersPhase.retryWaitMs,
+                    }),
+                  })
+                }
                 if (needsAuthors) {
                   if (!timelineSnapshot) {
                     throw new Error('Missing timeline checkpoint for author phase')
@@ -1400,6 +1539,7 @@ async function runAccountCycle(
                       resolvedTimelineSnapshot,
                       resolvedRepliesResult,
                       openApiContext.client,
+                      followRateLimitBudget,
                       trackRetryWait,
                     ),
                   )
@@ -1412,44 +1552,6 @@ async function runAccountCycle(
                       ...metrics,
                       durationMs: authorsPhase.durationMs,
                       retryWaitMs: authorsPhase.retryWaitMs,
-                    }),
-                  })
-                }
-                if (needsFollowing) {
-                  const followingPhase = await measurePhaseDuration((trackRetryWait) =>
-                    syncFollowingPhase(deps, account, openApiContext.client, trackRetryWait),
-                  )
-                  following = followingPhase.value
-                  await deps.completeCrawlAccountCheckpoint({
-                    crawlRunId,
-                    username: account.username,
-                    phase: 'following',
-                    data: toCheckpointData({
-                      ...following,
-                      durationMs: followingPhase.durationMs,
-                      retryWaitMs: followingPhase.retryWaitMs,
-                    }),
-                  })
-                }
-                if (needsFollowers) {
-                  const followersPhase = await measurePhaseDuration((trackRetryWait) =>
-                    syncFollowersPhase(
-                      deps,
-                      account,
-                      openApiContext.client,
-                      following?.userId ?? null,
-                      trackRetryWait,
-                    ),
-                  )
-                  followers = followersPhase.value
-                  await deps.completeCrawlAccountCheckpoint({
-                    crawlRunId,
-                    username: account.username,
-                    phase: 'followers',
-                    data: toCheckpointData({
-                      ...followers,
-                      durationMs: followersPhase.durationMs,
-                      retryWaitMs: followersPhase.retryWaitMs,
                     }),
                   })
                 }

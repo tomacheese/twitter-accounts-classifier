@@ -1,6 +1,6 @@
 // crawler から移動してくる各モジュールをここから re-export する。
-export { isRetryableTwitterError, withTwitterRetry } from './retry'
-export type { RetryOptions } from './retry'
+export { isRetryableTwitterError, withTwitterRetry, withTwitterRateLimitRetry } from './retry'
+export type { RetryOptions, RateLimitRetryOptions } from './retry'
 export { wrapFetchWithResponseCapture, getLastResponseMatching } from './response-capture'
 export type { CapturedResponse } from './response-capture'
 export {
