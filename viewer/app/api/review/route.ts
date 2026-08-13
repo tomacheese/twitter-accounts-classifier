@@ -6,7 +6,7 @@ import {
   type ReviewFindingStatus,
 } from '@/lib/queries/review-findings'
 import { buildApiResponseMeta } from '@/lib/api-response'
-import { getPipelineMeta } from '@/lib/read-model-meta'
+import { getPipelineHealthBreakdown, getPipelineMeta } from '@/lib/read-model-meta'
 import { guardSection } from '@/lib/api-section-guard'
 
 const DEFAULT_LIMIT = 25
@@ -64,12 +64,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const prisma = getPrismaClient()
   const result = await listReviewFindings(prisma, { filters, cursor, limit })
-  const meta = await getPipelineMeta(prisma)
+  const [meta, pipelineHealth] = await Promise.all([
+    getPipelineMeta(prisma),
+    getPipelineHealthBreakdown(prisma),
+  ])
 
   return NextResponse.json(
     {
       items: result.items,
-      meta: buildApiResponseMeta({ ...meta, nextCursor: result.nextCursor }),
+      meta: buildApiResponseMeta({ ...meta, nextCursor: result.nextCursor, pipelineHealth }),
     },
     { headers: { 'Cache-Control': 'no-store' } },
   )

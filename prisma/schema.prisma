@@ -296,9 +296,22 @@ model CrawlRun {
   checkpoints             CrawlAccountCheckpoint[]
   accountLabelRuns        CrawlAccountLabelRun[]
   authorCheckpoints       CrawlAuthorCheckpoint[]
+  labelEvidenceEpoch     LabelEvidenceEpoch?
 
   @@index([startedAt])
   @@index([status, startedAt(sort: Desc), id(sort: Desc)])
+}
+
+// CrawlRun の terminal 確定時に crawler が publish する不変の観測単位。
+// WorkItem の retry や再 enqueue とは独立して detector lifecycle の identity を保つ。
+model LabelEvidenceEpoch {
+  id                String   @id @default(cuid())
+  crawlRunId        String   @unique
+  crawlRun          CrawlRun @relation(fields: [crawlRunId], references: [id])
+  sourceWatermarkAt DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([sourceWatermarkAt(sort: Desc)])
 }
 
 model CrawlAccountRun {
@@ -1052,6 +1065,21 @@ model ReadModelState {
   analyzerVersion     String?
   errorCode           String?
   errorSummary        String?
+}
+
+// detector 固有の進捗を ReadModelState から分離する。
+model DetectorState {
+  detectorKey         String    @id
+  lastEvidenceEpochId String?
+  sourceWatermarkAt   DateTime?
+  lastStartedAt       DateTime?
+  lastSuccessAt       DateTime?
+  lastFailureAt       DateTime?
+  errorCode           String?
+  errorSummary        String?
+  policyHash          String?
+  analyzerVersion     String?
+  updatedAt           DateTime  @updatedAt
 }
 
 // 各コンポーネントの起動時に自身の build identity を upsert する。

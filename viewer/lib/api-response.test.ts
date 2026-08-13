@@ -53,4 +53,36 @@ describe('buildApiResponseMeta', () => {
 
     expect(meta.sourceDataAt).toBeNull()
   })
+
+  it('pipeline health の各段を ISO 時刻へ直列化する', () => {
+    const meta = buildApiResponseMeta({
+      generatedAt: new Date('2026-08-07T00:00:00.000Z'),
+      sourceDataAt: null,
+      generationId: null,
+      policyHash: null,
+      freshnessStatus: 'healthy',
+      pipelineHealth: {
+        overallStatus: 'delayed',
+        primaryCause: 'detector',
+        source: {
+          status: 'healthy',
+          lastSourceWatermarkAt: new Date('2026-08-06T23:00:00.000Z'),
+          lastOutcome: 'success',
+        },
+        detector: {
+          status: 'delayed',
+          processedWatermarkAt: null,
+          lastFailureAt: null,
+          errorSummary: null,
+        },
+        projection: { status: 'unknown', processedWatermarkAt: null },
+      },
+    })
+
+    expect(meta.pipelineHealth).toMatchObject({
+      overallStatus: 'delayed',
+      primaryCause: 'detector',
+      source: { lastSourceWatermarkAt: '2026-08-06T23:00:00.000Z' },
+    })
+  })
 })

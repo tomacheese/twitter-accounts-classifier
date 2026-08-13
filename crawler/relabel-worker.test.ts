@@ -264,6 +264,58 @@ describe('runRelabelWorkerCycleOnce', () => {
     vi.unstubAllEnvs()
   })
 
+  it('drain backlog が worker 上限に達している間は stale scan と cursor 更新を行わない', async () => {
+    vi.stubEnv('RELABELER_WORKER_BATCH_SIZE', '2')
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
+    const peekSpy = vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
+      { id: 'wi-1', triggerId: 'alice' },
+      { id: 'wi-2', triggerId: 'bob' },
+    ])
+    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
+      signalsFor: () => ({}),
+    })
+    vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([])
+    const accountFindMany = vi.fn().mockResolvedValue([])
+    const cursorUpsert = vi.fn().mockResolvedValue({})
+    const prisma = makeCursorPrisma({
+      account: { findMany: accountFindMany },
+      relabelScanCursor: { findUnique: vi.fn().mockResolvedValue(null), upsert: cursorUpsert },
+    })
+
+    await runRelabelWorkerCycleOnce(prisma)
+
+    expect(peekSpy).toHaveBeenCalledTimes(1)
+    expect(accountFindMany).not.toHaveBeenCalled()
+    expect(cursorUpsert).not.toHaveBeenCalled()
+  })
+
+  it('drain backlog が worker 上限未満の場合だけ stale scan 後に候補を取り直す', async () => {
+    vi.stubEnv('RELABELER_WORKER_BATCH_SIZE', '2')
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
+    const peekSpy = vi
+      .spyOn(workItemRepository, 'peekWorkItemCandidates')
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'wi-1', triggerId: 'alice' }])
+    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
+      signalsFor: () => ({}),
+    })
+    vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([])
+    const accountFindMany = vi.fn().mockResolvedValue([])
+    const cursorUpsert = vi.fn().mockResolvedValue({})
+    const prisma = makeCursorPrisma({
+      account: { findMany: accountFindMany },
+      relabelScanCursor: { findUnique: vi.fn().mockResolvedValue(null), upsert: cursorUpsert },
+    })
+
+    await runRelabelWorkerCycleOnce(prisma)
+
+    expect(peekSpy).toHaveBeenCalledTimes(2)
+    expect(accountFindMany).toHaveBeenCalled()
+    expect(cursorUpsert).not.toHaveBeenCalled()
+  })
+
   it('peek 候補が 0 件の場合、buildFollowGraphLabelIndex・loadReplyCorpus・claim を一切行わない', async () => {
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
     const peekSpy = vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([])

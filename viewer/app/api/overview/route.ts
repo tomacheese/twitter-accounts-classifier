@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getPrismaClient } from '../../../lib/prisma'
 import { getOverviewSnapshot } from '../../../lib/queries/overview'
 import { buildApiResponseMeta } from '../../../lib/api-response'
-import { getReadModelMeta } from '../../../lib/read-model-meta'
+import { getPipelineHealthBreakdown, getReadModelMeta } from '../../../lib/read-model-meta'
 import { guardSection } from '../../../lib/api-section-guard'
 
 /**
@@ -18,7 +18,10 @@ export async function GET(): Promise<NextResponse> {
 
   const prisma = getPrismaClient()
   const snapshot = await getOverviewSnapshot(prisma)
-  const { generatedAt } = await getReadModelMeta(prisma, 'overview_snapshot')
+  const [{ generatedAt }, pipelineHealth] = await Promise.all([
+    getReadModelMeta(prisma, 'overview_snapshot'),
+    getPipelineHealthBreakdown(prisma),
+  ])
 
   const body = snapshot
     ? {
@@ -35,6 +38,7 @@ export async function GET(): Promise<NextResponse> {
           generationId: snapshot.generationId,
           policyHash: snapshot.policyHash,
           freshnessStatus: snapshot.freshnessStatus,
+          pipelineHealth,
         }),
       }
     : {
@@ -51,6 +55,7 @@ export async function GET(): Promise<NextResponse> {
           generationId: null,
           policyHash: null,
           freshnessStatus: 'unknown',
+          pipelineHealth,
         }),
       }
 

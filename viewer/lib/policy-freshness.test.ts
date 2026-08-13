@@ -1,9 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import {
-  deriveElapsedFreshness,
-  extractFreshnessThresholds,
-  parseIsoDurationMs,
-} from './policy-freshness'
+import { deriveElapsedFreshness, extractFreshnessThresholds } from './policy-freshness'
+import { parseIsoDurationMs } from 'pipeline-health'
 
 describe('parseIsoDurationMs', () => {
   it('日数を解釈する', () => {
@@ -20,8 +17,11 @@ describe('parseIsoDurationMs', () => {
 })
 
 describe('extractFreshnessThresholds', () => {
-  it('read_model_freshness ルールからしきい値を取り出す', () => {
+  it('read_model_freshness から分類 freshness のしきい値を取り出す', () => {
     const content = {
+      pipelineHealth: {
+        projection: { delayedAfter: 'PT1H', staleAfter: 'PT6H' },
+      },
       rules: [
         { type: 'read_model_freshness', enabled: true, delayedAfter: 'PT1H', staleAfter: 'PT6H' },
       ],
@@ -32,7 +32,7 @@ describe('extractFreshnessThresholds', () => {
     })
   })
 
-  it('ルールが無効なら候補から除外する', () => {
+  it('read model rule が無効なら分類 freshness の既定値を返す', () => {
     const content = {
       rules: [
         { type: 'read_model_freshness', enabled: false, delayedAfter: 'PT1H', staleAfter: 'PT6H' },

@@ -74,9 +74,17 @@ export async function buildFollowGraphLabelIndex(
           COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
           COUNT(*)::int AS "totalCount"
         FROM (
-          SELECT "followerId" AS "accountId", "followeeId" FROM "Follow"
-          UNION
-          SELECT "accountId", "followeeId" FROM "LabelingFollowSample"
+          SELECT sample."accountId", sample."followeeId"
+          FROM "LabelingFollowSample" sample
+          UNION ALL
+          SELECT f."followerId" AS "accountId", f."followeeId"
+          FROM "Follow" f
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM "LabelingFollowSample" sample
+            WHERE sample."accountId" = f."followerId"
+              AND sample."followeeId" = f."followeeId"
+          )
         ) edges
         JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
         WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
@@ -90,9 +98,17 @@ export async function buildFollowGraphLabelIndex(
           COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
           COUNT(*)::int AS "totalCount"
         FROM (
-          SELECT "followerId" AS "accountId", "followeeId" FROM "Follow"
-          UNION
-          SELECT "accountId", "followeeId" FROM "LabelingFollowSample"
+          SELECT sample."accountId", sample."followeeId"
+          FROM "LabelingFollowSample" sample
+          UNION ALL
+          SELECT f."followerId" AS "accountId", f."followeeId"
+          FROM "Follow" f
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM "LabelingFollowSample" sample
+            WHERE sample."accountId" = f."followerId"
+              AND sample."followeeId" = f."followeeId"
+          )
         ) edges
         JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
         WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})

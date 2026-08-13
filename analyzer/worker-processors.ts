@@ -338,7 +338,7 @@ const DEFAULT_MIN_COVERAGE = 0.5
 const DEFAULT_MAX_STALE_RATIO = 0.3
 
 /**
- * `LabelMetricSnapshot` の snapshot set 確定 → (triggerType: crawl_run のみ) Finding 評価 →
+ * `LabelMetricSnapshot` の snapshot set 確定 → eligible crawl evidence のみ Finding 評価 →
  * `LabelSummaryCurrent` publish、の順で Label aggregate を再構築する。
  * @param prisma - Prisma クライアント
  * @param workItem - `kind: 'label_aggregate_refresh'` の WorkItem
@@ -382,22 +382,47 @@ export async function processLabelAggregateRefresh(
   }
 
   if (workItem.triggerType === 'crawl_run') {
-    try {
-      await runLabelFindingsSerialized(prisma, {
-        snapshotAt,
-        run: (tx) =>
-          generateFindingsForAggregateRefresh(tx, {
-            triggerWorkItemId: workItem.id,
-            policy,
-            policyHash,
-            detectorVersion: APP_VERSION,
-            sourceObservedAt: snapshotAt,
-          }),
-      })
-    } catch (error) {
-      throw new LabelAggregateRefreshError(
-        'label_finding_generation_failed',
-        error instanceof Error ? error.message : String(error),
+    const evidenceEpoch = await prisma.labelEvidenceEpoch.findUnique({
+      where: { crawlRunId: workItem.triggerId },
+      include: { crawlRun: { select: { status: true } } },
+    })
+    const [completeSnapshotCount, labelDefinitionCount] = await Promise.all([
+      prisma.labelMetricSnapshot.count({
+        where: { triggerWorkItemId: workItem.id, completeness: 'complete' },
+      }),
+      prisma.labelDefinition.count(),
+    ])
+    const isEligible =
+      evidenceEpoch?.crawlRun.status === 'success' &&
+      labelDefinitionCount > 0 &&
+      completeSnapshotCount === labelDefinitionCount
+
+    if (isEligible) {
+      try {
+        await runLabelFindingsSerialized(prisma, {
+          evidenceEpochId: evidenceEpoch.id,
+          sourceWatermarkAt: evidenceEpoch.sourceWatermarkAt,
+          policyHash,
+          analyzerVersion: APP_VERSION,
+          run: (tx) =>
+            generateFindingsForAggregateRefresh(tx, {
+              triggerWorkItemId: workItem.id,
+              evidenceEpochId: evidenceEpoch.id,
+              policy,
+              policyHash,
+              detectorVersion: APP_VERSION,
+              sourceObservedAt: evidenceEpoch.sourceWatermarkAt,
+            }),
+        })
+      } catch (error) {
+        throw new LabelAggregateRefreshError(
+          'label_finding_generation_failed',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
+    } else {
+      logger.info(
+        `Skipping label findings for ${workItem.triggerId}: evidence is missing, non-success, or incomplete`,
       )
     }
   }
@@ -619,10 +644,9 @@ export async function refreshReadModelFreshnessFromPolicy(prisma: PrismaClient):
   const rule = policy.rules.find((entry) => entry.type === 'read_model_freshness' && entry.enabled)
   if (!rule) return
 
-  const delayedAfterMs = parseIsoDurationMs(rule.delayedAfter ?? DEFAULT_READ_MODEL_DELAYED_AFTER)
   await refreshReadModelFreshness(prisma, {
     cadenceMs: parseIsoDurationMs(DEFAULT_READ_MODEL_CADENCE),
-    delayedAfterMs,
+    delayedAfterMs: parseIsoDurationMs(rule.delayedAfter ?? DEFAULT_READ_MODEL_DELAYED_AFTER),
     staleAfterMs: parseIsoDurationMs(rule.staleAfter ?? DEFAULT_READ_MODEL_STALE_AFTER),
     now: new Date(),
   })

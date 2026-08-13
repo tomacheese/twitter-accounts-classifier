@@ -45,7 +45,7 @@ GRANT INSERT, UPDATE, DELETE ON TABLE
   "AccountSummaryLatest", "AccountClassificationLatest", "ReadModelBootstrap",
   "LabelSummaryCurrent", "BlockRelationCurrent", "BlockStateChange",
   "AttentionItemCurrent", "OverviewSnapshot",
-  "ReadModelGeneration", "ReadModelPointer", "ReadModelState",
+  "ReadModelGeneration", "ReadModelPointer", "ReadModelState", "DetectorState",
   "AccountClassificationValueCount", "AccountClassificationConfidenceBucketCount",
   "AccountClassificationRuleVersionCount", "AccountClassificationFreshnessBucket"
   TO analyzer;

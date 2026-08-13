@@ -1,6 +1,21 @@
 {
   "schemaVersion": 1,
-  "policyVersion": "2026-08-12.0",
+  "policyVersion": "2026-08-13.0",
+  "pipelineHealth": {
+    "source": {
+      "expectedInterval": "PT3H",
+      "completionGrace": "PT3H",
+      "staleAfter": "PT12H"
+    },
+    "detector": {
+      "delayedAfter": "PT15M",
+      "staleAfter": "PT1H"
+    },
+    "projection": {
+      "delayedAfter": "PT15M",
+      "staleAfter": "PT1H"
+    }
+  },
   "rules": [
     {
       "type": "label_count_drop",

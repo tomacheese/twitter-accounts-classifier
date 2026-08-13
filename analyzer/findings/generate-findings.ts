@@ -27,6 +27,8 @@ type FindingsClient = PrismaClient | Prisma.TransactionClient
 export interface GenerateFindingsForAggregateRefreshInput {
   /** この観測の識別子。同一 WorkItem の retry では不変。 */
   triggerWorkItemId: string
+  /** immutable evidence epoch の識別子。指定時は detector observation identity に使う。 */
+  evidenceEpochId?: string
   /** 適用する検出ポリシー。 */
   policy: DetectionPolicy
   /** 適用したポリシーの content hash。 */
@@ -424,8 +426,8 @@ export async function generateFindingsForAggregateRefresh(
             primaryScopeId: snapshot.labelDefinitionId,
             observation: result,
             rule,
-            sourceType: 'crawl_run',
-            sourceId: input.triggerWorkItemId,
+            sourceType: input.evidenceEpochId ? 'label_evidence_epoch' : 'crawl_run',
+            sourceId: input.evidenceEpochId ?? input.triggerWorkItemId,
           },
           input,
         )
@@ -457,8 +459,8 @@ export async function generateFindingsForAggregateRefresh(
               primaryScopeId: snapshot.labelDefinitionId,
               observation: result,
               rule,
-              sourceType: 'crawl_run',
-              sourceId: input.triggerWorkItemId,
+              sourceType: input.evidenceEpochId ? 'label_evidence_epoch' : 'crawl_run',
+              sourceId: input.evidenceEpochId ?? input.triggerWorkItemId,
             },
             input,
           )

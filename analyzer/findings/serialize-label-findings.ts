@@ -3,53 +3,70 @@ import type { Prisma, PrismaClient } from '../generated/prisma'
 
 const logger = Logger.configure('analyzer:serialize-label-findings')
 
-const MODEL_KEY = 'label_findings'
+const DETECTOR_KEY = 'label_findings'
 
 /**
  * runLabelFindingsSerialized の入力。
  */
 export interface RunLabelFindingsSerializedInput {
-  /** 今回処理対象の snapshot set が確定した時刻。 */
-  snapshotAt: Date
+  /** 今回処理する immutable evidence epoch。 */
+  evidenceEpochId: string
+  /** evidence が表す CrawlRun の terminal 時刻。 */
+  sourceWatermarkAt: Date
+  /** 評価に使用した policy の content hash。 */
+  policyHash: string
+  /** 評価を実行した Analyzer の version。 */
+  analyzerVersion: string
   /** 直列化して実行する Finding 評価本体。 */
   run: (tx: Prisma.TransactionClient) => Promise<void>
 }
 
 /**
  * 複数の CrawlRun 起点 build が並行しても Finding 段の lifecycle 遷移が
- * snapshotAt の前後関係と食い違わないよう、ReadModelState (modelKey: 'label_findings')
- * の行ロックで直列化する。より新しい snapshotAt が既に処理済みなら、古い方は
+ * evidence watermark の前後関係と食い違わないよう、DetectorState (detectorKey: 'label_findings')
+ * の行ロックで直列化する。より新しい evidence watermark が既に処理済みなら、古い方は
  * lifecycle を巻き戻さないためスキップする。
  * @param prisma - Prisma クライアント
- * @param input - 対象 snapshot set の時刻と実行本体
+ * @param input - 対象 evidence の時刻と実行本体
  */
 export async function runLabelFindingsSerialized(
   prisma: PrismaClient,
   input: RunLabelFindingsSerializedInput,
 ): Promise<void> {
+  const startedAt = new Date()
+  await prisma.detectorState.upsert({
+    where: { detectorKey: DETECTOR_KEY },
+    update: { lastStartedAt: startedAt },
+    create: { detectorKey: DETECTOR_KEY, lastStartedAt: startedAt },
+  })
+
   try {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`
-        INSERT INTO "ReadModelState" ("modelKey", "schemaVersion", "status")
-        VALUES (${MODEL_KEY}, 1, 'unknown')
-        ON CONFLICT ("modelKey") DO NOTHING
+        INSERT INTO "DetectorState" ("detectorKey", "updatedAt")
+        VALUES (${DETECTOR_KEY}, now())
+        ON CONFLICT ("detectorKey") DO NOTHING
       `
       const rows = await tx.$queryRaw<{ sourceWatermarkAt: Date | null }[]>`
-        SELECT "sourceWatermarkAt" FROM "ReadModelState"
-        WHERE "modelKey" = ${MODEL_KEY}
+        SELECT "sourceWatermarkAt" FROM "DetectorState"
+        WHERE "detectorKey" = ${DETECTOR_KEY}
         FOR UPDATE
       `
       const state = rows.at(0)
-      if (state?.sourceWatermarkAt && input.snapshotAt <= state.sourceWatermarkAt) return
+      if (state?.sourceWatermarkAt && input.sourceWatermarkAt <= state.sourceWatermarkAt) return
 
       await input.run(tx)
 
-      await tx.readModelState.update({
-        where: { modelKey: MODEL_KEY },
+      await tx.detectorState.update({
+        where: { detectorKey: DETECTOR_KEY },
         data: {
-          status: 'healthy',
-          sourceWatermarkAt: input.snapshotAt,
+          lastEvidenceEpochId: input.evidenceEpochId,
+          sourceWatermarkAt: input.sourceWatermarkAt,
           lastSuccessAt: new Date(),
+          policyHash: input.policyHash,
+          analyzerVersion: input.analyzerVersion,
+          errorCode: null,
+          errorSummary: null,
         },
       })
     })
@@ -59,16 +76,28 @@ export async function runLabelFindingsSerialized(
     // 初回実行の失敗では INSERT ... ON CONFLICT DO NOTHING も rollback され行自体が
     // 存在しないため、update ではなく upsert で確実に failed を記録する。
     try {
-      await prisma.readModelState.upsert({
-        where: { modelKey: MODEL_KEY },
-        update: { status: 'failed', lastFailureAt: new Date(), errorSummary: String(error) },
-        create: {
-          modelKey: MODEL_KEY,
-          schemaVersion: 1,
-          status: 'failed',
-          lastFailureAt: new Date(),
-          errorSummary: String(error),
-        },
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`
+          INSERT INTO "DetectorState" ("detectorKey", "updatedAt")
+          VALUES (${DETECTOR_KEY}, now())
+          ON CONFLICT ("detectorKey") DO NOTHING
+        `
+        const rows = await tx.$queryRaw<{ sourceWatermarkAt: Date | null }[]>`
+          SELECT "sourceWatermarkAt" FROM "DetectorState"
+          WHERE "detectorKey" = ${DETECTOR_KEY}
+          FOR UPDATE
+        `
+        const state = rows.at(0)
+        if (state?.sourceWatermarkAt && state.sourceWatermarkAt > input.sourceWatermarkAt) return
+
+        await tx.detectorState.update({
+          where: { detectorKey: DETECTOR_KEY },
+          data: {
+            lastFailureAt: new Date(),
+            errorCode: 'label_finding_generation_failed',
+            errorSummary: String(error),
+          },
+        })
       })
     } catch (bookkeepingError) {
       logger.error(`failed to record label_findings failure`, bookkeepingError as Error)
