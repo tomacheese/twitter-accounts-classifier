@@ -39,6 +39,10 @@ CREATE TABLE "AccountClassificationFreshnessBucket" (
 -- 範囲内で4集計テーブルを維持する。アプリケーション層での read-modify-write では
 -- 並行 upsert 時に stale な値を減算してしまうため、トリガーで行ロックと遷移の
 -- 確定を同一 SQL 文にまとめる。
+-- "observedAt"/"observedAtBucket" は TIMESTAMP (timezone なし) で UTC の
+-- wall-clock 値として扱う運用のため、timestamptz を返す now() と直接比較すると
+-- セッションの timezone 設定に応じて implicit cast がずれる。now() は必ず
+-- AT TIME ZONE 'UTC' で naive UTC に変換してから比較する。
 CREATE OR REPLACE FUNCTION account_classification_latest_aggregate_trigger()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -49,17 +53,31 @@ DECLARE
   v_literal_old_bucket TIMESTAMP;
   v_literal_new_bucket TIMESTAMP;
 BEGIN
+  -- 4集計テーブルに影響する列 (value/confidence/ruleVersion と、分単位に
+  -- 丸めた observedAt) が UPDATE 前後で変わらないなら、decrement/increment は
+  -- 差し引きゼロにしかならない。単なる再クロールで observedAt が同一分内で
+  -- 微増するだけの多発ケースで、不要な行ロックを取らずに済ませる。
+  IF TG_OP = 'UPDATE'
+    AND NEW."value" IS NOT DISTINCT FROM OLD."value"
+    AND NEW."confidence" IS NOT DISTINCT FROM OLD."confidence"
+    AND NEW."ruleVersion" IS NOT DISTINCT FROM OLD."ruleVersion"
+    AND date_trunc('minute', NEW."observedAt") IS NOT DISTINCT FROM date_trunc('minute', OLD."observedAt")
+  THEN
+    RETURN NEW;
+  END IF;
+
   -- sentinel 行を(無ければ)作ってから常に先にロックする。compaction・OLD/NEW
   -- いずれの分岐でもこの順序を守ることで、逆順ロックによるデッドロックを
-  -- 構造的に排除する。
+  -- 構造的に排除する。DELETE では NEW が存在しないため OLD を使う。
   INSERT INTO "AccountClassificationFreshnessBucket" ("labelDefinitionId", "observedAtBucket", "count")
-    VALUES (NEW."labelDefinitionId", v_sentinel, 0)
+    VALUES (COALESCE(NEW."labelDefinitionId", OLD."labelDefinitionId"), v_sentinel, 0)
     ON CONFLICT DO NOTHING;
   PERFORM 1 FROM "AccountClassificationFreshnessBucket"
-    WHERE "labelDefinitionId" = NEW."labelDefinitionId" AND "observedAtBucket" = v_sentinel
+    WHERE "labelDefinitionId" = COALESCE(NEW."labelDefinitionId", OLD."labelDefinitionId")
+      AND "observedAtBucket" = v_sentinel
     FOR UPDATE;
 
-  IF TG_OP = 'UPDATE' THEN
+  IF TG_OP = 'UPDATE' OR TG_OP = 'DELETE' THEN
     v_confidence_bucket_old := LEAST(FLOOR(OLD."confidence" * 10), 9)::int;
 
     UPDATE "AccountClassificationValueCount"
@@ -105,6 +123,11 @@ BEGIN
     END IF;
   END IF;
 
+  -- DELETE は OLD の decrement のみで完結し、INSERT 相当の増分は行わない。
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+
   v_confidence_bucket_new := LEAST(FLOOR(NEW."confidence" * 10), 9)::int;
 
   INSERT INTO "AccountClassificationValueCount" ("labelDefinitionId", "value", "count", "confidenceSum")
@@ -136,7 +159,7 @@ BEGIN
     UPDATE "AccountClassificationFreshnessBucket"
       SET "count" = "count" + 1
       WHERE "labelDefinitionId" = NEW."labelDefinitionId" AND "observedAtBucket" = v_literal_new_bucket;
-  ELSIF now() - NEW."observedAt" > v_ceiling THEN
+  ELSIF (now() AT TIME ZONE 'UTC') - NEW."observedAt" > v_ceiling THEN
     UPDATE "AccountClassificationFreshnessBucket"
       SET "count" = "count" + 1
       WHERE "labelDefinitionId" = NEW."labelDefinitionId" AND "observedAtBucket" = v_sentinel;
@@ -150,17 +173,8 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER account_classification_latest_aggregate_trigger
-  AFTER INSERT OR UPDATE ON "AccountClassificationLatest"
+  AFTER INSERT OR UPDATE OR DELETE ON "AccountClassificationLatest"
   FOR EACH ROW EXECUTE FUNCTION account_classification_latest_aggregate_trigger();
-
--- reasonDistribution を value = true に絞った index-only scan にするため、
--- 既存 index を reason を INCLUDE した同名の index に差し替える。
--- Prisma schema の @@index([labelDefinitionId, value, accountId]) はそのままでよく、
--- INCLUDE 句は既存の GIN index と同様に Prisma schema には表現しない raw SQL 側だけの
--- 変更とする。
-DROP INDEX IF EXISTS "AccountClassificationLatest_labelDefinitionId_value_account_idx";
-CREATE INDEX "AccountClassificationLatest_labelDefinitionId_value_account_idx"
-  ON "AccountClassificationLatest" ("labelDefinitionId", "value") INCLUDE ("accountId", "reason");
 
 -- 既存データの backfill。CREATE TRIGGER (上記) が取得するロックにより、この
 -- migration トランザクションがコミットするまで AccountClassificationLatest への
@@ -181,7 +195,7 @@ FROM "AccountClassificationLatest" GROUP BY 1, 2;
 INSERT INTO "AccountClassificationFreshnessBucket" ("labelDefinitionId", "observedAtBucket", "count")
 SELECT
   "labelDefinitionId",
-  CASE WHEN now() - "observedAt" > interval '7 days'
+  CASE WHEN (now() AT TIME ZONE 'UTC') - "observedAt" > interval '7 days'
     THEN TIMESTAMP '1970-01-01'
     ELSE date_trunc('minute', "observedAt")
   END,

@@ -6,6 +6,10 @@ export type SnapshotCompleteness = 'complete' | 'partial' | 'unknown'
 const CONFIDENCE_BUCKET_COUNT = 10
 const FRESHNESS_BUCKET_BACKLOG_CEILING_MS = 7 * 24 * 60 * 60 * 1000
 const MIN_FRESHNESS_THRESHOLD_MS = 5 * 60 * 1000
+// 集計テーブル読み取りへの置き換えにより行数に依存しない O(labelDefinition数) の
+// トランザクションになったため、旧 COUNT(DISTINCT) 全件scan を見込んだ 300 秒は
+// 過大。account_summary_refresh と同じ水準に合わせる。
+const LABEL_AGGREGATE_SNAPSHOT_TRANSACTION_TIMEOUT_MS = 60_000
 
 /**
  * @param bucket - 0 から 9 までのバケット番号
@@ -94,7 +98,7 @@ async function compactFreshnessBuckets(
       SELECT "observedAtBucket", "count"
       FROM "AccountClassificationFreshnessBucket"
       WHERE "labelDefinitionId" = ${labelDefinitionId}
-        AND "observedAtBucket" < now() - interval '7 days'
+        AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
         AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
       FOR UPDATE
     )
@@ -106,9 +110,62 @@ async function compactFreshnessBuckets(
   await tx.$executeRaw`
     DELETE FROM "AccountClassificationFreshnessBucket"
     WHERE "labelDefinitionId" = ${labelDefinitionId}
-      AND "observedAtBucket" < now() - interval '7 days'
+      AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
       AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
   `
+}
+
+/**
+ * 全 labelDefinitionId の freshness バケットを、ラベルごとに分けず
+ * 固定回数の SQL 文で一括 compaction する。sentinel 行のロックは
+ * labelDefinitionId 昇順で一括取得し、トリガー側のロック順序と一致させる。
+ * snapshot 本体の REPEATABLE READ トランザクションより先に、それとは
+ * 独立した短時間トランザクションとして実行することで、分類書き込み側が
+ * 待たされる時間を compaction 自体の実行時間に限定する。
+ * @param prisma - Prisma クライアント
+ * @param labelIds - 対象の labelDefinitionId 一覧
+ */
+async function compactFreshnessBucketsForAllLabels(
+  prisma: PrismaClient,
+  labelIds: string[],
+): Promise<void> {
+  if (labelIds.length === 0) return
+  const sortedLabelIds = labelIds.toSorted()
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      INSERT INTO "AccountClassificationFreshnessBucket" ("labelDefinitionId", "observedAtBucket", "count")
+      SELECT "id", TIMESTAMP '1970-01-01', 0
+      FROM UNNEST(${sortedLabelIds}::text[]) AS "id"
+      ON CONFLICT DO NOTHING
+    `
+    await tx.$queryRaw`
+      SELECT * FROM "AccountClassificationFreshnessBucket"
+      WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::text[]) AND "observedAtBucket" = TIMESTAMP '1970-01-01'
+      ORDER BY "labelDefinitionId"
+      FOR UPDATE
+    `
+    await tx.$executeRaw`
+      WITH stale_totals AS (
+        SELECT "labelDefinitionId", SUM("count") AS total
+        FROM "AccountClassificationFreshnessBucket"
+        WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::text[])
+          AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
+          AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
+        GROUP BY 1
+      )
+      UPDATE "AccountClassificationFreshnessBucket" AS sentinel
+      SET "count" = sentinel."count" + stale_totals."total"
+      FROM stale_totals
+      WHERE sentinel."labelDefinitionId" = stale_totals."labelDefinitionId"
+        AND sentinel."observedAtBucket" = TIMESTAMP '1970-01-01'
+    `
+    await tx.$executeRaw`
+      DELETE FROM "AccountClassificationFreshnessBucket"
+      WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::text[])
+        AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
+        AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
+    `
+  })
 }
 
 /** buildLabelAggregateSnapshotSet の入力。 */
@@ -137,28 +194,35 @@ export interface BuildLabelAggregateSnapshotSetResult {
   reused: boolean
 }
 
+/** AccountClassificationValueCount の読み取り行。 */
 interface ValueCountRow {
   labelDefinitionId: string
   value: boolean
-  count: bigint
+  // AccountClassificationValueCount.count は INTEGER 列の直接 SELECT であり、
+  // COUNT(*) 等の集約ではないため node-postgres 経由でも number になる。
+  count: number
   confidenceSum: number
 }
+/** AccountClassificationConfidenceBucketCount の読み取り行。 */
 interface ConfidenceBucketCountRow {
   labelDefinitionId: string
   confidenceBucket: number
-  count: bigint
+  count: number
 }
+/** AccountClassificationRuleVersionCount の読み取り行。 */
 interface RuleVersionCountRow {
   labelDefinitionId: string
   ruleVersion: string
-  count: bigint
+  count: number
 }
+/** AccountClassificationFreshnessBucket を current/delayed/stale に振り分け集計した行。 */
 interface FreshnessCountRow {
   labelDefinitionId: string
   currentCount: bigint | null
   delayedCount: bigint | null
   staleCount: bigint | null
 }
+/** AccountClassificationLatest から reasonDistribution 用に読み取った行。 */
 interface ReasonCountRow {
   labelDefinitionId: string
   reason: string
@@ -206,21 +270,17 @@ export async function buildLabelAggregateSnapshotSet(
 
   const freshnessThresholds = input.freshnessThresholdsMs
   const labelIds = labelDefinitions.map((label) => label.id)
-  const sortedLabelIds = labelIds.toSorted()
+
+  // snapshot 本体の REPEATABLE READ トランザクションより先に、独立した
+  // 短時間トランザクションで compaction を済ませる。同一トランザクション内で
+  // 行うと、compaction の sentinel ロックが分類書き込み側のトリガーと
+  // snapshot トランザクションのタイムアウト全体で競合し得るため。
+  await compactFreshnessBucketsForAllLabels(prisma, labelIds)
 
   const snapshotAt = await prisma.$transaction(
     async (tx) => {
-      await tx.$executeRaw`SET LOCAL work_mem = '256MB'`
       const nowRows = await tx.$queryRaw<{ now: Date }[]>`SELECT now() AS now`
       const sharedSnapshotAt = nowRows.at(0)?.now ?? new Date()
-
-      // buildLabelAggregateSnapshotSet が呼ばれるたびに、
-      // 7 日を超えた freshness バケットを sentinel へ丸め込む。
-      // labelDefinitionId を昇順に処理し、
-      // トリガー側のロック取得順序と一致させる。
-      for (const labelDefinitionId of sortedLabelIds) {
-        await compactFreshnessBuckets(tx, labelDefinitionId)
-      }
 
       const populationRows = await tx.$queryRaw<{ count: bigint }[]>`
         SELECT COUNT(*) AS count FROM "AccountSummaryLatest" WHERE "classificationObservedAt" IS NOT NULL
@@ -299,7 +359,7 @@ export async function buildLabelAggregateSnapshotSet(
           let trueConfidenceSum = 0
           let falseConfidenceSum = 0
           for (const row of valueRowsByLabel.get(label.id) ?? []) {
-            const count = Number(row.count)
+            const count = row.count
             evaluatedCount += count
             if (row.value) {
               trueCount += count
@@ -312,12 +372,12 @@ export async function buildLabelAggregateSnapshotSet(
 
           const confidenceBuckets: Record<string, number> = {}
           for (const row of confidenceRowsByLabel.get(label.id) ?? []) {
-            confidenceBuckets[formatConfidenceBucketKey(row.confidenceBucket)] = Number(row.count)
+            confidenceBuckets[formatConfidenceBucketKey(row.confidenceBucket)] = row.count
           }
 
           const ruleVersionDistribution: Record<string, number> = {}
           for (const row of ruleVersionRowsByLabel.get(label.id) ?? []) {
-            ruleVersionDistribution[row.ruleVersion] = Number(row.count)
+            ruleVersionDistribution[row.ruleVersion] = row.count
           }
 
           const reasonDistribution: Record<string, number> = {}
@@ -386,7 +446,7 @@ export async function buildLabelAggregateSnapshotSet(
     },
     {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-      timeout: 300_000,
+      timeout: LABEL_AGGREGATE_SNAPSHOT_TRANSACTION_TIMEOUT_MS,
     },
   )
 

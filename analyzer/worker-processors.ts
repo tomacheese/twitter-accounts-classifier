@@ -243,7 +243,13 @@ export async function processAccountSummaryRefresh(
           lastClassificationChangedAt: changed
             ? observation.observedAt
             : (existing?.lastClassificationChangedAt ?? null),
-          classificationObservedAt: observation.observedAt,
+          // labels が空の場合は AccountClassificationLatest に行を書かないため、
+          // populationCount の母集団定義 (classificationObservedAt IS NOT NULL) と
+          // 実際の分類行の有無を一致させるよう、その場合は既存値を維持する。
+          classificationObservedAt:
+            labels.length > 0
+              ? observation.observedAt
+              : (existing?.classificationObservedAt ?? null),
           activeFindingCount: existing?.activeFindingCount ?? 0,
           highestFindingSeverity: existing?.highestFindingSeverity ?? null,
           findingObservedAt: existing?.findingObservedAt ?? null,

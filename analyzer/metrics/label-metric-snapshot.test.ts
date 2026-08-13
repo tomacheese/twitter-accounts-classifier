@@ -75,11 +75,28 @@ describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
       freshnessThresholdsMs: { delayedAfterMs: 10 * 60 * 1000, staleAfterMs: 20 * 60 * 1000 },
     })
 
-    const populationQuery = queryRaw.mock.calls
-      .map((call) => call[0].join('?'))
-      .find((sql: string) => sql.includes('FROM "AccountSummaryLatest"'))
+    const queriedSql = queryRaw.mock.calls.map((call) => call[0].join('?'))
+    const populationQuery = queriedSql.find((sql) => sql.includes('FROM "AccountSummaryLatest"'))
     expect(populationQuery).toContain('classificationObservedAt')
-    expect(executeRaw.mock.calls[0][0].join('?')).toContain("SET LOCAL work_mem = '256MB'")
+
+    // 集計本体が旧来の AccountClassificationLatest 直接 GROUP BY ではなく、
+    // 4 つの集計テーブルから読むことを確認する。
+    for (const table of [
+      'AccountClassificationValueCount',
+      'AccountClassificationConfidenceBucketCount',
+      'AccountClassificationRuleVersionCount',
+      'AccountClassificationFreshnessBucket',
+    ]) {
+      expect(queriedSql.some((sql) => sql.includes(`FROM "${table}"`))).toBe(true)
+    }
+    // AccountClassificationLatest への直接参照は reasonDistribution 用の
+    // 1 クエリだけに限られ、value/confidence/ruleVersion/freshness の
+    // 集計はすべて上記の集計テーブル読み取りに置き換わっていることを確認する。
+    const classificationLatestQueries = queriedSql.filter((sql) =>
+      sql.includes('FROM "AccountClassificationLatest"'),
+    )
+    expect(classificationLatestQueries).toHaveLength(1)
+    expect(classificationLatestQueries[0]).toContain('"reason"')
   })
 })
 
@@ -137,7 +154,7 @@ describe('buildLabelAggregateSnapshotSet transaction options', () => {
 
     expect(transaction).toHaveBeenCalledWith(
       expect.any(Function),
-      expect.objectContaining({ isolationLevel: 'RepeatableRead', timeout: 300_000 }),
+      expect.objectContaining({ isolationLevel: 'RepeatableRead', timeout: 60_000 }),
     )
   })
 })
@@ -477,6 +494,136 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     expect(valueCountRows.reduce((sum, row) => sum + row.count, 0)).toBe(2)
   })
 
+  it('AccountClassificationLatest の DELETE で4集計テーブルすべてが decrement される', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_trigger_delete', description: 'テスト用ラベル' },
+    })
+    for (const id of ['acct_trig_del_1', 'acct_trig_del_2']) {
+      await prisma.account.create({
+        data: {
+          id,
+          screenName: id,
+          displayName: id,
+          followersCount: 0,
+          followingCount: 0,
+          tweetCount: 0,
+          accountCreatedAt: new Date(),
+          lastCrawledAt: new Date(),
+        },
+      })
+    }
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_del_1',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'r1',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-13T00:00:00Z'),
+        sourceObservationId: null,
+      },
+      {
+        accountId: 'acct_trig_del_2',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'r2',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-13T00:00:00Z'),
+        sourceObservationId: null,
+      },
+    ])
+
+    await prisma.accountClassificationLatest.delete({
+      where: {
+        accountId_labelDefinitionId: { accountId: 'acct_trig_del_1', labelDefinitionId: label.id },
+      },
+    })
+
+    const valueCount = await prisma.accountClassificationValueCount.findUniqueOrThrow({
+      where: { labelDefinitionId_value: { labelDefinitionId: label.id, value: true } },
+    })
+    expect(valueCount.count).toBe(1)
+    expect(valueCount.confidenceSum).toBeCloseTo(0.9)
+
+    const ruleVersionCount = await prisma.accountClassificationRuleVersionCount.findUniqueOrThrow({
+      where: { labelDefinitionId_ruleVersion: { labelDefinitionId: label.id, ruleVersion: 'v1' } },
+    })
+    expect(ruleVersionCount.count).toBe(1)
+
+    const freshnessRows = await prisma.accountClassificationFreshnessBucket.findMany({
+      where: { labelDefinitionId: label.id },
+    })
+    expect(freshnessRows.reduce((sum, row) => sum + row.count, 0)).toBe(1)
+  })
+
+  it('value/confidence/ruleVersion と分単位バケットが変わらない UPDATE は集計を変えない', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_trigger_noop_update', description: 'テスト用ラベル' },
+    })
+    await prisma.account.create({
+      data: {
+        id: 'acct_trig_noop',
+        screenName: 'acct_trig_noop',
+        displayName: 'acct_trig_noop',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date(),
+      },
+    })
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_noop',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'r1',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-13T00:00:10Z'),
+        sourceObservationId: null,
+      },
+    ])
+    // 同一分内で observedAt だけが微増する再クロールを模す。value/confidence/
+    // ruleVersion は変えない。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_noop',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'r1_recrawled',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-13T00:00:40Z'),
+        sourceObservationId: null,
+      },
+    ])
+
+    const valueCount = await prisma.accountClassificationValueCount.findUniqueOrThrow({
+      where: { labelDefinitionId_value: { labelDefinitionId: label.id, value: true } },
+    })
+    expect(valueCount.count).toBe(1)
+    expect(valueCount.confidenceSum).toBeCloseTo(0.9)
+
+    const freshnessRows = await prisma.accountClassificationFreshnessBucket.findMany({
+      where: { labelDefinitionId: label.id },
+    })
+    expect(freshnessRows.reduce((sum, row) => sum + row.count, 0)).toBe(1)
+
+    const row = await prisma.accountClassificationLatest.findUniqueOrThrow({
+      where: {
+        accountId_labelDefinitionId: { accountId: 'acct_trig_noop', labelDefinitionId: label.id },
+      },
+    })
+    expect(row.observedAt.toISOString()).toBe('2026-08-13T00:00:40.000Z')
+  })
+
   it('同一 key への並行更新後も逐次実行と同じ集計になる', async () => {
     const label = await prisma.labelDefinition.create({
       data: { key: 'test_trigger_concurrent', description: 'テスト用ラベル' },
@@ -802,7 +949,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     literalBucket.setUTCSeconds(0, 0)
     const agedLiteralBucket = new Date(literalBucket.getTime() - 8 * 24 * 60 * 60 * 1000)
 
-    // このテストの主眼は、バケット行はそのままで実時刻だけが7日を超えた
+    // このテストの主眼は、バケット行はそのままで実時刻だけが 7 日を超えた
     // 状態を作ることである。トリガーを一時的に無効化し、
     // AccountClassificationLatest.observedAt とバケットのキーを同じ古い時刻に
     // 揃える (compaction は実行しない = まだ sentinel には丸め込まれていない)。
@@ -906,7 +1053,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     ])
     const literalBucket = new Date(freshAt)
     literalBucket.setUTCSeconds(0, 0)
-    // A のバケットが7日を超えた状態を、compaction を実行せずに作る。
+    // A のバケットが 7 日を超えた状態を、compaction を実行せずに作る。
     const agedBucket = new Date(literalBucket.getTime() - 8 * 24 * 60 * 60 * 1000)
     await prisma.$executeRaw`
       UPDATE "AccountClassificationFreshnessBucket"

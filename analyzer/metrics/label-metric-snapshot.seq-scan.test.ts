@@ -155,10 +155,8 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
   })
 
   it('AccountSummaryLatest 基準の populationCount クエリ', async () => {
-    // AccountSummaryLatest は classificationObservedAt の選択性次第で Seq Scan が
-    // 最適プランになり得るテーブルであり、spec の完了条件が禁止しているのは
-    // AccountClassificationLatest への Seq Scan のみである。この populationCount
-    // クエリは AccountClassificationLatest を参照しないため、この観点では自明に満たす。
+    // AccountSummaryLatest は行数が少なく、Seq Scan でも許容できるコストに収まる。
+    // ここで検証したいのは populationCount が AccountClassificationLatest を経由しないことである。
     const plan = await explain(
       `SELECT COUNT(*) AS count FROM "AccountSummaryLatest" WHERE "classificationObservedAt" IS NOT NULL`,
     )
