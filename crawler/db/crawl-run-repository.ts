@@ -141,6 +141,11 @@ export async function finishCrawlRun(
       where: { id },
       data: { finishedAt, status, currentUsername: null, currentAccountStartedAt: null },
     })
+    await tx.labelEvidenceEpoch.upsert({
+      where: { crawlRunId: id },
+      create: { crawlRunId: id, sourceWatermarkAt: finishedAt },
+      update: {},
+    })
     // failed で終わった run でも、途中まで取得できたデータの指標更新には価値があるため
     // 常に enqueue する。完全性の記録は label_aggregate_refresh 側の責務とする。
     await enqueueWorkItem(tx, {

@@ -128,10 +128,12 @@ describe('startOrResumeCrawlRun', () => {
     const create = vi.fn().mockResolvedValue({ id: 'new-run', startedAt })
     const update = vi.fn().mockResolvedValue({})
     const upsert = vi.fn().mockResolvedValue({})
+    const upsertEvidenceEpoch = vi.fn().mockResolvedValue({})
     const deleteCheckpoints = vi.fn().mockReturnValue({})
     const deleteLabelClaims = vi.fn().mockReturnValue({})
     const tx = {
       crawlRun: { update, create },
+      labelEvidenceEpoch: { upsert: upsertEvidenceEpoch },
       analysisWorkItem: { upsert },
     }
     const transaction = vi.fn((arg: unknown) =>
@@ -254,6 +256,46 @@ describe('startOrResumeCrawlRun', () => {
   })
 })
 
+describe('finishCrawlRun', () => {
+  it('publishes exactly one evidence epoch before enqueueing the crawl refresh', async () => {
+    const finishedAt = new Date('2026-08-13T12:00:00Z')
+    const update = vi.fn().mockResolvedValue({})
+    const upsert = vi.fn().mockResolvedValue({ id: 'epoch-1' })
+    const enqueue = vi.fn().mockResolvedValue({})
+    const tx = {
+      crawlRun: { update },
+      labelEvidenceEpoch: { upsert },
+      analysisWorkItem: { upsert: enqueue },
+    }
+    const transaction = vi.fn((fn: (transactionClient: unknown) => Promise<unknown>) => fn(tx))
+    const prisma = { $transaction: transaction } as unknown as PrismaClient
+
+    await finishCrawlRun(prisma, 'crawl-1', finishedAt, 'partial')
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: { crawlRunId: 'crawl-1' },
+      create: { crawlRunId: 'crawl-1', sourceWatermarkAt: finishedAt },
+      update: {},
+    })
+    expect(enqueue).toHaveBeenCalledWith({
+      where: {
+        kind_triggerType_triggerId: {
+          kind: 'label_aggregate_refresh',
+          triggerType: 'crawl_run',
+          triggerId: 'crawl-1',
+        },
+      },
+      create: {
+        kind: 'label_aggregate_refresh',
+        triggerType: 'crawl_run',
+        triggerId: 'crawl-1',
+      },
+      update: {},
+    })
+    expect(upsert.mock.invocationCallOrder[0]).toBeLessThan(enqueue.mock.invocationCallOrder[0])
+  })
+})
+
 describe('touchCrawlRunHeartbeat', () => {
   it('updates lastHeartbeatAt and staleAfterAt from the given time and threshold', async () => {
     const update = vi.fn().mockResolvedValue({})
@@ -273,7 +315,12 @@ describe('finishCrawlRun', () => {
   it('updates finishedAt, status, and clears the current-account fields', async () => {
     const update = vi.fn().mockResolvedValue({})
     const upsert = vi.fn().mockResolvedValue({})
-    const tx = { crawlRun: { update }, analysisWorkItem: { upsert } }
+    const upsertEvidenceEpoch = vi.fn().mockResolvedValue({})
+    const tx = {
+      crawlRun: { update },
+      labelEvidenceEpoch: { upsert: upsertEvidenceEpoch },
+      analysisWorkItem: { upsert },
+    }
     const prisma = {
       $transaction: vi.fn((fn: (tx: unknown) => Promise<void>) => fn(tx)),
     } as unknown as PrismaClient
@@ -297,7 +344,12 @@ describe('finishCrawlRun', () => {
   it('enqueues a label_aggregate_refresh AnalysisWorkItem for the finished run', async () => {
     const update = vi.fn().mockResolvedValue({})
     const upsert = vi.fn().mockResolvedValue({})
-    const tx = { crawlRun: { update }, analysisWorkItem: { upsert } }
+    const upsertEvidenceEpoch = vi.fn().mockResolvedValue({})
+    const tx = {
+      crawlRun: { update },
+      labelEvidenceEpoch: { upsert: upsertEvidenceEpoch },
+      analysisWorkItem: { upsert },
+    }
     const prisma = {
       $transaction: vi.fn((fn: (tx: unknown) => Promise<void>) => fn(tx)),
     } as unknown as PrismaClient
