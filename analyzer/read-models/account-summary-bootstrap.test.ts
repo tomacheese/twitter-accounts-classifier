@@ -47,6 +47,11 @@ describe('processAccountSummaryBootstrap transaction options', () => {
       expect.any(Function),
       expect.objectContaining({ timeout: 60_000 }),
     )
+    expect(tx.readModelBootstrap.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'completed', errorSummary: null }),
+      }),
+    )
   })
 })
 

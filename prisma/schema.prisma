@@ -896,47 +896,7 @@ model LabelMetricDaily {
   @@index([labelDefinitionId, date(sort: Desc)])
 }
 
-// normalizedDisplayName の部分一致検索は pg_trgm の GIN インデックスで支える
-// (Task 5 Step 2b の raw SQL で作成する。Prisma の schema DSL では表現できない)。
-// recentlyChanged 用の DESC NULLS LAST / accountId DESC 索引は Prisma DSL で NULLS LAST を表現できないため、
-// migration 20260809151500_fix_recently_changed_order の raw SQL で管理する。
-model AccountSummaryCurrent {
-  generationId                String
-  accountId                   String
-  normalizedScreenName        String
-  normalizedDisplayName       String
-  searchDocument              String
-  activeLabelKeys             String[]
-  activeLabelCount            Int
-  lastClassificationChangedAt DateTime?
-  lastRuleVersionChangedAt    DateTime?
-  activeFindingCount          Int       @default(0)
-  highestFindingSeverity      String?
-  sourceWatermarkAt           DateTime
-  updatedAt                   DateTime  @updatedAt
-
-  @@id([generationId, accountId])
-  @@index([generationId, lastClassificationChangedAt(sort: Desc), accountId])
-  @@index([generationId, highestFindingSeverity, activeFindingCount, accountId])
-  @@index([generationId, normalizedScreenName, accountId])
-  @@index([normalizedScreenName])
-}
-
-model AccountClassificationCurrent {
-  generationId      String
-  accountId         String
-  labelDefinitionId String
-  value             Boolean
-  confidence        Float
-  reason            String
-  lastChangedAt     DateTime
-
-  @@id([generationId, accountId, labelDefinitionId])
-  @@index([generationId, labelDefinitionId, value, accountId])
-}
-
-// sourceId (CrawlRun.id) を account_summary build の再試行冪等キーとして使う。
-// generationId は publishGeneration が retry ごとに新しく発行するため使えないが、
+// sourceId (CrawlRun.id) を分類更新の再試行冪等キーとして使う。
 // 同じ CrawlRun による retry では sourceId が変わらず一致する。
 // sourceId が null の行 (直接呼び出しや legacy データ) は Postgres の仕様上
 // NULL 同士が重複と判定されないため、この場合は冪等性の保証対象外になる。

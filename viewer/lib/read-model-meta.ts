@@ -209,6 +209,27 @@ function computeWorstOf<T extends WorstOfState>(
   return { latest, worstStatus, perModel }
 }
 
+// Overview の総合 freshness と揃える主要 read model。
+// block_relation は Block 機能を使わない環境では Pointer が作られないため、固定の Set には含めず呼び出し側で判定する。
+const CORE_MODEL_KEYS = ['account_summary_latest', 'label_summary', 'attention_items'] as const
+
+/** Overview と pipeline freshness の対象となる ReadModelState を解決する。 */
+async function getCoreReadModelStates(prisma: PrismaClient): Promise<WorstOfState[]> {
+  const [states, blockRelationPointer] = await Promise.all([
+    prisma.readModelState.findMany({ where: { modelKey: { in: [...CORE_MODEL_KEYS] } } }),
+    prisma.readModelPointer.findUnique({ where: { modelKey: 'block_relation' } }),
+  ])
+
+  if (blockRelationPointer) {
+    const blockRelationState = await prisma.readModelState.findUnique({
+      where: { modelKey: 'block_relation' },
+    })
+    if (blockRelationState) states.push(blockRelationState)
+  }
+
+  return states
+}
+
 /**
  * 特定の読み取りモデルに紐づかない section 向けのメタデータ。
  * ReviewFinding や OperationCycle は generation 管理下に無いため、
@@ -217,7 +238,7 @@ function computeWorstOf<T extends WorstOfState>(
  * @returns 直近成功した読み取りモデルのメタデータ。未記録なら unknown 扱いの既定値
  */
 export async function getPipelineMeta(prisma: PrismaClient): Promise<ReadModelMeta> {
-  const states = await prisma.readModelState.findMany()
+  const states = await getCoreReadModelStates(prisma)
   if (states.length === 0) return EMPTY_META
 
   const thresholds = await getFreshnessThresholds(prisma)
@@ -230,10 +251,6 @@ export async function getPipelineMeta(prisma: PrismaClient): Promise<ReadModelMe
     freshnessStatus: worstStatus,
   }
 }
-
-// Overview の総合 freshness と揃える主要 read model。
-// block_relation は Block 機能を使わない環境では Pointer が作られないため、固定の Set には含めず呼び出し側で判定する。
-const CORE_MODEL_KEYS = ['account_summary_latest', 'label_summary', 'attention_items'] as const
 
 /** 主要 read model 1 件分の freshness。 */
 export interface CoreReadModelStatus {
@@ -255,17 +272,7 @@ const EMPTY_CORE_META: CoreReadModelMeta = { ...EMPTY_META, perModel: [] }
  * @returns 主要 read model の worst-of と、モデルごとの内訳
  */
 export async function getCoreReadModelMeta(prisma: PrismaClient): Promise<CoreReadModelMeta> {
-  const [states, blockRelationPointer] = await Promise.all([
-    prisma.readModelState.findMany({ where: { modelKey: { in: [...CORE_MODEL_KEYS] } } }),
-    prisma.readModelPointer.findUnique({ where: { modelKey: 'block_relation' } }),
-  ])
-
-  if (blockRelationPointer) {
-    const blockRelationState = await prisma.readModelState.findUnique({
-      where: { modelKey: 'block_relation' },
-    })
-    if (blockRelationState) states.push(blockRelationState)
-  }
+  const states = await getCoreReadModelStates(prisma)
 
   if (states.length === 0) return EMPTY_CORE_META
 

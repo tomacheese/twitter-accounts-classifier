@@ -13,7 +13,7 @@ DECLARE
     'FindingEntityLink', 'DetectionPolicyVersion', 'DetectorEvaluation',
     'PolicyBacktestRun', 'PolicyBacktestFinding',
     'LabelMetricSnapshot', 'LabelMetricDaily',
-    'AccountSummaryCurrent', 'AccountClassificationCurrent', 'AccountLabelChange',
+    'AccountLabelChange',
     'AccountSummaryLatest', 'AccountClassificationLatest', 'ReadModelBootstrap',
     'LabelSummaryCurrent', 'BlockRelationCurrent', 'BlockStateChange',
     'AttentionItemCurrent', 'OverviewSnapshot',

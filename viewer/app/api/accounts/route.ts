@@ -34,7 +34,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     cursor: searchParams.get('cursor'),
     limit,
   })
-  const meta = await getReadModelMeta(prisma, 'account_summary')
+  const meta = await getReadModelMeta(prisma, 'account_summary_latest')
 
   return NextResponse.json(
     {

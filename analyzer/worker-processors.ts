@@ -62,52 +62,6 @@ export class LabelAggregateRefreshError extends Error {
   }
 }
 
-/**
- * account_summary がまだ一度も公開されていない環境では、最新の完了済み crawl を
- * label_metrics から再処理して read model を bootstrap する。過去に succeeded になった
- * WorkItem も、旧バージョンが read model 公開を見送っていた可能性があるため明示的に再キューする。
- */
-export async function enqueueReadModelBootstrapIfMissing(prisma: PrismaClient): Promise<void> {
-  const pointer = await prisma.readModelPointer.findUnique({
-    where: { modelKey: 'account_summary' },
-  })
-  if (pointer) return
-
-  const crawlRun = await prisma.crawlRun.findFirst({
-    where: { status: { in: ['success', 'partial'] }, finishedAt: { not: null } },
-    orderBy: { finishedAt: 'desc' },
-    select: { id: true, status: true },
-  })
-  if (!crawlRun) return
-
-  const now = new Date()
-  await prisma.analysisWorkItem.upsert({
-    where: {
-      kind_triggerType_triggerId: {
-        kind: 'label_metrics',
-        triggerType: 'crawl_run',
-        triggerId: crawlRun.id,
-      },
-    },
-    create: {
-      kind: 'label_metrics',
-      triggerType: 'crawl_run',
-      triggerId: crawlRun.id,
-      priority: 100,
-    },
-    update: {
-      status: 'queued',
-      priority: 100,
-      availableAt: now,
-      leaseOwner: null,
-      leaseExpiresAt: null,
-      lastErrorCode: null,
-      lastErrorSummary: null,
-      attemptCount: 0,
-    },
-  })
-}
-
 // CommonJS を採用する本プロジェクトでは __dirname がモジュールの位置を得る素直な手段であり、
 // import.meta は tsconfig の module 設定と両立しない。
 // eslint-disable-next-line unicorn/prefer-module
@@ -188,7 +142,7 @@ function isSameLabelKeySet(a: string[], b: string[]): boolean {
  * finding 系フィールド (activeFindingCount/highestFindingSeverity/findingObservedAt) は
  * ここでは更新しない (現状値をそのまま渡す)。
  * `AccountLabelChange` は `AccountLabel` 履歴上の直前行との比較 (既存の
- * `buildAccountSummary` と同じロジック) で判定し、`AccountClassificationLatest` の
+ * 既存の分類値と同じロジックで判定し、`AccountClassificationLatest` の
  * 前回値には依存しない (並行更新の順序に依存させないため)。
  * @param prisma - Prisma クライアント
  * @param workItem - `triggerType: 'account_classification_observation'` の WorkItem
