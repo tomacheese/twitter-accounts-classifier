@@ -20,11 +20,12 @@ describe('parseIsoDurationMs', () => {
 })
 
 describe('extractFreshnessThresholds', () => {
-  it('read_model_freshness ルールからしきい値を取り出す', () => {
+  it('pipelineHealth.projection からしきい値を取り出す', () => {
     const content = {
-      rules: [
-        { type: 'read_model_freshness', enabled: true, delayedAfter: 'PT1H', staleAfter: 'PT6H' },
-      ],
+      pipelineHealth: {
+        projection: { delayedAfter: 'PT1H', staleAfter: 'PT6H' },
+      },
+      rules: [{ type: 'read_model_freshness', enabled: true, delayedAfter: 'P99D' }],
     }
     expect(extractFreshnessThresholds(content)).toEqual({
       delayedAfterMs: 60 * 60 * 1000,
@@ -32,22 +33,22 @@ describe('extractFreshnessThresholds', () => {
     })
   })
 
-  it('ルールが無効なら候補から除外する', () => {
+  it('projection policy が無ければ operational SLO の既定値を返す', () => {
     const content = {
       rules: [
         { type: 'read_model_freshness', enabled: false, delayedAfter: 'PT1H', staleAfter: 'PT6H' },
       ],
     }
     expect(extractFreshnessThresholds(content)).toEqual({
-      delayedAfterMs: 3 * 60 * 60 * 1000,
-      staleAfterMs: 12 * 60 * 60 * 1000,
+      delayedAfterMs: 15 * 60 * 1000,
+      staleAfterMs: 60 * 60 * 1000,
     })
   })
 
   it('policy が未ロードなら既定値を返す', () => {
     expect(extractFreshnessThresholds(null)).toEqual({
-      delayedAfterMs: 3 * 60 * 60 * 1000,
-      staleAfterMs: 12 * 60 * 60 * 1000,
+      delayedAfterMs: 15 * 60 * 1000,
+      staleAfterMs: 60 * 60 * 1000,
     })
   })
 })

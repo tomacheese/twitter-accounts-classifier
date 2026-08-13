@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   getCoreReadModelMeta,
+  getPipelineHealthBreakdown,
   getPipelineMeta,
   getReadModelMeta,
   getReadModelReadiness,
@@ -25,8 +26,12 @@ function createMockPrisma(overrides: {
   }[]
   policyContent?: unknown
   blockRelationPointer?: unknown
+  latestEpoch?: unknown
+  latestEligibleEpoch?: unknown
+  detectorState?: unknown
 }): PrismaClient {
   const states = overrides.readModelStates ?? []
+  let labelEvidenceEpochFindFirstCalls = 0
   return {
     readModelState: {
       findUnique: (args: { where: { modelKey: string } }) =>
@@ -47,6 +52,17 @@ function createMockPrisma(overrides: {
           overrides.policyContent === undefined ? null : { content: overrides.policyContent },
         ),
     },
+    labelEvidenceEpoch: {
+      findFirst: () => {
+        labelEvidenceEpochFindFirstCalls += 1
+        return Promise.resolve(
+          labelEvidenceEpochFindFirstCalls === 1
+            ? (overrides.latestEpoch ?? null)
+            : (overrides.latestEligibleEpoch ?? null),
+        )
+      },
+    },
+    detectorState: { findUnique: () => Promise.resolve(overrides.detectorState ?? null) },
   } as unknown as PrismaClient
 }
 
@@ -284,6 +300,37 @@ describe('getPipelineMeta', () => {
 
     const meta = await getPipelineMeta(prisma)
     expect(meta.freshnessStatus).toBe('healthy')
+  })
+})
+
+describe('getPipelineHealthBreakdown', () => {
+  it('source は healthy のまま detector の遅延を primary cause として分離する', async () => {
+    const sourceWatermarkAt = new Date(Date.now() - 20 * 60 * 1000)
+    const prisma = createMockPrisma({
+      policyContent: {
+        pipelineHealth: {
+          source: { expectedInterval: 'PT3H', completionGrace: 'PT3H', staleAfter: 'PT12H' },
+          detector: { delayedAfter: 'PT15M', staleAfter: 'PT1H' },
+          projection: { delayedAfter: 'PT15M', staleAfter: 'PT1H' },
+        },
+      },
+      latestEpoch: {
+        sourceWatermarkAt,
+        createdAt: sourceWatermarkAt,
+        crawlRun: { status: 'success' },
+      },
+      latestEligibleEpoch: { sourceWatermarkAt, createdAt: sourceWatermarkAt },
+      detectorState: null,
+    })
+
+    const health = await getPipelineHealthBreakdown(prisma)
+
+    expect(health).toMatchObject({
+      overallStatus: 'delayed',
+      primaryCause: 'detector',
+      source: { status: 'healthy', lastOutcome: 'success' },
+      detector: { status: 'delayed' },
+    })
   })
 })
 

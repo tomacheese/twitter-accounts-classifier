@@ -18,6 +18,18 @@ describe('SystemPage', () => {
       activePolicy: null,
       readModels: [],
       diagnosticsEnvVars: [],
+      pipelineHealth: {
+        overallStatus: 'healthy',
+        primaryCause: null,
+        source: { status: 'healthy', lastSourceWatermarkAt: null, lastOutcome: 'success' },
+        detector: {
+          status: 'healthy',
+          processedWatermarkAt: null,
+          lastFailureAt: null,
+          errorSummary: null,
+        },
+        projection: { status: 'healthy', processedWatermarkAt: null },
+      },
       componentBuildIdentities: [
         {
           component: 'viewer',
@@ -58,6 +70,18 @@ describe('SystemPage', () => {
       activePolicy: null,
       readModels: [],
       diagnosticsEnvVars: [],
+      pipelineHealth: {
+        overallStatus: 'healthy',
+        primaryCause: null,
+        source: { status: 'healthy', lastSourceWatermarkAt: null, lastOutcome: 'success' },
+        detector: {
+          status: 'healthy',
+          processedWatermarkAt: null,
+          lastFailureAt: null,
+          errorSummary: null,
+        },
+        projection: { status: 'healthy', processedWatermarkAt: null },
+      },
       componentBuildIdentities: [],
     })
     vi.mocked(getRelabelStatus).mockRejectedValue(new Error('db error'))

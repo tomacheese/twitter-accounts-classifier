@@ -28,10 +28,27 @@ export const detectionPolicyRuleSchema = z.object({
   maxWeeklyReviewSeverityWithoutCorroboration: severitySchema.optional(),
 })
 
+const pipelineHealthStageSchema = z.object({
+  delayedAfter: z.string().min(1),
+  staleAfter: z.string().min(1),
+})
+
+/** source arrival と downstream lag を区別する運用 SLO。 */
+export const pipelineHealthPolicySchema = z.object({
+  source: z.object({
+    expectedInterval: z.string().min(1),
+    completionGrace: z.string().min(1),
+    staleAfter: z.string().min(1),
+  }),
+  detector: pipelineHealthStageSchema,
+  projection: pipelineHealthStageSchema,
+})
+
 /** detection-policy.json 全体のスキーマ。 */
 export const detectionPolicySchema = z.object({
   schemaVersion: z.number().int().min(1),
   policyVersion: z.string().min(1),
+  pipelineHealth: pipelineHealthPolicySchema.optional(),
   rules: z.array(detectionPolicyRuleSchema).min(1),
 })
 

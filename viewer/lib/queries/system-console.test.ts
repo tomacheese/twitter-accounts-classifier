@@ -19,9 +19,21 @@ function createMockPrisma(overrides: {
     overviewSnapshot: { findUnique: vi.fn().mockResolvedValue(overrides.snapshot ?? null) },
     detectionPolicyVersion: { findFirst: vi.fn().mockResolvedValue(overrides.policy ?? null) },
     readModelState: {
-      findUnique: vi.fn().mockResolvedValue(overviewReadModelState),
+      findUnique: vi.fn().mockImplementation(({ where }: { where: { modelKey: string } }) => {
+        if (where.modelKey === 'overview_snapshot') return Promise.resolve(overviewReadModelState)
+        return Promise.resolve(
+          (overrides.readModelStates ?? []).find(
+            (state) =>
+              typeof state === 'object' &&
+              state !== null &&
+              (state as { modelKey?: string }).modelKey === where.modelKey,
+          ) ?? null,
+        )
+      }),
       findMany: vi.fn().mockResolvedValue(overrides.readModelStates ?? []),
     },
+    labelEvidenceEpoch: { findFirst: vi.fn().mockResolvedValue(null) },
+    detectorState: { findUnique: vi.fn().mockResolvedValue(null) },
     componentBuildIdentity: {
       findMany: vi.fn().mockResolvedValue(overrides.componentBuildIdentities ?? []),
     },

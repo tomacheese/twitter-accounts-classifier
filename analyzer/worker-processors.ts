@@ -11,6 +11,7 @@ import {
 } from './operational-issues/detect-run-failures'
 import { refreshReadModelFreshness } from './operational-issues/freshness'
 import { parseIsoDurationMs } from './findings/lifecycle'
+import { extractPipelineHealthThresholds } from 'pipeline-health'
 import { buildOrUpdateCrawlCycle } from './operations/build-crawl-cycle'
 import { buildOrUpdateWeeklyReviewCycle } from './operations/build-weekly-review-cycle'
 import { buildOrUpdateBlockCycle } from './operations/build-block-cycle'
@@ -397,11 +398,7 @@ export async function processLabelAggregateRefresh(
       labelDefinitionCount > 0 &&
       completeSnapshotCount === labelDefinitionCount
 
-    if (!isEligible || !evidenceEpoch) {
-      logger.info(
-        `Skipping label findings for ${workItem.triggerId}: evidence is missing, non-success, or incomplete`,
-      )
-    } else {
+    if (isEligible) {
       try {
         await runLabelFindingsSerialized(prisma, {
           evidenceEpochId: evidenceEpoch.id,
@@ -424,6 +421,10 @@ export async function processLabelAggregateRefresh(
           error instanceof Error ? error.message : String(error),
         )
       }
+    } else {
+      logger.info(
+        `Skipping label findings for ${workItem.triggerId}: evidence is missing, non-success, or incomplete`,
+      )
     }
   }
 
@@ -641,14 +642,12 @@ export async function processOperationCycleRefresh(
  */
 export async function refreshReadModelFreshnessFromPolicy(prisma: PrismaClient): Promise<void> {
   const { policy } = getPolicy()
-  const rule = policy.rules.find((entry) => entry.type === 'read_model_freshness' && entry.enabled)
-  if (!rule) return
+  const thresholds = extractPipelineHealthThresholds(policy)
 
-  const delayedAfterMs = parseIsoDurationMs(rule.delayedAfter ?? DEFAULT_READ_MODEL_DELAYED_AFTER)
   await refreshReadModelFreshness(prisma, {
     cadenceMs: parseIsoDurationMs(DEFAULT_READ_MODEL_CADENCE),
-    delayedAfterMs,
-    staleAfterMs: parseIsoDurationMs(rule.staleAfter ?? DEFAULT_READ_MODEL_STALE_AFTER),
+    delayedAfterMs: thresholds.projection.delayedAfterMs,
+    staleAfterMs: thresholds.projection.staleAfterMs,
     now: new Date(),
   })
 }

@@ -1,5 +1,12 @@
 import type { PrismaClient } from '../generated/prisma'
 import type { ReadModelFreshnessStatus } from './api-response'
+import type { PipelineHealthBreakdown } from './api-response'
+import {
+  deriveOverallHealth,
+  deriveProcessingLag,
+  deriveSourceHealth,
+  extractPipelineHealthThresholds,
+} from 'pipeline-health'
 import {
   deriveElapsedFreshness,
   extractFreshnessThresholds,
@@ -249,6 +256,96 @@ export async function getPipelineMeta(prisma: PrismaClient): Promise<ReadModelMe
     ...toMeta(latest, thresholds, now),
     generationId: null,
     freshnessStatus: worstStatus,
+  }
+}
+
+function toPipelineHealthStatus(status: string): ReadModelFreshnessStatus {
+  return FRESHNESS_STATUSES.has(status) ? (status as ReadModelFreshnessStatus) : 'unknown'
+}
+
+/**
+ * source arrival・finding detector・label projection を別の watermark で評価する。
+ * source は terminal CrawlRun の成否、detector は eligible evidence の処理遅延、projection は
+ * detector が完了した evidence の read model への反映遅延を表すため、1 つの status へ潰さない。
+ * @param prisma - Prisma クライアント
+ * @returns API / System 画面が共有する pipeline health 内訳
+ */
+export async function getPipelineHealthBreakdown(
+  prisma: PrismaClient,
+): Promise<PipelineHealthBreakdown> {
+  const [policyVersion, latestEpoch, latestEligibleEpoch, detectorState, labelSummaryState] =
+    await Promise.all([
+      prisma.detectionPolicyVersion.findFirst({ orderBy: { loadedAt: 'desc' } }),
+      prisma.labelEvidenceEpoch.findFirst({
+        orderBy: { sourceWatermarkAt: 'desc' },
+        include: { crawlRun: { select: { status: true } } },
+      }),
+      prisma.labelEvidenceEpoch.findFirst({
+        where: { crawlRun: { status: 'success' } },
+        orderBy: { sourceWatermarkAt: 'desc' },
+      }),
+      prisma.detectorState.findUnique({ where: { detectorKey: 'label_findings' } }),
+      prisma.readModelState.findUnique({ where: { modelKey: 'label_summary' } }),
+    ])
+  const now = new Date()
+  const thresholds = extractPipelineHealthThresholds(policyVersion?.content)
+  const sourceOutcome = latestEpoch?.crawlRun.status ?? null
+  const sourceHealth = deriveSourceHealth({
+    sourceWatermarkAt: latestEpoch?.sourceWatermarkAt ?? null,
+    sourceOutcome:
+      sourceOutcome === 'success' || sourceOutcome === 'partial' || sourceOutcome === 'failed'
+        ? sourceOutcome
+        : null,
+    ...thresholds.source,
+    now,
+  })
+  const sourceStatus: ReadModelFreshnessStatus =
+    sourceOutcome === 'failed' ? 'failed' : toPipelineHealthStatus(sourceHealth.status)
+  const detectorLag = deriveProcessingLag({
+    upstreamWatermarkAt: latestEligibleEpoch?.sourceWatermarkAt ?? null,
+    processedWatermarkAt: detectorState?.sourceWatermarkAt ?? null,
+    pendingSinceAt: latestEligibleEpoch?.createdAt ?? null,
+    ...thresholds.detector,
+    now,
+  })
+  const detectorFailed =
+    detectorState?.lastFailureAt &&
+    (!detectorState.lastSuccessAt || detectorState.lastFailureAt > detectorState.lastSuccessAt)
+  const detectorStatus: ReadModelFreshnessStatus = detectorFailed
+    ? 'failed'
+    : toPipelineHealthStatus(detectorLag.status)
+  const projectionLag = deriveProcessingLag({
+    upstreamWatermarkAt: detectorState?.sourceWatermarkAt ?? null,
+    processedWatermarkAt: labelSummaryState?.sourceWatermarkAt ?? null,
+    pendingSinceAt: detectorState?.lastSuccessAt ?? null,
+    ...thresholds.projection,
+    now,
+  })
+  const projectionStatus = toPipelineHealthStatus(projectionLag.status)
+  const overall = deriveOverallHealth([
+    { component: 'source', status: sourceStatus },
+    { component: 'detector', status: detectorStatus },
+    { component: 'projection', status: projectionStatus },
+  ])
+
+  return {
+    overallStatus: toPipelineHealthStatus(overall.overallStatus),
+    primaryCause: overall.primaryCause as PipelineHealthBreakdown['primaryCause'],
+    source: {
+      status: sourceStatus,
+      lastSourceWatermarkAt: latestEpoch?.sourceWatermarkAt ?? null,
+      lastOutcome: sourceOutcome,
+    },
+    detector: {
+      status: detectorStatus,
+      processedWatermarkAt: detectorState?.sourceWatermarkAt ?? null,
+      lastFailureAt: detectorState?.lastFailureAt ?? null,
+      errorSummary: detectorFailed ? (detectorState?.errorSummary ?? null) : null,
+    },
+    projection: {
+      status: projectionStatus,
+      processedWatermarkAt: labelSummaryState?.sourceWatermarkAt ?? null,
+    },
   }
 }
 

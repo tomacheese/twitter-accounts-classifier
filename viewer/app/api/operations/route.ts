@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { getPrismaClient } from '@/lib/prisma'
 import { listOperationCycles, type OperationCycleKind } from '@/lib/queries/operation-cycles'
 import { buildApiResponseMeta } from '@/lib/api-response'
-import { getPipelineMeta } from '@/lib/read-model-meta'
+import { getPipelineHealthBreakdown, getPipelineMeta } from '@/lib/read-model-meta'
 import { guardSection } from '@/lib/api-section-guard'
 
 const VALID_KINDS: OperationCycleKind[] = ['crawl', 'weekly_review', 'block']
@@ -28,10 +28,13 @@ export async function GET(request: Request): Promise<NextResponse> {
     filters: { kind, attentionRequired },
     cursor,
   })
-  const meta = await getPipelineMeta(prisma)
+  const [meta, pipelineHealth] = await Promise.all([
+    getPipelineMeta(prisma),
+    getPipelineHealthBreakdown(prisma),
+  ])
 
   return NextResponse.json(
-    { items, meta: buildApiResponseMeta({ ...meta, nextCursor }) },
+    { items, meta: buildApiResponseMeta({ ...meta, nextCursor, pipelineHealth }) },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }

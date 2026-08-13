@@ -40,6 +40,26 @@ export interface OverallHealthComponent {
   status: PipelineHealthStatus;
 }
 
+export interface PipelineHealthThresholds {
+  source: {
+    expectedIntervalMs: number;
+    completionGraceMs: number;
+    staleAfterMs: number;
+  };
+  detector: { delayedAfterMs: number; staleAfterMs: number };
+  projection: { delayedAfterMs: number; staleAfterMs: number };
+}
+
+const DEFAULT_PIPELINE_HEALTH_THRESHOLDS: PipelineHealthThresholds = {
+  source: {
+    expectedIntervalMs: 3 * 60 * 60 * 1000,
+    completionGraceMs: 3 * 60 * 60 * 1000,
+    staleAfterMs: 12 * 60 * 60 * 1000,
+  },
+  detector: { delayedAfterMs: 15 * 60 * 1000, staleAfterMs: 60 * 60 * 1000 },
+  projection: { delayedAfterMs: 15 * 60 * 1000, staleAfterMs: 60 * 60 * 1000 },
+};
+
 const STATUS_SEVERITY: Record<PipelineHealthStatus, number> = {
   unknown: 0,
   healthy: 1,
@@ -62,6 +82,71 @@ export function parseIsoDurationMs(duration: string): number {
   const hours = Number(match[2] || 0);
   const minutes = Number(match[3] || 0);
   return ((days * 24 + hours) * 60 + minutes) * 60 * 1000;
+}
+
+function readDuration(value: unknown, fallback: number): number {
+  if (typeof value !== "string") return fallback;
+  try {
+    return parseIsoDurationMs(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/**
+ * @param policyContent - DetectionPolicyVersion.content の JSON
+ * @returns source arrival / detector / projection の独立した SLO しきい値
+ */
+export function extractPipelineHealthThresholds(
+  policyContent: unknown,
+): PipelineHealthThresholds {
+  const pipelineHealth = asRecord(asRecord(policyContent).pipelineHealth);
+  const source = asRecord(pipelineHealth.source);
+  const detector = asRecord(pipelineHealth.detector);
+  const projection = asRecord(pipelineHealth.projection);
+
+  return {
+    source: {
+      expectedIntervalMs: readDuration(
+        source.expectedInterval,
+        DEFAULT_PIPELINE_HEALTH_THRESHOLDS.source.expectedIntervalMs,
+      ),
+      completionGraceMs: readDuration(
+        source.completionGrace,
+        DEFAULT_PIPELINE_HEALTH_THRESHOLDS.source.completionGraceMs,
+      ),
+      staleAfterMs: readDuration(
+        source.staleAfter,
+        DEFAULT_PIPELINE_HEALTH_THRESHOLDS.source.staleAfterMs,
+      ),
+    },
+    detector: {
+      delayedAfterMs: readDuration(
+        detector.delayedAfter,
+        DEFAULT_PIPELINE_HEALTH_THRESHOLDS.detector.delayedAfterMs,
+      ),
+      staleAfterMs: readDuration(
+        detector.staleAfter,
+        DEFAULT_PIPELINE_HEALTH_THRESHOLDS.detector.staleAfterMs,
+      ),
+    },
+    projection: {
+      delayedAfterMs: readDuration(
+        projection.delayedAfter,
+        DEFAULT_PIPELINE_HEALTH_THRESHOLDS.projection.delayedAfterMs,
+      ),
+      staleAfterMs: readDuration(
+        projection.staleAfter,
+        DEFAULT_PIPELINE_HEALTH_THRESHOLDS.projection.staleAfterMs,
+      ),
+    },
+  };
 }
 
 /**

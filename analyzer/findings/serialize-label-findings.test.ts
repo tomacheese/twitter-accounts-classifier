@@ -107,12 +107,15 @@ describe('runLabelFindingsSerialized without a database', () => {
 
     await runLabelFindingsSerialized(prisma as never, input)
 
-    expect(executeRaw.mock.calls[0]?.[0].join('')).toContain('"DetectorState"')
+    const firstExecuteRawCall = executeRaw.mock.calls[0] as unknown[] | undefined
+    const sqlFragments = firstExecuteRawCall?.[0] as TemplateStringsArray | undefined
+    expect(sqlFragments?.join('')).toContain('"DetectorState"')
     expect(update).toHaveBeenCalledWith({
       where: { detectorKey: DETECTOR_KEY },
       data: {
         lastEvidenceEpochId: 'epoch-1',
         sourceWatermarkAt,
+        lastStartedAt: expect.any(Date),
         lastSuccessAt: expect.any(Date),
         policyHash: 'policy-hash',
         analyzerVersion: 'version-1',

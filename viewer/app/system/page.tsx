@@ -194,6 +194,38 @@ export default async function SystemPage(): Promise<React.ReactElement> {
           )}
         </section>
 
+        <section aria-labelledby="pipeline-health-heading">
+          <h2 id="pipeline-health-heading" className="text-lg font-semibold">
+            Pipeline health
+          </h2>
+          <p className="mt-2">
+            Overall: {data.pipelineHealth.overallStatus}, primary cause:{' '}
+            {data.pipelineHealth.primaryCause ?? '—'}
+          </p>
+          <dl className="mt-2 grid gap-2 sm:grid-cols-3">
+            <div>
+              <dt className="font-medium">Source</dt>
+              <dd>
+                {data.pipelineHealth.source.status} ({data.pipelineHealth.source.lastOutcome ?? '—'}
+                )
+              </dd>
+            </div>
+            <div>
+              <dt className="font-medium">Detector</dt>
+              <dd>{data.pipelineHealth.detector.status}</dd>
+            </div>
+            <div>
+              <dt className="font-medium">Projection</dt>
+              <dd>{data.pipelineHealth.projection.status}</dd>
+            </div>
+          </dl>
+          {data.pipelineHealth.detector.errorSummary ? (
+            <p className="mt-2 text-sm text-red-700 dark:text-red-300">
+              Detector error: {data.pipelineHealth.detector.errorSummary}
+            </p>
+          ) : null}
+        </section>
+
         <section aria-labelledby="active-policy-heading">
           <h2 id="active-policy-heading" className="text-lg font-semibold">
             Active policy

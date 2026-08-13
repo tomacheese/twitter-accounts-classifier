@@ -1,9 +1,11 @@
 import type { PrismaClient } from '../../generated/prisma'
 import {
+  getPipelineHealthBreakdown,
   overlayHealthWithFreshness,
   reconcileFreshness,
   toFreshnessStatus,
 } from '../read-model-meta'
+import type { PipelineHealthBreakdown } from '../api-response'
 import { extractFreshnessThresholds } from '../policy-freshness'
 
 /** 稼働中システムの識別情報。 */
@@ -61,6 +63,7 @@ export interface SystemConsoleData {
   readModels: SystemReadModelStatus[]
   diagnosticsEnvVars: SystemDiagnosticsEnvVar[]
   componentBuildIdentities: SystemComponentBuildIdentity[]
+  pipelineHealth: PipelineHealthBreakdown
 }
 
 // 秘密情報が含まれうる環境変数を denylist で除くと、追加時に漏れる。
@@ -100,13 +103,19 @@ function redactErrorSummary(errorSummary: string | null): string | null {
  * @returns System コンソール表示用データ
  */
 export async function getSystemConsoleData(prisma: PrismaClient): Promise<SystemConsoleData> {
-  const [overviewReadModelState, latestPolicy, readModelStates, componentBuildIdentities] =
-    await Promise.all([
-      prisma.readModelState.findUnique({ where: { modelKey: 'overview_snapshot' } }),
-      prisma.detectionPolicyVersion.findFirst({ orderBy: [{ loadedAt: 'desc' }] }),
-      prisma.readModelState.findMany(),
-      prisma.componentBuildIdentity.findMany(),
-    ])
+  const [
+    overviewReadModelState,
+    latestPolicy,
+    readModelStates,
+    componentBuildIdentities,
+    pipelineHealth,
+  ] = await Promise.all([
+    prisma.readModelState.findUnique({ where: { modelKey: 'overview_snapshot' } }),
+    prisma.detectionPolicyVersion.findFirst({ orderBy: [{ loadedAt: 'desc' }] }),
+    prisma.readModelState.findMany(),
+    prisma.componentBuildIdentity.findMany(),
+    getPipelineHealthBreakdown(prisma),
+  ])
   const latestSnapshot = overviewReadModelState?.currentGenerationId
     ? await prisma.overviewSnapshot.findUnique({
         where: { generationId: overviewReadModelState.currentGenerationId },
@@ -177,5 +186,12 @@ export async function getSystemConsoleData(prisma: PrismaClient): Promise<System
       buildTime: identity.buildTime,
       updatedAt: identity.updatedAt,
     })),
+    pipelineHealth: {
+      ...pipelineHealth,
+      detector: {
+        ...pipelineHealth.detector,
+        errorSummary: redactErrorSummary(pipelineHealth.detector.errorSummary),
+      },
+    },
   }
 }

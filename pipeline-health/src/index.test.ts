@@ -3,6 +3,7 @@ import {
   deriveOverallHealth,
   deriveProcessingLag,
   deriveSourceHealth,
+  extractPipelineHealthThresholds,
   parseIsoDurationMs,
 } from "./index";
 
@@ -66,5 +67,32 @@ describe("deriveOverallHealth", () => {
         { component: "projection", status: "stale" },
       ]),
     ).toEqual({ overallStatus: "failed", primaryCause: "source" });
+  });
+});
+
+describe("extractPipelineHealthThresholds", () => {
+  it("uses the operational SLO policy independently from classification rules", () => {
+    expect(
+      extractPipelineHealthThresholds({
+        pipelineHealth: {
+          source: {
+            expectedInterval: "PT2H",
+            completionGrace: "PT30M",
+            staleAfter: "PT8H",
+          },
+          detector: { delayedAfter: "PT10M", staleAfter: "PT40M" },
+          projection: { delayedAfter: "PT20M", staleAfter: "PT2H" },
+        },
+        rules: [{ type: "read_model_freshness", delayedAfter: "P99D" }],
+      }),
+    ).toEqual({
+      source: {
+        expectedIntervalMs: 7_200_000,
+        completionGraceMs: 1_800_000,
+        staleAfterMs: 28_800_000,
+      },
+      detector: { delayedAfterMs: 600_000, staleAfterMs: 2_400_000 },
+      projection: { delayedAfterMs: 1_200_000, staleAfterMs: 7_200_000 },
+    });
   });
 });

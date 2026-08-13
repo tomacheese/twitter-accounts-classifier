@@ -55,6 +55,7 @@ export async function runLabelFindingsSerialized(
         data: {
           lastEvidenceEpochId: input.evidenceEpochId,
           sourceWatermarkAt: input.sourceWatermarkAt,
+          lastStartedAt: new Date(),
           lastSuccessAt: new Date(),
           policyHash: input.policyHash,
           analyzerVersion: input.analyzerVersion,
@@ -71,10 +72,17 @@ export async function runLabelFindingsSerialized(
     try {
       await prisma.detectorState.upsert({
         where: { detectorKey: DETECTOR_KEY },
-        update: { lastFailureAt: new Date(), errorSummary: String(error) },
+        update: {
+          lastStartedAt: new Date(),
+          lastFailureAt: new Date(),
+          errorCode: 'label_finding_generation_failed',
+          errorSummary: String(error),
+        },
         create: {
           detectorKey: DETECTOR_KEY,
+          lastStartedAt: new Date(),
           lastFailureAt: new Date(),
+          errorCode: 'label_finding_generation_failed',
           errorSummary: String(error),
         },
       })
