@@ -24,7 +24,7 @@ export interface RunLabelFindingsSerializedInput {
 /**
  * 複数の CrawlRun 起点 build が並行しても Finding 段の lifecycle 遷移が
  * evidence watermark の前後関係と食い違わないよう、DetectorState (detectorKey: 'label_findings')
- * の行ロックで直列化する。より新しい snapshotAt が既に処理済みなら、古い方は
+ * の行ロックで直列化する。より新しい evidence watermark が既に処理済みなら、古い方は
  * lifecycle を巻き戻さないためスキップする。
  * @param prisma - Prisma クライアント
  * @param input - 対象 evidence の時刻と実行本体
