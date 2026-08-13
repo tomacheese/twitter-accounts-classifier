@@ -2,8 +2,10 @@ import { Logger } from '@book000/node-utils'
 import {
   createCookieIssuerClient,
   createOpenApiClient,
+  createOpenApiClientSession,
   closeOpenApiClient,
   type IssuedCookies,
+  type OpenApiClientSession,
 } from 'twitter-client'
 import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
@@ -54,11 +56,15 @@ export interface RunBlockCycleDependencies {
   touchBlockRunHeartbeat: typeof touchBlockRunHeartbeat
   runBlockAccountCycle: typeof runBlockAccountCycle
   notifyDiscord: typeof notifyDiscord
+  createOpenApiClient?: typeof createOpenApiClient
+  closeOpenApiClient?: typeof closeOpenApiClient
   /** アカウント単位で停滞 outbox entry を補修する。 */
   reconcileAccountOutbox: (
     account: Extract<BlockerAccountConfig, { blockEnabled: true }>,
     prisma: PrismaClient,
-    cookies?: IssuedCookies,
+    cookies: IssuedCookies | undefined,
+    createClient: typeof createOpenApiClient,
+    closeClient: typeof closeOpenApiClient,
   ) => Promise<void>
 }
 
@@ -72,6 +78,8 @@ async function reconcileAccountOutbox(
   account: Extract<BlockerAccountConfig, { blockEnabled: true }>,
   prisma: PrismaClient,
   cookies?: IssuedCookies,
+  createClient: typeof createOpenApiClient = createOpenApiClient,
+  closeClient: typeof closeOpenApiClient = closeOpenApiClient,
 ): Promise<void> {
   const issuedCookies =
     cookies ??
@@ -83,7 +91,7 @@ async function reconcileAccountOutbox(
       password: account.password,
       otp_secret: account.otpSecret,
     }))
-  const client = await createOpenApiClient(issuedCookies)
+  const client = await createClient(issuedCookies)
   try {
     const blockerId = await resolveOwnAccountId(client, account.username)
     await reconcileOutboxEntries(
@@ -104,7 +112,7 @@ async function reconcileAccountOutbox(
       prisma,
     )
   } finally {
-    await closeOpenApiClient(client)
+    await closeClient(client)
   }
 }
 
@@ -142,8 +150,8 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
             capturedCookies = cookies
             return cookies
           },
-          createOpenApiClient,
-          closeOpenApiClient,
+          createOpenApiClient: deps.createOpenApiClient ?? createOpenApiClient,
+          closeOpenApiClient: deps.closeOpenApiClient ?? closeOpenApiClient,
           selectBlockCandidates,
           recordSuccessfulBlock,
           startBlockAccountRun,
@@ -171,7 +179,13 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
     }
 
     try {
-      await deps.reconcileAccountOutbox(account, deps.prisma, capturedCookies)
+      await deps.reconcileAccountOutbox(
+        account,
+        deps.prisma,
+        capturedCookies,
+        deps.createOpenApiClient ?? createOpenApiClient,
+        deps.closeOpenApiClient ?? closeOpenApiClient,
+      )
     } catch (error) {
       logger.error(`Failed to reconcile outbox entries for ${account.username}`, error as Error)
       captureException(error, { username: account.username })
@@ -189,9 +203,12 @@ export async function runBlockCycle(deps: RunBlockCycleDependencies): Promise<vo
 
 async function main(): Promise<void> {
   const prisma = getPrismaClient()
+  let openApiSession: OpenApiClientSession | undefined
   try {
     await upsertComponentBuildIdentity(prisma, 'blocker')
     const config = loadBlockerConfig()
+    const session = await createOpenApiClientSession()
+    openApiSession = session
     await runBlockCycle({
       config,
       prisma,
@@ -200,9 +217,12 @@ async function main(): Promise<void> {
       touchBlockRunHeartbeat,
       runBlockAccountCycle,
       notifyDiscord,
+      createOpenApiClient: session.createOpenApiClient,
+      closeOpenApiClient,
       reconcileAccountOutbox,
     })
   } finally {
+    await openApiSession?.close()
     await disconnectPrisma()
   }
 }
