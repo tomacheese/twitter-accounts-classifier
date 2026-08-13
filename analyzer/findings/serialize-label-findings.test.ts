@@ -115,7 +115,6 @@ describe('runLabelFindingsSerialized without a database', () => {
       data: {
         lastEvidenceEpochId: 'epoch-1',
         sourceWatermarkAt,
-        lastStartedAt: expect.any(Date),
         lastSuccessAt: expect.any(Date),
         policyHash: 'policy-hash',
         analyzerVersion: 'version-1',
@@ -123,5 +122,34 @@ describe('runLabelFindingsSerialized without a database', () => {
         errorSummary: null,
       },
     })
+  })
+
+  it('新しい evidence が成功済みなら古い evidence の失敗を記録しない', async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ sourceWatermarkAt: null }])
+      .mockResolvedValueOnce([{ sourceWatermarkAt: new Date('2026-08-13T04:00:00Z') }])
+    const update = vi.fn().mockResolvedValue({})
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      $queryRaw: queryRaw,
+      detectorState: { update },
+    }
+    const prisma = {
+      $transaction: vi.fn((callback: (client: typeof tx) => Promise<void>) => callback(tx)),
+      detectorState: { upsert: vi.fn().mockResolvedValue({}) },
+    }
+
+    await expect(
+      runLabelFindingsSerialized(prisma as never, {
+        evidenceEpochId: 'epoch-old',
+        sourceWatermarkAt: new Date('2026-08-13T03:00:00Z'),
+        policyHash: 'policy-hash',
+        analyzerVersion: 'version-1',
+        run: vi.fn().mockRejectedValue(new Error('boom')),
+      }),
+    ).rejects.toThrow('boom')
+
+    expect(update).not.toHaveBeenCalled()
   })
 })

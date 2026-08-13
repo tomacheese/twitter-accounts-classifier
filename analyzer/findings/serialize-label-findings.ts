@@ -33,6 +33,13 @@ export async function runLabelFindingsSerialized(
   prisma: PrismaClient,
   input: RunLabelFindingsSerializedInput,
 ): Promise<void> {
+  const startedAt = new Date()
+  await prisma.detectorState.upsert({
+    where: { detectorKey: DETECTOR_KEY },
+    update: { lastStartedAt: startedAt },
+    create: { detectorKey: DETECTOR_KEY, lastStartedAt: startedAt },
+  })
+
   try {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`
@@ -55,7 +62,6 @@ export async function runLabelFindingsSerialized(
         data: {
           lastEvidenceEpochId: input.evidenceEpochId,
           sourceWatermarkAt: input.sourceWatermarkAt,
-          lastStartedAt: new Date(),
           lastSuccessAt: new Date(),
           policyHash: input.policyHash,
           analyzerVersion: input.analyzerVersion,
@@ -70,21 +76,28 @@ export async function runLabelFindingsSerialized(
     // 初回実行の失敗では INSERT ... ON CONFLICT DO NOTHING も rollback され行自体が
     // 存在しないため、update ではなく upsert で確実に failed を記録する。
     try {
-      await prisma.detectorState.upsert({
-        where: { detectorKey: DETECTOR_KEY },
-        update: {
-          lastStartedAt: new Date(),
-          lastFailureAt: new Date(),
-          errorCode: 'label_finding_generation_failed',
-          errorSummary: String(error),
-        },
-        create: {
-          detectorKey: DETECTOR_KEY,
-          lastStartedAt: new Date(),
-          lastFailureAt: new Date(),
-          errorCode: 'label_finding_generation_failed',
-          errorSummary: String(error),
-        },
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`
+          INSERT INTO "DetectorState" ("detectorKey", "updatedAt")
+          VALUES (${DETECTOR_KEY}, now())
+          ON CONFLICT ("detectorKey") DO NOTHING
+        `
+        const rows = await tx.$queryRaw<{ sourceWatermarkAt: Date | null }[]>`
+          SELECT "sourceWatermarkAt" FROM "DetectorState"
+          WHERE "detectorKey" = ${DETECTOR_KEY}
+          FOR UPDATE
+        `
+        const state = rows.at(0)
+        if (state?.sourceWatermarkAt && state.sourceWatermarkAt > input.sourceWatermarkAt) return
+
+        await tx.detectorState.update({
+          where: { detectorKey: DETECTOR_KEY },
+          data: {
+            lastFailureAt: new Date(),
+            errorCode: 'label_finding_generation_failed',
+            errorSummary: String(error),
+          },
+        })
       })
     } catch (bookkeepingError) {
       logger.error(`failed to record label_findings failure`, bookkeepingError as Error)

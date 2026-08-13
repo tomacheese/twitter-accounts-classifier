@@ -332,6 +332,57 @@ describe('getPipelineHealthBreakdown', () => {
       detector: { status: 'delayed' },
     })
   })
+
+  it('Overview publish が未完了なら projection を delayed として返す', async () => {
+    const sourceWatermarkAt = new Date(Date.now() - 20 * 60 * 1000)
+    const prisma = createMockPrisma({
+      policyContent: {
+        pipelineHealth: {
+          source: { expectedInterval: 'PT3H', completionGrace: 'PT3H', staleAfter: 'PT12H' },
+          detector: { delayedAfter: 'PT15M', staleAfter: 'PT1H' },
+          projection: { delayedAfter: 'PT15M', staleAfter: 'PT1H' },
+        },
+      },
+      latestEpoch: {
+        sourceWatermarkAt,
+        createdAt: sourceWatermarkAt,
+        crawlRun: { status: 'success' },
+      },
+      latestEligibleEpoch: { sourceWatermarkAt, createdAt: sourceWatermarkAt },
+      detectorState: {
+        sourceWatermarkAt,
+        lastSuccessAt: sourceWatermarkAt,
+        lastFailureAt: null,
+        errorSummary: null,
+      },
+      readModelStates: [
+        {
+          modelKey: 'label_summary',
+          lastSuccessAt: sourceWatermarkAt,
+          sourceWatermarkAt,
+          currentGenerationId: null,
+          policyHash: null,
+          status: 'healthy',
+        },
+        {
+          modelKey: 'attention_items',
+          lastSuccessAt: sourceWatermarkAt,
+          sourceWatermarkAt,
+          currentGenerationId: null,
+          policyHash: null,
+          status: 'healthy',
+        },
+      ],
+    })
+
+    const health = await getPipelineHealthBreakdown(prisma)
+
+    expect(health).toMatchObject({
+      overallStatus: 'delayed',
+      primaryCause: 'projection',
+      projection: { status: 'delayed', processedWatermarkAt: null },
+    })
+  })
 })
 
 describe('getCoreReadModelMeta', () => {

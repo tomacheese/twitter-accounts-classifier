@@ -1,10 +1,4 @@
-import {
-  extractPipelineHealthThresholds,
-  parseIsoDurationMs,
-  type PipelineHealthThresholds,
-} from 'pipeline-health'
-
-export { parseIsoDurationMs }
+import { parseIsoDurationMs } from 'pipeline-health'
 
 /** read model freshness を判定するためのしきい値 (ミリ秒)。 */
 export interface FreshnessThresholds {
@@ -12,16 +6,37 @@ export interface FreshnessThresholds {
   staleAfterMs: number
 }
 
+const DEFAULT_DELAYED_AFTER = 'PT3H'
+const DEFAULT_STALE_AFTER = 'PT12H'
+
 /**
  * DetectionPolicyVersion.content から read_model_freshness ルールのしきい値を取り出す。
  * @param policyContent - DetectionPolicyVersion.content (JSON)
  * @returns しきい値。ルールが見つからなければ analyzer 側の既定値
  */
 export function extractFreshnessThresholds(policyContent: unknown): FreshnessThresholds {
-  return extractPipelineHealthThresholds(policyContent).projection
-}
+  const rules =
+    policyContent &&
+    typeof policyContent === 'object' &&
+    'rules' in policyContent &&
+    Array.isArray((policyContent as { rules: unknown }).rules)
+      ? (policyContent as { rules: unknown[] }).rules
+      : []
+  const rule = rules.find(
+    (
+      entry,
+    ): entry is { type: string; enabled: boolean; delayedAfter?: string; staleAfter?: string } =>
+      typeof entry === 'object' &&
+      entry !== null &&
+      (entry as { type?: unknown }).type === 'read_model_freshness' &&
+      (entry as { enabled?: unknown }).enabled === true,
+  )
 
-export type { PipelineHealthThresholds }
+  return {
+    delayedAfterMs: parseIsoDurationMs(rule?.delayedAfter ?? DEFAULT_DELAYED_AFTER),
+    staleAfterMs: parseIsoDurationMs(rule?.staleAfter ?? DEFAULT_STALE_AFTER),
+  }
+}
 
 /**
  * lastSuccessAt からの経過時間としきい値だけで freshness を判定する。

@@ -11,7 +11,6 @@ import {
 } from './operational-issues/detect-run-failures'
 import { refreshReadModelFreshness } from './operational-issues/freshness'
 import { parseIsoDurationMs } from './findings/lifecycle'
-import { extractPipelineHealthThresholds } from 'pipeline-health'
 import { buildOrUpdateCrawlCycle } from './operations/build-crawl-cycle'
 import { buildOrUpdateWeeklyReviewCycle } from './operations/build-weekly-review-cycle'
 import { buildOrUpdateBlockCycle } from './operations/build-block-cycle'
@@ -642,12 +641,13 @@ export async function processOperationCycleRefresh(
  */
 export async function refreshReadModelFreshnessFromPolicy(prisma: PrismaClient): Promise<void> {
   const { policy } = getPolicy()
-  const thresholds = extractPipelineHealthThresholds(policy)
+  const rule = policy.rules.find((entry) => entry.type === 'read_model_freshness' && entry.enabled)
+  if (!rule) return
 
   await refreshReadModelFreshness(prisma, {
     cadenceMs: parseIsoDurationMs(DEFAULT_READ_MODEL_CADENCE),
-    delayedAfterMs: thresholds.projection.delayedAfterMs,
-    staleAfterMs: thresholds.projection.staleAfterMs,
+    delayedAfterMs: parseIsoDurationMs(rule.delayedAfter ?? DEFAULT_READ_MODEL_DELAYED_AFTER),
+    staleAfterMs: parseIsoDurationMs(rule.staleAfter ?? DEFAULT_READ_MODEL_STALE_AFTER),
     now: new Date(),
   })
 }

@@ -1,6 +1,5 @@
 import type { PrismaClient } from '../generated/prisma'
-import type { ReadModelFreshnessStatus } from './api-response'
-import type { PipelineHealthBreakdown } from './api-response'
+import type { PipelineHealthBreakdown, ReadModelFreshnessStatus } from './api-response'
 import {
   deriveOverallHealth,
   deriveProcessingLag,
@@ -273,7 +272,7 @@ function toPipelineHealthStatus(status: string): ReadModelFreshnessStatus {
 export async function getPipelineHealthBreakdown(
   prisma: PrismaClient,
 ): Promise<PipelineHealthBreakdown> {
-  const [policyVersion, latestEpoch, latestEligibleEpoch, detectorState, labelSummaryState] =
+  const [policyVersion, latestEpoch, latestEligibleEpoch, detectorState, projectionStates] =
     await Promise.all([
       prisma.detectionPolicyVersion.findFirst({ orderBy: { loadedAt: 'desc' } }),
       prisma.labelEvidenceEpoch.findFirst({
@@ -285,7 +284,9 @@ export async function getPipelineHealthBreakdown(
         orderBy: { sourceWatermarkAt: 'desc' },
       }),
       prisma.detectorState.findUnique({ where: { detectorKey: 'label_findings' } }),
-      prisma.readModelState.findUnique({ where: { modelKey: 'label_summary' } }),
+      prisma.readModelState.findMany({
+        where: { modelKey: { in: ['label_summary', 'attention_items', 'overview_snapshot'] } },
+      }),
     ])
   const now = new Date()
   const thresholds = extractPipelineHealthThresholds(policyVersion?.content)
@@ -314,14 +315,35 @@ export async function getPipelineHealthBreakdown(
   const detectorStatus: ReadModelFreshnessStatus = detectorFailed
     ? 'failed'
     : toPipelineHealthStatus(detectorLag.status)
-  const projectionLag = deriveProcessingLag({
-    upstreamWatermarkAt: detectorState?.sourceWatermarkAt ?? null,
-    processedWatermarkAt: labelSummaryState?.sourceWatermarkAt ?? null,
-    pendingSinceAt: detectorState?.lastSuccessAt ?? null,
-    ...thresholds.projection,
-    now,
-  })
-  const projectionStatus = toPipelineHealthStatus(projectionLag.status)
+  const projectionStatesByKey = new Map(projectionStates.map((state) => [state.modelKey, state]))
+  const projectionComponents = ['label_summary', 'attention_items', 'overview_snapshot'].map(
+    (modelKey) => {
+      const state = projectionStatesByKey.get(modelKey)
+      if (state?.status === 'failed') return { component: modelKey, status: 'failed' as const }
+      const lag = deriveProcessingLag({
+        upstreamWatermarkAt: detectorState?.sourceWatermarkAt ?? null,
+        processedWatermarkAt: state?.sourceWatermarkAt ?? null,
+        pendingSinceAt: detectorState?.lastSuccessAt ?? null,
+        ...thresholds.projection,
+        now,
+      })
+      return { component: modelKey, status: toPipelineHealthStatus(lag.status) }
+    },
+  )
+  const projectionOverall = deriveOverallHealth(projectionComponents)
+  const projectionStatus = toPipelineHealthStatus(projectionOverall.overallStatus)
+  const projectionWatermarks = projectionComponents.map(
+    ({ component }) => projectionStatesByKey.get(component)?.sourceWatermarkAt ?? null,
+  )
+  let projectionProcessedWatermarkAt: Date | null = null
+  if (!projectionWatermarks.includes(null)) {
+    for (const watermark of projectionWatermarks) {
+      if (watermark === null) continue
+      if (projectionProcessedWatermarkAt === null || watermark < projectionProcessedWatermarkAt) {
+        projectionProcessedWatermarkAt = watermark
+      }
+    }
+  }
   const overall = deriveOverallHealth([
     { component: 'source', status: sourceStatus },
     { component: 'detector', status: detectorStatus },
@@ -340,11 +362,11 @@ export async function getPipelineHealthBreakdown(
       status: detectorStatus,
       processedWatermarkAt: detectorState?.sourceWatermarkAt ?? null,
       lastFailureAt: detectorState?.lastFailureAt ?? null,
-      errorSummary: detectorFailed ? (detectorState?.errorSummary ?? null) : null,
+      errorSummary: detectorFailed ? detectorState.errorSummary : null,
     },
     projection: {
       status: projectionStatus,
-      processedWatermarkAt: labelSummaryState?.sourceWatermarkAt ?? null,
+      processedWatermarkAt: projectionProcessedWatermarkAt,
     },
   }
 }
