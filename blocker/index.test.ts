@@ -80,6 +80,8 @@ describe('runBlockCycle', () => {
       expect.objectContaining({ username: 'alice' }),
       deps.prisma,
       undefined,
+      expect.any(Function),
+      expect.any(Function),
     )
   })
 
@@ -310,6 +312,8 @@ describe('runBlockCycle', () => {
       expect.objectContaining({ username: 'alice' }),
       deps.prisma,
       issuedCookies,
+      expect.any(Function),
+      expect.any(Function),
     )
   })
 
@@ -349,6 +353,61 @@ describe('runBlockCycle', () => {
       expect.objectContaining({ username: 'alice' }),
       deps.prisma,
       undefined,
+      expect.any(Function),
+      expect.any(Function),
+    )
+  })
+})
+
+describe('runBlockCycle OpenAPI client lifecycle', () => {
+  it('passes the injected client lifecycle to each account cycle', async () => {
+    const config: BlockerAppConfig = {
+      accounts: [
+        {
+          email: 'a@example.com',
+          username: 'alice',
+          password: 'p',
+          otpSecret: null,
+          blockEnabled: true,
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+        },
+      ],
+      discordWebhookUrl: null,
+    }
+    const injectedCreateOpenApiClient = vi.fn()
+    const injectedCloseOpenApiClient = vi.fn().mockResolvedValue(undefined)
+    const reconcileAccountOutbox = vi.fn().mockResolvedValue(undefined)
+    let receivedAccountDeps: unknown
+    const runBlockAccountCycle = vi.fn().mockImplementation((accountDeps: unknown) => {
+      receivedAccountDeps = accountDeps
+      return { username: 'alice', blockedCount: 0, failedCount: 0, failed: false }
+    })
+    const deps = {
+      config,
+      startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1', completedUsernames: [] }),
+      finishBlockRun: vi.fn().mockResolvedValue(undefined),
+      touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
+      runBlockAccountCycle,
+      notifyDiscord: vi.fn().mockResolvedValue(undefined),
+      reconcileAccountOutbox,
+      createOpenApiClient: injectedCreateOpenApiClient,
+      closeOpenApiClient: injectedCloseOpenApiClient,
+      prisma: {},
+    }
+
+    await runBlockCycle(deps as never)
+
+    expect(runBlockAccountCycle).toHaveBeenCalledTimes(1)
+    expect(receivedAccountDeps).toMatchObject({
+      createOpenApiClient: injectedCreateOpenApiClient,
+      closeOpenApiClient: injectedCloseOpenApiClient,
+    })
+    expect(reconcileAccountOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({ username: 'alice' }),
+      deps.prisma,
+      undefined,
+      injectedCreateOpenApiClient,
+      injectedCloseOpenApiClient,
     )
   })
 })
