@@ -27,7 +27,7 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
     expect(sql).not.toContain('row_number()')
   })
 
-  it('population counts は label ごとに query を分割する', async () => {
+  it('population counts は label ごとに query を分割し期間 window を先に materialize する', async () => {
     const queries: { strings: readonly string[]; values: readonly unknown[] }[] = []
     const prisma = {
       labelDefinition: {
@@ -49,9 +49,14 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
     expect(queries.map((query) => query.values[0])).toEqual(['label-a', 'label-b'])
     for (const query of queries) {
       const sql = query.strings.join('?')
+      expect(sql).toContain('WITH windowed AS MATERIALIZED')
       expect(sql).toContain('WHERE label."labelDefinitionId" = ?')
-      expect(sql).toContain('DISTINCT ON (label."accountId")')
-      expect(sql).toContain('ORDER BY label."accountId", label."labeledAt" DESC, label.id DESC')
+      expect(sql).toContain('ORDER BY label."labeledAt" DESC, label.id DESC')
+      expect(sql).toContain('FROM windowed')
+      expect(sql).toContain('DISTINCT ON (windowed."accountId")')
+      expect(sql).toContain(
+        'ORDER BY windowed."accountId", windowed."labeledAt" DESC, windowed.id DESC',
+      )
       expect(sql).toContain('AND label.evaluable')
     }
   })
