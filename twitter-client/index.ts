@@ -33,10 +33,11 @@ export {
   createOpenApiClientWith,
   createCycleTLSFetch,
   createOpenApiClient,
+  createOpenApiClientSession,
   closeOpenApiClient,
   createTrendsScraper,
   closeTrendsScraper,
   DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS,
 } from './client'
-export type { OpenApiClientContext, TrendsScraperContext } from './client'
+export type { OpenApiClientContext, OpenApiClientSession, TrendsScraperContext } from './client'
 export { withTimeout, TimeoutError } from './timeout'
