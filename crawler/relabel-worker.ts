@@ -271,20 +271,25 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
   for (const rule of ALL_LABEL_RULES) registry.register(rule)
   const labelDefinitionIds = await ensureLabelDefinitionsForRules(prisma, registry.getAll())
 
-  const scanResult = await scanForStaleAccounts(prisma, {
-    registry,
-    labelDefinitionIds,
-    batchSize: getRelabelerProducerBatchSize(),
-  })
-  logger.info(
-    `Relabel scan: ${scanResult.scanned} accounts scanned, ${scanResult.requested} requested`,
-  )
-
   const leaseOwner = `${hostname()}-${process.pid}-${randomUUID()}`
   const concurrency = getRelabelerWorkerConcurrency()
   const totalLimit = getRelabelerWorkerBatchSize() * concurrency
 
-  const candidates = await peekAccountRelabelCandidates(prisma, { limit: totalLimit })
+  let candidates = await peekAccountRelabelCandidates(prisma, { limit: totalLimit })
+  if (candidates.length < totalLimit) {
+    const scanResult = await scanForStaleAccounts(prisma, {
+      registry,
+      labelDefinitionIds,
+      batchSize: getRelabelerProducerBatchSize(),
+    })
+    logger.info(
+      `Relabel scan: ${scanResult.scanned} accounts scanned, ${scanResult.requested} requested`,
+    )
+    candidates = await peekAccountRelabelCandidates(prisma, { limit: totalLimit })
+  } else {
+    logger.info(`Relabel scan: skipped because ${candidates.length} drain candidates are ready`)
+  }
+
   if (candidates.length === 0) {
     logger.info('Relabel drain: 0 candidates, skipping index construction')
     return

@@ -123,6 +123,20 @@ describe('buildFollowGraphLabelIndex', () => {
     const followeeQuerySql = (queryRaw.mock.calls[0][0] as unknown[]).join('')
     expect(followeeQuerySql).toContain('"LabelingFollowSample"')
   })
+
+  it('フォロー先方向では sample を優先して重複 Follow edge を anti join し UNION ALL する', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await buildFollowGraphLabelIndex(prisma, new Map([['topic_food', 'def-topic_food']]), {
+      accountIds: ['alice'],
+    })
+
+    const followeeQuerySql = (queryRaw.mock.calls[0][0] as unknown[]).join('')
+    expect(followeeQuerySql).toContain('UNION ALL')
+    expect(followeeQuerySql).toContain('NOT EXISTS')
+    expect(followeeQuerySql).toContain('sample."accountId" = f."followerId"')
+  })
 })
 
 describe('buildFollowGraphLabelIndex label filtering', () => {
