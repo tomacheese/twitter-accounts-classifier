@@ -215,7 +215,7 @@ async function LegacyAccountsPage({
 }
 
 /**
- * 新 Accounts 一覧画面。account_summary read model を参照する。
+ * 新 Accounts 一覧画面。account_summary_latest read model を参照する。
  * `view=recentlyChanged` (既定) は最近分類が変わった順、`view=all` は screenName 順に表示する。
  * @param props - `view`/`cursor` 検索パラメータ
  * @returns アカウント一覧画面の描画結果

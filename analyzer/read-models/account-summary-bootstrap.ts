@@ -310,7 +310,7 @@ export async function processAccountSummaryBootstrap(
           data: {
             cursor: nextCursor,
             processedCount: { increment: accounts.length },
-            ...(isDone ? { status: 'completed', completedAt: new Date() } : {}),
+            ...(isDone ? { status: 'completed', completedAt: new Date(), errorSummary: null } : {}),
           },
         })
 

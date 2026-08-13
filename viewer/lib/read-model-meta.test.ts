@@ -107,6 +107,133 @@ describe('getReadModelMeta', () => {
 })
 
 describe('getPipelineMeta', () => {
+  it('legacy account_summary が stale でも active core models が healthy なら healthy を返す', async () => {
+    const prisma = createMockPrisma({
+      readModelStates: [
+        {
+          modelKey: 'account_summary',
+          lastSuccessAt: new Date(Date.now() - 13 * 60 * 60 * 1000),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'legacy-generation',
+          policyHash: 'hash-1',
+          status: 'stale',
+        },
+        {
+          modelKey: 'account_summary_latest',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: null,
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+        {
+          modelKey: 'label_summary',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-2',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+        {
+          modelKey: 'attention_items',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-3',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+      ],
+    })
+
+    const [pipeline, core] = await Promise.all([
+      getPipelineMeta(prisma),
+      getCoreReadModelMeta(prisma),
+    ])
+
+    expect(pipeline.freshnessStatus).toBe('healthy')
+    expect(pipeline.freshnessStatus).toBe(core.freshnessStatus)
+    expect(core.perModel.map((model) => model.modelKey)).not.toContain('account_summary')
+  })
+
+  it('account_summary_latest が failed なら pipeline も failed を返す', async () => {
+    const prisma = createMockPrisma({
+      readModelStates: [
+        {
+          modelKey: 'account_summary_latest',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: null,
+          policyHash: 'hash-1',
+          status: 'failed',
+        },
+        {
+          modelKey: 'label_summary',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-2',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+        {
+          modelKey: 'attention_items',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-3',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+      ],
+    })
+
+    const meta = await getPipelineMeta(prisma)
+
+    expect(meta.freshnessStatus).toBe('failed')
+  })
+
+  it('block_relation Pointer が無ければ stale な state を pipeline から除外する', async () => {
+    const prisma = createMockPrisma({
+      readModelStates: [
+        {
+          modelKey: 'account_summary_latest',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: null,
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+        {
+          modelKey: 'label_summary',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-2',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+        {
+          modelKey: 'attention_items',
+          lastSuccessAt: new Date(),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-3',
+          policyHash: 'hash-1',
+          status: 'healthy',
+        },
+        {
+          modelKey: 'block_relation',
+          lastSuccessAt: new Date(Date.now() - 13 * 60 * 60 * 1000),
+          sourceWatermarkAt: new Date(),
+          currentGenerationId: 'generation-4',
+          policyHash: 'hash-1',
+          status: 'stale',
+        },
+      ],
+      blockRelationPointer: null,
+    })
+
+    const meta = await getPipelineMeta(prisma)
+
+    expect(meta.freshnessStatus).toBe('healthy')
+  })
+
   it('いずれかの read model が経過時間で劣化していれば全体も劣化させる', async () => {
     const prisma = createMockPrisma({
       readModelStates: [

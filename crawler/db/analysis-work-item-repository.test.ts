@@ -29,7 +29,20 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueWorkItem (crawler)', () => {
       triggerType: 'crawl_run',
       triggerId: 'crawl-x',
     })
-    expect(await prisma.analysisWorkItem.count()).toBe(1)
+    await enqueueWorkItem(prisma, {
+      kind: 'account_relabel',
+      triggerType: 'account',
+      triggerId: 'another-account',
+    })
+    expect(
+      await prisma.analysisWorkItem.count({
+        where: {
+          kind: 'label_metrics',
+          triggerType: 'crawl_run',
+          triggerId: 'crawl-x',
+        },
+      }),
+    ).toBe(1)
   })
 })
 

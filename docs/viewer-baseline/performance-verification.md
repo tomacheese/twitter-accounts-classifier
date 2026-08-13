@@ -8,7 +8,7 @@
 1. 本番相当規模のデータを用意する。目安として `Account` 100 万件、`AccountLabelLatest` 1,000 万件超。
    既存の本番相当環境の複製、または `crawler` のシード処理を反復実行した合成データのいずれかでよい。
 2. `analyzer` の read model 生成ジョブ (`buildOrUpdateCrawlCycle`・各 `publishGeneration`) を実データ相当の頻度で流し、
-   `AccountSummaryCurrent`・`LabelSummaryCurrent`・`ReviewFinding` 等の read model テーブルも
+   `AccountSummaryLatest`・`LabelSummaryCurrent`・`ReviewFinding` 等の read model テーブルも
    本番相当の行数まで積み上げる。
 3. `docker compose -f compose.yaml up postgres` と同じ `shared_buffers`・`work_mem` 設定で計測する。
    開発機のデフォルト設定のまま計測すると、実運用と乖離した実行計画になりうる。
@@ -29,7 +29,7 @@
 2. 採取した SQL に `EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)` を付けて本番相当データに対して実行し、
    結果を `docs/viewer-baseline/explain/` 配下の対応するファイルへ追記する
    (`docs/viewer-baseline/explain/dashboard.txt` 等、Task 1 のベースラインと同じ命名規則を使う)。
-3. `viewer/lib/queries/seq-scan.test.ts` は `AccountSummaryCurrent`・`LabelSummaryCurrent` に対する
+3. `viewer/lib/queries/seq-scan.test.ts` は `AccountSummaryLatest`・`LabelSummaryCurrent` に対する
    代表クエリが Seq Scan を行わないことを機械的に検証するが、これは実行計画の形だけの確認であり、
    実際のレイテンシは本番相当データでの `ANALYZE, BUFFERS` 計測でのみ判断できる。
    この検証は `DATABASE_URL` の設定された Postgres 接続を要するため、他の viewer テストと異なり

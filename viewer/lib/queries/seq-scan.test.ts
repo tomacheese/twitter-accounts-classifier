@@ -26,16 +26,6 @@ function collectSeqScans(node: ExplainPlanNode, targetTable: string): ExplainPla
 
 /**
  * @param node - 探索対象のプランノード
- * @returns Sort / Incremental Sort ノードの一覧
- */
-function collectSorts(node: ExplainPlanNode): ExplainPlanNode[] {
-  const found =
-    node['Node Type'] === 'Sort' || node['Node Type'] === 'Incremental Sort' ? [node] : []
-  return [...found, ...(node.Plans ?? []).flatMap((child) => collectSorts(child))]
-}
-
-/**
- * @param node - 探索対象のプランノード
  * @param indexName - 検知対象の index 名
  * @returns 指定した index を使っているノード (Index Scan 系) の一覧
  */
@@ -55,7 +45,7 @@ async function explain(sql: string): Promise<ExplainPlanNode> {
   return rows[0]['QUERY PLAN'][0].Plan
 }
 
-// listAccountSummaries・listLabelSummaries は generationId で絞り込む。
+// listLabelSummaries は generationId で絞り込む。
 // 過去 generation の残骸行が同居していないと絞り込みの選択性が働かず、
 // planner が Seq Scan を避けているかを検証できない。
 const ROWS_PER_GENERATION = 300
@@ -105,20 +95,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await prisma.$executeRawUnsafe('ANALYZE "AccountSummaryLatest"')
 
       for (const gid of allGenerationIds) {
-        await prisma.accountSummaryCurrent.createMany({
-          data: Array.from({ length: ROWS_PER_GENERATION }, (_, index) => ({
-            generationId: gid,
-            accountId: `account-${gid}-${index}`,
-            normalizedScreenName: `screen_${gid}_${index}`,
-            normalizedDisplayName: `Display ${index}`,
-            searchDocument: `screen_${gid}_${index} display ${index}`,
-            activeLabelKeys: [],
-            activeLabelCount: 0,
-            lastClassificationChangedAt: new Date(Date.now() - index * 60_000),
-            activeFindingCount: 0,
-            sourceWatermarkAt: new Date(),
-          })),
-        })
         await prisma.labelSummaryCurrent.createMany({
           data: Array.from({ length: ROWS_PER_GENERATION }, (_, index) => ({
             generationId: gid,
@@ -136,14 +112,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
       // 直近で挿入した行数を統計情報へ反映させないと、
       // planner が古い統計のまま Seq Scan を選び、実運用と乖離した結果になる。
-      await prisma.$executeRawUnsafe('ANALYZE "AccountSummaryCurrent"')
       await prisma.$executeRawUnsafe('ANALYZE "LabelSummaryCurrent"')
     })
 
     afterAll(async () => {
-      await prisma.accountSummaryCurrent.deleteMany({
-        where: { generationId: { in: allGenerationIds } },
-      })
       await prisma.labelSummaryCurrent.deleteMany({
         where: { generationId: { in: allGenerationIds } },
       })
@@ -153,18 +125,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await prisma.accountSummaryLatest.deleteMany({
         where: { accountId: { startsWith: 'account-seq-scan-noise-' } },
       })
-    })
-
-    it('listAccountSummaries (view: recentlyChanged) は AccountSummaryCurrent の Seq Scan を行わない', async () => {
-      const plan = await explain(`
-      SELECT "accountId" FROM "AccountSummaryCurrent"
-      WHERE "generationId" = '${generationId}'
-      ORDER BY "lastClassificationChangedAt" DESC NULLS LAST, "accountId" DESC
-      LIMIT 25
-    `)
-
-      expect(collectSeqScans(plan, 'AccountSummaryCurrent')).toEqual([])
-      expect(collectSorts(plan)).toEqual([])
     })
 
     it('listLabelSummaries は LabelSummaryCurrent の Seq Scan を行わない', async () => {

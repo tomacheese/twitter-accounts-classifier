@@ -61,14 +61,6 @@ const GENERATION_ROW_DELETERS: Record<
   string,
   ((prisma: PrismaClient, generationIds: string[]) => Promise<unknown>) | undefined
 > = {
-  account_summary: async (prisma, generationIds) => {
-    await prisma.accountClassificationCurrent.deleteMany({
-      where: { generationId: { in: generationIds } },
-    })
-    await prisma.accountSummaryCurrent.deleteMany({
-      where: { generationId: { in: generationIds } },
-    })
-  },
   label_summary: (prisma, generationIds) =>
     prisma.labelSummaryCurrent.deleteMany({ where: { generationId: { in: generationIds } } }),
   attention_items: (prisma, generationIds) =>
