@@ -35,6 +35,14 @@ function page(ids: string[], nextCursor: string | undefined): FollowListPage {
   return { data: ids.map((id) => rawUser(id)), nextCursor }
 }
 
+async function retryPageOnce<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch {
+    return fn()
+  }
+}
+
 describe('fetchFollowing', () => {
   it('follows the cursor across pages until exhausted, marking reachedEnd true', async () => {
     const getFollowing = vi
@@ -98,16 +106,9 @@ describe('fetchFollowing', () => {
       .mockResolvedValueOnce(page(['1'], 'cursor-a'))
       .mockRejectedValueOnce(new Error('temporary failure'))
       .mockResolvedValueOnce(page(['2'], undefined))
-    const retryPageImpl = async <T>(fn: () => Promise<T>): Promise<T> => {
-      try {
-        return await fn()
-      } catch {
-        return fn()
-      }
-    }
     const client: FollowListApiLike = { getFollowing, getFollowers: vi.fn() }
 
-    const result = await fetchFollowing(client, 'me', 100, { retryPage: retryPageImpl })
+    const result = await fetchFollowing(client, 'me', 100, { retryPage: retryPageOnce })
 
     expect(result.ids).toEqual(['1', '2'])
     expect(getFollowing).toHaveBeenCalledTimes(3)

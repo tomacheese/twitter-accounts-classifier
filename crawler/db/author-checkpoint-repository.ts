@@ -14,8 +14,11 @@ import {
   replaceLabelingFollowSampleWithinTx,
 } from './labeling-follow-sample-repository'
 import { recordCrawlAccountLabelsAtomicWithinTx } from './label-repository'
-import { recordCrawlAuthorCheckpoint, type CrawlWarning } from './crawl-run-repository'
-import type { FollowSampleStatus } from './crawl-run-repository'
+import {
+  recordCrawlAuthorCheckpoint,
+  type CrawlWarning,
+  type FollowSampleStatus,
+} from './crawl-run-repository'
 
 const logger = Logger.configure('author-checkpoint-repository')
 

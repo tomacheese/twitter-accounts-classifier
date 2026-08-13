@@ -268,15 +268,17 @@ describe('runCrawlCycle', () => {
   it('login account の following/followers sync を optional follow sample より先に実行する', async () => {
     const order: string[] = []
     const deps = makeDeps({
-      syncFollowing: vi.fn().mockImplementation(async () => {
+      syncFollowing: vi.fn().mockImplementation(() => {
         order.push('following')
+        return Promise.resolve()
       }),
-      syncFollowers: vi.fn().mockImplementation(async () => {
+      syncFollowers: vi.fn().mockImplementation(() => {
         order.push('followers')
+        return Promise.resolve()
       }),
-      persistAuthorResultAtomic: vi.fn().mockImplementation(async () => {
+      persistAuthorResultAtomic: vi.fn().mockImplementation(() => {
         order.push('author')
-        return { observationId: 'observation1', labelsAppliedCount: 1 }
+        return Promise.resolve({ observationId: 'observation1', labelsAppliedCount: 1 })
       }),
     })
 
@@ -403,11 +405,10 @@ describe('runCrawlCycle', () => {
           }),
         )
         const matchingLog = loggerError.mock.calls.find(([message]) =>
-          String(message).includes('labeling follow sample') &&
-          String(message).includes(`httpStatus=${String(status)}`),
+          message.includes('labeling follow sample') && message.includes(`httpStatus=${status}`),
         )
         const [message, loggedError] = matchingLog ?? []
-        expect(message).toContain(`httpStatus=${String(status)}`)
+        expect(message).toContain(`httpStatus=${status}`)
         expect(message).not.toContain('diagnostic-test')
         expect(loggedError).toMatchObject({ name: 'ResponseError', message: 'ResponseError' })
       } finally {

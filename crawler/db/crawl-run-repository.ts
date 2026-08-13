@@ -264,6 +264,10 @@ export interface CrawlAuthorCheckpointRecord {
   followSampleRateLimitReset: number | null
 }
 
+function isFollowSampleStatus(value: unknown): value is Exclude<FollowSampleStatus, null> {
+  return ['fetched', 'budget_skipped', 'rate_limit_skipped', 'failed'].includes(value as string)
+}
+
 /**
  * 同じ author を再度処理しても既存行を置き換えるだけで別行を作らない。
  * 自前で transaction を開かないため、呼び出し元が `tx as unknown as PrismaClient` を渡せば、
@@ -330,16 +334,12 @@ export async function loadCrawlAuthorCheckpoints(
         followSampleStatus: isFollowSampleStatus(checkpoint.followSampleStatus)
           ? checkpoint.followSampleStatus
           : null,
-        followSampleRequestCount: checkpoint.followSampleRequestCount ?? 0,
+        followSampleRequestCount: checkpoint.followSampleRequestCount,
         followSampleRateLimitRemaining: checkpoint.followSampleRateLimitRemaining,
         followSampleRateLimitReset: checkpoint.followSampleRateLimitReset,
       },
     ]),
   )
-}
-
-function isFollowSampleStatus(value: unknown): value is Exclude<FollowSampleStatus, null> {
-  return ['fetched', 'budget_skipped', 'rate_limit_skipped', 'failed'].includes(value as string)
 }
 
 /**

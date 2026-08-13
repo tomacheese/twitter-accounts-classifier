@@ -1383,8 +1383,8 @@ async function runAccountCycle(
     const needsTimeline = !metrics && !timelineSnapshot
     const needsReplies = !metrics && !repliesResult
     const needsAuthors = !metrics
-    let needsFollowing = !following
-    let needsFollowers = !followers
+    const needsFollowing = !following
+    const needsFollowers = !followers
     const needsBlocks = !blocks
 
     if (
@@ -1495,7 +1495,6 @@ async function runAccountCycle(
                       retryWaitMs: followingPhase.retryWaitMs,
                     }),
                   })
-                  needsFollowing = false
                 }
                 if (needsFollowers) {
                   const followersPhase = await measurePhaseDuration((trackRetryWait) =>
@@ -1519,7 +1518,6 @@ async function runAccountCycle(
                       retryWaitMs: followersPhase.retryWaitMs,
                     }),
                   })
-                  needsFollowers = false
                 }
                 if (needsAuthors) {
                   if (!timelineSnapshot) {
@@ -1554,51 +1552,6 @@ async function runAccountCycle(
                       ...metrics,
                       durationMs: authorsPhase.durationMs,
                       retryWaitMs: authorsPhase.retryWaitMs,
-                    }),
-                  })
-                }
-                if (needsFollowing) {
-                  const followingPhase = await measurePhaseDuration((trackRetryWait) =>
-                    syncFollowingPhase(
-                      deps,
-                      account,
-                      openApiContext.client,
-                      followRateLimitBudget,
-                      trackRetryWait,
-                    ),
-                  )
-                  following = followingPhase.value
-                  await deps.completeCrawlAccountCheckpoint({
-                    crawlRunId,
-                    username: account.username,
-                    phase: 'following',
-                    data: toCheckpointData({
-                      ...following,
-                      durationMs: followingPhase.durationMs,
-                      retryWaitMs: followingPhase.retryWaitMs,
-                    }),
-                  })
-                }
-                if (needsFollowers) {
-                  const followersPhase = await measurePhaseDuration((trackRetryWait) =>
-                    syncFollowersPhase(
-                      deps,
-                      account,
-                      openApiContext.client,
-                      followRateLimitBudget,
-                      following?.userId ?? null,
-                      trackRetryWait,
-                    ),
-                  )
-                  followers = followersPhase.value
-                  await deps.completeCrawlAccountCheckpoint({
-                    crawlRunId,
-                    username: account.username,
-                    phase: 'followers',
-                    data: toCheckpointData({
-                      ...followers,
-                      durationMs: followersPhase.durationMs,
-                      retryWaitMs: followersPhase.retryWaitMs,
                     }),
                   })
                 }
