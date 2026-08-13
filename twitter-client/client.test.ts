@@ -194,3 +194,27 @@ describe('createTrendsScraper port wiring', () => {
     expect(initCycleTLS).toHaveBeenCalledWith({ port: 20_456 })
   })
 })
+
+describe('createOpenApiClientSession', () => {
+  it('keeps one CycleTLS transport alive until the session is closed', async () => {
+    const { createOpenApiClientSession, closeOpenApiClient } = await import('./client')
+    const cycletls = await import('cycletls')
+    const initCycleTLS = cycletls.default as ReturnType<typeof vi.fn>
+    const initCallsBefore = initCycleTLS.mock.calls.length
+    const exitCallsBefore = fakeCycleTLS.exit.mock.calls.length
+
+    const session = await createOpenApiClientSession()
+    const first = await session.createOpenApiClient({ ct0: 'c1', authToken: 'a1' })
+    await closeOpenApiClient(first)
+    const second = await session.createOpenApiClient({ ct0: 'c2', authToken: 'a2' })
+    await closeOpenApiClient(second)
+
+    expect(initCycleTLS.mock.calls.length).toBe(initCallsBefore + 1)
+    expect(fakeCycleTLS.exit.mock.calls.length).toBe(exitCallsBefore)
+
+    await session.close()
+    await session.close()
+
+    expect(fakeCycleTLS.exit.mock.calls.length).toBe(exitCallsBefore + 1)
+  })
+})
