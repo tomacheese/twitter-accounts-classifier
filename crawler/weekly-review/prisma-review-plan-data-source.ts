@@ -148,8 +148,8 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
    * `targetFrom`〜`targetTo` の期間内に labeled された、ラベル×value ごとのアカウント数
    * (relabel 履歴の行数ではなく account 単位の重複排除後) を返す。
    * `listRecentCandidates` の抽出母集団と揃えるため `evaluable` でも絞り込む。
-   * 全ラベルを一括で DISTINCT/SORT すると巨大な期間スキャンになるため、ラベル単位へ分割して
-   * (labelDefinitionId, accountId, labeledAt DESC, id DESC) index を利用可能にする。
+   * ラベル単位に分割したうえで期間 window を先に materialize し、その小さい集合だけを
+   * account 単位に重複排除する。time-first partial covering index は raw migration で管理する。
    */
   public async listPopulationCounts(
     targetFrom: Date,
@@ -169,17 +169,26 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
       POPULATION_COUNT_QUERY_CONCURRENCY,
       async (definition, index) => {
         const rows = await this.prisma.$queryRaw<PopulationCountByValueRow[]>(Prisma.sql`
-          SELECT deduped.value, COUNT(*)::int AS count
-          FROM (
-            SELECT DISTINCT ON (label."accountId")
+          WITH windowed AS MATERIALIZED (
+            SELECT
               label."accountId",
-              label.value
+              label.value,
+              label."labeledAt",
+              label.id
             FROM "AccountLabel" label
             WHERE label."labelDefinitionId" = ${definition.id}
               AND label."labeledAt" >= ${targetFrom}
               AND label."labeledAt" <= ${targetTo}
               AND label.evaluable
-            ORDER BY label."accountId", label."labeledAt" DESC, label.id DESC
+            ORDER BY label."labeledAt" DESC, label.id DESC
+          )
+          SELECT deduped.value, COUNT(*)::int AS count
+          FROM (
+            SELECT DISTINCT ON (windowed."accountId")
+              windowed."accountId",
+              windowed.value
+            FROM windowed
+            ORDER BY windowed."accountId", windowed."labeledAt" DESC, windowed.id DESC
           ) deduped
           GROUP BY deduped.value
         `)
