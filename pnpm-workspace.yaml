@@ -4,6 +4,7 @@ packages:
   - "twitter-client"
   - "blocker"
   - "analyzer"
+  - "pipeline-health"
 
 # pnpm deploy --prod が workspace パッケージを symlink でなく実体としてコピーするために必要。
 injectWorkspacePackages: true
