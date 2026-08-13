@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "main": "dist/index.js",
-  "types": "src/index.ts",
+  "types": "dist/index.d.ts",
   "packageManager": "pnpm@11.18.0",
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",

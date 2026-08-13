@@ -7,11 +7,12 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.json && cp -r generated dist/generated && cp policy/detection-policy.json dist/policy/detection-policy.json",
+    "build": "pnpm --dir ../pipeline-health run build && rm -rf dist && tsc -p tsconfig.json && cp -r generated dist/generated && cp policy/detection-policy.json dist/policy/detection-policy.json",
     "start": "node dist/index.js",
     "lint": "eslint .",
     "format": "prettier --check .",
     "typecheck": "tsc --noEmit",
+    "pretest": "pnpm --dir ../pipeline-health run build",
     "test": "vitest run",
     "precheck": "pnpm run db:generate",
     "check": "run-p lint typecheck test",
@@ -23,6 +24,7 @@
     "@book000/node-utils": "^1.0.0",
     "@prisma/client": "^6.0.0",
     "@sentry/node": "^8.0.0",
+    "pipeline-health": "workspace:*",
     "zod": "^3.24.0"
   },
   "devDependencies": {
