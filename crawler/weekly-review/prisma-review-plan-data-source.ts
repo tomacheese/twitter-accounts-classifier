@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from '../generated/prisma'
+import { runWithConcurrencyLimit } from '../utils/concurrency-limit'
 import type {
   PlanningAggregateRow,
   PlanningCandidateRow,
@@ -8,6 +9,10 @@ import type {
   PlanningSnapshotRow,
   WeeklyReviewPlanningDataSource,
 } from './review-plan-data'
+
+const POPULATION_COUNT_QUERY_CONCURRENCY = 2
+
+type PopulationCountByValueRow = Pick<PlanningPopulationCountRow, 'value' | 'count'>
 
 export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlanningDataSource {
   public constructor(private readonly prisma: PrismaClient) {}
@@ -143,26 +148,50 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
    * `targetFrom`〜`targetTo` の期間内に labeled された、ラベル×value ごとのアカウント数
    * (relabel 履歴の行数ではなく account 単位の重複排除後) を返す。
    * `listRecentCandidates` の抽出母集団と揃えるため `evaluable` でも絞り込む。
+   * 全ラベルを一括で DISTINCT/SORT すると巨大な期間スキャンになるため、ラベル単位へ分割して
+   * (labelDefinitionId, accountId, labeledAt DESC, id DESC) index を利用可能にする。
    */
   public async listPopulationCounts(
     targetFrom: Date,
     targetTo: Date,
   ): Promise<PlanningPopulationCountRow[]> {
-    return this.prisma.$queryRaw<PlanningPopulationCountRow[]>(Prisma.sql`
-      SELECT deduped."labelDefinitionId", deduped.value, COUNT(*)::int AS count
-      FROM (
-        SELECT DISTINCT ON (label."labelDefinitionId", label."accountId")
-          label."accountId",
-          label."labelDefinitionId",
-          label.value
-        FROM "AccountLabel" label
-        WHERE label."labeledAt" >= ${targetFrom}
-          AND label."labeledAt" <= ${targetTo}
-          AND label.evaluable
-        ORDER BY label."labelDefinitionId", label."accountId", label."labeledAt" DESC, label.id DESC
-      ) deduped
-      GROUP BY deduped."labelDefinitionId", deduped.value
-    `)
+    const definitions = await this.prisma.labelDefinition.findMany({
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    })
+    const rowsByDefinition: PlanningPopulationCountRow[][] = Array.from(
+      { length: definitions.length },
+      () => [],
+    )
+
+    await runWithConcurrencyLimit(
+      definitions,
+      POPULATION_COUNT_QUERY_CONCURRENCY,
+      async (definition, index) => {
+        const rows = await this.prisma.$queryRaw<PopulationCountByValueRow[]>(Prisma.sql`
+          SELECT deduped.value, COUNT(*)::int AS count
+          FROM (
+            SELECT DISTINCT ON (label."accountId")
+              label."accountId",
+              label.value
+            FROM "AccountLabel" label
+            WHERE label."labelDefinitionId" = ${definition.id}
+              AND label."labeledAt" >= ${targetFrom}
+              AND label."labeledAt" <= ${targetTo}
+              AND label.evaluable
+            ORDER BY label."accountId", label."labeledAt" DESC, label.id DESC
+          ) deduped
+          GROUP BY deduped.value
+        `)
+        rowsByDefinition[index] = rows.map((row) => ({
+          labelDefinitionId: definition.id,
+          value: row.value,
+          count: row.count,
+        }))
+      },
+    )
+
+    return rowsByDefinition.flat()
   }
 
   public async listChangeCandidates(
