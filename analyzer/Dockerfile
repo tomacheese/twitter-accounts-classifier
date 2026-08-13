@@ -6,12 +6,10 @@ WORKDIR /app
 
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY analyzer/package.json analyzer/package.json
-COPY pipeline-health/package.json pipeline-health/package.json
 RUN corepack enable && corepack prepare pnpm@11.18.0 --activate && pnpm install --frozen-lockfile
 
 COPY prisma ./prisma
 COPY analyzer ./analyzer
-COPY pipeline-health ./pipeline-health
 RUN pnpm --filter analyzer run db:generate
 RUN pnpm --filter analyzer run build
 RUN test -f /app/analyzer/dist/policy/detection-policy.json
