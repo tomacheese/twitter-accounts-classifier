@@ -197,6 +197,42 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
   })
 })
 
+describe('upsertAccountClassificationLatest row ordering', () => {
+  it('sorts rows by labelDefinitionId ascending before building the UNNEST arrays', async () => {
+    const executeRaw = vi.fn<(...args: unknown[]) => Promise<number>>(() => Promise.resolve(0))
+    const fakePrisma = { $executeRaw: executeRaw } as unknown as PrismaClient
+
+    await upsertAccountClassificationLatest(fakePrisma, [
+      {
+        accountId: 'acct_1',
+        labelDefinitionId: 'label_z',
+        value: true,
+        confidence: 0.9,
+        reason: 'r',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-13T00:00:00Z'),
+        sourceObservationId: null,
+      },
+      {
+        accountId: 'acct_1',
+        labelDefinitionId: 'label_a',
+        value: false,
+        confidence: 0.1,
+        reason: 'r2',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-13T00:00:00Z'),
+        sourceObservationId: null,
+      },
+    ])
+
+    expect(executeRaw).toHaveBeenCalledTimes(1)
+    const labelDefinitionIds = executeRaw.mock.calls[0][2]
+    expect(labelDefinitionIds).toEqual(['label_a', 'label_z'])
+  })
+})
+
 function createMockPrisma() {
   const upsert = vi.fn().mockResolvedValue(undefined)
   const prisma = { readModelState: { upsert } } as unknown as PrismaClient

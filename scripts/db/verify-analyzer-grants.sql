@@ -17,7 +17,9 @@ DECLARE
     'AccountSummaryLatest', 'AccountClassificationLatest', 'ReadModelBootstrap',
     'LabelSummaryCurrent', 'BlockRelationCurrent', 'BlockStateChange',
     'AttentionItemCurrent', 'OverviewSnapshot',
-    'ReadModelGeneration', 'ReadModelPointer', 'ReadModelState'
+    'ReadModelGeneration', 'ReadModelPointer', 'ReadModelState',
+    'AccountClassificationValueCount', 'AccountClassificationConfidenceBucketCount',
+    'AccountClassificationRuleVersionCount', 'AccountClassificationFreshnessBucket'
   ];
   limited_write_allowlist text[] := ARRAY['ComponentBuildIdentity'];
   missing_writes text;

@@ -546,6 +546,43 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     expect(state?.status).toBe('healthy')
     expect(state?.sourceWatermarkAt?.toISOString()).toBe(observedAt.toISOString())
   })
+
+  it('leaves classificationObservedAt unset when the watermark has no AccountLabel rows, keeping it in sync with AccountClassificationLatest having no rows', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_pop_1',
+        screenName: 'alice',
+        displayName: 'Alice',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+      },
+    })
+    const observedAt = new Date('2026-01-02T00:00:00Z')
+    const observation = await prisma.accountClassificationObservation.create({
+      data: { accountId: account.id, observedAt, labelCount: 0 },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+        triggerId: observation.id,
+      },
+    })
+
+    await processAccountSummaryRefresh(prisma, workItem)
+
+    const summary = await prisma.accountSummaryLatest.findUnique({
+      where: { accountId: account.id },
+    })
+    expect(summary?.classificationObservedAt).toBeNull()
+    const classificationRows = await prisma.accountClassificationLatest.findMany({
+      where: { accountId: account.id },
+    })
+    expect(classificationRows).toHaveLength(0)
+  })
 })
 
 describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () => {

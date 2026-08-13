@@ -4,6 +4,12 @@ import { Prisma, type PrismaClient } from '../generated/prisma'
 export type SnapshotCompleteness = 'complete' | 'partial' | 'unknown'
 
 const CONFIDENCE_BUCKET_COUNT = 10
+const FRESHNESS_BUCKET_BACKLOG_CEILING_MS = 7 * 24 * 60 * 60 * 1000
+const MIN_FRESHNESS_THRESHOLD_MS = 5 * 60 * 1000
+// 集計テーブル読み取りへの置き換えにより行数に依存しない O(labelDefinition数) の
+// トランザクションになったため、旧 COUNT(DISTINCT) 全件scan を見込んだ 300 秒は
+// 過大。account_summary_refresh と同じ水準に合わせる。
+const LABEL_AGGREGATE_SNAPSHOT_TRANSACTION_TIMEOUT_MS = 60_000
 
 /**
  * @param bucket - 0 から 9 までのバケット番号
@@ -39,6 +45,129 @@ export function deriveCompletenessFromCoverage(
   return 'complete'
 }
 
+/**
+ * read_model_freshness policy の delayedAfter/staleAfter が、
+ * freshness バケットの sentinel 丸め・分単位丸めの前提と矛盾しないことを検査する。
+ * 矛盾する policy 変更をコード変更・migration レビューを伴わずに投入できないようにする契約。
+ * @param freshnessThresholdsMs - 検査対象の閾値
+ */
+function assertFreshnessThresholdsCompatibleWithBucketing(freshnessThresholdsMs: {
+  delayedAfterMs: number
+  staleAfterMs: number
+}): void {
+  if (freshnessThresholdsMs.staleAfterMs > FRESHNESS_BUCKET_BACKLOG_CEILING_MS) {
+    throw new Error(
+      `staleAfterMs (${freshnessThresholdsMs.staleAfterMs}) must not exceed ` +
+        `FRESHNESS_BUCKET_BACKLOG_CEILING_MS (${FRESHNESS_BUCKET_BACKLOG_CEILING_MS})`,
+    )
+  }
+  if (
+    freshnessThresholdsMs.delayedAfterMs < MIN_FRESHNESS_THRESHOLD_MS ||
+    freshnessThresholdsMs.staleAfterMs < MIN_FRESHNESS_THRESHOLD_MS
+  ) {
+    throw new Error(
+      `delayedAfterMs/staleAfterMs must be at least ${MIN_FRESHNESS_THRESHOLD_MS}ms ` +
+        `(minute-level bucket rounding granularity)`,
+    )
+  }
+}
+
+/**
+ * 分単位バケットのうち 7 日を超えたものを sentinel へ丸め込んで削除する。
+ * sentinel 行を必ず先に FOR UPDATE でロックしてから対象バケットをロックし、
+ * トリガー側のロック順序と一致させてデッドロックを防ぐ。
+ * @param tx - トランザクション内 Prisma クライアント
+ * @param labelDefinitionId - 対象の labelDefinitionId
+ */
+async function compactFreshnessBuckets(
+  tx: Prisma.TransactionClient,
+  labelDefinitionId: string,
+): Promise<void> {
+  await tx.$executeRaw`
+    INSERT INTO "AccountClassificationFreshnessBucket" ("labelDefinitionId", "observedAtBucket", "count")
+    VALUES (${labelDefinitionId}, TIMESTAMP '1970-01-01', 0)
+    ON CONFLICT DO NOTHING
+  `
+  await tx.$queryRaw`
+    SELECT * FROM "AccountClassificationFreshnessBucket"
+    WHERE "labelDefinitionId" = ${labelDefinitionId} AND "observedAtBucket" = TIMESTAMP '1970-01-01'
+    FOR UPDATE
+  `
+  await tx.$executeRaw`
+    WITH stale_buckets AS (
+      SELECT "observedAtBucket", "count"
+      FROM "AccountClassificationFreshnessBucket"
+      WHERE "labelDefinitionId" = ${labelDefinitionId}
+        AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
+        AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
+      FOR UPDATE
+    )
+    UPDATE "AccountClassificationFreshnessBucket" AS sentinel
+    SET "count" = sentinel."count" + (SELECT COALESCE(SUM("count"), 0) FROM stale_buckets)
+    WHERE sentinel."labelDefinitionId" = ${labelDefinitionId}
+      AND sentinel."observedAtBucket" = TIMESTAMP '1970-01-01'
+  `
+  await tx.$executeRaw`
+    DELETE FROM "AccountClassificationFreshnessBucket"
+    WHERE "labelDefinitionId" = ${labelDefinitionId}
+      AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
+      AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
+  `
+}
+
+/**
+ * 全 labelDefinitionId の freshness バケットを、ラベルごとに分けず
+ * 固定回数の SQL 文で一括 compaction する。sentinel 行のロックは
+ * labelDefinitionId 昇順で一括取得し、トリガー側のロック順序と一致させる。
+ * snapshot 本体の REPEATABLE READ トランザクションより先に、それとは
+ * 独立した短時間トランザクションとして実行することで、分類書き込み側が
+ * 待たされる時間を compaction 自体の実行時間に限定する。
+ * @param prisma - Prisma クライアント
+ * @param labelIds - 対象の labelDefinitionId 一覧
+ */
+async function compactFreshnessBucketsForAllLabels(
+  prisma: PrismaClient,
+  labelIds: string[],
+): Promise<void> {
+  if (labelIds.length === 0) return
+  const sortedLabelIds = labelIds.toSorted()
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      INSERT INTO "AccountClassificationFreshnessBucket" ("labelDefinitionId", "observedAtBucket", "count")
+      SELECT "id", TIMESTAMP '1970-01-01', 0
+      FROM UNNEST(${sortedLabelIds}::text[]) AS "id"
+      ON CONFLICT DO NOTHING
+    `
+    await tx.$queryRaw`
+      SELECT * FROM "AccountClassificationFreshnessBucket"
+      WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::text[]) AND "observedAtBucket" = TIMESTAMP '1970-01-01'
+      ORDER BY "labelDefinitionId"
+      FOR UPDATE
+    `
+    await tx.$executeRaw`
+      WITH stale_totals AS (
+        SELECT "labelDefinitionId", SUM("count") AS total
+        FROM "AccountClassificationFreshnessBucket"
+        WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::text[])
+          AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
+          AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
+        GROUP BY 1
+      )
+      UPDATE "AccountClassificationFreshnessBucket" AS sentinel
+      SET "count" = sentinel."count" + stale_totals."total"
+      FROM stale_totals
+      WHERE sentinel."labelDefinitionId" = stale_totals."labelDefinitionId"
+        AND sentinel."observedAtBucket" = TIMESTAMP '1970-01-01'
+    `
+    await tx.$executeRaw`
+      DELETE FROM "AccountClassificationFreshnessBucket"
+      WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::text[])
+        AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
+        AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
+    `
+  })
+}
+
 /** buildLabelAggregateSnapshotSet の入力。 */
 export interface BuildLabelAggregateSnapshotSetInput {
   /** この build を確定させた WorkItem の id。snapshot set の識別子。 */
@@ -65,18 +194,39 @@ export interface BuildLabelAggregateSnapshotSetResult {
   reused: boolean
 }
 
-/** 1 (value, reason, ruleVersion, confidenceBucket) 組み合わせ分の集計行。 */
-interface AggregateSnapshotRow {
+/** AccountClassificationValueCount の読み取り行。 */
+interface ValueCountRow {
   labelDefinitionId: string
   value: boolean
-  reason: string
-  ruleVersion: string
-  confidenceBucket: number
-  count: bigint
+  // AccountClassificationValueCount.count は INTEGER 列の直接 SELECT であり、
+  // COUNT(*) 等の集約ではないため node-postgres 経由でも number になる。
+  count: number
   confidenceSum: number
-  currentCount: bigint
-  delayedCount: bigint
-  staleCount: bigint
+}
+/** AccountClassificationConfidenceBucketCount の読み取り行。 */
+interface ConfidenceBucketCountRow {
+  labelDefinitionId: string
+  confidenceBucket: number
+  count: number
+}
+/** AccountClassificationRuleVersionCount の読み取り行。 */
+interface RuleVersionCountRow {
+  labelDefinitionId: string
+  ruleVersion: string
+  count: number
+}
+/** AccountClassificationFreshnessBucket を current/delayed/stale に振り分け集計した行。 */
+interface FreshnessCountRow {
+  labelDefinitionId: string
+  currentCount: bigint | null
+  delayedCount: bigint | null
+  staleCount: bigint | null
+}
+/** AccountClassificationLatest から reasonDistribution 用に読み取った行。 */
+interface ReasonCountRow {
+  labelDefinitionId: string
+  reason: string
+  count: bigint
 }
 
 /**
@@ -93,6 +243,8 @@ export async function buildLabelAggregateSnapshotSet(
   prisma: PrismaClient,
   input: BuildLabelAggregateSnapshotSetInput,
 ): Promise<BuildLabelAggregateSnapshotSetResult> {
+  assertFreshnessThresholdsCompatibleWithBucketing(input.freshnessThresholdsMs)
+
   const labelDefinitions = await prisma.labelDefinition.findMany({ select: { id: true } })
   const existingCount = await prisma.labelMetricSnapshot.count({
     where: { triggerWorkItemId: input.triggerWorkItemId },
@@ -117,91 +269,126 @@ export async function buildLabelAggregateSnapshotSet(
   }
 
   const freshnessThresholds = input.freshnessThresholdsMs
+  const labelIds = labelDefinitions.map((label) => label.id)
+
+  // snapshot 本体の REPEATABLE READ トランザクションより先に、独立した
+  // 短時間トランザクションで compaction を済ませる。同一トランザクション内で
+  // 行うと、compaction の sentinel ロックが分類書き込み側のトリガーと
+  // snapshot トランザクションのタイムアウト全体で競合し得るため。
+  await compactFreshnessBucketsForAllLabels(prisma, labelIds)
 
   const snapshotAt = await prisma.$transaction(
     async (tx) => {
-      await tx.$executeRaw`SET LOCAL work_mem = '256MB'`
       const nowRows = await tx.$queryRaw<{ now: Date }[]>`SELECT now() AS now`
       const sharedSnapshotAt = nowRows.at(0)?.now ?? new Date()
 
       const populationRows = await tx.$queryRaw<{ count: bigint }[]>`
-        SELECT COUNT(DISTINCT "accountId") AS count FROM "AccountClassificationLatest"
+        SELECT COUNT(*) AS count FROM "AccountSummaryLatest" WHERE "classificationObservedAt" IS NOT NULL
       `
       const populationCount = Number(populationRows.at(0)?.count ?? 0)
 
-      // freshness (current/delayed/stale) を JS 側で行ごとに判定すると、
-      // GROUP BY に observedAt の生値が必要になり、Account 数に比例して行数が
-      // 増えてしまう。FILTER 句で current/delayed/stale の件数自体を SQL 側で
-      // 集計し、GROUP BY は value/reason/ruleVersion/confidenceBucket の
-      // 有限な組み合わせのみに保つ。
       const delayedAfterSeconds = freshnessThresholds.delayedAfterMs / 1000
       const staleAfterSeconds = freshnessThresholds.staleAfterMs / 1000
 
-      const aggregateRows: AggregateSnapshotRow[] =
-        labelDefinitions.length === 0
-          ? []
-          : await tx.$queryRaw<AggregateSnapshotRow[]>`
-              SELECT
-                "labelDefinitionId", "value", "reason", "ruleVersion",
-                LEAST(FLOOR("confidence" * 10), 9)::int AS "confidenceBucket",
-                COUNT(*) AS "count",
-                SUM("confidence") AS "confidenceSum",
-                COUNT(*) FILTER (
-                  WHERE ${sharedSnapshotAt}::timestamp - "observedAt" <= make_interval(secs => ${delayedAfterSeconds})
-                ) AS "currentCount",
-                COUNT(*) FILTER (
-                  WHERE ${sharedSnapshotAt}::timestamp - "observedAt" > make_interval(secs => ${delayedAfterSeconds})
-                    AND ${sharedSnapshotAt}::timestamp - "observedAt" <= make_interval(secs => ${staleAfterSeconds})
-                ) AS "delayedCount",
-                COUNT(*) FILTER (
-                  WHERE ${sharedSnapshotAt}::timestamp - "observedAt" > make_interval(secs => ${staleAfterSeconds})
-                ) AS "staleCount"
-              FROM "AccountClassificationLatest"
-              WHERE "labelDefinitionId" IN (${Prisma.join(labelDefinitions.map((label) => label.id))})
-              GROUP BY 1, 2, 3, 4, 5
-            `
+      const [valueRows, confidenceRows, ruleVersionRows, freshnessRows, reasonRows] =
+        labelIds.length === 0
+          ? [[], [], [], [], []]
+          : await Promise.all([
+              tx.$queryRaw<ValueCountRow[]>`
+                SELECT "labelDefinitionId", "value", "count", "confidenceSum"
+                FROM "AccountClassificationValueCount"
+                WHERE "labelDefinitionId" IN (${Prisma.join(labelIds)})
+              `,
+              tx.$queryRaw<ConfidenceBucketCountRow[]>`
+                SELECT "labelDefinitionId", "confidenceBucket", "count"
+                FROM "AccountClassificationConfidenceBucketCount"
+                WHERE "labelDefinitionId" IN (${Prisma.join(labelIds)})
+              `,
+              tx.$queryRaw<RuleVersionCountRow[]>`
+                SELECT "labelDefinitionId", "ruleVersion", "count"
+                FROM "AccountClassificationRuleVersionCount"
+                WHERE "labelDefinitionId" IN (${Prisma.join(labelIds)})
+              `,
+              tx.$queryRaw<FreshnessCountRow[]>`
+                SELECT
+                  "labelDefinitionId",
+                  SUM("count") FILTER (
+                    WHERE ${sharedSnapshotAt}::timestamp - "observedAtBucket" <= make_interval(secs => ${delayedAfterSeconds})
+                  ) AS "currentCount",
+                  SUM("count") FILTER (
+                    WHERE ${sharedSnapshotAt}::timestamp - "observedAtBucket" > make_interval(secs => ${delayedAfterSeconds})
+                      AND ${sharedSnapshotAt}::timestamp - "observedAtBucket" <= make_interval(secs => ${staleAfterSeconds})
+                  ) AS "delayedCount",
+                  SUM("count") FILTER (
+                    WHERE ${sharedSnapshotAt}::timestamp - "observedAtBucket" > make_interval(secs => ${staleAfterSeconds})
+                  ) AS "staleCount"
+                FROM "AccountClassificationFreshnessBucket"
+                WHERE "labelDefinitionId" IN (${Prisma.join(labelIds)})
+                GROUP BY 1
+              `,
+              tx.$queryRaw<ReasonCountRow[]>`
+                SELECT "labelDefinitionId", "reason", COUNT(*) AS count
+                FROM "AccountClassificationLatest"
+                WHERE "labelDefinitionId" IN (${Prisma.join(labelIds)}) AND "value" = true
+                GROUP BY 1, 2
+              `,
+            ])
 
-      const rowsByLabelDefinitionId = new Map<string, AggregateSnapshotRow[]>()
-      for (const row of aggregateRows) {
-        const rows = rowsByLabelDefinitionId.get(row.labelDefinitionId) ?? []
-        rows.push(row)
-        rowsByLabelDefinitionId.set(row.labelDefinitionId, rows)
+      const groupByLabel = <T extends { labelDefinitionId: string }>(
+        rows: T[],
+      ): Map<string, T[]> => {
+        const map = new Map<string, T[]>()
+        for (const row of rows) {
+          const group = map.get(row.labelDefinitionId) ?? []
+          group.push(row)
+          map.set(row.labelDefinitionId, group)
+        }
+        return map
       }
+      const valueRowsByLabel = groupByLabel(valueRows)
+      const confidenceRowsByLabel = groupByLabel(confidenceRows)
+      const ruleVersionRowsByLabel = groupByLabel(ruleVersionRows)
+      const reasonRowsByLabel = groupByLabel(reasonRows)
+      const freshnessRowByLabel = new Map(freshnessRows.map((row) => [row.labelDefinitionId, row]))
 
       await Promise.all(
         labelDefinitions.map(async (label) => {
-          const rows = rowsByLabelDefinitionId.get(label.id) ?? []
           let evaluatedCount = 0
           let trueCount = 0
+          let falseCount = 0
           let trueConfidenceSum = 0
           let falseConfidenceSum = 0
-          let falseCount = 0
-          let currentCount = 0
-          let delayedCount = 0
-          let staleCount = 0
-          const confidenceBuckets: Record<string, number> = {}
-          const reasonDistribution: Record<string, number> = {}
-          const ruleVersionDistribution: Record<string, number> = {}
-          for (const row of rows) {
-            const count = Number(row.count)
+          for (const row of valueRowsByLabel.get(label.id) ?? []) {
+            const count = row.count
             evaluatedCount += count
             if (row.value) {
               trueCount += count
               trueConfidenceSum += row.confidenceSum
-              reasonDistribution[row.reason] = (reasonDistribution[row.reason] ?? 0) + count
             } else {
               falseCount += count
               falseConfidenceSum += row.confidenceSum
             }
-            const bucketKey = formatConfidenceBucketKey(row.confidenceBucket)
-            confidenceBuckets[bucketKey] = (confidenceBuckets[bucketKey] ?? 0) + count
-            ruleVersionDistribution[row.ruleVersion] =
-              (ruleVersionDistribution[row.ruleVersion] ?? 0) + count
-
-            currentCount += Number(row.currentCount)
-            delayedCount += Number(row.delayedCount)
-            staleCount += Number(row.staleCount)
           }
+
+          const confidenceBuckets: Record<string, number> = {}
+          for (const row of confidenceRowsByLabel.get(label.id) ?? []) {
+            confidenceBuckets[formatConfidenceBucketKey(row.confidenceBucket)] = row.count
+          }
+
+          const ruleVersionDistribution: Record<string, number> = {}
+          for (const row of ruleVersionRowsByLabel.get(label.id) ?? []) {
+            ruleVersionDistribution[row.ruleVersion] = row.count
+          }
+
+          const reasonDistribution: Record<string, number> = {}
+          for (const row of reasonRowsByLabel.get(label.id) ?? []) {
+            reasonDistribution[row.reason] = Number(row.count)
+          }
+
+          const freshnessRow = freshnessRowByLabel.get(label.id)
+          const currentCount = Number(freshnessRow?.currentCount ?? 0n)
+          const delayedCount = Number(freshnessRow?.delayedCount ?? 0n)
+          const staleCount = Number(freshnessRow?.staleCount ?? 0n)
 
           const unknownCount = Math.max(populationCount - evaluatedCount, 0)
           const coverage = populationCount === 0 ? 0 : evaluatedCount / populationCount
@@ -259,9 +446,11 @@ export async function buildLabelAggregateSnapshotSet(
     },
     {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-      timeout: 300_000,
+      timeout: LABEL_AGGREGATE_SNAPSHOT_TRANSACTION_TIMEOUT_MS,
     },
   )
 
   return { triggerWorkItemId: input.triggerWorkItemId, snapshotAt, reused: false }
 }
+
+export { compactFreshnessBuckets as compactFreshnessBucketsForTest }

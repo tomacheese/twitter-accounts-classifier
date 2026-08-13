@@ -417,6 +417,39 @@ model AccountClassificationLatest {
   @@index([labelDefinitionId, value, accountId])
 }
 
+model AccountClassificationValueCount {
+  labelDefinitionId String
+  value             Boolean
+  count             Int      @default(0)
+  confidenceSum     Float    @default(0)
+
+  @@id([labelDefinitionId, value])
+}
+
+model AccountClassificationConfidenceBucketCount {
+  labelDefinitionId String
+  confidenceBucket  Int
+  count             Int      @default(0)
+
+  @@id([labelDefinitionId, confidenceBucket])
+}
+
+model AccountClassificationRuleVersionCount {
+  labelDefinitionId String
+  ruleVersion       String
+  count             Int      @default(0)
+
+  @@id([labelDefinitionId, ruleVersion])
+}
+
+model AccountClassificationFreshnessBucket {
+  labelDefinitionId String
+  observedAtBucket  DateTime
+  count             Int      @default(0)
+
+  @@id([labelDefinitionId, observedAtBucket])
+}
+
 model AccountClassificationObservation {
   id         String   @id @default(cuid())
   accountId  String
