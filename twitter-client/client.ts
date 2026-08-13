@@ -80,8 +80,14 @@ export function createCycleTLSFetch(
 export interface OpenApiClientContext {
   client: TwitterOpenApiClient
   cycleTLS: CycleTLSClient
+  ownsCycleTLS?: boolean
   blocksClient: BlocksListRawApiLike
   createBlock: (targetUserId: string) => Promise<void>
+}
+
+export interface OpenApiClientSession {
+  createOpenApiClient: (cookies: IssuedCookies, timeoutMs?: number) => Promise<OpenApiClientContext>
+  close: () => Promise<void>
 }
 
 /**
@@ -94,6 +100,25 @@ export interface OpenApiClientContext {
  * @param port - `cycletls` の Go バイナリが listen する port。省略時は `cycletls` 既定値 (9119)
  * @returns クライアントと、依存する `cycletls` クライアント。呼び出し側でクローズできるように返す
  */
+async function createOpenApiClientFromCycleTLS(
+  cookies: IssuedCookies,
+  cycleTLS: CycleTLSClient,
+  timeoutMs: number,
+  ownsCycleTLS: boolean,
+): Promise<OpenApiClientContext> {
+  const fetchImpl = wrapFetchWithResponseCapture(createCycleTLSFetch(cycleTLS, timeoutMs))
+  TwitterOpenApi.fetchApi = fetchImpl
+  const client = await createOpenApiClientWith(new TwitterOpenApi(), cookies)
+  const blocksClient = createBlocksClient(cookies, fetchImpl)
+  return {
+    client,
+    cycleTLS,
+    ownsCycleTLS,
+    blocksClient,
+    createBlock: (targetUserId: string) => createBlock(cookies, fetchImpl, targetUserId),
+  }
+}
+
 export async function createOpenApiClient(
   cookies: IssuedCookies,
   timeoutMs: number = DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS,
@@ -101,21 +126,26 @@ export async function createOpenApiClient(
 ): Promise<OpenApiClientContext> {
   const cycleTLS = await initCycleTLS(port === undefined ? undefined : { port })
   try {
-    const fetchImpl = wrapFetchWithResponseCapture(createCycleTLSFetch(cycleTLS, timeoutMs))
-    TwitterOpenApi.fetchApi = fetchImpl
-    const client = await createOpenApiClientWith(new TwitterOpenApi(), cookies)
-    const blocksClient = createBlocksClient(cookies, fetchImpl)
-    return {
-      client,
-      cycleTLS,
-      blocksClient,
-      createBlock: (targetUserId: string) => createBlock(cookies, fetchImpl, targetUserId),
-    }
+    return await createOpenApiClientFromCycleTLS(cookies, cycleTLS, timeoutMs, true)
   } catch (error) {
     // ここで throw すると呼び出し元は cycleTLS を受け取れず close できないため、
     // 返す前に自分で close する。
     await cycleTLS.exit()
     throw error
+  }
+}
+
+export async function createOpenApiClientSession(port?: number): Promise<OpenApiClientSession> {
+  const cycleTLS = await initCycleTLS(port === undefined ? undefined : { port })
+  let closed = false
+  return {
+    createOpenApiClient: (cookies, timeoutMs = DEFAULT_CYCLETLS_REQUEST_TIMEOUT_MS) =>
+      createOpenApiClientFromCycleTLS(cookies, cycleTLS, timeoutMs, false),
+    close: async () => {
+      if (closed) return
+      await cycleTLS.exit()
+      closed = true
+    },
   }
 }
 
@@ -126,6 +156,7 @@ export async function createOpenApiClient(
  * @param context - {@link createOpenApiClient} が返したコンテキスト
  */
 export async function closeOpenApiClient(context: OpenApiClientContext): Promise<void> {
+  if (context.ownsCycleTLS === false) return
   await context.cycleTLS.exit()
 }
 
