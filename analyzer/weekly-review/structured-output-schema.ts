@@ -1,6 +1,39 @@
 import { z } from 'zod'
 import { severitySchema } from '../policy/schema'
 
+const resolutionBaseSchema = {
+  summary: z.string().min(1),
+  evidenceReference: z.string().min(1),
+}
+const deferredResolutionSchema = z.object({
+  status: z.literal('deferred_to_issue'),
+  ...resolutionBaseSchema,
+  deferReason: z.enum(['human_judgment_required', 'oversized_scope']),
+  issueNumber: z.number().int().positive(),
+  issueUrl: z
+    .string()
+    .url()
+    .regex(/^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+$/),
+})
+
+export const weeklyReviewResolutionSchema = z
+  .discriminatedUnion('status', [
+    z.object({ status: z.literal('fixed'), ...resolutionBaseSchema }),
+    z.object({ status: z.literal('verified_not_issue'), ...resolutionBaseSchema }),
+    deferredResolutionSchema,
+  ])
+  .superRefine((resolution, ctx) => {
+    if (resolution.status !== 'deferred_to_issue') return
+    const issueNumber = Number(resolution.issueUrl.split('/').at(-1))
+    if (issueNumber !== resolution.issueNumber) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['issueUrl'],
+        message: 'issueUrl must match issueNumber',
+      })
+    }
+  })
+
 export const weeklyReviewSampleKindSchema = z.enum([
   'random_positive',
   'random_negative',
@@ -38,6 +71,7 @@ export const weeklyReviewSampleJudgmentSchema = z.object({
   unavailableReason: z.string().min(1).optional(),
   populationCount: z.number().int().min(0).optional(),
   classifierEvaluable: z.boolean().optional(),
+  resolution: weeklyReviewResolutionSchema.optional(),
 })
 
 export const weeklyReviewSummarySchema = z
@@ -86,6 +120,8 @@ export const weeklyReviewSummarySchema = z
     }
   })
 
+export const weeklyReviewFindingResolutionSchema = weeklyReviewResolutionSchema
+
 export const weeklyReviewFindingCandidateSchema = z.object({
   type: z.string().min(1),
   dimensions: z.record(z.string()),
@@ -98,6 +134,7 @@ export const weeklyReviewFindingCandidateSchema = z.object({
   structuredMeasurement: z.record(z.unknown()),
   suggestedSeverity: severitySchema,
   unavailableReason: z.string().optional(),
+  resolution: weeklyReviewFindingResolutionSchema.optional(),
 })
 
 export const structuredOutputSchema = z
@@ -122,9 +159,36 @@ export const structuredOutputSchema = z
         message: 'review is required for schemaVersion >= 2',
       })
     }
+    if (output.schemaVersion >= 3) {
+      for (const [index, judgment] of (output.review?.judgments ?? []).entries()) {
+        if (
+          (judgment.verdict === 'false_positive' || judgment.verdict === 'false_negative') &&
+          judgment.resolution?.status !== 'fixed' &&
+          judgment.resolution?.status !== 'deferred_to_issue'
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['review', 'judgments', index, 'resolution'],
+            message:
+              'misclassification resolution must be fixed or deferred_to_issue for schemaVersion >= 3',
+          })
+        }
+      }
+      for (const [index, finding] of output.findings.entries()) {
+        if (!finding.resolution) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['findings', index, 'resolution'],
+            message: 'finding resolution is required for schemaVersion >= 3',
+          })
+        }
+      }
+    }
   })
 
+export type WeeklyReviewResolution = z.infer<typeof weeklyReviewResolutionSchema>
 export type WeeklyReviewSampleJudgment = z.infer<typeof weeklyReviewSampleJudgmentSchema>
 export type WeeklyReviewSummary = z.infer<typeof weeklyReviewSummarySchema>
+export type WeeklyReviewFindingResolution = z.infer<typeof weeklyReviewFindingResolutionSchema>
 export type WeeklyReviewFindingCandidate = z.infer<typeof weeklyReviewFindingCandidateSchema>
 export type StructuredOutput = z.infer<typeof structuredOutputSchema>

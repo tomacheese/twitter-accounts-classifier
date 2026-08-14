@@ -125,6 +125,153 @@ describe('structuredOutputSchema', () => {
     expect(structuredOutputSchema.safeParse(validV2Output).success).toBe(true)
   })
 
+  it('schemaVersion 3 は finding resolution を保持する', () => {
+    const resolution = {
+      status: 'fixed',
+      summary: '修正と回帰テストで解決済み',
+      evidenceReference: 'tests/finding-regression',
+    }
+    const result = structuredOutputSchema.safeParse({
+      ...validV2Output,
+      schemaVersion: 3,
+      findings: [{ ...validV2Output.findings[0], resolution }],
+      review: {
+        ...validV2Output.review,
+        uncertainCount: 0,
+        judgments: validV2Output.review.judgments.map((judgment) => ({
+          ...judgment,
+          verdict: 'correct',
+        })),
+      },
+    })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.findings[0]?.resolution).toEqual(resolution)
+  })
+
+  it('schemaVersion 3 の false_positive / false_negative judgment は fixed resolution が必須', () => {
+    for (const verdict of ['false_positive', 'false_negative'] as const) {
+      const review = {
+        ...validV2Output.review,
+        uncertainCount: 0,
+        judgments: validV2Output.review.judgments.map((judgment, index) => ({
+          ...judgment,
+          verdict: index === 0 ? verdict : 'correct',
+          ...(index === 1 && { unavailableReason: undefined }),
+        })),
+      }
+      expect(
+        structuredOutputSchema.safeParse({
+          ...validV2Output,
+          schemaVersion: 3,
+          findings: [],
+          review,
+        }).success,
+      ).toBe(false)
+
+      const resolution = {
+        status: 'fixed' as const,
+        summary: '同じ run で修正済み',
+        evidenceReference: 'tests/sample-regression',
+      }
+      const resolved = structuredOutputSchema.safeParse({
+        ...validV2Output,
+        schemaVersion: 3,
+        findings: [],
+        review: {
+          ...review,
+          judgments: review.judgments.map((judgment, index) =>
+            index === 0 ? { ...judgment, resolution } : judgment,
+          ),
+        },
+      })
+      expect(resolved.success).toBe(true)
+      if (resolved.success)
+        expect(resolved.data.review?.judgments[0]?.resolution).toEqual(resolution)
+    }
+  })
+
+  it('schemaVersion 3 は deferred_to_issue に Issue 参照と defer 理由を必須にする', () => {
+    const deferred = {
+      status: 'deferred_to_issue',
+      summary: '人間判断が必要なので Issue へ移管',
+      evidenceReference: 'finding/1',
+      deferReason: 'human_judgment_required',
+      issueNumber: 203,
+      issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/203',
+    }
+    const result = structuredOutputSchema.safeParse({
+      ...validV2Output,
+      schemaVersion: 3,
+      findings: [{ ...validV2Output.findings[0], resolution: deferred }],
+      review: {
+        ...validV2Output.review,
+        uncertainCount: 0,
+        judgments: validV2Output.review.judgments.map((judgment) => ({
+          ...judgment,
+          verdict: 'correct',
+          unavailableReason: undefined,
+        })),
+      },
+    })
+    expect(result.success).toBe(true)
+
+    expect(
+      structuredOutputSchema.safeParse({
+        ...validV2Output,
+        schemaVersion: 3,
+        findings: [
+          { ...validV2Output.findings[0], resolution: { ...deferred, issueNumber: undefined } },
+        ],
+        review: {
+          ...validV2Output.review,
+          uncertainCount: 0,
+          judgments: validV2Output.review.judgments.map((judgment) => ({
+            ...judgment,
+            verdict: 'correct',
+            unavailableReason: undefined,
+          })),
+        },
+      }).success,
+    ).toBe(false)
+  })
+
+  it('schemaVersion 3 の誤判定 judgment は deferred_to_issue も受理する', () => {
+    const result = structuredOutputSchema.safeParse({
+      ...validV2Output,
+      schemaVersion: 3,
+      findings: [],
+      review: {
+        ...validV2Output.review,
+        uncertainCount: 0,
+        judgments: validV2Output.review.judgments.map((judgment, index) => ({
+          ...judgment,
+          verdict: index === 0 ? 'false_positive' : 'correct',
+          unavailableReason: undefined,
+          ...(index === 0 && {
+            resolution: {
+              status: 'deferred_to_issue',
+              summary: '修正範囲が大きいため Issue へ移管',
+              evidenceReference: 'sample/1',
+              deferReason: 'oversized_scope',
+              issueNumber: 204,
+              issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/204',
+            },
+          }),
+        })),
+      },
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('schemaVersion 3 で finding resolution が無ければ reject する', () => {
+    expect(
+      structuredOutputSchema.safeParse({
+        ...validV2Output,
+        schemaVersion: 3,
+      }).success,
+    ).toBe(false)
+  })
+
   it('schemaVersion 2 で review が無ければ reject する', () => {
     expect(structuredOutputSchema.safeParse({ ...validV2Output, review: undefined }).success).toBe(
       false,

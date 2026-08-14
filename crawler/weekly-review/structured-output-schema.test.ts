@@ -89,6 +89,153 @@ describe('crawler structuredOutputSchema', () => {
     ).toBe(true)
   })
 
+  it('v3 finding は解決状態を保持する', () => {
+    const resolution = {
+      status: 'fixed',
+      summary: '回帰テストを追加して修正済み',
+      evidenceReference: 'tests/rule-regression',
+    }
+    const parsed = structuredOutputSchema.parse({
+      ...valid,
+      schemaVersion: 3,
+      findings: [
+        {
+          type: 'coverage_gap',
+          dimensions: { labelKey: 'topic_test' },
+          primaryScopeType: 'label',
+          primaryScopeId: 'l1',
+          confidence: 0.9,
+          sampleCount: 1,
+          sampleReference: ['a1'],
+          evidenceReference: 'finding/1',
+          structuredMeasurement: {},
+          suggestedSeverity: 'medium',
+          resolution,
+        },
+      ],
+    })
+    expect(parsed.findings[0]?.resolution).toEqual(resolution)
+  })
+
+  it('v3 finding に resolution がなければ拒否する', () => {
+    expect(
+      structuredOutputSchema.safeParse({
+        ...valid,
+        schemaVersion: 3,
+        findings: [
+          {
+            type: 'coverage_gap',
+            dimensions: { labelKey: 'topic_test' },
+            primaryScopeType: 'label',
+            primaryScopeId: 'l1',
+            confidence: 0.9,
+            sampleCount: 1,
+            sampleReference: ['a1'],
+            evidenceReference: 'finding/1',
+            structuredMeasurement: {},
+            suggestedSeverity: 'medium',
+          },
+        ],
+      }).success,
+    ).toBe(false)
+  })
+
+  it('v3 の false_positive / false_negative judgment は fixed resolution が必須', () => {
+    for (const verdict of ['false_positive', 'false_negative'] as const) {
+      const unresolved = structuredOutputSchema.safeParse({
+        ...valid,
+        schemaVersion: 3,
+        review: {
+          ...valid.review,
+          judgments: [{ ...valid.review.judgments[0], verdict }],
+        },
+      })
+      expect(unresolved.success).toBe(false)
+
+      const resolution = {
+        status: 'fixed' as const,
+        summary: '同じ run で修正済み',
+        evidenceReference: 'tests/sample-regression',
+      }
+      const resolved = structuredOutputSchema.safeParse({
+        ...valid,
+        schemaVersion: 3,
+        review: {
+          ...valid.review,
+          judgments: [{ ...valid.review.judgments[0], verdict, resolution }],
+        },
+      })
+      expect(resolved.success).toBe(true)
+      if (resolved.success)
+        expect(resolved.data.review?.judgments[0]?.resolution).toEqual(resolution)
+    }
+  })
+
+  it('v3 は deferred_to_issue resolution に理由と実在 Issue の参照情報を必須にする', () => {
+    const finding = {
+      type: 'coverage_gap',
+      dimensions: { labelKey: 'topic_test' },
+      primaryScopeType: 'label',
+      primaryScopeId: 'l1',
+      confidence: 0.9,
+      sampleCount: 1,
+      sampleReference: ['a1'],
+      evidenceReference: 'finding/1',
+      structuredMeasurement: {},
+      suggestedSeverity: 'medium',
+    }
+    const deferred = {
+      status: 'deferred_to_issue',
+      summary: '人間の判断が必要なので Issue へ移管',
+      evidenceReference: 'finding/1',
+      deferReason: 'human_judgment_required',
+      issueNumber: 203,
+      issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/203',
+    }
+
+    expect(
+      structuredOutputSchema.safeParse({
+        ...valid,
+        schemaVersion: 3,
+        findings: [{ ...finding, resolution: deferred }],
+      }).success,
+    ).toBe(true)
+    expect(
+      structuredOutputSchema.safeParse({
+        ...valid,
+        schemaVersion: 3,
+        findings: [{ ...finding, resolution: { ...deferred, issueUrl: undefined } }],
+      }).success,
+    ).toBe(false)
+  })
+
+  it('v3 の false_positive / false_negative judgment は fixed または deferred_to_issue を受理する', () => {
+    for (const verdict of ['false_positive', 'false_negative'] as const) {
+      const deferred = structuredOutputSchema.safeParse({
+        ...valid,
+        schemaVersion: 3,
+        review: {
+          ...valid.review,
+          judgments: [
+            {
+              ...valid.review.judgments[0],
+              verdict,
+              resolution: {
+                status: 'deferred_to_issue',
+                summary: '修正範囲が大きいため Issue へ移管',
+                evidenceReference: 'sample/1',
+                deferReason: 'oversized_scope',
+                issueNumber: 204,
+                issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/204',
+              },
+            },
+          ],
+        },
+      })
+      expect(deferred.success).toBe(true)
+    }
+  })
+
   it('旧 high_confidence_negative sampleKind を後方互換として受理する', () => {
     const judgment = {
       sampleId: 's1',

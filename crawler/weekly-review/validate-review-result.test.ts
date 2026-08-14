@@ -1,6 +1,39 @@
 import { describe, expect, it } from 'vitest'
 import { extractPlannedAccountIds, validateReviewResultAgainstPlan } from './validate-review-result'
 
+interface TestJudgment {
+  sampleId: string
+  verdict: string
+  resolution?: {
+    status: string
+    deferReason?: string
+    issueNumber?: number
+    issueUrl?: string
+  }
+}
+
+interface TestFinding {
+  type: string
+  resolution?: {
+    status: string
+    deferReason?: string
+    issueNumber?: number
+    issueUrl?: string
+  }
+}
+
+interface TestResult {
+  schemaVersion: number
+  review: {
+    strategyVersion: string
+    seed: string
+    plannedSampleCount: number
+    incompletePhases: string[]
+    judgments: TestJudgment[]
+  }
+  findings: TestFinding[]
+}
+
 const plan = {
   schemaVersion: 1,
   strategyVersion: 'risk-stratified/1',
@@ -12,15 +45,17 @@ const plan = {
   samples: [{ sampleId: 'l1:a1' }, { sampleId: 'l1:a2' }],
 }
 
-function result(sampleIds: string[]) {
+function result(sampleIds: string[]): TestResult {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     review: {
       strategyVersion: 'risk-stratified/1',
       seed: 'run-1',
       plannedSampleCount: sampleIds.length,
-      judgments: sampleIds.map((sampleId) => ({ sampleId })),
+      incompletePhases: [],
+      judgments: sampleIds.map((sampleId) => ({ sampleId, verdict: 'correct' })),
     },
+    findings: [],
   }
 }
 
@@ -52,10 +87,127 @@ describe('validateReviewResultAgainstPlan', () => {
     }).toThrow('review result does not match review plan identity')
   })
 
-  it('plan が存在する run では structured output v2 を必須にする', () => {
+  it('plan が存在する run では structured output v3 を必須にする', () => {
     expect(() => {
-      validateReviewResultAgainstPlan(plan, { schemaVersion: 1, findings: [] })
-    }).toThrow('structured output schemaVersion 2 is required when a review plan exists')
+      validateReviewResultAgainstPlan(plan, { ...result(['l1:a1', 'l1:a2']), schemaVersion: 2 })
+    }).toThrow('structured output schemaVersion 3 is required when a review plan exists')
+  })
+
+  it('uncertain または skipped judgment が残っていれば complete を拒否する', () => {
+    for (const verdict of ['uncertain', 'skipped']) {
+      const current = result(['l1:a1', 'l1:a2'])
+      current.review.judgments[0] = { sampleId: 'l1:a1', verdict }
+      expect(() => {
+        validateReviewResultAgainstPlan(plan, current)
+      }).toThrow('review result contains unresolved sample judgments')
+    }
+  })
+
+  it('false_positive / false_negative judgment は fixed resolution が必須', () => {
+    for (const verdict of ['false_positive', 'false_negative']) {
+      const unresolved = result(['l1:a1', 'l1:a2'])
+      unresolved.review.judgments[0] = { sampleId: 'l1:a1', verdict }
+      expect(() => {
+        validateReviewResultAgainstPlan(plan, unresolved)
+      }).toThrow('review result contains unresolved sample judgments')
+
+      const resolved = result(['l1:a1', 'l1:a2'])
+      resolved.review.judgments[0] = {
+        sampleId: 'l1:a1',
+        verdict,
+        resolution: { status: 'fixed' },
+      }
+      expect(() => {
+        validateReviewResultAgainstPlan(plan, resolved)
+      }).not.toThrow()
+    }
+  })
+
+  it('incomplete phase が残っていれば complete を拒否する', () => {
+    const current = result(['l1:a1', 'l1:a2'])
+    current.review.incompletePhases = ['external_research']
+    expect(() => {
+      validateReviewResultAgainstPlan(plan, current)
+    }).toThrow('review result contains incomplete phases')
+  })
+
+  it('resolution のない finding が残っていれば complete を拒否する', () => {
+    const current = result(['l1:a1', 'l1:a2'])
+    current.findings = [{ type: 'coverage_gap' }]
+    expect(() => {
+      validateReviewResultAgainstPlan(plan, current)
+    }).toThrow('review result contains unresolved findings')
+  })
+
+  it('finding が fixed または verified_not_issue なら complete を受理する', () => {
+    const current = result(['l1:a1', 'l1:a2'])
+    current.findings = [
+      { type: 'coverage_gap', resolution: { status: 'fixed' } },
+      { type: 'rule_behavior_mismatch', resolution: { status: 'verified_not_issue' } },
+    ]
+    expect(() => {
+      validateReviewResultAgainstPlan(plan, current)
+    }).not.toThrow()
+  })
+
+  it('uncertain は Issue へ正式に defer した場合だけ complete を受理する', () => {
+    const unresolved = result(['l1:a1', 'l1:a2'])
+    unresolved.review.judgments[0] = { sampleId: 'l1:a1', verdict: 'uncertain' }
+    expect(() => {
+      validateReviewResultAgainstPlan(plan, unresolved)
+    }).toThrow('review result contains unresolved sample judgments')
+
+    const deferred = result(['l1:a1', 'l1:a2'])
+    deferred.review.judgments[0] = {
+      sampleId: 'l1:a1',
+      verdict: 'uncertain',
+      resolution: {
+        status: 'deferred_to_issue',
+        deferReason: 'human_judgment_required',
+        issueNumber: 203,
+        issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/203',
+      },
+    }
+    expect(() => {
+      validateReviewResultAgainstPlan(plan, deferred)
+    }).not.toThrow()
+  })
+
+  it('false_positive / false_negative は fixed または Issue defer で complete できる', () => {
+    for (const verdict of ['false_positive', 'false_negative']) {
+      const deferred = result(['l1:a1', 'l1:a2'])
+      deferred.review.judgments[0] = {
+        sampleId: 'l1:a1',
+        verdict,
+        resolution: {
+          status: 'deferred_to_issue',
+          deferReason: 'oversized_scope',
+          issueNumber: 204,
+          issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/204',
+        },
+      }
+      expect(() => {
+        validateReviewResultAgainstPlan(plan, deferred)
+      }).not.toThrow()
+    }
+  })
+
+  it('finding は実在 Issue 参照付き deferred_to_issue なら complete を受理する', () => {
+    const current = result(['l1:a1', 'l1:a2'])
+    current.findings = [
+      {
+        type: 'coverage_gap',
+        resolution: {
+          status: 'deferred_to_issue',
+          deferReason: 'oversized_scope',
+          issueNumber: 205,
+          issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/205',
+        },
+      },
+    ]
+    expect(() => {
+      validateReviewResultAgainstPlan(plan, current)
+    }).not.toThrow()
   })
 
   it('sampledAccountIds は plan の重複 account を除いて plan 順に導出する', () => {

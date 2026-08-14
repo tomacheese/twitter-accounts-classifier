@@ -171,6 +171,62 @@ describe.skipIf(!process.env.DATABASE_URL)('ingestWeeklyReviewFindings', () => {
     expect(evidence.sampleStrategyVersion).toBe('risk-stratified/1')
   })
 
+  it('schemaVersion 3 の解決済み finding は active Finding や work item を作らない', async () => {
+    const base = buildStructuredOutput({})
+    const baseFinding = base.findings[0]
+    const structuredOutput: StructuredOutput = {
+      ...base,
+      schemaVersion: 3,
+      findings: [
+        {
+          ...baseFinding,
+          resolution: {
+            status: 'fixed',
+            summary: '同じ run で修正済み',
+            evidenceReference: 'tests/regression',
+          },
+        },
+      ],
+      review: {
+        strategyVersion: 'risk-stratified/2',
+        seed: 'weekly-run-1',
+        budget: 240,
+        plannedSampleCount: 1,
+        reviewedSampleCount: 1,
+        randomAuditCount: 1,
+        targetedAuditCount: 0,
+        uncertainCount: 0,
+        skippedCount: 0,
+        incompletePhases: [],
+        judgments: [
+          {
+            sampleId: 'label-1:account-1',
+            accountId: 'account-1',
+            labelDefinitionId: 'label-1',
+            labelKey: 'test_label',
+            sampleKind: 'random_positive',
+            classifierValue: true,
+            classifierConfidence: 0.8,
+            ruleVersion: '1.0.0',
+            verdict: 'false_positive',
+            judgeConfidence: 0.9,
+            evidenceReference: 'sample/1',
+            reviewedBy: 'weekly-review-judge',
+          },
+        ],
+      },
+    }
+
+    await ingestWeeklyReviewFindings(prisma, {
+      weeklyAnalysisRunId: `weekly-${randomUUID()}`,
+      structuredOutput,
+      policy,
+    })
+
+    expect(await prisma.reviewFinding.count()).toBe(0)
+    expect(await prisma.analysisWorkItem.count()).toBe(0)
+  })
+
   it('suggestedSeverity が critical でも maxWeeklyReviewSeverityWithoutCorroboration を超える場合は降格する', async () => {
     const structuredOutput = buildStructuredOutput({ suggestedSeverity: 'critical' })
 

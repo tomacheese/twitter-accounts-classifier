@@ -1,6 +1,6 @@
-# Structured result contract v2
+# Structured result contract v3
 
-`WeeklyAnalysisRun.reviewPlan` and `WEEKLY_REVIEW_PLAN_FILE` are the sources of truth for planned samples. Structured output must use schemaVersion 2 and must neither omit nor add samples relative to the plan.
+`WeeklyAnalysisRun.reviewPlan` and `WEEKLY_REVIEW_PLAN_FILE` are the sources of truth for planned samples. Structured output must use schemaVersion 3 and must neither omit nor add samples relative to the plan.
 
 Each item in `review.judgments` must contain:
 
@@ -19,8 +19,9 @@ Each item in `review.judgments` must contain:
 - unavailableReason: when needed
 - populationCount: when the sample is `random_positive`/`random_negative`, carry over the plan's population count for that label/value
 - classifierEvaluable: when needed, carry over the rule's `evaluable` at labeling time
+- resolution: required in v3 when verdict is `false_positive` or `false_negative`; status must be `fixed` or `deferred_to_issue`. `uncertain` may complete only with `deferred_to_issue`
 
-`review` must contain strategyVersion, seed, budget, plannedSampleCount, reviewedSampleCount, randomAuditCount, targetedAuditCount, uncertainCount, skippedCount, incompletePhases, and judgments. Aggregate counts must equal values mechanically recomputed from judgments.
+`review` must contain strategyVersion, seed, budget, plannedSampleCount, reviewedSampleCount, randomAuditCount, targetedAuditCount, uncertainCount, skippedCount, incompletePhases, and judgments. Aggregate counts must equal values mechanically recomputed from judgments. A successful v3 run must have `skippedCount == 0` and an empty `incompletePhases` array. Any `uncertain` judgment must carry a valid `deferred_to_issue` resolution.
 
 Use finding types as follows:
 
@@ -32,3 +33,12 @@ Use finding types as follows:
 - `external_threat_gap`: reproducible external behavior that is observable through local features but not covered by existing rules
 
 `sampleReference` must contain Account ID only; never include handles or content text.
+
+Every v3 finding must include `resolution` with:
+
+- `status`: `fixed`, `verified_not_issue`, or `deferred_to_issue`
+- `summary`: concise Japanese explanation of how the finding was disposed
+- `evidenceReference`: test, impact-evaluation, or investigation reference supporting the disposition
+- when `status = deferred_to_issue`: `deferReason` (`human_judgment_required` or `oversized_scope`), positive integer `issueNumber`, and the matching GitHub `issueUrl` are required
+
+`deferred_to_issue` means the work is not silently left unresolved: the coordinator must search for an exact existing open Issue and create the GitHub Issue if none exists before writing the structured result. Human judgment and oversized/risky remediation are the only allowed defer reasons. Ordinary fixable work stays in the weekly-review PR.
