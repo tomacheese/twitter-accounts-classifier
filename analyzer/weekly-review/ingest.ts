@@ -242,6 +242,7 @@ export async function ingestWeeklyReviewFindings(
 
   for (const candidate of input.structuredOutput.findings) {
     if (candidate.unavailableReason) continue
+    if (input.structuredOutput.schemaVersion >= 3 && candidate.resolution) continue
 
     const rule = input.policy.rules.find(
       (candidateRule) => candidateRule.type === candidate.type && candidateRule.enabled,

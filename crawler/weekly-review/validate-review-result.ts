@@ -9,8 +9,10 @@ interface ReviewResultLike {
   review?: {
     strategyVersion: string
     seed: string
-    judgments: { sampleId: string }[]
+    incompletePhases: string[]
+    judgments: { sampleId: string; verdict: string; resolution?: { status?: string } }[]
   }
+  findings: { resolution?: { status?: string } }[]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -39,27 +41,52 @@ function parseResult(value: unknown): ReviewResultLike {
   if (!isRecord(value) || typeof value.schemaVersion !== 'number') {
     throw new Error('invalid structured output')
   }
-  if (!isRecord(value.review)) return { schemaVersion: value.schemaVersion }
+  if (!Array.isArray(value.findings)) throw new Error('invalid structured findings')
+  const findings = value.findings.map((finding) => {
+    if (!isRecord(finding)) throw new Error('invalid structured finding')
+    const resolution = isRecord(finding.resolution)
+      ? {
+          status:
+            typeof finding.resolution.status === 'string' ? finding.resolution.status : undefined,
+        }
+      : undefined
+    return { resolution }
+  })
+  if (!isRecord(value.review)) return { schemaVersion: value.schemaVersion, findings }
   if (
     typeof value.review.strategyVersion !== 'string' ||
     typeof value.review.seed !== 'string' ||
+    !Array.isArray(value.review.incompletePhases) ||
+    !value.review.incompletePhases.every((phase) => typeof phase === 'string') ||
     !Array.isArray(value.review.judgments)
   ) {
     throw new TypeError('invalid structured review output')
   }
   const judgments = value.review.judgments.map((judgment) => {
-    if (!isRecord(judgment) || typeof judgment.sampleId !== 'string') {
+    if (
+      !isRecord(judgment) ||
+      typeof judgment.sampleId !== 'string' ||
+      typeof judgment.verdict !== 'string'
+    ) {
       throw new Error('invalid structured review judgment')
     }
-    return { sampleId: judgment.sampleId }
+    const resolution = isRecord(judgment.resolution)
+      ? {
+          status:
+            typeof judgment.resolution.status === 'string' ? judgment.resolution.status : undefined,
+        }
+      : undefined
+    return { sampleId: judgment.sampleId, verdict: judgment.verdict, resolution }
   })
   return {
     schemaVersion: value.schemaVersion,
     review: {
       strategyVersion: value.review.strategyVersion,
       seed: value.review.seed,
+      incompletePhases: value.review.incompletePhases,
       judgments,
     },
+    findings,
   }
 }
 
@@ -69,11 +96,33 @@ export function validateReviewResultAgainstPlan(
 ): void {
   const plan = parsePlan(reviewPlan)
   const result = parseResult(structuredOutput)
-  if (result.schemaVersion < 2 || !result.review) {
-    throw new Error('structured output schemaVersion 2 is required when a review plan exists')
+  if (result.schemaVersion < 3 || !result.review) {
+    throw new Error('structured output schemaVersion 3 is required when a review plan exists')
   }
   if (result.review.strategyVersion !== plan.strategyVersion || result.review.seed !== plan.seed) {
     throw new Error('review result does not match review plan identity')
+  }
+  if (result.review.incompletePhases.length > 0) {
+    throw new Error('review result contains incomplete phases')
+  }
+  if (
+    result.review.judgments.some(
+      (judgment) =>
+        ['uncertain', 'skipped'].includes(judgment.verdict) ||
+        (['false_positive', 'false_negative'].includes(judgment.verdict) &&
+          judgment.resolution?.status !== 'fixed'),
+    )
+  ) {
+    throw new Error('review result contains unresolved sample judgments')
+  }
+  if (
+    result.findings.some(
+      (finding) =>
+        finding.resolution?.status !== 'fixed' &&
+        finding.resolution?.status !== 'verified_not_issue',
+    )
+  ) {
+    throw new Error('review result contains unresolved findings')
   }
 
   const plannedIds = plan.samples.map((sample) => sample.sampleId).toSorted()

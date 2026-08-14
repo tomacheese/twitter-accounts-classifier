@@ -125,6 +125,80 @@ describe('structuredOutputSchema', () => {
     expect(structuredOutputSchema.safeParse(validV2Output).success).toBe(true)
   })
 
+  it('schemaVersion 3 は finding resolution を保持する', () => {
+    const resolution = {
+      status: 'fixed',
+      summary: '修正と回帰テストで解決済み',
+      evidenceReference: 'tests/finding-regression',
+    }
+    const result = structuredOutputSchema.safeParse({
+      ...validV2Output,
+      schemaVersion: 3,
+      findings: [{ ...validV2Output.findings[0], resolution }],
+      review: {
+        ...validV2Output.review,
+        uncertainCount: 0,
+        judgments: validV2Output.review.judgments.map((judgment) => ({
+          ...judgment,
+          verdict: 'correct',
+        })),
+      },
+    })
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.data.findings[0]?.resolution).toEqual(resolution)
+  })
+
+  it('schemaVersion 3 の false_positive / false_negative judgment は fixed resolution が必須', () => {
+    for (const verdict of ['false_positive', 'false_negative'] as const) {
+      const review = {
+        ...validV2Output.review,
+        uncertainCount: 0,
+        judgments: validV2Output.review.judgments.map((judgment, index) => ({
+          ...judgment,
+          verdict: index === 0 ? verdict : 'correct',
+          ...(index === 1 && { unavailableReason: undefined }),
+        })),
+      }
+      expect(
+        structuredOutputSchema.safeParse({
+          ...validV2Output,
+          schemaVersion: 3,
+          findings: [],
+          review,
+        }).success,
+      ).toBe(false)
+
+      const resolution = {
+        status: 'fixed' as const,
+        summary: '同じ run で修正済み',
+        evidenceReference: 'tests/sample-regression',
+      }
+      const resolved = structuredOutputSchema.safeParse({
+        ...validV2Output,
+        schemaVersion: 3,
+        findings: [],
+        review: {
+          ...review,
+          judgments: review.judgments.map((judgment, index) =>
+            index === 0 ? { ...judgment, resolution } : judgment,
+          ),
+        },
+      })
+      expect(resolved.success).toBe(true)
+      if (resolved.success)
+        expect(resolved.data.review?.judgments[0]?.resolution).toEqual(resolution)
+    }
+  })
+
+  it('schemaVersion 3 で finding resolution が無ければ reject する', () => {
+    expect(
+      structuredOutputSchema.safeParse({
+        ...validV2Output,
+        schemaVersion: 3,
+      }).success,
+    ).toBe(false)
+  })
+
   it('schemaVersion 2 で review が無ければ reject する', () => {
     expect(structuredOutputSchema.safeParse({ ...validV2Output, review: undefined }).success).toBe(
       false,

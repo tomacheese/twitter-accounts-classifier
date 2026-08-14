@@ -1,5 +1,12 @@
 import { z } from 'zod'
 const severitySchema = z.enum(['low', 'medium', 'high', 'critical'])
+const resolutionStatusSchema = z.enum(['fixed', 'verified_not_issue'])
+
+export const weeklyReviewResolutionSchema = z.object({
+  status: resolutionStatusSchema,
+  summary: z.string().min(1),
+  evidenceReference: z.string().min(1),
+})
 
 export const weeklyReviewSampleKindSchema = z.enum([
   'random_positive',
@@ -38,6 +45,7 @@ export const weeklyReviewSampleJudgmentSchema = z.object({
   unavailableReason: z.string().min(1).optional(),
   populationCount: z.number().int().min(0).optional(),
   classifierEvaluable: z.boolean().optional(),
+  resolution: weeklyReviewResolutionSchema.optional(),
 })
 
 export const weeklyReviewSummarySchema = z
@@ -86,6 +94,8 @@ export const weeklyReviewSummarySchema = z
     }
   })
 
+export const weeklyReviewFindingResolutionSchema = weeklyReviewResolutionSchema
+
 export const weeklyReviewFindingCandidateSchema = z.object({
   type: z.string().min(1),
   dimensions: z.record(z.string()),
@@ -98,6 +108,7 @@ export const weeklyReviewFindingCandidateSchema = z.object({
   structuredMeasurement: z.record(z.unknown()),
   suggestedSeverity: severitySchema,
   unavailableReason: z.string().optional(),
+  resolution: weeklyReviewFindingResolutionSchema.optional(),
 })
 
 export const structuredOutputSchema = z
@@ -122,9 +133,34 @@ export const structuredOutputSchema = z
         message: 'review is required for schemaVersion >= 2',
       })
     }
+    if (output.schemaVersion >= 3) {
+      for (const [index, judgment] of (output.review?.judgments ?? []).entries()) {
+        if (
+          (judgment.verdict === 'false_positive' || judgment.verdict === 'false_negative') &&
+          judgment.resolution?.status !== 'fixed'
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['review', 'judgments', index, 'resolution'],
+            message: 'misclassification resolution must be fixed for schemaVersion >= 3',
+          })
+        }
+      }
+      for (const [index, finding] of output.findings.entries()) {
+        if (!finding.resolution) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['findings', index, 'resolution'],
+            message: 'finding resolution is required for schemaVersion >= 3',
+          })
+        }
+      }
+    }
   })
 
+export type WeeklyReviewResolution = z.infer<typeof weeklyReviewResolutionSchema>
 export type WeeklyReviewSampleJudgment = z.infer<typeof weeklyReviewSampleJudgmentSchema>
 export type WeeklyReviewSummary = z.infer<typeof weeklyReviewSummarySchema>
+export type WeeklyReviewFindingResolution = z.infer<typeof weeklyReviewFindingResolutionSchema>
 export type WeeklyReviewFindingCandidate = z.infer<typeof weeklyReviewFindingCandidateSchema>
 export type StructuredOutput = z.infer<typeof structuredOutputSchema>
