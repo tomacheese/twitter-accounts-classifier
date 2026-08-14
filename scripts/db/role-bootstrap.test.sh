@@ -84,7 +84,7 @@ psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -c "CREATE ROLE weekly_review NOLOGIN"
 
 test "$(analysis_work_item_privileges)" = "true:true:false:false"
 test "$(role_config_has weekly_review client_connection_check_interval=5s)" = "true"
-test "$(role_config_has weekly_review statement_timeout=120s)" = "true"
+test "$(role_config_has weekly_review statement_timeout=15min)" = "true"
 test "$(role_config_has weekly_review max_parallel_workers_per_gather=0)" = "true"
 
 # grant sync が途中で落ちても、REVOKE だけが残って write allowlist を壊さないことを検証する。
