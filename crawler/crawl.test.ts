@@ -297,7 +297,9 @@ describe('runCrawlCycle', () => {
       })
 
       const cycle = runCrawlCycle(deps)
-      await vi.waitFor(() => expect(getUserTweetsAndReplies).toHaveBeenCalledOnce())
+      await vi.waitFor(() => {
+        expect(getUserTweetsAndReplies).toHaveBeenCalledOnce()
+      })
       vi.setSystemTime(fetchCompletedAt)
       resolveRecentTweets?.({ data: { data: [] } })
       await cycle
