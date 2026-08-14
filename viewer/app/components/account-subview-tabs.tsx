@@ -279,6 +279,16 @@ function TechnicalView({ data }: { data: AccountTechnicalView }): React.ReactEle
       <dd>{formatDateTime(data.firstSeenAt)}</dd>
       <dt className="text-gray-500 dark:text-gray-400">Last crawled</dt>
       <dd>{formatDateTime(data.lastCrawledAt)}</dd>
+      <dt className="text-gray-500 dark:text-gray-400">Recent tweets fetch</dt>
+      <dd>{data.recentTweetsFetchStatus ?? 'unknown'}</dd>
+      <dt className="text-gray-500 dark:text-gray-400">Recent tweets attempted</dt>
+      <dd>
+        {data.lastRecentTweetsAttemptedAt ? formatDateTime(data.lastRecentTweetsAttemptedAt) : '—'}
+      </dd>
+      <dt className="text-gray-500 dark:text-gray-400">Recent tweets fetched</dt>
+      <dd>
+        {data.lastRecentTweetsFetchedAt ? formatDateTime(data.lastRecentTweetsFetchedAt) : '—'}
+      </dd>
       <dt className="text-gray-500 dark:text-gray-400">Updated at</dt>
       <dd>{formatDateTime(data.updatedAt)}</dd>
       <dt className="text-gray-500 dark:text-gray-400">Read model freshness</dt>

@@ -11,7 +11,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicFitnessRule: LabelRule = {
   key: 'topic_fitness',
-  description: 'プロフィールで筋トレ・ジム通いなどのフィットネスを中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係からフィットネスとの強い関連が示される',
   version: '1.0.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

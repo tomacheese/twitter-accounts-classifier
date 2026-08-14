@@ -11,7 +11,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicMovieRule: LabelRule = {
   key: 'topic_movie',
-  description: 'プロフィールで映画・ドラマ鑑賞を中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係から映画・ドラマとの強い関連が示される',
   version: '1.1.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

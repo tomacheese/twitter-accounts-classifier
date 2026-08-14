@@ -4,6 +4,11 @@
 const URL_PATTERN = /https?:\/\/\S+/g
 const MENTION_PATTERN = /@\w+/g
 const WHITESPACE_PATTERN = /\s+/g
+const HASHTAG_PATTERN = /#[^\s#]+/g
+
+export interface SimilarityNormalizationOptions {
+  removeHashtags?: boolean
+}
 
 /**
  * ペアワイズ類似度比較用にテキストを正規化する。
@@ -11,10 +16,14 @@ const WHITESPACE_PATTERN = /\s+/g
  * @param text - ツイートの生本文
  * @returns 正規化後のテキスト
  */
-export function normalizeForSimilarity(text: string): string {
-  return text
-    .replaceAll(URL_PATTERN, '')
-    .replaceAll(MENTION_PATTERN, '')
+export function normalizeForSimilarity(
+  text: string,
+  options: SimilarityNormalizationOptions = {},
+): string {
+  let normalized = text.replaceAll(URL_PATTERN, '').replaceAll(MENTION_PATTERN, '')
+  if (options.removeHashtags) normalized = normalized.replaceAll(HASHTAG_PATTERN, '')
+
+  return normalized
     .replaceAll(WHITESPACE_PATTERN, ' ')
     .trim()
     .toLowerCase()
@@ -59,8 +68,11 @@ export function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
  * @param texts - ペアワイズ比較する生テキスト
  * @returns ペアワイズ類似度の平均。テキストが2件未満の場合は0
  */
-export function averagePairwiseSimilarity(texts: string[]): number {
-  const bigramSets = texts.map((text) => bigramSet(normalizeForSimilarity(text)))
+export function averagePairwiseSimilarity(
+  texts: string[],
+  options: SimilarityNormalizationOptions = {},
+): number {
+  const bigramSets = texts.map((text) => bigramSet(normalizeForSimilarity(text, options)))
   let total = 0
   let pairs = 0
   for (let i = 0; i < bigramSets.length; i++) {

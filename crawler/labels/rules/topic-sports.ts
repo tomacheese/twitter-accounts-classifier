@@ -16,7 +16,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicSportsRule: LabelRule = {
   key: 'topic_sports',
-  description: 'プロフィールでスポーツを中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係からスポーツとの強い関連が示される',
   version: '1.2.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

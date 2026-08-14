@@ -87,6 +87,45 @@ describe('replyFarmingRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it('marks an undersized sample as not evaluable with neutral confidence', () => {
+    const result = replyFarmingRule.evaluate(
+      makeBundle(340, [{ isReply: true }, { isReply: true }]),
+    )
+
+    expect(result).toMatchObject({ value: false, evaluable: false, confidence: 0.5 })
+  })
+
+  it('distinguishes a strong velocity negative from a near-threshold negative', () => {
+    const stronglyNegative = replyFarmingRule.evaluate(
+      makeBundle(
+        1,
+        Array.from({ length: 6 }, () => ({ isReply: true })),
+      ),
+    )
+    const nearMiss = replyFarmingRule.evaluate(
+      makeBundle(
+        149,
+        Array.from({ length: 6 }, () => ({ isReply: true })),
+      ),
+    )
+
+    expect(stronglyNegative.value).toBe(false)
+    expect(nearMiss.value).toBe(false)
+    expect(stronglyNegative.confidence).toBeGreaterThan(nearMiss.confidence)
+  })
+
+  it('lowers positive confidence when a required signal is only just above its threshold', () => {
+    const result = replyFarmingRule.evaluate(
+      makeBundle(
+        151,
+        Array.from({ length: 6 }, () => ({ isReply: true })),
+      ),
+    )
+
+    expect(result.value).toBe(true)
+    expect(result.confidence).toBeLessThan(1)
+  })
+
   it('is false for an old, large account whose lifetime tweetCount is inflated but the sampled replies were posted at a normal cadence (e.g. a decade-old verified brand account)', () => {
     const dayMs = 24 * 60 * 60 * 1000
     const base = new Date('2026-01-01T00:00:00Z').getTime()

@@ -49,4 +49,20 @@ describe('topicPoliticsRule', () => {
     expect(result.value).toBe(false)
     expect(result.confidence).toBe(1)
   })
+
+  it.each([
+    '政治家を応援しています',
+    '自民党を応援しています',
+    '地元の市議会議員を支持します',
+    'Supporting senator Jane Doe',
+  ])("does not treat a supporter bio as the account holder's political office: %s", (bio) => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each(['自民党所属、市議会議員をしています', 'State senator, district 4'])(
+    'keeps explicit self-identification positive: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
 })

@@ -150,9 +150,13 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
             label.reason,
             label."ruleVersion",
             label."labeledAt",
-            label.evaluable
+            label.evaluable,
+            account."recentTweetsFetchStatus",
+            account."lastRecentTweetsAttemptedAt",
+            account."lastRecentTweetsFetchedAt"
           FROM sampled
           JOIN "AccountLabel" label ON label.id = sampled.id
+          JOIN "Account" account ON account.id = sampled."accountId"
         `)
         rowsByDefinition[index] = rows.map((row) => ({
           ...row,
@@ -240,12 +244,16 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
         latest."ruleVersion",
         latest."labeledAt",
         latest.evaluable,
+        account."recentTweetsFetchStatus",
+        account."lastRecentTweetsAttemptedAt",
+        account."lastRecentTweetsFetchedAt",
         change."changeType"
       FROM "AccountLabelChange" change
       JOIN "AccountLabelLatest" latest
         ON latest."accountId" = change."accountId"
        AND latest."labelDefinitionId" = change."labelDefinitionId"
       JOIN "LabelDefinition" definition ON definition.id = latest."labelDefinitionId"
+      JOIN "Account" account ON account.id = latest."accountId"
       WHERE change."changedAt" >= ${targetFrom}
         AND change."changedAt" <= ${targetTo}
         AND NOT EXISTS (

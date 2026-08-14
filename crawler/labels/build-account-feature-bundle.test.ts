@@ -25,6 +25,9 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
     parodyCommentaryFanLabel: null,
     firstSeenAt: new Date('2020-01-01T00:00:00Z'),
     lastCrawledAt: new Date('2026-01-01T00:00:00Z'),
+    lastRecentTweetsAttemptedAt: null,
+    lastRecentTweetsFetchedAt: null,
+    recentTweetsFetchStatus: null,
     updatedAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
   }

@@ -90,7 +90,7 @@ describe('persistAuthorResultAtomic', () => {
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const queryRaw = vi.fn().mockResolvedValue([])
     const txClient = {
-      account: { upsert: accountUpsert, findUnique: accountFindUnique },
+      account: { upsert: accountUpsert, findUnique: accountFindUnique, update: vi.fn() },
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
       $queryRaw: queryRaw,
@@ -137,7 +137,7 @@ describe('persistAuthorResultAtomic', () => {
     const followSampleDeleteMany = vi.fn()
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
-      account: { upsert: accountUpsert, findUnique: accountFindUnique },
+      account: { upsert: accountUpsert, findUnique: accountFindUnique, update: vi.fn() },
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
       labelingFollowSample: { deleteMany: followSampleDeleteMany },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
@@ -184,7 +184,11 @@ describe('persistAuthorResultAtomic', () => {
     const followSampleCreateMany = vi.fn().mockResolvedValue({ count: 1 })
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
-      account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null) },
+      account: {
+        upsert: accountUpsert,
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
@@ -231,6 +235,7 @@ describe('persistAuthorResultAtomic', () => {
       account: {
         upsert: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
       },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -267,7 +272,11 @@ describe('persistAuthorResultAtomic', () => {
   it('upserts each fallback author only once even if it appears against multiple context tweets', async () => {
     const accountUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
-      account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null) },
+      account: {
+        upsert: accountUpsert,
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),

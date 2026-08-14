@@ -12,7 +12,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicFoodRule: LabelRule = {
   key: 'topic_food',
-  description: 'プロフィールでグルメ/料理を中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係からグルメ/料理との強い関連が示される',
   version: '1.2.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

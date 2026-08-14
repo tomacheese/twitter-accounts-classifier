@@ -28,6 +28,9 @@ export interface PlanningCandidate {
   ruleVersion: string
   labeledAt: Date
   evaluable: boolean
+  recentTweetsFetchStatus?: string | null
+  lastRecentTweetsAttemptedAt?: Date | null
+  lastRecentTweetsFetchedAt?: Date | null
   changeType?: string
 }
 
@@ -58,6 +61,9 @@ export interface WeeklyReviewSample {
   classifierReason: string
   ruleVersion: string
   labeledAt: string
+  recentTweetsFetchStatus?: string | null
+  lastRecentTweetsAttemptedAt?: string | null
+  lastRecentTweetsFetchedAt?: string | null
   sampleKind: WeeklyReviewSampleKind
   priorityScore: number
   selectionSignals: WeeklyReviewSelectionSignal[]
@@ -147,6 +153,17 @@ function toSample(
     classifierReason: candidate.reason,
     ruleVersion: candidate.ruleVersion,
     labeledAt: candidate.labeledAt.toISOString(),
+    ...(candidate.recentTweetsFetchStatus === undefined
+      ? {}
+      : { recentTweetsFetchStatus: candidate.recentTweetsFetchStatus }),
+    ...(candidate.lastRecentTweetsAttemptedAt === undefined
+      ? {}
+      : {
+          lastRecentTweetsAttemptedAt: candidate.lastRecentTweetsAttemptedAt?.toISOString() ?? null,
+        }),
+    ...(candidate.lastRecentTweetsFetchedAt === undefined
+      ? {}
+      : { lastRecentTweetsFetchedAt: candidate.lastRecentTweetsFetchedAt?.toISOString() ?? null }),
     sampleKind,
     priorityScore,
     selectionSignals,

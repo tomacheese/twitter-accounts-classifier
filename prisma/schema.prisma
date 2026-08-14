@@ -45,6 +45,9 @@ model Account {
   parodyCommentaryFanLabel       String?
   firstSeenAt                    DateTime               @default(now())
   lastCrawledAt                  DateTime               @default(now())
+  lastRecentTweetsAttemptedAt    DateTime?
+  lastRecentTweetsFetchedAt      DateTime?
+  recentTweetsFetchStatus        String?
   updatedAt                      DateTime               @updatedAt
   tweets                         Tweet[]
   labels                         AccountLabel[]

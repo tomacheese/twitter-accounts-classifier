@@ -13,7 +13,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicIllustrationRule: LabelRule = {
   key: 'topic_illustration',
-  description: 'プロフィールでイラスト制作/投稿を中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係からイラスト制作/投稿との強い関連が示される',
   version: '1.1.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

@@ -10,6 +10,14 @@ describe('normalizeForSimilarity', () => {
   it('strips urls, mentions, and collapses whitespace', () => {
     expect(normalizeForSimilarity('@foo  https://example.com/x  Hello   World')).toBe('hello world')
   })
+
+  it('keeps hashtags by default for existing callers', () => {
+    expect(normalizeForSimilarity('本文 #共通タグ')).toContain('#共通タグ')
+  })
+
+  it('removes hashtag tokens when requested', () => {
+    expect(normalizeForSimilarity('本文 #共通タグ', { removeHashtags: true })).toBe('本文')
+  })
 })
 
 describe('bigramSet', () => {

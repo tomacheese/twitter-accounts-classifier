@@ -26,7 +26,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicTechRule: LabelRule = {
   key: 'topic_tech',
-  description: 'プロフィールで技術/ソフトウェア開発を中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係から技術/ソフトウェア開発との強い関連が示される',
   version: '1.3.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

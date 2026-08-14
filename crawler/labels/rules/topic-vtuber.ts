@@ -11,7 +11,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicVtuberRule: LabelRule = {
   key: 'topic_vtuber',
-  description: 'プロフィールで VTuber (視聴/活動) を中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係から VTuber との強い関連が示される',
   version: '1.1.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

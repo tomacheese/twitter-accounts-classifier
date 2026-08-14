@@ -9,7 +9,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicAnimeRule: LabelRule = {
   key: 'topic_anime',
-  description: 'プロフィールでアニメ/漫画を中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係からアニメ/漫画との強い関連が示される',
   version: '1.2.0',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
