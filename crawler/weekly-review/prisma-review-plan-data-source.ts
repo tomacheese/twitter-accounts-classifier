@@ -10,8 +10,13 @@ import type {
   WeeklyReviewPlanningDataSource,
 } from './review-plan-data'
 
+const RECENT_CANDIDATE_QUERY_CONCURRENCY = 2
 const POPULATION_COUNT_QUERY_CONCURRENCY = 2
 
+type RecentCandidateByValueRow = Omit<
+  PlanningCandidateRow,
+  'labelDefinitionId' | 'labelKey' | 'changeType'
+>
 type PopulationCountByValueRow = Pick<PlanningPopulationCountRow, 'value' | 'count'>
 
 export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlanningDataSource {
@@ -86,68 +91,102 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
     poolSize: number,
     seed: string,
   ): Promise<PlanningCandidateRow[]> {
-    return this.prisma.$queryRaw<PlanningCandidateRow[]>(Prisma.sql`
-      SELECT
-        recent."accountId",
-        definition.id AS "labelDefinitionId",
-        definition.key AS "labelKey",
-        recent.value,
-        recent.confidence,
-        recent.reason,
-        recent."ruleVersion",
-        recent."labeledAt",
-        recent.evaluable
-      FROM "LabelDefinition" definition
-      CROSS JOIN LATERAL (
-        SELECT
-          ranked."accountId",
-          ranked.value,
-          ranked.confidence,
-          ranked.reason,
-          ranked."ruleVersion",
-          ranked."labeledAt",
-          ranked.evaluable
-        FROM (
+    const definitions = await this.prisma.labelDefinition.findMany({
+      select: { id: true, key: true },
+      orderBy: { id: 'asc' },
+    })
+    const rowsByDefinition: PlanningCandidateRow[][] = Array.from(
+      { length: definitions.length },
+      () => [],
+    )
+
+    await runWithConcurrencyLimit(
+      definitions,
+      RECENT_CANDIDATE_QUERY_CONCURRENCY,
+      async (definition, index) => {
+        const rows = await this.prisma.$queryRaw<RecentCandidateByValueRow[]>(Prisma.sql`
+          WITH frame AS MATERIALIZED (
+            SELECT
+              latest."accountId",
+              latest.value,
+              latest."labeledAt",
+              NULL::text AS "historyId"
+            FROM "AccountLabelLatest" latest
+            WHERE latest."labelDefinitionId" = ${definition.id}
+              AND latest."labeledAt" >= ${targetFrom}
+              AND latest."labeledAt" <= ${targetTo}
+
+            UNION ALL
+
+            SELECT
+              future."accountId",
+              history.value,
+              history."labeledAt",
+              history.id AS "historyId"
+            FROM "AccountLabelLatest" future
+            CROSS JOIN LATERAL (
+              SELECT
+                history.id,
+                history.value,
+                history."labeledAt"
+              FROM "AccountLabel" history
+              WHERE history."labelDefinitionId" = ${definition.id}
+                AND history."accountId" = future."accountId"
+                AND history."labeledAt" >= ${targetFrom}
+                AND history."labeledAt" <= ${targetTo}
+              ORDER BY history."labeledAt" DESC, history.id DESC
+              LIMIT 1
+            ) history
+            WHERE future."labelDefinitionId" = ${definition.id}
+              AND future."labeledAt" > ${targetTo}
+          ),
+          sampled AS MATERIALIZED (
+            (
+              SELECT frame."accountId", frame.value, frame."labeledAt", frame."historyId"
+              FROM frame
+              WHERE frame.value
+              ORDER BY md5(frame."accountId" || ':' || ${definition.id} || ':' || ${seed})
+              LIMIT ${poolSize}
+            )
+            UNION ALL
+            (
+              SELECT frame."accountId", frame.value, frame."labeledAt", frame."historyId"
+              FROM frame
+              WHERE NOT frame.value
+              ORDER BY md5(frame."accountId" || ':' || ${definition.id} || ':' || ${seed})
+              LIMIT ${poolSize}
+            )
+          )
           SELECT
-            deduped."accountId",
-            deduped.value,
-            deduped.confidence,
-            deduped.reason,
-            deduped."ruleVersion",
-            deduped."labeledAt",
-            deduped.evaluable,
-            row_number() OVER (
-              PARTITION BY deduped.value
-              ORDER BY md5(deduped."accountId" || ':' || definition.id || ':' || ${seed})
-            ) AS stratum_rank
-          FROM (
-            -- sample frame = 期間内の各 accountId × labelDefinitionId の最新1件 (dedupe 後の期間内全件)。
-            -- listPopulationCounts と同じ DISTINCT ON キー・LIMIT なしで揃え、
-            -- inclusion probability がゼロの行を population frame に含めない。
-            SELECT DISTINCT ON (label."labelDefinitionId", label."accountId")
-              label."accountId",
-              label.value,
-              label.confidence,
-              label.reason,
-              label."ruleVersion",
-              label."labeledAt",
-              label.evaluable
-            FROM "AccountLabel" label
-            WHERE label."labelDefinitionId" = definition.id
-              AND label."labeledAt" >= ${targetFrom}
-              AND label."labeledAt" <= ${targetTo}
-            ORDER BY label."labelDefinitionId", label."accountId", label."labeledAt" DESC, label.id DESC
-          ) deduped
-        ) ranked
-        WHERE ranked.stratum_rank <= ${poolSize}
-      ) recent
-    `)
+            sampled."accountId",
+            sampled.value,
+            COALESCE(history.confidence, latest.confidence) AS confidence,
+            COALESCE(history.reason, latest.reason) AS reason,
+            COALESCE(history."ruleVersion", latest."ruleVersion") AS "ruleVersion",
+            sampled."labeledAt",
+            COALESCE(history.evaluable, latest.evaluable) AS evaluable
+          FROM sampled
+          LEFT JOIN "AccountLabelLatest" latest
+            ON sampled."historyId" IS NULL
+           AND latest."accountId" = sampled."accountId"
+           AND latest."labelDefinitionId" = ${definition.id}
+          LEFT JOIN "AccountLabel" history ON history.id = sampled."historyId"
+        `)
+        rowsByDefinition[index] = rows.map((row) => ({
+          ...row,
+          labelDefinitionId: definition.id,
+          labelKey: definition.key,
+        }))
+      },
+    )
+
+    return rowsByDefinition.flat()
   }
 
   /**
    * `targetFrom`〜`targetTo` の期間内に labeled された、ラベル×value ごとのアカウント数
    * (relabel 履歴の行数ではなく account 単位の重複排除後) を返す。
-   * `listRecentCandidates` の抽出母集団と揃えるため `evaluable` でも絞り込む。
+   * `listRecentCandidates` と同じ targetTo 時点の最新1件を母集団とし、`evaluable` でも絞り込む。
    * ラベル単位に分割したうえで期間 window を先に materialize し、その小さい集合だけを
    * account 単位に重複排除する。time-first partial covering index は raw migration で管理する。
    */

@@ -60,4 +60,44 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
       expect(sql).toContain('AND label.evaluable')
     }
   })
+
+  it('recent candidates は label ごとに Latest の期間 window を読み targetTo 後だけ履歴へ fallback する', async () => {
+    const queries: { strings: readonly string[] }[] = []
+    const prisma = {
+      labelDefinition: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'label-a', key: 'alpha' },
+          { id: 'label-b', key: 'beta' },
+        ]),
+      },
+      $queryRaw: vi.fn((query: { strings: readonly string[] }) => {
+        queries.push(query)
+        return Promise.resolve([])
+      }),
+    } as unknown as PrismaClient
+    const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
+
+    await source.listRecentCandidates(
+      new Date('2026-08-01T00:00:00Z'),
+      new Date('2026-08-08T00:00:00Z'),
+      80,
+      'stable-seed',
+    )
+
+    expect(queries).toHaveLength(2)
+    for (const query of queries) {
+      const sql = query.strings.join('?')
+      expect(sql).toContain('WITH frame AS MATERIALIZED')
+      expect(sql).toContain('FROM "AccountLabelLatest" latest')
+      expect(sql).toContain('latest."labeledAt" >= ?')
+      expect(sql).toContain('latest."labeledAt" <= ?')
+      expect(sql).toContain('FROM "AccountLabelLatest" future')
+      expect(sql).toContain('CROSS JOIN LATERAL')
+      expect(sql).toContain('FROM "AccountLabel" history')
+      expect(sql.match(/ORDER BY md5/g)).toHaveLength(2)
+      expect(sql).toContain('LIMIT 1')
+      expect(sql.match(/LIMIT \?/g)).toHaveLength(2)
+      expect(sql).not.toContain('row_number()')
+    }
+  })
 })

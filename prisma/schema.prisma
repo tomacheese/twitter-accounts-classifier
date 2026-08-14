@@ -143,7 +143,7 @@ model AccountLabel {
   @@index([labeledAt(sort: Desc), id(sort: Desc)])
   @@index([labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])
   @@index([sourceKind, sourceId])
-  // weekly-review の listRecentCandidates/listPopulationCounts が行う
+  // weekly-review の listPopulationCounts が行う
   // DISTINCT ON (labelDefinitionId, accountId) ORDER BY labeledAt DESC, id DESC を
   // インデックススキャンで処理できるよう、この並び順で複合インデックスを用意する。
   @@index([labelDefinitionId, accountId, labeledAt(sort: Desc), id(sort: Desc)])
