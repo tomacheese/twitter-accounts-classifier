@@ -20,7 +20,7 @@ $$;
 GRANT USAGE ON SCHEMA public TO weekly_review;
 
 ALTER ROLE weekly_review SET client_connection_check_interval = '5s';
-ALTER ROLE weekly_review SET statement_timeout = '120s';
+ALTER ROLE weekly_review SET statement_timeout = '15min';
 ALTER ROLE weekly_review SET max_parallel_workers_per_gather = 0;
 
 -- 過去の個別GRANTや設定変更で増えた直接write権限を一度除去する。
