@@ -298,6 +298,92 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
     }
   })
 
+  it('同一 labeledAt の履歴は id DESC の行を candidate に使う', async () => {
+    const suffix = randomUUID().slice(0, 8)
+    const label = await prisma.labelDefinition.create({
+      data: {
+        key: `weekly_review_tie_${suffix}`,
+        description: '同一時刻 tie-break テストラベル',
+        currentRuleVersion: '1.0.0',
+      },
+    })
+    const accountId = `tie_${suffix}`
+    const labeledAt = new Date('2026-08-07T12:00:00Z')
+
+    try {
+      await prisma.account.create({
+        data: {
+          id: accountId,
+          screenName: accountId,
+          displayName: 'Tie Account',
+          followersCount: 1,
+          followingCount: 1,
+          tweetCount: 1,
+          accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
+        },
+      })
+      await prisma.accountLabel.createMany({
+        data: [
+          {
+            id: `z_${suffix}`,
+            accountId,
+            labelDefinitionId: label.id,
+            value: true,
+            confidence: 0.9,
+            reason: 'id desc winner',
+            method: 'rule',
+            ruleVersion: '1.0.0',
+            labeledAt,
+          },
+          {
+            id: `a_${suffix}`,
+            accountId,
+            labelDefinitionId: label.id,
+            value: false,
+            confidence: 0.1,
+            reason: 'latest table loser',
+            method: 'rule',
+            ruleVersion: '1.0.0',
+            labeledAt,
+          },
+        ],
+      })
+      await prisma.accountLabelLatest.create({
+        data: {
+          accountId,
+          labelDefinitionId: label.id,
+          value: false,
+          confidence: 0.1,
+          reason: 'latest table loser',
+          method: 'rule',
+          ruleVersion: '1.0.0',
+          labeledAt,
+        },
+      })
+
+      const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
+      const candidates = await source.listRecentCandidates(
+        new Date('2026-08-01T00:00:00Z'),
+        new Date('2026-08-08T00:00:00Z'),
+        1,
+        'tie-seed',
+      )
+      const candidate = candidates.find((row) => row.labelDefinitionId === label.id)
+
+      expect(candidate).toMatchObject({
+        accountId,
+        value: true,
+        confidence: 0.9,
+        reason: 'id desc winner',
+      })
+    } finally {
+      await prisma.accountLabelLatest.deleteMany({ where: { labelDefinitionId: label.id } })
+      await prisma.accountLabel.deleteMany({ where: { labelDefinitionId: label.id } })
+      await prisma.account.deleteMany({ where: { id: accountId } })
+      await prisma.labelDefinition.deleteMany({ where: { id: label.id } })
+    }
+  })
+
   it('listPopulationCounts は sample frame と同じ DISTINCT ON キーで重複排除した件数を返す', async () => {
     const suffix = randomUUID().slice(0, 8)
     const label = await prisma.labelDefinition.create({

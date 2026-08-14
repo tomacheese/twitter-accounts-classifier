@@ -61,7 +61,7 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
     }
   })
 
-  it('recent candidates は label ごとに Latest の期間 window を読み targetTo 後だけ履歴へ fallback する', async () => {
+  it('recent candidates は label ごとに履歴 window を読み id DESC で dedupe 後に sample する', async () => {
     const queries: { strings: readonly string[] }[] = []
     const prisma = {
       labelDefinition: {
@@ -87,16 +87,16 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
     expect(queries).toHaveLength(2)
     for (const query of queries) {
       const sql = query.strings.join('?')
-      expect(sql).toContain('WITH frame AS MATERIALIZED')
-      expect(sql).toContain('FROM "AccountLabelLatest" latest')
-      expect(sql).toContain('latest."labeledAt" >= ?')
-      expect(sql).toContain('latest."labeledAt" <= ?')
-      expect(sql).toContain('FROM "AccountLabelLatest" future')
-      expect(sql).toContain('CROSS JOIN LATERAL')
-      expect(sql).toContain('FROM "AccountLabel" history')
+      expect(sql).toContain('WITH windowed AS MATERIALIZED')
+      expect(sql).toContain('FROM "AccountLabel" label')
+      expect(sql).toContain('DISTINCT ON (windowed."accountId")')
+      expect(sql).toContain(
+        'ORDER BY windowed."accountId", windowed."labeledAt" DESC, windowed.id DESC',
+      )
       expect(sql.match(/ORDER BY md5/g)).toHaveLength(2)
-      expect(sql).toContain('LIMIT 1')
       expect(sql.match(/LIMIT \?/g)).toHaveLength(2)
+      expect(sql).toContain('JOIN "AccountLabel" label ON label.id = sampled.id')
+      expect(sql).not.toContain('AccountLabelLatest')
       expect(sql).not.toContain('row_number()')
     }
   })
