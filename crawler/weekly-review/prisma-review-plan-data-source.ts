@@ -105,72 +105,54 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
       RECENT_CANDIDATE_QUERY_CONCURRENCY,
       async (definition, index) => {
         const rows = await this.prisma.$queryRaw<RecentCandidateByValueRow[]>(Prisma.sql`
-          WITH frame AS MATERIALIZED (
+          WITH windowed AS MATERIALIZED (
             SELECT
-              latest."accountId",
-              latest.value,
-              latest."labeledAt",
-              NULL::text AS "historyId"
-            FROM "AccountLabelLatest" latest
-            WHERE latest."labelDefinitionId" = ${definition.id}
-              AND latest."labeledAt" >= ${targetFrom}
-              AND latest."labeledAt" <= ${targetTo}
-
-            UNION ALL
-
-            SELECT
-              future."accountId",
-              history.value,
-              history."labeledAt",
-              history.id AS "historyId"
-            FROM "AccountLabelLatest" future
-            CROSS JOIN LATERAL (
-              SELECT
-                history.id,
-                history.value,
-                history."labeledAt"
-              FROM "AccountLabel" history
-              WHERE history."labelDefinitionId" = ${definition.id}
-                AND history."accountId" = future."accountId"
-                AND history."labeledAt" >= ${targetFrom}
-                AND history."labeledAt" <= ${targetTo}
-              ORDER BY history."labeledAt" DESC, history.id DESC
-              LIMIT 1
-            ) history
-            WHERE future."labelDefinitionId" = ${definition.id}
-              AND future."labeledAt" > ${targetTo}
+              label.id,
+              label."accountId",
+              label.value,
+              label."labeledAt"
+            FROM "AccountLabel" label
+            WHERE label."labelDefinitionId" = ${definition.id}
+              AND label."labeledAt" >= ${targetFrom}
+              AND label."labeledAt" <= ${targetTo}
+            ORDER BY label."labeledAt" DESC, label.id DESC
           ),
-          sampled AS MATERIALIZED (
+          deduped AS MATERIALIZED (
+            SELECT DISTINCT ON (windowed."accountId")
+              windowed.id,
+              windowed."accountId",
+              windowed.value,
+              windowed."labeledAt"
+            FROM windowed
+            ORDER BY windowed."accountId", windowed."labeledAt" DESC, windowed.id DESC
+          ),
+          sampled AS (
             (
-              SELECT frame."accountId", frame.value, frame."labeledAt", frame."historyId"
-              FROM frame
-              WHERE frame.value
-              ORDER BY md5(frame."accountId" || ':' || ${definition.id} || ':' || ${seed})
+              SELECT deduped.id, deduped."accountId", deduped.value
+              FROM deduped
+              WHERE deduped.value = true
+              ORDER BY md5(deduped."accountId" || ':' || ${definition.id} || ':' || ${seed})
               LIMIT ${poolSize}
             )
             UNION ALL
             (
-              SELECT frame."accountId", frame.value, frame."labeledAt", frame."historyId"
-              FROM frame
-              WHERE NOT frame.value
-              ORDER BY md5(frame."accountId" || ':' || ${definition.id} || ':' || ${seed})
+              SELECT deduped.id, deduped."accountId", deduped.value
+              FROM deduped
+              WHERE deduped.value = false
+              ORDER BY md5(deduped."accountId" || ':' || ${definition.id} || ':' || ${seed})
               LIMIT ${poolSize}
             )
           )
           SELECT
             sampled."accountId",
             sampled.value,
-            COALESCE(history.confidence, latest.confidence) AS confidence,
-            COALESCE(history.reason, latest.reason) AS reason,
-            COALESCE(history."ruleVersion", latest."ruleVersion") AS "ruleVersion",
-            sampled."labeledAt",
-            COALESCE(history.evaluable, latest.evaluable) AS evaluable
+            label.confidence,
+            label.reason,
+            label."ruleVersion",
+            label."labeledAt",
+            label.evaluable
           FROM sampled
-          LEFT JOIN "AccountLabelLatest" latest
-            ON sampled."historyId" IS NULL
-           AND latest."accountId" = sampled."accountId"
-           AND latest."labelDefinitionId" = ${definition.id}
-          LEFT JOIN "AccountLabel" history ON history.id = sampled."historyId"
+          JOIN "AccountLabel" label ON label.id = sampled.id
         `)
         rowsByDefinition[index] = rows.map((row) => ({
           ...row,
