@@ -4,7 +4,24 @@ import { PrismaClient } from '../generated/prisma'
 import { loadWeeklyReviewPlanningData } from './review-plan-data'
 import { PrismaWeeklyReviewPlanningDataSource } from './prisma-review-plan-data-source'
 
+interface SyntheticLabelRow {
+  accountId: string
+  labelDefinitionId: string
+  value: boolean
+  confidence: number
+  reason: string
+  method: string
+  ruleVersion: string
+  labeledAt: Date
+  evaluable?: boolean
+}
+
 const prisma = new PrismaClient()
+
+async function createLabelHistoryAndLatest(data: SyntheticLabelRow[]): Promise<void> {
+  await prisma.accountLabel.createMany({ data })
+  await prisma.accountLabelLatest.createMany({ data })
+}
 
 afterAll(async () => {
   await prisma.$disconnect()
@@ -39,30 +56,28 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
           },
         })
       }
-      await prisma.accountLabel.createMany({
-        data: [
-          {
-            accountId: accountIds[0],
-            labelDefinitionId: label.id,
-            value: true,
-            confidence: 0.8,
-            reason: 'synthetic positive',
-            method: 'rule',
-            ruleVersion: '1.0.0',
-            labeledAt: new Date('2026-08-02T00:00:00Z'),
-          },
-          {
-            accountId: accountIds[1],
-            labelDefinitionId: label.id,
-            value: false,
-            confidence: 0.1,
-            reason: 'synthetic negative',
-            method: 'rule',
-            ruleVersion: '1.0.0',
-            labeledAt: new Date('2026-08-07T00:00:00Z'),
-          },
-        ],
-      })
+      await createLabelHistoryAndLatest([
+        {
+          accountId: accountIds[0],
+          labelDefinitionId: label.id,
+          value: true,
+          confidence: 0.8,
+          reason: 'synthetic positive',
+          method: 'rule',
+          ruleVersion: '1.0.0',
+          labeledAt: new Date('2026-08-02T00:00:00Z'),
+        },
+        {
+          accountId: accountIds[1],
+          labelDefinitionId: label.id,
+          value: false,
+          confidence: 0.1,
+          reason: 'synthetic negative',
+          method: 'rule',
+          ruleVersion: '1.0.0',
+          labeledAt: new Date('2026-08-07T00:00:00Z'),
+        },
+      ])
 
       const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
       const candidates = await source.listRecentCandidates(targetFrom, targetTo, 1, 'balanced-seed')
@@ -70,6 +85,7 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
 
       expect(own.map((candidate) => candidate.value).toSorted()).toEqual([false, true])
     } finally {
+      await prisma.accountLabelLatest.deleteMany({ where: { labelDefinitionId: label.id } })
       await prisma.accountLabel.deleteMany({ where: { labelDefinitionId: label.id } })
       await prisma.account.deleteMany({ where: { id: { in: accountIds } } })
       await prisma.labelDefinition.deleteMany({ where: { id: label.id } })
@@ -101,30 +117,28 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
           accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
         })),
       })
-      await prisma.accountLabel.createMany({
-        data: [
-          {
-            accountId: accountIds[0],
-            labelDefinitionId: label.id,
-            value: true,
-            confidence: 0.8,
-            reason: 'synthetic older positive',
-            method: 'rule',
-            ruleVersion: '1.0.0',
-            labeledAt: new Date('2026-08-02T00:00:00Z'),
-          },
-          ...accountIds.slice(1).map((accountId, index) => ({
-            accountId,
-            labelDefinitionId: label.id,
-            value: false,
-            confidence: 0.1,
-            reason: 'synthetic recent negative',
-            method: 'rule',
-            ruleVersion: '1.0.0',
-            labeledAt: new Date(`2026-08-07T00:${String(index).padStart(2, '0')}:00Z`),
-          })),
-        ],
-      })
+      await createLabelHistoryAndLatest([
+        {
+          accountId: accountIds[0],
+          labelDefinitionId: label.id,
+          value: true,
+          confidence: 0.8,
+          reason: 'synthetic older positive',
+          method: 'rule',
+          ruleVersion: '1.0.0',
+          labeledAt: new Date('2026-08-02T00:00:00Z'),
+        },
+        ...accountIds.slice(1).map((accountId, index) => ({
+          accountId,
+          labelDefinitionId: label.id,
+          value: false,
+          confidence: 0.1,
+          reason: 'synthetic recent negative',
+          method: 'rule',
+          ruleVersion: '1.0.0',
+          labeledAt: new Date(`2026-08-07T00:${String(index).padStart(2, '0')}:00Z`),
+        })),
+      ])
 
       const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
       const candidates = await source.listRecentCandidates(targetFrom, targetTo, 1, 'bounded-seed')
@@ -135,6 +149,7 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
       expect(own.map((candidate) => candidate.value).toSorted()).toEqual([false, true])
       expect(own.find((candidate) => candidate.value)?.accountId).toBe(accountIds[0])
     } finally {
+      await prisma.accountLabelLatest.deleteMany({ where: { labelDefinitionId: label.id } })
       await prisma.accountLabel.deleteMany({ where: { labelDefinitionId: label.id } })
       await prisma.account.deleteMany({ where: { id: { in: accountIds } } })
       await prisma.labelDefinition.deleteMany({ where: { id: label.id } })
@@ -172,8 +187,8 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
           accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
         })),
       })
-      await prisma.accountLabel.createMany({
-        data: accountIds.map((accountId, index) => ({
+      await createLabelHistoryAndLatest(
+        accountIds.map((accountId, index) => ({
           accountId,
           labelDefinitionId: label.id,
           value: false,
@@ -183,7 +198,7 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
           ruleVersion: '1.0.0',
           labeledAt: new Date(targetFrom.getTime() + index * 1000),
         })),
-      })
+      )
 
       const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
       const rows = await source.listRecentCandidates(targetFrom, targetTo, 5, 'full-frame-seed')
@@ -193,8 +208,92 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
       const oldestSelectedLabeledAt = Math.min(...own.map((row) => row.labeledAt.getTime()))
       expect(oldestSelectedLabeledAt).toBeLessThan(newestFiftyThreshold.getTime())
     } finally {
+      await prisma.accountLabelLatest.deleteMany({ where: { labelDefinitionId: label.id } })
       await prisma.accountLabel.deleteMany({ where: { labelDefinitionId: label.id } })
       await prisma.account.deleteMany({ where: { id: { in: accountIds } } })
+      await prisma.labelDefinition.deleteMany({ where: { id: label.id } })
+    }
+  })
+
+  it('targetTo 後に Latest が更新されても targetTo 時点の履歴行を candidate に使う', async () => {
+    const suffix = randomUUID().slice(0, 8)
+    const label = await prisma.labelDefinition.create({
+      data: {
+        key: `weekly_review_target_boundary_${suffix}`,
+        description: '架空の target boundary テストラベル',
+        currentRuleVersion: '1.0.0',
+      },
+    })
+    const accountId = `target_boundary_${suffix}`
+    const targetFrom = new Date('2026-08-01T00:00:00Z')
+    const targetTo = new Date('2026-08-08T00:00:00Z')
+    const beforeTarget = new Date('2026-08-07T12:00:00Z')
+    const afterTarget = new Date('2026-08-08T00:00:10Z')
+
+    try {
+      await prisma.account.create({
+        data: {
+          id: accountId,
+          screenName: accountId,
+          displayName: 'Synthetic Account',
+          followersCount: 1,
+          followingCount: 1,
+          tweetCount: 1,
+          accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
+        },
+      })
+      await prisma.accountLabel.createMany({
+        data: [
+          {
+            accountId,
+            labelDefinitionId: label.id,
+            value: true,
+            confidence: 0.8,
+            reason: 'before target',
+            method: 'rule',
+            ruleVersion: '1.0.0',
+            labeledAt: beforeTarget,
+          },
+          {
+            accountId,
+            labelDefinitionId: label.id,
+            value: false,
+            confidence: 0.2,
+            reason: 'after target',
+            method: 'rule',
+            ruleVersion: '1.0.0',
+            labeledAt: afterTarget,
+          },
+        ],
+      })
+      await prisma.accountLabelLatest.create({
+        data: {
+          accountId,
+          labelDefinitionId: label.id,
+          value: false,
+          confidence: 0.2,
+          reason: 'after target',
+          method: 'rule',
+          ruleVersion: '1.0.0',
+          labeledAt: afterTarget,
+        },
+      })
+
+      const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
+      const candidates = await source.listRecentCandidates(targetFrom, targetTo, 1, 'boundary-seed')
+      const candidate = candidates.find((row) => row.labelDefinitionId === label.id)
+
+      expect(candidate).toMatchObject({
+        accountId,
+        value: true,
+        confidence: 0.8,
+        reason: 'before target',
+      })
+      expect(candidate?.labeledAt).toEqual(beforeTarget)
+    } finally {
+      await prisma.accountLabelLatest.deleteMany({ where: { labelDefinitionId: label.id } })
+      await prisma.accountLabel.deleteMany({ where: { labelDefinitionId: label.id } })
+      await prisma.account.deleteMany({ where: { id: accountId } })
       await prisma.labelDefinition.deleteMany({ where: { id: label.id } })
     }
   })
@@ -283,6 +382,7 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
       expect(trueCountRow?.count).toBe(2)
       expect(falseCountRow?.count).toBe(1)
     } finally {
+      await prisma.accountLabelLatest.deleteMany({ where: { labelDefinitionId: label.id } })
       await prisma.accountLabel.deleteMany({ where: { labelDefinitionId: label.id } })
       await prisma.account.deleteMany({ where: { id: { in: accountIds } } })
       await prisma.labelDefinition.deleteMany({ where: { id: label.id } })

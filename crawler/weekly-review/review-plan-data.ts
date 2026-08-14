@@ -127,8 +127,8 @@ export interface WeeklyReviewPlanningDataSource {
   ): Promise<PlanningCandidateRow[]>
   /**
    * `targetFrom`〜`targetTo` の期間内に labeled された、当該ラベル×value のアカウント数
-   * (relabel 履歴の行数ではない) を返す。`listRecentCandidates` と同じ
-   * `DISTINCT ON (accountId, labelDefinitionId)` の sampling unit で集計するため、
+   * (relabel 履歴の行数ではない) を返す。`listRecentCandidates` と同じく
+   * targetTo 時点の各 accountId × labelDefinitionId の最新1件を sampling unit とするため、
    * 無作為抽出プールの inclusion probability (`poolSize / populationCount`) を
    * 近似する母集団件数として使える (population frame が sample frame と一致する)。
    */
