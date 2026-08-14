@@ -645,6 +645,7 @@ async function runAuthorUnitPhase(
           retryOptions(deps, trackAuthorRetryWait),
         ),
       )
+      const recentTweetsFetchedAt = new Date()
       recentTweetsFetchSucceeded = true
 
       // フォロー先サンプルの取得はラベリング精度を補強する追加シグナルに過ぎないため、
@@ -715,7 +716,7 @@ async function runAuthorUnitPhase(
           authorId,
           profile,
           recentTweets,
-          recentTweetsFetchedAt: recentTweetsAttemptedAt,
+          recentTweetsFetchedAt,
           additionalOwnTweets: [...authorTimelineTweets, ...authorOtherReplies],
           recentTweetsFallbackAuthors: fallbackAuthors,
           followSample,

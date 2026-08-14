@@ -184,7 +184,11 @@ describe('persistAuthorResultAtomic', () => {
     const followSampleCreateMany = vi.fn().mockResolvedValue({ count: 1 })
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
-      account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null), update: vi.fn() },
+      account: {
+        upsert: accountUpsert,
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
@@ -268,7 +272,11 @@ describe('persistAuthorResultAtomic', () => {
   it('upserts each fallback author only once even if it appears against multiple context tweets', async () => {
     const accountUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
-      account: { upsert: accountUpsert, findUnique: vi.fn().mockResolvedValue(null), update: vi.fn() },
+      account: {
+        upsert: accountUpsert,
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),

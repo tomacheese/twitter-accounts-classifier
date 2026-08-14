@@ -254,6 +254,64 @@ describe('runCrawlCycle', () => {
     expect(deps.setCurrentAccount).toHaveBeenCalledWith('run1', 'v', expect.any(Date))
   })
 
+  it('records the timeline fetch completion time separately from its request-start time', async () => {
+    // リクエスト開始時刻を fetchedAt に保存すると、遅延した成功応答が Viewer と週次レビューで実際より古く見える。
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const requestStartedAt = new Date('2026-08-14T00:00:00.000Z')
+      const fetchCompletedAt = new Date('2026-08-14T00:10:00.000Z')
+      vi.setSystemTime(requestStartedAt)
+
+      let resolveRecentTweets: ((value: { data: { data: [] } }) => void) | undefined
+      const getUserTweetsAndReplies = vi.fn(
+        () =>
+          new Promise<{ data: { data: [] } }>((resolve) => {
+            resolveRecentTweets = resolve
+          }),
+      )
+      const deps = makeDeps({
+        createOpenApiClient: vi.fn().mockResolvedValue({
+          client: {
+            getTweetApi: () => ({
+              getHomeTimeline: vi
+                .fn()
+                .mockResolvedValue({ data: { data: [rawTweet('tweet1', rawUser('author1'))] } }),
+              getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            }),
+            getUserApi: () => ({
+              getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+              getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+              getUserTweetsAndReplies,
+            }),
+            getUserListApi: () => ({
+              getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+              getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
+            getBlocksApi: () => ({
+              getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
+          },
+        }),
+      })
+
+      const cycle = runCrawlCycle(deps)
+      await vi.waitFor(() => expect(getUserTweetsAndReplies).toHaveBeenCalledOnce())
+      vi.setSystemTime(fetchCompletedAt)
+      resolveRecentTweets?.({ data: { data: [] } })
+      await cycle
+
+      expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recentTweetsFetchedAt: fetchCompletedAt,
+        }),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('投稿者ごとにフォロー先サンプルを取得し、persistAuthorResultAtomic へ渡す', async () => {
     const deps = makeDeps()
     await runCrawlCycle(deps)
