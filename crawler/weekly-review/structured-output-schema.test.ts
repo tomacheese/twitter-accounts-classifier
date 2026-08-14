@@ -171,6 +171,71 @@ describe('crawler structuredOutputSchema', () => {
     }
   })
 
+  it('v3 は deferred_to_issue resolution に理由と実在 Issue の参照情報を必須にする', () => {
+    const finding = {
+      type: 'coverage_gap',
+      dimensions: { labelKey: 'topic_test' },
+      primaryScopeType: 'label',
+      primaryScopeId: 'l1',
+      confidence: 0.9,
+      sampleCount: 1,
+      sampleReference: ['a1'],
+      evidenceReference: 'finding/1',
+      structuredMeasurement: {},
+      suggestedSeverity: 'medium',
+    }
+    const deferred = {
+      status: 'deferred_to_issue',
+      summary: '人間の判断が必要なので Issue へ移管',
+      evidenceReference: 'finding/1',
+      deferReason: 'human_judgment_required',
+      issueNumber: 203,
+      issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/203',
+    }
+
+    expect(
+      structuredOutputSchema.safeParse({
+        ...valid,
+        schemaVersion: 3,
+        findings: [{ ...finding, resolution: deferred }],
+      }).success,
+    ).toBe(true)
+    expect(
+      structuredOutputSchema.safeParse({
+        ...valid,
+        schemaVersion: 3,
+        findings: [{ ...finding, resolution: { ...deferred, issueUrl: undefined } }],
+      }).success,
+    ).toBe(false)
+  })
+
+  it('v3 の false_positive / false_negative judgment は fixed または deferred_to_issue を受理する', () => {
+    for (const verdict of ['false_positive', 'false_negative'] as const) {
+      const deferred = structuredOutputSchema.safeParse({
+        ...valid,
+        schemaVersion: 3,
+        review: {
+          ...valid.review,
+          judgments: [
+            {
+              ...valid.review.judgments[0],
+              verdict,
+              resolution: {
+                status: 'deferred_to_issue',
+                summary: '修正範囲が大きいため Issue へ移管',
+                evidenceReference: 'sample/1',
+                deferReason: 'oversized_scope',
+                issueNumber: 204,
+                issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/204',
+              },
+            },
+          ],
+        },
+      })
+      expect(deferred.success).toBe(true)
+    }
+  })
+
   it('旧 high_confidence_negative sampleKind を後方互換として受理する', () => {
     const judgment = {
       sampleId: 's1',

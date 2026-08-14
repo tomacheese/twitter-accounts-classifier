@@ -4,12 +4,22 @@ import { extractPlannedAccountIds, validateReviewResultAgainstPlan } from './val
 interface TestJudgment {
   sampleId: string
   verdict: string
-  resolution?: { status: string }
+  resolution?: {
+    status: string
+    deferReason?: string
+    issueNumber?: number
+    issueUrl?: string
+  }
 }
 
 interface TestFinding {
   type: string
-  resolution?: { status: string }
+  resolution?: {
+    status: string
+    deferReason?: string
+    issueNumber?: number
+    issueUrl?: string
+  }
 }
 
 interface TestResult {
@@ -134,6 +144,66 @@ describe('validateReviewResultAgainstPlan', () => {
     current.findings = [
       { type: 'coverage_gap', resolution: { status: 'fixed' } },
       { type: 'rule_behavior_mismatch', resolution: { status: 'verified_not_issue' } },
+    ]
+    expect(() => {
+      validateReviewResultAgainstPlan(plan, current)
+    }).not.toThrow()
+  })
+
+  it('uncertain は Issue へ正式に defer した場合だけ complete を受理する', () => {
+    const unresolved = result(['l1:a1', 'l1:a2'])
+    unresolved.review.judgments[0] = { sampleId: 'l1:a1', verdict: 'uncertain' }
+    expect(() => {
+      validateReviewResultAgainstPlan(plan, unresolved)
+    }).toThrow('review result contains unresolved sample judgments')
+
+    const deferred = result(['l1:a1', 'l1:a2'])
+    deferred.review.judgments[0] = {
+      sampleId: 'l1:a1',
+      verdict: 'uncertain',
+      resolution: {
+        status: 'deferred_to_issue',
+        deferReason: 'human_judgment_required',
+        issueNumber: 203,
+        issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/203',
+      },
+    }
+    expect(() => {
+      validateReviewResultAgainstPlan(plan, deferred)
+    }).not.toThrow()
+  })
+
+  it('false_positive / false_negative は fixed または Issue defer で complete できる', () => {
+    for (const verdict of ['false_positive', 'false_negative']) {
+      const deferred = result(['l1:a1', 'l1:a2'])
+      deferred.review.judgments[0] = {
+        sampleId: 'l1:a1',
+        verdict,
+        resolution: {
+          status: 'deferred_to_issue',
+          deferReason: 'oversized_scope',
+          issueNumber: 204,
+          issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/204',
+        },
+      }
+      expect(() => {
+        validateReviewResultAgainstPlan(plan, deferred)
+      }).not.toThrow()
+    }
+  })
+
+  it('finding は実在 Issue 参照付き deferred_to_issue なら complete を受理する', () => {
+    const current = result(['l1:a1', 'l1:a2'])
+    current.findings = [
+      {
+        type: 'coverage_gap',
+        resolution: {
+          status: 'deferred_to_issue',
+          deferReason: 'oversized_scope',
+          issueNumber: 205,
+          issueUrl: 'https://github.com/tomacheese/twitter-accounts-classifier/issues/205',
+        },
+      },
     ]
     expect(() => {
       validateReviewResultAgainstPlan(plan, current)

@@ -1,13 +1,38 @@
 import { z } from 'zod'
 import { severitySchema } from '../policy/schema'
 
-const resolutionStatusSchema = z.enum(['fixed', 'verified_not_issue'])
-
-export const weeklyReviewResolutionSchema = z.object({
-  status: resolutionStatusSchema,
+const resolutionBaseSchema = {
   summary: z.string().min(1),
   evidenceReference: z.string().min(1),
+}
+const deferredResolutionSchema = z.object({
+  status: z.literal('deferred_to_issue'),
+  ...resolutionBaseSchema,
+  deferReason: z.enum(['human_judgment_required', 'oversized_scope']),
+  issueNumber: z.number().int().positive(),
+  issueUrl: z
+    .string()
+    .url()
+    .regex(/^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+$/),
 })
+
+export const weeklyReviewResolutionSchema = z
+  .discriminatedUnion('status', [
+    z.object({ status: z.literal('fixed'), ...resolutionBaseSchema }),
+    z.object({ status: z.literal('verified_not_issue'), ...resolutionBaseSchema }),
+    deferredResolutionSchema,
+  ])
+  .superRefine((resolution, ctx) => {
+    if (resolution.status !== 'deferred_to_issue') return
+    const issueNumber = Number(resolution.issueUrl.split('/').at(-1))
+    if (issueNumber !== resolution.issueNumber) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['issueUrl'],
+        message: 'issueUrl must match issueNumber',
+      })
+    }
+  })
 
 export const weeklyReviewSampleKindSchema = z.enum([
   'random_positive',
@@ -138,12 +163,14 @@ export const structuredOutputSchema = z
       for (const [index, judgment] of (output.review?.judgments ?? []).entries()) {
         if (
           (judgment.verdict === 'false_positive' || judgment.verdict === 'false_negative') &&
-          judgment.resolution?.status !== 'fixed'
+          judgment.resolution?.status !== 'fixed' &&
+          judgment.resolution?.status !== 'deferred_to_issue'
         ) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ['review', 'judgments', index, 'resolution'],
-            message: 'misclassification resolution must be fixed for schemaVersion >= 3',
+            message:
+              'misclassification resolution must be fixed or deferred_to_issue for schemaVersion >= 3',
           })
         }
       }

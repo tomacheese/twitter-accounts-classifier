@@ -19,9 +19,9 @@ Each item in `review.judgments` must contain:
 - unavailableReason: when needed
 - populationCount: when the sample is `random_positive`/`random_negative`, carry over the plan's population count for that label/value
 - classifierEvaluable: when needed, carry over the rule's `evaluable` at labeling time
-- resolution: required in v3 when verdict is `false_positive` or `false_negative`; status must be `fixed` with summary and evidenceReference
+- resolution: required in v3 when verdict is `false_positive` or `false_negative`; status must be `fixed` or `deferred_to_issue`. `uncertain` may complete only with `deferred_to_issue`
 
-`review` must contain strategyVersion, seed, budget, plannedSampleCount, reviewedSampleCount, randomAuditCount, targetedAuditCount, uncertainCount, skippedCount, incompletePhases, and judgments. Aggregate counts must equal values mechanically recomputed from judgments. A successful v3 run must have `uncertainCount == 0`, `skippedCount == 0`, and an empty `incompletePhases` array.
+`review` must contain strategyVersion, seed, budget, plannedSampleCount, reviewedSampleCount, randomAuditCount, targetedAuditCount, uncertainCount, skippedCount, incompletePhases, and judgments. Aggregate counts must equal values mechanically recomputed from judgments. A successful v3 run must have `skippedCount == 0` and an empty `incompletePhases` array. Any `uncertain` judgment must carry a valid `deferred_to_issue` resolution.
 
 Use finding types as follows:
 
@@ -36,8 +36,9 @@ Use finding types as follows:
 
 Every v3 finding must include `resolution` with:
 
-- `status`: `fixed` or `verified_not_issue`
-- `summary`: concise Japanese explanation of how the finding was closed
-- `evidenceReference`: test, impact-evaluation, or investigation reference supporting closure
+- `status`: `fixed`, `verified_not_issue`, or `deferred_to_issue`
+- `summary`: concise Japanese explanation of how the finding was disposed
+- `evidenceReference`: test, impact-evaluation, or investigation reference supporting the disposition
+- when `status = deferred_to_issue`: `deferReason` (`human_judgment_required` or `oversized_scope`), positive integer `issueNumber`, and the matching GitHub `issueUrl` are required
 
-There is deliberately no deferred/unresolved resolution status. If any finding cannot reach one of the two terminal states, the run must fail instead of completing.
+`deferred_to_issue` means the work is not silently left unresolved: the coordinator must search for an exact existing open Issue and create the GitHub Issue if none exists before writing the structured result. Human judgment and oversized/risky remediation are the only allowed defer reasons. Ordinary fixable work stays in the weekly-review PR.

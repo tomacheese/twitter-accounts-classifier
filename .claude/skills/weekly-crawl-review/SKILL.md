@@ -48,12 +48,12 @@ Use `SendMessage` as the worker liveness and handoff protocol:
 
 Create one ledger entry for every planned sample. Keep random audits separate from targeted audits, and never describe a targeted-sample error rate as population precision.
 
-- classifier=true / judge=false -> false-positive candidate; if the final verdict remains `false_positive`, remediate it in this run and attach a `fixed` resolution to that judgment
-- classifier=false / judge=true -> false-negative candidate; if the final verdict remains `false_negative`, remediate it in this run and attach a `fixed` resolution to that judgment
-- judge lacks sufficient evidence -> uncertain
+- classifier=true / judge=false -> false-positive candidate; if the final verdict remains `false_positive`, either remediate it in this run with `fixed` or, only when the remaining work qualifies for issue deferral, attach `deferred_to_issue`
+- classifier=false / judge=true -> false-negative candidate; if the final verdict remains `false_negative`, either remediate it in this run with `fixed` or, only when the remaining work qualifies for issue deferral, attach `deferred_to_issue`
+- judge lacks sufficient evidence -> continue investigating; use `uncertain` at completion only when genuine human judgment is required and the judgment has a `deferred_to_issue` resolution
 - execution failure prevents review -> skipped + `review_incomplete`
 
-Do not blindly change a rule from one isolated example. Instead, continue investigating each suspected defect until it is either supported well enough to remediate or disproved. Every emitted finding must be resolved in the same run as `fixed` or `verified_not_issue`; an ambiguous or isolated example is not a valid reason to defer it. If the investigation cannot reach a safe resolution, fail the run instead of completing.
+Do not blindly change a rule from one isolated example. Continue investigating until the suspected defect is supported well enough to remediate, disproved, or clearly requires human judgment / oversized follow-up. Every emitted finding must end as `fixed`, `verified_not_issue`, or `deferred_to_issue`. `deferred_to_issue` is allowed only for `human_judgment_required` or `oversized_scope`; ordinary remediation must stay in the current PR.
 
 ### 4. Rule audit and external coverage
 
@@ -61,13 +61,13 @@ Treat specification drift from the rule auditor as a `rule_behavior_mismatch` ca
 
 Use existing `LabelMetricSnapshot`, `AccountLabelChange`, and plan risk to evaluate topic and behavior coverage. Do not make expensive full-table `LIKE` scans a mandatory step on every run. If a database timeout prevents a core phase, do not hide it behind a successful result; emit `review_incomplete`.
 
-Preserve the intended semantics of `topic_nsfw`, `topic_politics`, and adjacent categories, but do not leave confirmed mismatches unresolved. When evidence supports a rule correction or coverage expansion, remediate it with the same TDD and impact checks as other labels. Do not ask the user during this unattended run; if a safe, evidence-backed resolution cannot be established, fail the run instead of completing.
+Preserve the intended semantics of `topic_nsfw`, `topic_politics`, and adjacent categories. When evidence supports a rule correction or coverage expansion, remediate it with the same TDD and impact checks as other labels. If the decision genuinely requires human product/policy judgment, create or reuse the matching open GitHub Issue and record `deferred_to_issue` with reason `human_judgment_required`; do not ask the user during this unattended run.
 
 ### 5. Remediation
 
 Run `scripts/weekly-analysis-heartbeat.sh implementing`. When remediation is required, follow `references/remediation.md` and make changes with TDD. Bump the rule version whenever rule logic changes.
 
-After remediation, run impact evaluation for each changed label and re-review the changed cohort. If a candidate change has an unexpected blast radius, broad unrelated cohort flips, or unverifiable impact, revert that candidate and continue investigating a narrower safe fix. If no safe fix can be verified, fail the run instead of completing; do not keep an unresolved finding as a successful outcome.
+After remediation, run impact evaluation for each changed label and re-review the changed cohort. If a candidate change has an unexpected blast radius, broad unrelated cohort flips, or unverifiable impact, revert that candidate and continue investigating a narrower safe fix. If the necessary fix becomes too large/risky for the weekly-review PR, classify it as `oversized_scope`, create or reuse the matching open GitHub Issue, and record `deferred_to_issue` instead of forcing the large change into the PR.
 
 ### 6. Verify privacy and tests
 
@@ -79,13 +79,14 @@ Run `scripts/weekly-analysis-heartbeat.sh verifying`, then run check and format 
 
 Run `scripts/weekly-analysis-heartbeat.sh recording`. Following `references/result-contract.md`, always write schemaVersion 3 JSON to `$WEEKLY_REVIEW_RESULT_FILE`. This is the durable diagnostics artifact retained by the supervisor and used for recovery after PR merge. Include exactly one judgment for every planned sample.
 
-Write human-readable `findings` in Japanese. Structured findings must use enabled policy types only. Every finding must include a terminal resolution whose status is `fixed` or `verified_not_issue`, with a concise summary and evidence reference. Do not include identifying information for real accounts other than Account ID.
+Write human-readable `findings` in Japanese. Structured findings must use enabled policy types only. Every finding must include a terminal disposition: `fixed`, `verified_not_issue`, or `deferred_to_issue`, with a concise summary and evidence reference. Before recording `deferred_to_issue`, search existing open Issues and create the GitHub Issue when no exact match exists. The resolution must include `deferReason`, `issueNumber`, and `issueUrl`. Do not include identifying information for real accounts other than Account ID.
+For deferral, use `gh issue list --state open` to check for an exact existing tracker. If none exists, create the GitHub Issue with `gh issue create` using a concise title and a body that includes the finding type/scope, abstract evidence references, `deferReason`, and acceptance criteria. Capture the returned Issue URL and number and write them into the resolution before `complete`.
 
 ### 8. Complete or open PR
 
 Even when there are no code changes, always pass structured output v3 to `complete --structured-output-file`. Do not pass `sampledAccountIds` manually; the CLI derives them from the persisted review plan.
 
-When code changes exist, follow the PR lifecycle in `references/remediation.md`. Advance the state machine until the PR is merged or otherwise reaches the expected ready state. Call `complete` only when there are no unresolved findings, no `uncertain` or `skipped` judgments, and no incomplete phases. Otherwise fail the run instead of completing. Then make exactly one terminal transition: `complete`, `fail`, or `timeout`.
+When code changes exist, follow the PR lifecycle in `references/remediation.md`. Advance the state machine until the PR is merged or otherwise reaches the expected ready state. Call `complete` only when every finding and actionable judgment is either resolved in-run or backed by a created/reused GitHub Issue via `deferred_to_issue`; `skipped` judgments and incomplete phases still block completion. Then make exactly one terminal transition: `complete`, `fail`, or `timeout`.
 
 ## Failure policy
 

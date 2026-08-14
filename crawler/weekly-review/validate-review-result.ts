@@ -106,12 +106,19 @@ export function validateReviewResultAgainstPlan(
     throw new Error('review result contains incomplete phases')
   }
   if (
-    result.review.judgments.some(
-      (judgment) =>
-        ['uncertain', 'skipped'].includes(judgment.verdict) ||
-        (['false_positive', 'false_negative'].includes(judgment.verdict) &&
-          judgment.resolution?.status !== 'fixed'),
-    )
+    result.review.judgments.some((judgment) => {
+      if (judgment.verdict === 'skipped') return true
+      if (judgment.verdict === 'uncertain') {
+        return judgment.resolution?.status !== 'deferred_to_issue'
+      }
+      if (judgment.verdict === 'false_positive' || judgment.verdict === 'false_negative') {
+        return (
+          judgment.resolution?.status !== 'fixed' &&
+          judgment.resolution?.status !== 'deferred_to_issue'
+        )
+      }
+      return false
+    })
   ) {
     throw new Error('review result contains unresolved sample judgments')
   }
@@ -119,7 +126,8 @@ export function validateReviewResultAgainstPlan(
     result.findings.some(
       (finding) =>
         finding.resolution?.status !== 'fixed' &&
-        finding.resolution?.status !== 'verified_not_issue',
+        finding.resolution?.status !== 'verified_not_issue' &&
+        finding.resolution?.status !== 'deferred_to_issue',
     )
   ) {
     throw new Error('review result contains unresolved findings')
