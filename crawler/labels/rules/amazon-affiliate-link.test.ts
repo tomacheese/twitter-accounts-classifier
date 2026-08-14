@@ -57,12 +57,12 @@ describe('amazonAffiliateLinkRule', () => {
     ).toBe(true)
   })
 
-  it('is false for a plain Amazon product URL', () => {
-    expect(
-      amazonAffiliateLinkRule.evaluate(
-        makeBundle([tweet({ expandedUrls: ['https://www.amazon.co.jp/dp/FICTIONAL'] })]),
-      ).value,
-    ).toBe(false)
+  it('is false for a plain Amazon product URL, with high confidence since no affiliate evidence was found', () => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([tweet({ expandedUrls: ['https://www.amazon.co.jp/dp/FICTIONAL'] })]),
+    )
+    expect(result.value).toBe(false)
+    expect(result.confidence).toBe(1)
   })
 
   it('is false when the affiliate link occurs only in a retweet', () => {

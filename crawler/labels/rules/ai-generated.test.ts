@@ -65,11 +65,12 @@ describe('aiGeneratedRule', () => {
     expect(withCorroboration.confidence).toBeGreaterThan(withoutCorroboration.confidence)
   })
 
-  it('is false when the bio has no AI-generation declaration', () => {
+  it('is false when the bio has no AI-generation declaration, with high confidence since no evidence was found', () => {
     const result = aiGeneratedRule.evaluate(
       makeBundle({ bio: 'Full stack dev | Open for freelance work' }),
     )
     expect(result.value).toBe(false)
+    expect(result.confidence).toBe(1)
   })
 
   it('is false for a bio that explicitly denies using AI generation ("しません")', () => {

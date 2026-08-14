@@ -1,3 +1,4 @@
+import { toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 // 「生成AI」と「AI生成」の両方の語順を含めているのは、
@@ -118,7 +119,7 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.9.0',
+  version: '1.9.1',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
@@ -136,11 +137,11 @@ export const aiGeneratedRule: LabelRule = {
     const hasCorroboratingTweet = sampled.some((t) => TWEET_BOILERPLATE_PATTERN.test(t.fullText))
 
     const value = hasDeclaration
-    const confidence = hasDeclaration ? (hasCorroboratingTweet ? 1 : 0.7) : 0
+    const evidenceScore = hasDeclaration ? (hasCorroboratingTweet ? 1 : 0.7) : 0
 
     return {
       value,
-      confidence,
+      confidence: toConfidence(value, evidenceScore),
       reason: `bio declaration=${hasDeclaration}, corroborating tweet=${hasCorroboratingTweet}`,
     }
   },

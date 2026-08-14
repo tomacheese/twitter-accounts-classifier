@@ -32,10 +32,12 @@ describe('topicNsfwRule', () => {
     expect(topicNsfwRule.evaluate(makeBundle({ bio: 'NSFW art account, 18+' })).value).toBe(true)
   })
 
-  it('is false for an unrelated bio', () => {
-    expect(
-      topicNsfwRule.evaluate(makeBundle({ bio: '大阪のおばちゃん。フォローはご自由にどぞ' })).value,
-    ).toBe(false)
+  it('is false for an unrelated bio, with high confidence since no keyword evidence was found', () => {
+    const result = topicNsfwRule.evaluate(
+      makeBundle({ bio: '大阪のおばちゃん。フォローはご自由にどぞ' }),
+    )
+    expect(result.value).toBe(false)
+    expect(result.confidence).toBe(1)
   })
 
   it('is false for a bio listing NSFW in a "do not interact" list', () => {

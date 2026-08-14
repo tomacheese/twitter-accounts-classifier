@@ -55,14 +55,14 @@ describe('amazonAffiliatePromotedRule', () => {
     expect(result.reason).toContain('paidPromotion=true')
   })
 
-  it('is false when an Associates link is not promoted', () => {
-    expect(
-      amazonAffiliatePromotedRule.evaluate(
-        makeBundle([
-          tweet({ expandedUrls: ['https://www.amazon.co.jp/dp/FICTIONAL?tag=fictional-22'] }),
-        ]),
-      ).value,
-    ).toBe(false)
+  it('is false when an Associates link is not promoted, with high confidence since no matching evidence was found', () => {
+    const result = amazonAffiliatePromotedRule.evaluate(
+      makeBundle([
+        tweet({ expandedUrls: ['https://www.amazon.co.jp/dp/FICTIONAL?tag=fictional-22'] }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+    expect(result.confidence).toBe(1)
   })
 
   it('is false when a promoted tweet only has a plain Amazon URL', () => {

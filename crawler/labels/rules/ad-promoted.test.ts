@@ -46,10 +46,10 @@ describe('adPromotedRule', () => {
     expect(result.confidence).toBe(1)
   })
 
-  it('is false when no recent tweet is promoted', () => {
+  it('is false when no recent tweet is promoted, with high confidence since no evidence was found', () => {
     const result = adPromotedRule.evaluate(makeBundle([tweet({}), tweet({ id: 't2' })]))
     expect(result.value).toBe(false)
-    expect(result.confidence).toBe(0)
+    expect(result.confidence).toBe(1)
   })
 
   it('is false for an account with no recent tweets', () => {

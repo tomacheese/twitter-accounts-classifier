@@ -40,10 +40,10 @@ function tweet(
 }
 
 describe('videoRepostRule', () => {
-  it('is false when there are no source-attributed videos', () => {
+  it('is false when there are no source-attributed videos, with high confidence since no evidence was found', () => {
     const result = videoRepostRule.evaluate(makeBundle([tweet({ quotedTweetAuthorId: null })]))
     expect(result.value).toBe(false)
-    expect(result.confidence).toBe(0)
+    expect(result.confidence).toBe(1)
     expect(result.reason).toBe('foreignVideoPostCount=0 (n=1)')
   })
 
@@ -52,7 +52,7 @@ describe('videoRepostRule', () => {
       makeBundle([tweet({ id: 't1' }), tweet({ id: 't2' }), tweet({ id: 't3' })]),
     )
     expect(result.value).toBe(false)
-    expect(result.confidence).toBe(0)
+    expect(result.confidence).toBe(1)
     expect(result.reason).toBe('foreignVideoPostCount=0 (n=3)')
   })
 
@@ -78,7 +78,7 @@ describe('videoRepostRule', () => {
       ]),
     )
     expect(result.value).toBe(false)
-    expect(result.confidence).toBe(0)
+    expect(result.confidence).toBe(1)
     expect(result.reason).toBe('foreignVideoPostCount=0 (n=3)')
   })
 })
