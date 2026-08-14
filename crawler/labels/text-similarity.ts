@@ -20,10 +20,10 @@ export function normalizeForSimilarity(
   text: string,
   options: SimilarityNormalizationOptions = {},
 ): string {
-  return text
-    .replaceAll(URL_PATTERN, '')
-    .replaceAll(MENTION_PATTERN, '')
-    .replaceAll(options.removeHashtags ? HASHTAG_PATTERN : /$^/g, '')
+  let normalized = text.replaceAll(URL_PATTERN, '').replaceAll(MENTION_PATTERN, '')
+  if (options.removeHashtags) normalized = normalized.replaceAll(HASHTAG_PATTERN, '')
+
+  return normalized
     .replaceAll(WHITESPACE_PATTERN, ' ')
     .trim()
     .toLowerCase()
