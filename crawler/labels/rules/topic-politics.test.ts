@@ -42,9 +42,11 @@ describe('topicPoliticsRule', () => {
     ).toBe(false)
   })
 
-  it('is false for an unrelated bio', () => {
-    expect(
-      topicPoliticsRule.evaluate(makeBundle({ bio: '毎日ラーメンの写真を載せています' })).value,
-    ).toBe(false)
+  it('is false for an unrelated bio, with high confidence since no keyword evidence was found', () => {
+    const result = topicPoliticsRule.evaluate(
+      makeBundle({ bio: '毎日ラーメンの写真を載せています' }),
+    )
+    expect(result.value).toBe(false)
+    expect(result.confidence).toBe(1)
   })
 })

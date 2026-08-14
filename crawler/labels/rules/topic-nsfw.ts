@@ -1,3 +1,4 @@
+import { toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 // 曖昧な仄めかし表現まで対象にすると誤検知が増えるため、
@@ -40,14 +41,14 @@ export const topicNsfwRule: LabelRule = {
   description: 'プロフィールでアダルト/NSFW コンテンツを投稿していることを自己申告している',
   // 性的指向に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.6.0',
+  version: '1.6.1',
   evaluate(bundle) {
     const { bio } = bundle.account
     const optedOut = bio !== null && ANTI_NSFW_PATTERNS.some((pattern) => pattern.test(bio))
     const keywordMatch = bio !== null && NSFW_PATTERN.test(bio) && !optedOut
     return {
       value: keywordMatch,
-      confidence: keywordMatch ? 0.8 : 0,
+      confidence: toConfidence(keywordMatch, keywordMatch ? 0.8 : 0),
       reason: `bio nsfw-keyword match=${keywordMatch}`,
     }
   },

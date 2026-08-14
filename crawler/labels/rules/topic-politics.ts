@@ -1,3 +1,4 @@
+import { toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 // 「保守」「リベラル」のような曖昧なイデオロギー用語は、
@@ -13,13 +14,13 @@ export const topicPoliticsRule: LabelRule = {
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.1.0',
+  version: '1.1.1',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && POLITICS_PATTERN.test(bio)
     return {
       value: keywordMatch,
-      confidence: keywordMatch ? 0.8 : 0,
+      confidence: toConfidence(keywordMatch, keywordMatch ? 0.8 : 0),
       reason: `bio politics-keyword match=${keywordMatch}`,
     }
   },

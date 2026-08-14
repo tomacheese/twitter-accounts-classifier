@@ -56,12 +56,12 @@ describe('scamLinkDomainRule', () => {
     ).toBe(true)
   })
 
-  it('is false when only a lookalike domain is present', () => {
-    expect(
-      scamLinkDomainRule.evaluate(
-        makeBundle([tweet({ expandedUrls: ['https://evil1link.jp/fictional'] })]),
-      ).value,
-    ).toBe(false)
+  it('is false when only a lookalike domain is present, with high confidence since no matching domain was found', () => {
+    const result = scamLinkDomainRule.evaluate(
+      makeBundle([tweet({ expandedUrls: ['https://evil1link.jp/fictional'] })]),
+    )
+    expect(result.value).toBe(false)
+    expect(result.confidence).toBe(1)
   })
 
   it('is true when only one of several URLs matches', () => {

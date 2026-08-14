@@ -1,4 +1,5 @@
 import { classifyAmazonAffiliateUrl } from '../amazon-affiliate-url'
+import { toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 const PR_DISCLOSURE_PATTERN = /(?:#PR(?![\p{L}\p{N}_])|[【（([]\s*PR\s*[】）)\]])/iu
@@ -7,7 +8,7 @@ export const amazonAffiliatePromotedRule: LabelRule = {
   key: 'amazon_affiliate_promoted',
   description:
     '自身の最近の投稿のうち、Amazonアソシエイトリンクを含む同一投稿がX上でプロモートされている',
-  version: '1.0.0',
+  version: '1.0.1',
   evaluate(bundle) {
     for (const tweet of bundle.recentTweets) {
       if (tweet.isRetweet || !tweet.isPromoted) continue
@@ -17,9 +18,10 @@ export const amazonAffiliatePromotedRule: LabelRule = {
         if (!evidence) continue
 
         const prDisclosure = PR_DISCLOSURE_PATTERN.test(tweet.fullText)
+        const evidenceScore = evidence.kind === 'associate-tag' ? 1 : 0.95
         return {
           value: true,
-          confidence: evidence.kind === 'associate-tag' ? 1 : 0.95,
+          confidence: toConfidence(true, evidenceScore),
           reason: `tweet=${tweet.id}, evidence=${evidence.kind}, host=${evidence.host}, paidPromotion=${tweet.isPaidPromotion}, prDisclosure=${prDisclosure}`,
         }
       }
@@ -27,7 +29,7 @@ export const amazonAffiliatePromotedRule: LabelRule = {
 
     return {
       value: false,
-      confidence: 0,
+      confidence: toConfidence(false, 0),
       reason: 'no promoted original tweet with Amazon affiliate link evidence',
     }
   },
