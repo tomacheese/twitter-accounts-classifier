@@ -265,6 +265,9 @@ export interface AccountTechnicalView {
   accountId: string
   firstSeenAt: Date
   lastCrawledAt: Date
+  lastRecentTweetsAttemptedAt: Date | null
+  lastRecentTweetsFetchedAt: Date | null
+  recentTweetsFetchStatus: string | null
   updatedAt: Date
   freshnessStatus: ReadModelFreshnessStatus
   sourceWatermarkAt: Date | null
@@ -289,6 +292,9 @@ export async function getAccountTechnical(
     accountId: account.id,
     firstSeenAt: account.firstSeenAt,
     lastCrawledAt: account.lastCrawledAt,
+    lastRecentTweetsAttemptedAt: account.lastRecentTweetsAttemptedAt,
+    lastRecentTweetsFetchedAt: account.lastRecentTweetsFetchedAt,
+    recentTweetsFetchStatus: account.recentTweetsFetchStatus,
     updatedAt: account.updatedAt,
     freshnessStatus: meta.freshnessStatus,
     sourceWatermarkAt: meta.sourceDataAt,

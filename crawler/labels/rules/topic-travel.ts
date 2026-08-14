@@ -14,7 +14,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicTravelRule: LabelRule = {
   key: 'topic_travel',
-  description: 'プロフィールで旅行を中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係から旅行との強い関連が示される',
   version: '1.1.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

@@ -63,6 +63,9 @@ const account = {
   isBlueVerified: false,
   firstSeenAt: new Date('2026-01-01T00:00:00Z'),
   lastCrawledAt: new Date('2026-01-02T00:00:00Z'),
+  lastRecentTweetsAttemptedAt: null,
+  lastRecentTweetsFetchedAt: null,
+  recentTweetsFetchStatus: null,
   updatedAt: new Date('2026-01-03T00:00:00Z'),
 }
 
@@ -453,6 +456,7 @@ describe('getAccountTechnical', () => {
       accountId: 'account-1',
       freshnessStatus: 'healthy',
       sourceWatermarkAt,
+      recentTweetsFetchStatus: null,
     })
   })
 

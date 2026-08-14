@@ -1,3 +1,4 @@
+import { combineRequired, rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 // オリジナル投稿が一切なく、直近のツイートがすべてリプライまたはリツイートで、
@@ -39,7 +40,7 @@ export const replyFarmingRule: LabelRule = {
   key: 'reply_farming',
   description:
     '自身によるオリジナル投稿が一切なく(直近のツイートがすべてリプライまたはリツイート)、かつ人間としてあり得ない投稿頻度である。大量生産型の AI 生成/エンゲージメント稼ぎリプライボットの特徴',
-  version: '1.4.0',
+  version: '1.4.1',
   evaluate(bundle) {
     const { tweetCount, accountCreatedAt } = bundle.account
     const sampled = bundle.recentTweets
@@ -64,11 +65,29 @@ export const replyFarmingRule: LabelRule = {
     const looksReplyFocused = hasEnoughSample && replyRatio >= REPLY_RATIO_THRESHOLD
 
     const value = isHighVelocity && hasNoOriginalContent && looksReplyFocused
+    const evidenceScore = combineRequired([
+      rampScore(tweetsPerDay, VELOCITY_THRESHOLD_PER_DAY, 150, 'higher-is-positive'),
+      rampScore(
+        recentTweetsPerDay,
+        RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY,
+        50,
+        'higher-is-positive',
+      ),
+      rampScore(
+        originalContentRatio,
+        ORIGINAL_CONTENT_RATIO_THRESHOLD,
+        ORIGINAL_CONTENT_RATIO_THRESHOLD,
+        'lower-is-positive',
+      ),
+      rampScore(replyRatio, REPLY_RATIO_THRESHOLD, 0.5, 'higher-is-positive'),
+    ])
+    const evaluable = hasEnoughSample
 
     return {
       value,
-      confidence: value ? 1 - originalContentRatio : 0,
+      confidence: toConfidence(value, evidenceScore, evaluable),
       reason: `tweetsPerDay=${tweetsPerDay.toFixed(1)}, recentTweetsPerDay=${recentTweetsPerDay.toFixed(1)}, originalContentRatio=${originalContentRatio.toFixed(2)}, replyRatio=${replyRatio.toFixed(2)} (n=${sampled.length})`,
+      evaluable,
     }
   },
 }

@@ -10,7 +10,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicParentingRule: LabelRule = {
   key: 'topic_parenting',
-  description: 'プロフィールで育児/子育てを中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係から育児/子育てとの強い関連が示される',
   version: '1.1.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

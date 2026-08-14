@@ -12,7 +12,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicPetsRule: LabelRule = {
   key: 'topic_pets',
-  description: 'プロフィールで猫・犬などペットの飼育・愛好を中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係からペットとの強い関連が示される',
   version: '1.0.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

@@ -14,7 +14,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicIdolRule: LabelRule = {
   key: 'topic_idol',
-  description: 'プロフィールでアイドル/推し活を中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係からアイドルとの強い関連が示される',
   version: '1.2.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

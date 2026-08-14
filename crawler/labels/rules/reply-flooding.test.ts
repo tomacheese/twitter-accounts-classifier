@@ -161,4 +161,28 @@ describe('replyFloodingRule', () => {
 
     expect(result.value).toBe(false)
   })
+
+  it('does not treat otherwise distinct live commentary as flooding solely because of a shared hashtag', () => {
+    const commentary = [
+      'ゴール！これは熱い #日本代表',
+      '惜しい！あと少しだった #日本代表',
+      '前半終了、0-0 #日本代表',
+      '選手交代きた #日本代表',
+      'ナイスセーブ！ #日本代表',
+      '後半開始、いけるぞ #日本代表',
+      'PK獲得！ #日本代表',
+      '試合終了、お疲れさま #日本代表',
+    ]
+    const result = replyFloodingRule.evaluate(
+      makeBundle(
+        commentary.map((fullText, index) => ({
+          fullText: `@target ${fullText}`,
+          isReply: true,
+          minutesAgo: index,
+        })),
+      ),
+    )
+
+    expect(result.value).toBe(false)
+  })
 })

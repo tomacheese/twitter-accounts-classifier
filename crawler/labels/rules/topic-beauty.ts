@@ -11,7 +11,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicBeautyRule: LabelRule = {
   key: 'topic_beauty',
-  description: 'プロフィールで美容・コスメ・スキンケアを中心的な関心事として挙げている',
+  description: 'プロフィールの直接証拠、またはフォロー関係から美容・コスメ・スキンケアとの強い関連が示される',
   version: '1.0.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

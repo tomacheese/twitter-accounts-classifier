@@ -150,6 +150,7 @@ export interface CrawlDependencies {
   ) => Promise<{ scraper: TrendsScraperLike }>
   closeTrendsScraper: (context: { scraper: TrendsScraperLike }) => Promise<void>
   persistAccount: (input: AccountProfileInput) => Promise<void>
+  recordRecentTweetsFetchFailure: (input: AccountProfileInput, attemptedAt: Date) => Promise<void>
   persistTweets: (inputs: TweetInput[]) => Promise<void>
   ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
   loadReplyCorpus: (watermark: Date) => Promise<ReplyHijackCorpusEntry[]>
@@ -617,6 +618,9 @@ async function runAuthorUnitPhase(
     let followSampleRequestCount = 0
     let followSampleRateLimitRemaining: number | undefined
     let followSampleRateLimitReset: number | undefined
+    let profile: AccountProfileInput | null = null
+    let recentTweetsAttemptedAt: Date | null = null
+    let recentTweetsFetchSucceeded = false
 
     try {
       // embedded profile は追加の API 呼び出しなしで得られるため、
@@ -627,19 +631,21 @@ async function runAuthorUnitPhase(
         embeddedProfile.screenName !== '' &&
         embeddedProfile.displayName !== ''
 
-      const profile = hasValidEmbeddedProfile
+      profile = hasValidEmbeddedProfile
         ? embeddedProfile
         : await withTwitterRetry(
             () => fetchAccountProfile(userApi, authorId),
             retryOptions(deps, trackAuthorRetryWait),
           )
 
+      recentTweetsAttemptedAt = new Date()
       const { tweets: recentTweets, authors: fallbackAuthors } = await guardTimelineFetch(() =>
         withTwitterRetry(
           () => fetchRecentTweets(userApi, authorId, deps.limits.recentTweetsPerAccount),
           retryOptions(deps, trackAuthorRetryWait),
         ),
       )
+      recentTweetsFetchSucceeded = true
 
       // フォロー先サンプルの取得はラベリング精度を補強する追加シグナルに過ぎないため、
       // 失敗してもキーワードベースのラベリングまで止めない。
@@ -709,6 +715,7 @@ async function runAuthorUnitPhase(
           authorId,
           profile,
           recentTweets,
+          recentTweetsFetchedAt: recentTweetsAttemptedAt,
           additionalOwnTweets: [...authorTimelineTweets, ...authorOtherReplies],
           recentTweetsFallbackAuthors: fallbackAuthors,
           followSample,
@@ -732,6 +739,16 @@ async function runAuthorUnitPhase(
       if (observationId !== null) labelsAppliedCount += appliedThisAuthor
       warnings.push(...authorWarnings)
     } catch (error) {
+      if (profile && recentTweetsAttemptedAt && !recentTweetsFetchSucceeded) {
+        try {
+          await deps.recordRecentTweetsFetchFailure(profile, recentTweetsAttemptedAt)
+        } catch (coverageError) {
+          logger.error(
+            `Failed to record recent-tweets fetch failure for ${authorId}`,
+            coverageError as Error,
+          )
+        }
+      }
       if (isExpectedAccountLookupError(error)) {
         logger.info(
           `Skipping author ${authorId}: account is unavailable (suspended, deleted, or protected)`,
@@ -1839,6 +1856,18 @@ export function createPersistAccountFn(prisma: PrismaClient): CrawlDependencies[
   }
 }
 
+export function createRecordRecentTweetsFetchFailureFn(
+  prisma: PrismaClient,
+): CrawlDependencies['recordRecentTweetsFetchFailure'] {
+  return async (input, attemptedAt) => {
+    const { account } = await upsertAccount(prisma, input)
+    await prisma.account.update({
+      where: { id: account.id },
+      data: { lastRecentTweetsAttemptedAt: attemptedAt, recentTweetsFetchStatus: 'failed' },
+    })
+  }
+}
+
 /**
  * tweet 更新を永続化し、classification-relevant な変化があった既存ラベル済み account のみ再評価を要求する persistTweets 実装を作る。
  * @param prisma - Prisma クライアント
@@ -1884,6 +1913,7 @@ async function main(): Promise<void> {
     closeTrendsScraper: (context) =>
       closeRealTrendsScraper(context as Parameters<typeof closeRealTrendsScraper>[0]),
     persistAccount: createPersistAccountFn(prisma),
+    recordRecentTweetsFetchFailure: createRecordRecentTweetsFetchFailureFn(prisma),
     persistTweets: createPersistTweetsFn(prisma),
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: (watermark) => loadReplyCorpus(prisma, watermark),

@@ -11,7 +11,7 @@ const KEYWORD_SCORE = 0.8
 
 export const topicVrchatRule: LabelRule = {
   key: 'topic_vrchat',
-  description: 'プロフィールまたは直近のツイートで VRChat を中心的な関心事として挙げている',
+  description: 'プロフィールまたは直近ツイートの直接証拠、またはフォロー関係から VRChat との強い関連が示される',
   version: '1.1.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

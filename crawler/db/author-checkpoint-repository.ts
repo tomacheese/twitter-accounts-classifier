@@ -29,6 +29,7 @@ export interface PersistAuthorResultAtomicParams {
   profile: AccountProfileInput
   /** `fetchRecentTweets` が返す Tweet 全件 (author 自身の Tweet と文脈 Tweet の両方)。 */
   recentTweets: TweetInput[]
+  recentTweetsFetchedAt?: Date
   /**
    * authorId 自身の Tweet であることが確定しており、
    * fallback profile 解決が不要な追加分(timeline 上で観測された自身の投稿・他アカウント処理中に見つかった自身のリプライ)。
@@ -102,6 +103,14 @@ export async function persistAuthorResultAtomic(
       const txClient = tx as unknown as PrismaClient
 
       const { account } = await upsertAccount(txClient, params.profile)
+      await txClient.account.update({
+        where: { id: account.id },
+        data: {
+          lastRecentTweetsAttemptedAt: params.recentTweetsFetchedAt ?? new Date(),
+          lastRecentTweetsFetchedAt: params.recentTweetsFetchedAt ?? new Date(),
+          recentTweetsFetchStatus: 'success',
+        },
+      })
       // `recentTweets` には他者に帰属する会話コンテキストの Tweet が混在するため、
       // Tweet.accountId の FK を満たすには対応する Account を先に用意しておく必要がある。
       for (const fallbackAuthor of fallbackAuthorsById.values()) {

@@ -158,6 +158,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       .mockResolvedValue({ scraper: { getTrends: vi.fn().mockResolvedValue([]) } }),
     closeTrendsScraper: vi.fn().mockResolvedValue(undefined),
     persistAccount: vi.fn().mockResolvedValue(undefined),
+    recordRecentTweetsFetchFailure: vi.fn().mockResolvedValue(undefined),
     persistTweets: vi.fn().mockResolvedValue(undefined),
     ensureLabelDefinitions: vi
       .fn()
@@ -404,8 +405,9 @@ describe('runCrawlCycle', () => {
             ]),
           }),
         )
-        const matchingLog = loggerError.mock.calls.find(([message]) =>
-          message.includes('labeling follow sample') && message.includes(`httpStatus=${status}`),
+        const matchingLog = loggerError.mock.calls.find(
+          ([message]) =>
+            message.includes('labeling follow sample') && message.includes(`httpStatus=${status}`),
         )
         const [message, loggedError] = matchingLog ?? []
         expect(message).toContain(`httpStatus=${status}`)
