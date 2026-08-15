@@ -280,6 +280,15 @@ describe('aiGeneratedRule', () => {
     expect(result.value).toBe(true)
   })
 
+  it('is false for a journalist bio listing generative AI as a coverage beat, not a self-declaration', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({
+        bio: 'ITジャーナリスト。担当分野はセキュリティ、ネット事件、生成AI。非常勤講師も務めています。',
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
   it('is false for a bio listing generative AI under an opposition-list heading placed before the term', () => {
     const result = aiGeneratedRule.evaluate(
       makeBundle({ bio: '苦手なもの：辛い食べ物、人混み、生成AI、早起き' }),

@@ -32,7 +32,7 @@ function isNegatedDeclaration(bio: string): boolean {
 // ただし「画像は」「投稿しています」のような自身のコンテンツを指す明示的な表現を伴う場合は、
 // 実際に自己申告しているとみなす。
 const INSTITUTIONAL_CONTEXT_PATTERN =
-  /教授|研究者|代表取締役|\bCEO\b|公式(アカウント)?|メディア|事業|コンサル(ティング)?|規制派|反対派|賛成派|推進(派)?|アドバイザー|著書|委員|エンジニア|CAMP|ウェビナー|セミナー|活用ノウハウ|解説|考察|紹介します|エバンジェリスト|evangelist|お仕事受付中|お仕事募集中/i
+  /教授|研究者|代表取締役|\bCEO\b|公式(アカウント)?|メディア|事業|コンサル(ティング)?|規制派|反対派|賛成派|推進(派)?|アドバイザー|著書|委員|エンジニア|CAMP|ウェビナー|セミナー|活用ノウハウ|解説|考察|紹介します|エバンジェリスト|evangelist|お仕事受付中|お仕事募集中|ジャーナリスト|記者|講師/i
 const PERSONAL_CONTENT_DECLARATION_PATTERN =
   /画像は|イラストは|作品(です|を投稿)|ヘッダーは|アイコンは|投稿して(います|ます)|保管庫|ポートレート|-generated (images?|art|content|portraits?)|images? are AI/i
 
@@ -119,7 +119,7 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.10.0',
+  version: '1.9.3',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
