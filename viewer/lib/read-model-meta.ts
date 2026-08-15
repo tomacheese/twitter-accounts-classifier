@@ -280,7 +280,7 @@ export async function getPipelineHealthBreakdown(
         include: { crawlRun: { select: { status: true } } },
       }),
       prisma.labelEvidenceEpoch.findFirst({
-        where: { crawlRun: { status: 'success' } },
+        where: { crawlRun: { status: { in: ['success', 'partial'] } } },
         orderBy: { sourceWatermarkAt: 'desc' },
       }),
       prisma.detectorState.findUnique({ where: { detectorKey: 'label_findings' } }),

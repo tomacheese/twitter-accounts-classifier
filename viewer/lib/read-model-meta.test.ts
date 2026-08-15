@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   getCoreReadModelMeta,
   getPipelineHealthBreakdown,
@@ -304,6 +304,64 @@ describe('getPipelineMeta', () => {
 })
 
 describe('getPipelineHealthBreakdown', () => {
+  it('partial epoch を detector の最新 eligible evidence として扱い source outcome も partial のまま保持する', async () => {
+    const latestPartialAt = new Date(Date.now() - 20 * 60 * 1000)
+    const previousSuccessAt = new Date(Date.now() - 2 * 60 * 60 * 1000)
+    let epochQueryCount = 0
+    const findFirst = vi.fn((args: { where?: { crawlRun?: { status?: unknown } } }) => {
+      epochQueryCount += 1
+      if (epochQueryCount === 1) {
+        return Promise.resolve({
+          sourceWatermarkAt: latestPartialAt,
+          createdAt: latestPartialAt,
+          crawlRun: { status: 'partial' },
+        })
+      }
+      const status = args.where?.crawlRun?.status
+      const acceptsPartial =
+        typeof status === 'object' &&
+        status !== null &&
+        'in' in status &&
+        Array.isArray((status as { in?: unknown }).in) &&
+        (status as { in: unknown[] }).in.includes('partial')
+      return Promise.resolve(
+        acceptsPartial
+          ? { sourceWatermarkAt: latestPartialAt, createdAt: latestPartialAt }
+          : { sourceWatermarkAt: previousSuccessAt, createdAt: previousSuccessAt },
+      )
+    })
+    const prisma = {
+      detectionPolicyVersion: { findFirst: vi.fn().mockResolvedValue(null) },
+      labelEvidenceEpoch: { findFirst },
+      detectorState: {
+        findUnique: vi.fn().mockResolvedValue({
+          sourceWatermarkAt: previousSuccessAt,
+          lastSuccessAt: previousSuccessAt,
+          lastFailureAt: null,
+          errorSummary: null,
+        }),
+      },
+      readModelState: {
+        findMany: vi.fn().mockResolvedValue(
+          ['label_summary', 'attention_items', 'overview_snapshot'].map((modelKey) => ({
+            modelKey,
+            status: 'healthy',
+            sourceWatermarkAt: previousSuccessAt,
+            lastSuccessAt: previousSuccessAt,
+          })),
+        ),
+      },
+    } as unknown as PrismaClient
+
+    const health = await getPipelineHealthBreakdown(prisma)
+
+    expect(health).toMatchObject({
+      overallStatus: 'delayed',
+      primaryCause: 'detector',
+      source: { status: 'healthy', lastOutcome: 'partial' },
+      detector: { status: 'delayed' },
+    })
+  })
   it('source は healthy のまま detector の遅延を primary cause として分離する', async () => {
     const sourceWatermarkAt = new Date(Date.now() - 20 * 60 * 1000)
     const prisma = createMockPrisma({

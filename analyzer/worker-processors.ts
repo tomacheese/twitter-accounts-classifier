@@ -392,12 +392,15 @@ export async function processLabelAggregateRefresh(
       }),
       prisma.labelDefinition.count(),
     ])
-    const isEligible =
-      evidenceEpoch?.crawlRun.status === 'success' &&
+    const sourceStatus = evidenceEpoch?.crawlRun.status
+    const isEligibleSource = sourceStatus === 'success' || sourceStatus === 'partial'
+
+    if (
+      evidenceEpoch &&
+      isEligibleSource &&
       labelDefinitionCount > 0 &&
       completeSnapshotCount === labelDefinitionCount
-
-    if (isEligible) {
+    ) {
       try {
         await runLabelFindingsSerialized(prisma, {
           evidenceEpochId: evidenceEpoch.id,
@@ -422,7 +425,7 @@ export async function processLabelAggregateRefresh(
       }
     } else {
       logger.info(
-        `Skipping label findings for ${workItem.triggerId}: evidence is missing, non-success, or incomplete`,
+        `Skipping label findings for ${workItem.triggerId}: evidence is missing, failed, or incomplete`,
       )
     }
   }
