@@ -160,6 +160,29 @@ describe('aiGeneratedRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it('is false for a job-title bio that identifies as a generative-AI evangelist, not a self-declaration', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({
+        bio: '生成AIエバンジェリスト。企業向けに最新動向を発信しています。',
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for a bio soliciting generative-AI-related freelance work, not a self-declaration', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({
+        bio: 'フリーランスで活動中。生成AI関連のお仕事受付中です。',
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for a bio that denies AI generation using the "✖" prohibition symbol', () => {
+    const result = aiGeneratedRule.evaluate(makeBundle({ bio: '生成AI✖ 手描き専門です。' }))
+    expect(result.value).toBe(false)
+  })
+
   it('is still true for an institutional-sounding bio that also explicitly declares its own posted images are AI-generated', () => {
     const result = aiGeneratedRule.evaluate(
       makeBundle({
