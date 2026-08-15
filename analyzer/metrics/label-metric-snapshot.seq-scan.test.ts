@@ -7,6 +7,7 @@ const prisma = getPrismaClient()
 interface ExplainPlanNode {
   'Node Type': string
   'Relation Name'?: string
+  'Index Name'?: string
   Plans?: ExplainPlanNode[]
 }
 
@@ -20,6 +21,11 @@ function collectSeqScans(node: ExplainPlanNode, targetTable: string): ExplainPla
   const found =
     node['Node Type'] === 'Seq Scan' && node['Relation Name'] === targetTable ? [node] : []
   return [...found, ...(node.Plans ?? []).flatMap((child) => collectSeqScans(child, targetTable))]
+}
+
+function collectIndexNames(node: ExplainPlanNode): string[] {
+  const current = node['Index Name'] ? [node['Index Name']] : []
+  return [...current, ...(node.Plans ?? []).flatMap((child) => collectIndexNames(child))]
 }
 
 /**
@@ -45,6 +51,7 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
     { length: NOISE_LABEL_COUNT },
     (_, index) => `${labelId}_noise_${index}`,
   )
+  const allLabelIds = [labelId, ...noiseLabelIds]
 
   beforeAll(async () => {
     await prisma.labelDefinition.create({
@@ -102,7 +109,7 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
       data: Array.from({ length: NOISE_ACCOUNT_COUNT }, (_, index) => ({
         accountId: `account-seq-scan-noise-${index}`,
         labelDefinitionId: noiseLabelIds[index % noiseLabelIds.length],
-        value: index % 2 === 0,
+        value: index % 50 === 0,
         confidence: 0.5,
         reason: `noise_reason_${index}`,
         method: 'rule',
@@ -119,7 +126,7 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
         profileObservedAt: new Date(),
         activeLabelKeys: [],
         activeLabelCount: 0,
-        classificationObservedAt: index % 2 === 0 ? new Date() : null,
+        classificationObservedAt: index % 50 === 0 ? new Date() : null,
       })),
     })
 
@@ -177,10 +184,12 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
     }
   })
 
-  it('reasonDistribution クエリ (value = true に絞った index-only scan)', async () => {
+  it('reasonDistribution クエリは全ラベル指定でも Seq Scan しない', async () => {
+    const labelIdsSql = allLabelIds.map((id) => `'${id}'`).join(', ')
     const plan = await explain(
-      `SELECT "labelDefinitionId", "reason", COUNT(*) FROM "AccountClassificationLatest" WHERE "labelDefinitionId" IN ('${labelId}') AND "value" = true GROUP BY 1, 2`,
+      `SELECT "labelDefinitionId", "reason", COUNT(*) FROM "AccountClassificationLatest" WHERE "labelDefinitionId" IN (${labelIdsSql}) AND "value" = true GROUP BY 1, 2`,
     )
     expect(collectSeqScans(plan, 'AccountClassificationLatest')).toHaveLength(0)
+    expect(collectIndexNames(plan)).toContain('AccountClassificationLatest_true_reason_idx')
   })
 })
