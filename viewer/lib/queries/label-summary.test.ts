@@ -70,6 +70,24 @@ describe('listLabelSummaries', () => {
     })
   })
 
+  it('LabelDefinition.description 由来の labelDescription を返す', async () => {
+    vi.mocked(getReadModelReadiness).mockResolvedValue({ accounts: 'ready', labels: 'ready' })
+    const rows = [makeRow({ labelDefinitionId: 'label-1' })]
+    const labels = [{ id: 'label-1', key: 'label-key', description: 'テスト用ラベルの説明文' }]
+    const { prisma } = createMockPrisma({
+      pointer: { currentGenerationId: 'generation-1' },
+      rows,
+      labels,
+    })
+
+    const result = await listLabelSummaries(prisma)
+
+    expect(result.items[0]).toMatchObject({
+      labelKey: 'label-key',
+      labelDescription: 'テスト用ラベルの説明文',
+    })
+  })
+
   it('ReadModelPointer が無ければ空配列を返す', async () => {
     vi.mocked(getReadModelReadiness).mockResolvedValue({ accounts: 'ready', labels: 'ready' })
     const { prisma } = createMockPrisma({})
