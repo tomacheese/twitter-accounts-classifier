@@ -383,7 +383,7 @@ export async function buildLabelAggregateSnapshotSet(
 
           const reasonDistribution: Record<string, number> = {}
           for (const row of reasonRowsByLabel.get(label.id) ?? []) {
-            reasonDistribution[row.reason] = Number(row.count)
+            reasonDistribution[row.reason] = row.count
           }
 
           const freshnessRow = freshnessRowByLabel.get(label.id)
