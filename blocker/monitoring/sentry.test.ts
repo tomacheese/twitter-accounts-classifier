@@ -49,7 +49,19 @@ describe('monitoring/sentry', () => {
 
     const error = new Error('boom')
     captureException(error)
-    expect(captureExceptionMock).toHaveBeenCalledWith(error, undefined)
+    expect(captureExceptionMock).toHaveBeenCalledWith(error, { extra: undefined })
+  })
+
+  it('forwards captured exceptions with extra context when GLITCHTIP_DSN is set', async () => {
+    process.env.GLITCHTIP_DSN = 'https://example.test/1'
+    const { initMonitoring, captureException } = await import('./sentry')
+    initMonitoring()
+
+    const error = new Error('boom')
+    captureException(error, { username: 'alice', httpStatus: 403 })
+    expect(captureExceptionMock).toHaveBeenCalledWith(error, {
+      extra: { username: 'alice', httpStatus: 403 },
+    })
   })
 
   it('forwards captured messages with a warning level and extra context when GLITCHTIP_DSN is set', async () => {

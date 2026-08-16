@@ -31,7 +31,9 @@ describe('createBlock actor unavailable', () => {
 
     await expect(
       createBlock(cookies, fetchImpl as unknown as typeof fetch, 'target-user-999'),
-    ).rejects.toThrow(expect.not.stringContaining('target-user-999'))
+    ).rejects.toMatchObject({
+      message: expect.not.stringContaining('target-user-999'),
+    })
   })
 
   it('keeps other 403 responses as ResponseError', async () => {

@@ -199,27 +199,43 @@ function isBlockTargetNotFoundResponse(status: number, body: string): boolean {
   }
 }
 
+export const BLOCK_ACTOR_UNAVAILABLE_HTTP_STATUS = 403
+export const BLOCK_ACTOR_UNAVAILABLE_X_ERROR_CODE = 64
+
 function isBlockActorUnavailableResponse(status: number, body: string): boolean {
-  if (status !== 403) return false
+  if (status !== BLOCK_ACTOR_UNAVAILABLE_HTTP_STATUS) return false
   try {
     const payload = JSON.parse(body) as { errors?: { code?: number }[] }
-    return payload.errors?.some((error) => error.code === 64) ?? false
+    return (
+      payload.errors?.some((error) => error.code === BLOCK_ACTOR_UNAVAILABLE_X_ERROR_CODE) ?? false
+    )
   } catch {
     return false
   }
 }
 
 /**
+ * `BlockActorUnavailableError` の message と `BlockAccountRun.errorMessage` を同じ文言に保つため、
+ * フォーマット処理を一箇所にまとめている。
+ * @param httpStatus - レスポンスの HTTP ステータスコード
+ * @param xErrorCode - X API のエラーコード
+ * @returns block 実行アカウント操作不能を表すエラーメッセージ
+ */
+export function formatBlockActorUnavailableMessage(httpStatus: number, xErrorCode: number): string {
+  return `Block actor account is unavailable (HTTP ${httpStatus}, X error code ${xErrorCode})`
+}
+
+/**
  * block を実行するログインアカウント自体が suspended 等で操作不能な場合に throw するエラー。
- * message に block 対象ユーザー ID を含めると、GlitchTip のデフォルトの message ベース fingerprint が
- * 対象ごとに別 Issue へ grouping してしまうため、あえて含めない。
+ * message に block 対象ユーザー ID は含めない。
+ * 含めると GlitchTip の message ベース fingerprint が対象ごとに別 Issue へ grouping してしまうため。
  */
 export class BlockActorUnavailableError extends Error {
   readonly httpStatus: number
   readonly xErrorCode: number
 
   constructor(httpStatus: number, xErrorCode: number) {
-    super(`Block actor account is unavailable (HTTP ${httpStatus}, X error code ${xErrorCode})`)
+    super(formatBlockActorUnavailableMessage(httpStatus, xErrorCode))
     this.name = 'BlockActorUnavailableError'
     this.httpStatus = httpStatus
     this.xErrorCode = xErrorCode
@@ -306,7 +322,7 @@ export async function createBlock(
       throw new BlockTargetNotFoundError(targetUserId)
     }
     if (isBlockActorUnavailableResponse(response.status, body)) {
-      throw new BlockActorUnavailableError(response.status, 64)
+      throw new BlockActorUnavailableError(response.status, BLOCK_ACTOR_UNAVAILABLE_X_ERROR_CODE)
     }
     throw new BlocksResponseError(
       `Failed to create block for user ${targetUserId}: HTTP ${response.status}${body ? ` - ${body}` : ''}`,

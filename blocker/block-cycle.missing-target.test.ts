@@ -62,11 +62,18 @@ describe('missing block target', () => {
     const { client, deps } = fakeDeps()
     vi.mocked(client.createBlock).mockRejectedValue(new BlockTargetNotFoundError('blocked-1'))
 
-    const result = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
-      accountId: 'blocked-1',
-      labelDefinitionId: 'label-1',
-      confidence: 0.9,
-    })
+    const result = await attemptBlock(
+      client as never,
+      deps as never,
+      'bar-1',
+      'blocker-1',
+      {
+        accountId: 'blocked-1',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+      },
+      'alice',
+    )
 
     expect(result).toBe('skipped')
     expect(deps.markOutboxRemoteSkipped).toHaveBeenCalledWith(deps.prisma, 'outbox-1')

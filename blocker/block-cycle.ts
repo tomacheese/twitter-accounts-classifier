@@ -3,6 +3,9 @@ import {
   BlockActorUnavailableError,
   BlockTargetNotFoundError,
   withTwitterRetry,
+  formatBlockActorUnavailableMessage,
+  BLOCK_ACTOR_UNAVAILABLE_HTTP_STATUS,
+  BLOCK_ACTOR_UNAVAILABLE_X_ERROR_CODE,
   type IssuedCookies,
   type OpenApiClientContext,
 } from 'twitter-client'
@@ -83,7 +86,9 @@ export async function resolveOwnAccountId(
  * @param blockAccountRunId - 記録先の `BlockAccountRun` ID
  * @param blockerId - ブロックを実行するアカウント
  * @param candidate - ブロック対象と根拠ラベル・確信度
- * @returns 成功時は true、通常失敗時は false、対象不存在で処理不要なら skipped
+ * @param username - ログ・GlitchTip 報告に使うブロック実行アカウントのユーザー名
+ * @returns 成功時は true、通常失敗時は false、対象不存在で処理不要なら skipped、
+ * ブロック実行アカウント自体が操作不能なら actor_unavailable
  */
 export async function attemptBlock(
   client: OpenApiClientContext,
@@ -91,7 +96,7 @@ export async function attemptBlock(
   blockAccountRunId: string,
   blockerId: string,
   candidate: BlockCandidate,
-  username?: string,
+  username: string,
 ): Promise<boolean | 'skipped' | 'actor_unavailable'> {
   let outboxEntry: OutboxEntryRef
   try {
@@ -159,10 +164,6 @@ export async function attemptBlock(
         `Failed to block account ${candidate.accountId} on behalf of ${blockerId}`,
         error,
       )
-      // remote レスポンスの時点で actor unavailable は確定済みのため、
-      // DB 記録の成否に関わらず候補ループを止める必要がある。
-      // markOutboxRemoteFailed/recordBlockAction の失敗を理由に false へ落とすと、
-      // 呼び出し元が「通常失敗」と誤認して残り候補への createBlock を続けてしまう。
       captureException(error, {
         username,
         blockerId,
@@ -170,6 +171,7 @@ export async function attemptBlock(
         xErrorCode: error.xErrorCode,
       })
       try {
+        // 永続化に失敗して false を返すと、呼び出し元が通常失敗と誤認して残り候補への createBlock を続けてしまう。
         await deps.markOutboxRemoteFailed(deps.prisma, outboxEntry.id)
         await deps.recordBlockAction(deps.prisma, {
           blockAccountRunId,
@@ -367,7 +369,10 @@ export async function runBlockAccountCycle(
       blockedCount,
       failedCount,
       errorMessage: actorUnavailable
-        ? 'Block actor account is unavailable (HTTP 403, X error code 64)'
+        ? formatBlockActorUnavailableMessage(
+            BLOCK_ACTOR_UNAVAILABLE_HTTP_STATUS,
+            BLOCK_ACTOR_UNAVAILABLE_X_ERROR_CODE,
+          )
         : null,
     })
 

@@ -211,11 +211,18 @@ describe('attemptBlock', () => {
       return Promise.resolve()
     })
 
-    await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
-      accountId: 'blocked-1',
-      labelDefinitionId: 'label-1',
-      confidence: 0.9,
-    })
+    await attemptBlock(
+      client as never,
+      deps as never,
+      'bar-1',
+      'blocker-1',
+      {
+        accountId: 'blocked-1',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+      },
+      'alice',
+    )
 
     expect(callOrder).toEqual(['outbox_created', 'remote_block_called'])
   })
@@ -229,11 +236,18 @@ describe('attemptBlock', () => {
     const client = createMockClient()
     vi.mocked(client.createBlock).mockRejectedValue(new Error('boom'))
 
-    await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
-      accountId: 'blocked-1',
-      labelDefinitionId: 'label-1',
-      confidence: 0.9,
-    })
+    await attemptBlock(
+      client as never,
+      deps as never,
+      'bar-1',
+      'blocker-1',
+      {
+        accountId: 'blocked-1',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+      },
+      'alice',
+    )
 
     expect(deps.markOutboxRemoteFailed).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
   })
@@ -243,11 +257,18 @@ describe('attemptBlock', () => {
     vi.mocked(deps.findOrCreateOutboxEntry).mockRejectedValue(new Error('db down'))
     const client = createMockClient()
 
-    const succeeded = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
-      accountId: 'blocked-1',
-      labelDefinitionId: 'label-1',
-      confidence: 0.9,
-    })
+    const succeeded = await attemptBlock(
+      client as never,
+      deps as never,
+      'bar-1',
+      'blocker-1',
+      {
+        accountId: 'blocked-1',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+      },
+      'alice',
+    )
 
     expect(succeeded).toBe(false)
     expect(client.createBlock).not.toHaveBeenCalled()
@@ -261,11 +282,18 @@ describe('attemptBlock', () => {
     })
     const client = createMockClient()
 
-    const succeeded = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
-      accountId: 'blocked-1',
-      labelDefinitionId: 'label-1',
-      confidence: 0.9,
-    })
+    const succeeded = await attemptBlock(
+      client as never,
+      deps as never,
+      'bar-1',
+      'blocker-1',
+      {
+        accountId: 'blocked-1',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+      },
+      'alice',
+    )
 
     expect(succeeded).toBe(true)
     expect(deps.markOutboxRemoteSucceeded).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
@@ -285,11 +313,18 @@ describe('attemptBlock', () => {
     vi.mocked(deps.markOutboxRemoteSucceeded).mockRejectedValue(new Error('db down'))
     const client = createMockClient()
 
-    const succeeded = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
-      accountId: 'blocked-1',
-      labelDefinitionId: 'label-1',
-      confidence: 0.9,
-    })
+    const succeeded = await attemptBlock(
+      client as never,
+      deps as never,
+      'bar-1',
+      'blocker-1',
+      {
+        accountId: 'blocked-1',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+      },
+      'alice',
+    )
 
     expect(succeeded).toBe(true)
   })
@@ -304,11 +339,18 @@ describe('attemptBlock', () => {
     const client = createMockClient()
     vi.mocked(client.createBlock).mockRejectedValue(new BlockTargetNotFoundError('blocked-1'))
 
-    const result = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
-      accountId: 'blocked-1',
-      labelDefinitionId: 'label-1',
-      confidence: 0.9,
-    })
+    const result = await attemptBlock(
+      client as never,
+      deps as never,
+      'bar-1',
+      'blocker-1',
+      {
+        accountId: 'blocked-1',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+      },
+      'alice',
+    )
 
     expect(result).toBe(false)
   })
@@ -322,11 +364,18 @@ describe('attemptBlock', () => {
     const client = createMockClient()
     vi.mocked(client.createBlock).mockRejectedValue(new BlockTargetNotFoundError('blocked-1'))
 
-    const result = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
-      accountId: 'blocked-1',
-      labelDefinitionId: 'label-1',
-      confidence: 0.9,
-    })
+    const result = await attemptBlock(
+      client as never,
+      deps as never,
+      'bar-1',
+      'blocker-1',
+      {
+        accountId: 'blocked-1',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+      },
+      'alice',
+    )
 
     expect(result).toBe('skipped')
     expect(deps.markOutboxRemoteSkipped).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
@@ -346,11 +395,18 @@ describe('attemptBlock', () => {
     const client = createMockClient()
     vi.mocked(client.createBlock).mockRejectedValue(new BlockTargetNotFoundError('blocked-1'))
 
-    const result = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
-      accountId: 'blocked-1',
-      labelDefinitionId: 'label-1',
-      confidence: 0.9,
-    })
+    const result = await attemptBlock(
+      client as never,
+      deps as never,
+      'bar-1',
+      'blocker-1',
+      {
+        accountId: 'blocked-1',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+      },
+      'alice',
+    )
 
     expect(result).toBe('skipped')
     expect(deps.markOutboxRemoteSkipped).toHaveBeenCalledWith(deps.prisma, 'outbox-1')
@@ -366,11 +422,18 @@ describe('attemptBlock', () => {
     const client = createMockClient()
     vi.mocked(client.createBlock).mockRejectedValue(new Error('boom'))
 
-    const result = await attemptBlock(client as never, deps as never, 'bar-1', 'blocker-1', {
-      accountId: 'blocked-1',
-      labelDefinitionId: 'label-1',
-      confidence: 0.9,
-    })
+    const result = await attemptBlock(
+      client as never,
+      deps as never,
+      'bar-1',
+      'blocker-1',
+      {
+        accountId: 'blocked-1',
+        labelDefinitionId: 'label-1',
+        confidence: 0.9,
+      },
+      'alice',
+    )
 
     expect(result).toBe(false)
   })
