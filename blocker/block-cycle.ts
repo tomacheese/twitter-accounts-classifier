@@ -1,5 +1,6 @@
 import { Logger } from '@book000/node-utils'
 import {
+  BlockActorUnavailableError,
   BlockTargetNotFoundError,
   withTwitterRetry,
   type IssuedCookies,
@@ -90,7 +91,8 @@ export async function attemptBlock(
   blockAccountRunId: string,
   blockerId: string,
   candidate: BlockCandidate,
-): Promise<boolean | 'skipped'> {
+  username?: string,
+): Promise<boolean | 'skipped' | 'actor_unavailable'> {
   let outboxEntry: OutboxEntryRef
   try {
     outboxEntry = await deps.findOrCreateOutboxEntry(deps.prisma, {
@@ -150,6 +152,43 @@ export async function attemptBlock(
         captureException(persistError, { blockerId, blockedId: candidate.accountId })
       }
       return 'skipped'
+    }
+
+    if (error instanceof BlockActorUnavailableError) {
+      logger.error(
+        `Failed to block account ${candidate.accountId} on behalf of ${blockerId}`,
+        error,
+      )
+      // remote レスポンスの時点で actor unavailable は確定済みのため、
+      // DB 記録の成否に関わらず候補ループを止める必要がある。
+      // markOutboxRemoteFailed/recordBlockAction の失敗を理由に false へ落とすと、
+      // 呼び出し元が「通常失敗」と誤認して残り候補への createBlock を続けてしまう。
+      captureException(error, {
+        username,
+        blockerId,
+        httpStatus: error.httpStatus,
+        xErrorCode: error.xErrorCode,
+      })
+      try {
+        await deps.markOutboxRemoteFailed(deps.prisma, outboxEntry.id)
+        await deps.recordBlockAction(deps.prisma, {
+          blockAccountRunId,
+          blockerId,
+          blockedId: candidate.accountId,
+          labelDefinitionId: candidate.labelDefinitionId,
+          confidence: candidate.confidence,
+          result: 'failure',
+          errorMessage: error.message,
+          outboxEntryId: outboxEntry.id,
+        })
+      } catch (persistError) {
+        logger.error(
+          `Failed to persist actor_unavailable failure for ${candidate.accountId} on behalf of ${blockerId}`,
+          persistError as Error,
+        )
+        captureException(persistError, { blockerId, blockedId: candidate.accountId })
+      }
+      return 'actor_unavailable'
     }
 
     logger.error(
@@ -290,25 +329,40 @@ export async function runBlockAccountCycle(
 
     let blockedCount = 0
     let failedCount = 0
+    let actorUnavailable = false
     const sleepImpl = deps.sleepImpl ?? defaultSleep
 
     for (const [index, candidate] of candidates.entries()) {
       if (index > 0) await sleepImpl(deps.limits.actionDelayMs)
-      const result = await attemptBlock(context, deps, accountRun.id, blockerId, candidate)
+      const result = await attemptBlock(
+        context,
+        deps,
+        accountRun.id,
+        blockerId,
+        candidate,
+        account.username,
+      )
       if (result === true) blockedCount++
       else if (result === false) failedCount++
+      else if (result === 'actor_unavailable') {
+        failedCount++
+        actorUnavailable = true
+        break
+      }
     }
 
     await deps.finishBlockAccountRun(deps.prisma, accountRun.id, {
       finishedAt: new Date(),
-      status: 'completed',
+      status: actorUnavailable ? 'failed' : 'completed',
       candidatesCount: candidates.length,
       blockedCount,
       failedCount,
-      errorMessage: null,
+      errorMessage: actorUnavailable
+        ? 'Block actor account is unavailable (HTTP 403, X error code 64)'
+        : null,
     })
 
-    return { username: account.username, blockedCount, failedCount, failed: false }
+    return { username: account.username, blockedCount, failedCount, failed: actorUnavailable }
   } finally {
     await deps.closeOpenApiClient(context)
   }
