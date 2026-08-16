@@ -1,19 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
+import { getReadModelReadiness } from '../read-model-meta'
+import { listLabelSummaries } from './label-summary'
 
-function createMockPrisma(options: {
-  labelAggregateRows?: {
-    labelKey: string
-    labelDescription: string
-    trueCount: number
-    totalCount: number
-  }[]
-  status?: {
-    labeledAccounts: number
-    lastSuccessAt: Date | null
-    lastAttemptStatus: string
-  } | null
-}) {
+vi.mock('../read-model-meta', () => ({ getReadModelReadiness: vi.fn() }))
+vi.mock('./label-summary', () => ({ listLabelSummaries: vi.fn() }))
+
+function createMockPrisma(options: { counter?: { labeledAccounts: number } | null }) {
   const prisma = {
     account: {
       count: vi.fn().mockResolvedValue(120),
@@ -22,139 +15,55 @@ function createMockPrisma(options: {
         .mockResolvedValue({ _max: { lastCrawledAt: new Date('2026-07-27T00:00:00Z') } }),
     },
     tweet: { count: vi.fn().mockResolvedValue(4500) },
-    labelAggregate: {
-      findMany: vi.fn().mockResolvedValue(options.labelAggregateRows ?? []),
+    labeledAccountCounter: {
+      findUnique: vi.fn().mockResolvedValue(options.counter ?? null),
     },
-    labelAggregateStatus: {
-      findUnique: vi.fn().mockResolvedValue(options.status ?? null),
-    },
-    // getLabelAggregateSnapshot は2テーブルの読み取りを RepeatableRead の
-    // インタラクティブトランザクションで包むため、テストダブルでも同じ形で
-    // コールバックへ自分自身を渡して呼び出す。
-    $transaction: vi.fn((callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
   } as unknown as PrismaClient & {
     account: { count: ReturnType<typeof vi.fn>; aggregate: ReturnType<typeof vi.fn> }
     tweet: { count: ReturnType<typeof vi.fn> }
-    labelAggregate: { findMany: ReturnType<typeof vi.fn> }
-    labelAggregateStatus: { findUnique: ReturnType<typeof vi.fn> }
-    $transaction: ReturnType<typeof vi.fn>
+    labeledAccountCounter: { findUnique: ReturnType<typeof vi.fn> }
   }
   return prisma
 }
 
-describe('getLabelAggregateSnapshot', () => {
-  it('maps LabelAggregate rows and LabelAggregateStatus into a snapshot', async () => {
-    const { getLabelAggregateSnapshot } = await import('./dashboard')
-    const prisma = createMockPrisma({
-      labelAggregateRows: [
-        {
-          labelKey: 'spam',
-          labelDescription: 'Likely spam account',
-          trueCount: 7,
-          totalCount: 120,
-        },
-      ],
-      status: {
-        labeledAccounts: 42,
-        lastSuccessAt: new Date('2026-08-05T00:00:00Z'),
-        lastAttemptStatus: 'success',
-      },
-    })
+function makeSummaryItem(overrides: Partial<Record<string, unknown>>) {
+  return {
+    labelDefinitionId: 'label-1',
+    labelKey: 'spam',
+    labelDescription: 'Likely spam account',
+    evaluatedCount: 120,
+    trueCount: 7,
+    populationCount: 120,
+    coverage: 1,
+    prevalence: 0.058,
+    qualityStatus: 'stable',
+    activeFindingCount: 0,
+    highestFindingSeverity: null,
+    ...overrides,
+  }
+}
 
-    const result = await getLabelAggregateSnapshot(prisma)
-
-    expect(result).toEqual({
-      labeledAccounts: 42,
-      distribution: [
-        {
-          labelKey: 'spam',
-          labelDescription: 'Likely spam account',
-          trueCount: 7,
-          totalAccounts: 120,
-        },
-      ],
-      lastSuccessAt: new Date('2026-08-05T00:00:00Z'),
-      lastAttemptStatus: 'success',
-    })
-  })
-
-  it('returns default zero values when LabelAggregateStatus has never been written', async () => {
-    const { getLabelAggregateSnapshot } = await import('./dashboard')
-    const prisma = createMockPrisma({ labelAggregateRows: [], status: null })
-
-    const result = await getLabelAggregateSnapshot(prisma)
-
-    expect(result).toEqual({
-      labeledAccounts: 0,
-      distribution: [],
-      lastSuccessAt: null,
-      lastAttemptStatus: null,
-    })
-  })
-
-  it('sorts distribution entries by labelKey even when rows arrive unsorted', async () => {
-    const { getLabelAggregateSnapshot } = await import('./dashboard')
-    const prisma = createMockPrisma({
-      labelAggregateRows: [
-        { labelKey: 'topic_tech', labelDescription: 'Tech', trueCount: 5, totalCount: 100 },
-        { labelKey: 'blue_verified', labelDescription: 'Verified', trueCount: 20, totalCount: 100 },
-        {
-          labelKey: 'spam',
-          labelDescription: 'Likely spam account',
-          trueCount: 7,
-          totalCount: 120,
-        },
-      ],
-    })
-
-    const result = await getLabelAggregateSnapshot(prisma)
-
-    expect(result.distribution.map((entry) => entry.labelKey)).toEqual([
-      'blue_verified',
-      'spam',
-      'topic_tech',
-    ])
-  })
-
-  it('falls back to null when lastAttemptStatus holds an unrecognized value', async () => {
-    const { getLabelAggregateSnapshot } = await import('./dashboard')
-    const prisma = createMockPrisma({
-      status: {
-        labeledAccounts: 42,
-        lastSuccessAt: new Date('2026-08-05T00:00:00Z'),
-        lastAttemptStatus: 'unknown-status',
-      },
-    })
-
-    const result = await getLabelAggregateSnapshot(prisma)
-
-    expect(result.lastAttemptStatus).toBeNull()
-  })
-
-  it('reads LabelAggregate and LabelAggregateStatus inside the same RepeatableRead transaction', async () => {
-    const { getLabelAggregateSnapshot } = await import('./dashboard')
-    const prisma = createMockPrisma({})
-
-    await getLabelAggregateSnapshot(prisma)
-
-    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: 'RepeatableRead',
-    })
-  })
-})
+// テストからは Prisma を差し替えられる形で呼ぶためのラッパー。
+// 実体は本ファイル冒頭の import から差し替わる `./dashboard` を直接使う。
+async function getDashboardKpisFor(prisma: PrismaClient) {
+  const { getDashboardKpis } = await import('./dashboard')
+  return getDashboardKpis(prisma)
+}
+async function getLabelDistributionFor() {
+  const { getLabelDistribution } = await import('./dashboard')
+  return getLabelDistribution({} as PrismaClient)
+}
+async function getTopLabelOverviewFor(limit: number) {
+  const { getTopLabelOverview } = await import('./dashboard')
+  return getTopLabelOverview({} as PrismaClient, limit)
+}
 
 describe('getDashboardKpis', () => {
-  it('aggregates account/tweet counts, labeled account count, and last crawl time', async () => {
-    const { getDashboardKpis } = await import('./dashboard')
-    const prisma = createMockPrisma({
-      status: {
-        labeledAccounts: 42,
-        lastSuccessAt: new Date('2026-08-05T00:00:00Z'),
-        lastAttemptStatus: 'success',
-      },
-    })
+  it('aggregates account/tweet counts, labeled account count, and last crawl time when accounts read model is ready', async () => {
+    vi.mocked(getReadModelReadiness).mockResolvedValue({ accounts: 'ready', labels: 'ready' })
+    const prisma = createMockPrisma({ counter: { labeledAccounts: 42 } })
 
-    const result = await getDashboardKpis(prisma)
+    const result = await getDashboardKpisFor(prisma)
 
     expect(result).toEqual({
       totalAccounts: 120,
@@ -164,14 +73,26 @@ describe('getDashboardKpis', () => {
     })
   })
 
-  it('returns 0 labeled accounts when LabelAggregateStatus has never been written', async () => {
-    const { getDashboardKpis } = await import('./dashboard')
-    const prisma = createMockPrisma({ status: null })
+  it('returns null labeled accounts while the read model is not ready yet', async () => {
+    vi.mocked(getReadModelReadiness).mockResolvedValue({
+      accounts: 'bootstrapping',
+      labels: 'bootstrapping',
+    })
+    const prisma = createMockPrisma({ counter: { labeledAccounts: 42 } })
+
+    const result = await getDashboardKpisFor(prisma)
+
+    expect(result.labeledAccounts).toBeNull()
+  })
+
+  it('returns 0 labeled accounts when the read model is ready but LabeledAccountCounter has never been written', async () => {
+    vi.mocked(getReadModelReadiness).mockResolvedValue({ accounts: 'ready', labels: 'ready' })
+    const prisma = createMockPrisma({ counter: null })
     prisma.account.count.mockResolvedValue(0)
     prisma.tweet.count.mockResolvedValue(0)
     prisma.account.aggregate.mockResolvedValue({ _max: { lastCrawledAt: null } })
 
-    const result = await getDashboardKpis(prisma)
+    const result = await getDashboardKpisFor(prisma)
 
     expect(result.labeledAccounts).toBe(0)
     expect(result.lastCrawledAt).toBeNull()
@@ -179,69 +100,59 @@ describe('getDashboardKpis', () => {
 })
 
 describe('getLabelDistribution', () => {
-  it('maps raw rows into typed distribution entries', async () => {
-    const { getLabelDistribution } = await import('./dashboard')
-    const prisma = createMockPrisma({
-      labelAggregateRows: [
-        {
-          labelKey: 'spam',
-          labelDescription: 'Likely spam account',
-          trueCount: 7,
-          totalCount: 120,
-        },
+  it('maps listLabelSummaries entries into distribution entries sorted by labelKey', async () => {
+    vi.mocked(listLabelSummaries).mockResolvedValue({
+      readiness: 'ready',
+      items: [
+        makeSummaryItem({
+          labelKey: 'topic_tech',
+          labelDescription: 'Tech',
+          trueCount: 5,
+          evaluatedCount: 100,
+        }),
+        makeSummaryItem({
+          labelKey: 'blue_verified',
+          labelDescription: 'Verified',
+          trueCount: 20,
+          evaluatedCount: 100,
+        }),
       ],
     })
 
-    const result = await getLabelDistribution(prisma)
+    const result = await getLabelDistributionFor()
 
     expect(result).toEqual([
       {
-        labelKey: 'spam',
-        labelDescription: 'Likely spam account',
-        trueCount: 7,
-        totalAccounts: 120,
+        labelKey: 'blue_verified',
+        labelDescription: 'Verified',
+        trueCount: 20,
+        totalAccounts: 100,
       },
+      { labelKey: 'topic_tech', labelDescription: 'Tech', trueCount: 5, totalAccounts: 100 },
     ])
   })
 
-  it('includes a label definition with zero evaluations as 0/0', async () => {
-    const { getLabelDistribution } = await import('./dashboard')
-    const prisma = createMockPrisma({
-      labelAggregateRows: [
-        {
-          labelKey: 'new-label',
-          labelDescription: 'Not yet evaluated by any crawl',
-          trueCount: 0,
-          totalCount: 0,
-        },
-      ],
-    })
+  it('returns an empty array while the read model is not ready', async () => {
+    vi.mocked(listLabelSummaries).mockResolvedValue({ readiness: 'bootstrapping', items: [] })
 
-    const result = await getLabelDistribution(prisma)
+    const result = await getLabelDistributionFor()
 
-    expect(result).toEqual([
-      {
-        labelKey: 'new-label',
-        labelDescription: 'Not yet evaluated by any crawl',
-        trueCount: 0,
-        totalAccounts: 0,
-      },
-    ])
+    expect(result).toEqual([])
   })
 })
 
 describe('getTopLabelOverview', () => {
   it('returns entries sorted by trueCount descending, limited to the given count', async () => {
-    const { getTopLabelOverview } = await import('./dashboard')
-    const prisma = createMockPrisma({
-      labelAggregateRows: [
-        { labelKey: 'topic_tech', labelDescription: 'Tech', trueCount: 5, totalCount: 100 },
-        { labelKey: 'blue_verified', labelDescription: 'Verified', trueCount: 20, totalCount: 100 },
-        { labelKey: 'topic_finance', labelDescription: 'Finance', trueCount: 12, totalCount: 100 },
+    vi.mocked(listLabelSummaries).mockResolvedValue({
+      readiness: 'ready',
+      items: [
+        makeSummaryItem({ labelKey: 'topic_tech', trueCount: 5 }),
+        makeSummaryItem({ labelKey: 'blue_verified', trueCount: 20 }),
+        makeSummaryItem({ labelKey: 'topic_finance', trueCount: 12 }),
       ],
     })
 
-    const entries = await getTopLabelOverview(prisma, 2)
+    const entries = await getTopLabelOverviewFor(2)
 
     expect(entries.map((entry) => entry.labelKey)).toEqual(['blue_verified', 'topic_finance'])
   })

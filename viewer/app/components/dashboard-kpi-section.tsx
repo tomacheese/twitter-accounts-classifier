@@ -33,7 +33,10 @@ export async function DashboardSummary(): Promise<React.ReactElement> {
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <StatTile label="Total accounts" value={kpis.totalAccounts.toLocaleString()} />
           <StatTile label="Total tweets" value={kpis.totalTweets.toLocaleString()} />
-          <StatTile label="Labeled accounts" value={kpis.labeledAccounts.toLocaleString()} />
+          <StatTile
+            label="Labeled accounts"
+            value={kpis.labeledAccounts === null ? '—' : kpis.labeledAccounts.toLocaleString()}
+          />
           <StatTile
             label="Last crawled"
             value={kpis.lastCrawledAt ? formatDateTime(kpis.lastCrawledAt) : '—'}
