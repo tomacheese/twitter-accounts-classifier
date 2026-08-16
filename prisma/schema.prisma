@@ -395,8 +395,8 @@ model AccountSummaryLatest {
   @@index([activeLabelKeys], type: Gin, map: "AccountSummaryLatest_activeLabelKeys_gin_idx")
 }
 
-// AccountSummaryLatest.activeLabelCount が 0 ⇔ 正 を跨いだ行だけをトリガーで
-// 増減させ、少なくとも1つ true ラベルを持つ distinct account 数を O(1) で保持する。
+// AccountSummaryLatest.activeLabelCount が 0 ⇔ 正 を跨いだ行だけトリガーで増減させ、
+// 少なくとも1つ true ラベルを持つ distinct account 数を O(1) で保持する。
 // 維持方法の詳細は該当 migration のトリガー定義コメントを参照。
 model LabeledAccountCounter {
   id              String   @id

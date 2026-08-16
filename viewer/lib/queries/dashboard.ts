@@ -19,10 +19,10 @@ export interface LabelDistributionEntry {
 const LABELED_ACCOUNT_COUNTER_ID = 'global'
 
 /**
- * `AccountSummaryLatest` の bootstrap が完了していない間は `LabeledAccountCounter`
- * も母集団全体を反映していないため、`accounts` read model が `ready` の場合のみ
- * 正常値として扱い、それ以外は未確定であることを示す `null` を返す
- * (0 を返すと「本当に0件」と「まだ集計できていない」を型で区別できないため)。
+ * `AccountSummaryLatest` の bootstrap 未完了時は `LabeledAccountCounter` も母集団全体を反映しない。
+ * そのため `accounts` read model が `ready` の場合のみ正常値として扱い、
+ * それ以外は未確定であることを示す `null` を返す。
+ * (0 だと「本当に0件」と「未集計」を型で区別できないため)
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns 少なくとも1つ true ラベルを持つ distinct account 数、未確定なら null
  */

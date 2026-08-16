@@ -7,8 +7,8 @@ async function readCounter(prisma: ReturnType<typeof getPrismaClient>): Promise<
   return row?.labeledAccounts ?? 0
 }
 
-// AccountSummaryLatest への INSERT/UPDATE/DELETE で activeLabelCount が 0 ⇔ 正 を
-// 跨いだ場合だけ LabeledAccountCounter が ±1 されることを、実際の Postgres トリガーに対して検証する。
+// AccountSummaryLatest への INSERT/UPDATE/DELETE で activeLabelCount が 0 ⇔ 正 を跨いだ場合だけ、
+// LabeledAccountCounter が ±1 されることを実際の Postgres トリガーに対して検証する。
 describe.skipIf(!process.env.DATABASE_URL)(
   'account_summary_latest_labeled_counter_trigger (integration)',
   () => {
