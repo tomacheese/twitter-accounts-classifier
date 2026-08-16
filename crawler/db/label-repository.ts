@@ -94,32 +94,49 @@ interface RecordAccountLabelsBulkRow {
   semanticNoOp: boolean
 }
 
+interface RecordAccountLabelsBulkCoreLabel {
+  accountId: string
+  labelDefinitionId: string
+  result: LabelRuleResult
+  method: string
+  ruleVersion: string
+}
+
 /**
- * 1アカウント分の評価結果をまとめて記録する: ラベルごとに `$queryRaw` を逐次発行する代わりに、
+ * ラベルごとに `$queryRaw` を逐次発行する代わりに、
  * 列単位の配列を `UNNEST` で展開し、
  * `AccountLabel` への INSERT と `AccountLabelLatest` への UPSERT を 1 ラウンドトリップにまとめる。
  * `AccountLabelLatest` への UPSERT は値・confidence・reason・method・ruleVersion が不変なら行わない
  * (`recordCrawlAccountLabel` は claim 成立時に無条件で UPSERT する点が異なる)。
+ * `labels` の各行が自分自身の `accountId` を持つため、
+ * 単一アカウント向けの `recordAccountLabelsBulk` と複数アカウントをまとめて渡す
+ * `recordAccountLabelsBulkForAccounts` の両方から共有できる。
  * @param prisma - Prisma クライアント
- * @param params - 記録対象のアカウントと評価結果一覧
+ * @param labels - 記録対象の評価結果一覧 (アカウントを跨いでよい)
+ * @param sourceKind - どの処理がこの行を書いたか (crawl・relabel など)
+ * @param sourceId - 発生源となった run の ID
+ * @param sourceUsername - 発生源となったログインアカウント
  * @returns 作成された `AccountLabel` 履歴行。`labels` と同じ順序とは限らないため、
- *   対応付けが必要なら `labelDefinitionId` で突き合わせる。
+ *   対応付けが必要なら `accountId`・`labelDefinitionId` で突き合わせる。
  */
-export async function recordAccountLabelsBulk(
+async function recordAccountLabelsBulkCore(
   prisma: PrismaClient,
-  params: RecordAccountLabelsBulkParams,
+  labels: RecordAccountLabelsBulkCoreLabel[],
+  sourceKind: string,
+  sourceId: string | undefined,
+  sourceUsername: string | undefined,
 ): Promise<AccountLabel[]> {
-  if (params.labels.length === 0) return []
+  if (labels.length === 0) return []
 
-  const ids = params.labels.map(() => randomUUID())
-  const accountIds = params.labels.map(() => params.accountId)
-  const labelDefinitionIds = params.labels.map((label) => label.labelDefinitionId)
-  const values = params.labels.map((label) => label.result.value)
-  const confidences = params.labels.map((label) => label.result.confidence)
-  const reasons = params.labels.map((label) => label.result.reason)
-  const methods = params.labels.map((label) => label.method)
-  const ruleVersions = params.labels.map((label) => label.ruleVersion)
-  const evaluables = params.labels.map((label) => label.result.evaluable ?? true)
+  const ids = labels.map(() => randomUUID())
+  const accountIds = labels.map((label) => label.accountId)
+  const labelDefinitionIds = labels.map((label) => label.labelDefinitionId)
+  const values = labels.map((label) => label.result.value)
+  const confidences = labels.map((label) => label.result.confidence)
+  const reasons = labels.map((label) => label.result.reason)
+  const methods = labels.map((label) => label.method)
+  const ruleVersions = labels.map((label) => label.ruleVersion)
+  const evaluables = labels.map((label) => label.result.evaluable ?? true)
 
   const rows = await prisma.$queryRaw<RecordAccountLabelsBulkRow[]>`
     WITH shared_now AS (
@@ -145,14 +162,14 @@ export async function recordAccountLabelsBulk(
     inserted_history AS (
       INSERT INTO "AccountLabel"
         ("id", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
-      SELECT ti.*, shared_now."labeledAt", ${params.sourceKind}, ${params.sourceId ?? null}, ${params.sourceUsername ?? null}
+      SELECT ti.*, shared_now."labeledAt", ${sourceKind}, ${sourceId ?? null}, ${sourceUsername ?? null}
       FROM to_insert ti
       CROSS JOIN shared_now
       RETURNING *
     ),
     upserted_latest AS (
       INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
-      SELECT ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion", ir."evaluable", shared_now."labeledAt", ${params.sourceKind}, ${params.sourceId ?? null}, ${params.sourceUsername ?? null}
+      SELECT ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion", ir."evaluable", shared_now."labeledAt", ${sourceKind}, ${sourceId ?? null}, ${sourceUsername ?? null}
       FROM input_rows ir
       CROSS JOIN shared_now
       WHERE EXISTS (SELECT 1 FROM to_insert ti WHERE ti."id" = ir."id")
@@ -190,14 +207,63 @@ export async function recordAccountLabelsBulk(
       history.push({
         ...rest,
         labeledAt,
-        sourceKind: params.sourceKind,
-        sourceId: params.sourceId ?? null,
-        sourceUsername: params.sourceUsername ?? null,
+        sourceKind,
+        sourceId: sourceId ?? null,
+        sourceUsername: sourceUsername ?? null,
       })
     }
   }
 
   return history
+}
+
+/**
+ * 1アカウント分の評価結果をまとめて記録する。SQL 本体は `recordAccountLabelsBulkCore` を参照。
+ * @param prisma - Prisma クライアント
+ * @param params - 記録対象のアカウントと評価結果一覧
+ * @returns 作成された `AccountLabel` 履歴行。`labels` と同じ順序とは限らないため、
+ *   対応付けが必要なら `labelDefinitionId` で突き合わせる。
+ */
+export async function recordAccountLabelsBulk(
+  prisma: PrismaClient,
+  params: RecordAccountLabelsBulkParams,
+): Promise<AccountLabel[]> {
+  return recordAccountLabelsBulkCore(
+    prisma,
+    params.labels.map((label) => ({ ...label, accountId: params.accountId })),
+    params.sourceKind,
+    params.sourceId,
+    params.sourceUsername,
+  )
+}
+
+export interface RecordAccountLabelsBulkForAccountsParams {
+  labels: RecordAccountLabelsBulkCoreLabel[]
+  /** どの処理がこの行を書いたか (crawl・relabel など)。 */
+  sourceKind: string
+  sourceId?: string
+  sourceUsername?: string
+}
+
+/**
+ * relabel worker のように、1 チャンクにまとめた複数アカウント分の評価結果を
+ * アカウントごとの往復なしで 1 ラウンドトリップで記録する。SQL 本体は
+ * `recordAccountLabelsBulkCore` を参照 (`labels` の各行が自分の `accountId` を持つ点のみが違う)。
+ * @param prisma - Prisma クライアント
+ * @param params - 記録対象のアカウントを跨いだ評価結果一覧
+ * @returns 作成された `AccountLabel` 履歴行
+ */
+export async function recordAccountLabelsBulkForAccounts(
+  prisma: PrismaClient,
+  params: RecordAccountLabelsBulkForAccountsParams,
+): Promise<AccountLabel[]> {
+  return recordAccountLabelsBulkCore(
+    prisma,
+    params.labels,
+    params.sourceKind,
+    params.sourceId,
+    params.sourceUsername,
+  )
 }
 
 /**

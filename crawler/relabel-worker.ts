@@ -3,20 +3,25 @@ import { hostname } from 'node:os'
 import { Logger } from '@book000/node-utils'
 import type { AnalysisWorkItem, PrismaClient } from './generated/prisma'
 import { LabelRuleRegistry } from './labels/registry'
+import type { LabelRuleResult } from './labels/types'
 import { buildAccountFeatureBundle } from './labels/build-account-feature-bundle'
 import type { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import type { buildReplyHijackIndex } from './labels/reply-hijack-index'
 import type { FollowGraphLabelIndex } from './labels/follow-graph-label-index'
 import {
   claimWorkItemBatchByIds,
-  completeAccountRelabelWorkItem,
+  completeAccountRelabelWorkItemsBulk,
   peekWorkItemCandidates,
   requestAccountRelabelBulk,
   type WorkItemCandidate,
 } from './db/analysis-work-item-repository'
-import { recordAccountLabelsBulk, ensureLabelDefinitionsForRules } from './db/label-repository'
+import {
+  recordAccountLabelsBulkForAccounts,
+  ensureLabelDefinitionsForRules,
+} from './db/label-repository'
 import { CRAWL_LIMITS } from './config/crawl-limits'
 import { loadReplyCorpus } from './db/reply-corpus'
+import { loadRecentTweetsForAccounts } from './db/tweet-repository'
 import { buildDuplicateReplyIndex as buildDuplicateReplyIndexImpl } from './labels/duplicate-reply-index'
 import { buildReplyHijackIndex as buildReplyHijackIndexImpl } from './labels/reply-hijack-index'
 import { buildFollowGraphLabelIndex } from './labels/follow-graph-label-index'
@@ -91,9 +96,98 @@ export interface EvaluateAccountRelabelItemsResult {
 }
 
 /**
- * claim 済みの account_relabel work item を、1 account ずつ評価・永続化する。
- * account 単位の try/catch で例外を吸収しているため、chunk を跨いだ Promise.all 並列化でも、
- * 1 account の失敗が他の account やチャンクを巻き込むことはない。
+ * claim 済みの account_relabel work item のうち、1 グループ分 (account 複数件) を
+ * account 取得・tweet 取得・ラベル永続化・work item 完了それぞれ 1 ラウンドトリップにまとめて評価する。
+ * account 単位の往復を無くした分、ラベル永続化のようなグループ全体を巻き込む失敗の
+ * blast radius はこのグループ (chunk size 以下) までに広がる。個々の account のルール評価
+ * (DB I/O を伴わない CPU 処理) は try/catch で分離しており、1 account の不正なデータで
+ * グループ全体の評価が失敗することはない。
+ * @param prisma - Prisma クライアント
+ * @param group - claimAccountRelabelBatchByIds で claim 済みの work item のうち1グループ分
+ * @param options - 評価に使うルールレジストリと共有インデックス・lease owner 名
+ * @returns succeeded (requeue 含む) にできた件数
+ */
+async function evaluateAccountRelabelItemGroup(
+  prisma: PrismaClient,
+  group: AnalysisWorkItem[],
+  options: Omit<EvaluateAccountRelabelItemsOptions, 'concurrency'>,
+): Promise<number> {
+  if (group.length === 0) return 0
+
+  const accountIds = group.map((item) => item.triggerId)
+  const [accounts, tweetsByAccountId] = await Promise.all([
+    prisma.account.findMany({ where: { id: { in: accountIds } } }),
+    loadRecentTweetsForAccounts(prisma, accountIds, CRAWL_LIMITS.recentTweetsPerAccount),
+  ])
+  const accountById = new Map(accounts.map((account) => [account.id, account]))
+
+  const labelsToPersist: {
+    accountId: string
+    labelDefinitionId: string
+    result: LabelRuleResult
+    method: string
+    ruleVersion: string
+  }[] = []
+  const failedItemIds = new Set<string>()
+  for (const item of group) {
+    // account が既に削除されている場合、これ以上評価しようがないため succeeded 扱いで終端する。
+    const account = accountById.get(item.triggerId)
+    if (!account) continue
+    try {
+      const recentTweets = tweetsByAccountId.get(account.id) ?? []
+      const bundle = buildAccountFeatureBundle(
+        account,
+        recentTweets,
+        options.duplicateReplyIndex,
+        options.replyHijackIndex,
+        options.followGraphLabelIndex,
+      )
+      for (const { rule, result } of options.registry.applyAll(bundle)) {
+        const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
+        if (!labelDefinitionId) continue
+        labelsToPersist.push({
+          accountId: account.id,
+          labelDefinitionId,
+          method: rule.key,
+          ruleVersion: rule.version,
+          result,
+        })
+      }
+    } catch (error) {
+      logger.error(`Failed to relabel account ${item.triggerId}`, error as Error)
+      captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
+      failedItemIds.add(item.id)
+      await prisma.analysisWorkItem
+        .update({
+          where: { id: item.id },
+          data: { lastErrorSummary: String(error).slice(0, 500) },
+        })
+        .catch(() => undefined)
+    }
+  }
+
+  if (labelsToPersist.length > 0) {
+    await recordAccountLabelsBulkForAccounts(prisma, {
+      sourceKind: 'relabel',
+      labels: labelsToPersist,
+    })
+  }
+
+  const completableItemIds = group
+    .filter((item) => !failedItemIds.has(item.id))
+    .map((item) => item.id)
+  const completions = await completeAccountRelabelWorkItemsBulk(prisma, {
+    workItemIds: completableItemIds,
+    leaseOwner: options.leaseOwner,
+  })
+  return completions.length
+}
+
+/**
+ * claim 済みの account_relabel work item を評価・永続化する。
+ * account 単位に往復していた DB I/O (account 取得・tweet 取得・ラベル永続化・
+ * work item 完了) をグループ単位にまとめることで、
+ * 1 account あたり最大 4 ラウンドトリップかかっていたレイテンシを chunk あたり数回に抑える。
  * @param prisma - Prisma クライアント
  * @param items - claimAccountRelabelBatchByIds で claim 済みの work item 一覧
  * @param options - 評価に使うルールレジストリ・共有インデックス・並行度・lease owner 名
@@ -104,71 +198,17 @@ export async function evaluateAccountRelabelItems(
   items: AnalysisWorkItem[],
   options: EvaluateAccountRelabelItemsOptions,
 ): Promise<EvaluateAccountRelabelItemsResult> {
-  async function evaluateOne(item: AnalysisWorkItem): Promise<boolean> {
-    try {
-      const account = await prisma.account.findUnique({ where: { id: item.triggerId } })
-      if (account) {
-        const recentTweets = await prisma.tweet.findMany({
-          where: { accountId: account.id },
-          orderBy: { createdAt: 'desc' },
-          take: CRAWL_LIMITS.recentTweetsPerAccount,
-        })
-        const bundle = buildAccountFeatureBundle(
-          account,
-          recentTweets,
-          options.duplicateReplyIndex,
-          options.replyHijackIndex,
-          options.followGraphLabelIndex,
-        )
-        const labelsToPersist = options.registry.applyAll(bundle).flatMap(({ rule, result }) => {
-          const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
-          if (!labelDefinitionId) return []
-          return [{ labelDefinitionId, method: rule.key, ruleVersion: rule.version, result }]
-        })
-        if (labelsToPersist.length > 0) {
-          await recordAccountLabelsBulk(prisma, {
-            accountId: account.id,
-            sourceKind: 'relabel',
-            labels: labelsToPersist,
-          })
-        }
-      }
-      // account が既に削除されている場合、これ以上評価しようがないため succeeded 扱いで終端する。
-      const outcome = await completeAccountRelabelWorkItem(prisma, {
-        workItemId: item.id,
-        leaseOwner: options.leaseOwner,
-      })
-      return outcome !== 'lease_lost'
-    } catch (error) {
-      logger.error(`Failed to relabel account ${item.triggerId}`, error as Error)
-      captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
-      await prisma.analysisWorkItem
-        .update({
-          where: { id: item.id },
-          data: { lastErrorSummary: String(error).slice(0, 500) },
-        })
-        .catch(() => undefined)
-      return false
-    }
-  }
-
   const concurrency = Math.max(1, options.concurrency)
-  const chunks: AnalysisWorkItem[][] = Array.from({ length: concurrency }, () => [])
+  const groups: AnalysisWorkItem[][] = Array.from({ length: concurrency }, () => [])
   for (const [index, item] of items.entries()) {
-    chunks[index % concurrency].push(item)
+    groups[index % concurrency].push(item)
   }
 
-  const chunkResults = await Promise.all(
-    chunks.map(async (chunk) => {
-      let succeeded = 0
-      for (const item of chunk) {
-        if (await evaluateOne(item)) succeeded++
-      }
-      return succeeded
-    }),
+  const groupResults = await Promise.all(
+    groups.map((group) => evaluateAccountRelabelItemGroup(prisma, group, options)),
   )
 
-  return { succeeded: chunkResults.reduce((sum, count) => sum + count, 0) }
+  return { succeeded: groupResults.reduce((sum, count) => sum + count, 0) }
 }
 
 interface StaleAccountRow {

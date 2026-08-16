@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
-import { upsertTweet, upsertTweets, type TweetInput } from './tweet-repository'
+import {
+  upsertTweet,
+  upsertTweets,
+  loadRecentTweetsForAccounts,
+  type TweetInput,
+} from './tweet-repository'
 
 const sampleTweet: TweetInput = {
   id: 't1',
@@ -297,5 +302,38 @@ describe('upsertTweet foreign-video-source count', () => {
 
     const call = upsert.mock.calls[0][0] as Record<string, unknown>
     expect(call.update).toMatchObject({ foreignVideoSourceCount: 2 })
+  })
+})
+
+describe('loadRecentTweetsForAccounts', () => {
+  it('accountIds が空の場合は DB へ問い合わせず空 Map を返す', async () => {
+    const queryRaw = vi.fn()
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const result = await loadRecentTweetsForAccounts(prisma, [], 20)
+
+    expect(result).toEqual(new Map())
+    expect(queryRaw).not.toHaveBeenCalled()
+  })
+
+  it('account ごとの直近ツイートを1回の queryRaw でまとめて取得し account 単位にグルーピングする', async () => {
+    const rows = [
+      { id: 't1', accountId: 'u1', createdAt: new Date('2026-01-02T00:00:00Z') },
+      { id: 't2', accountId: 'u1', createdAt: new Date('2026-01-01T00:00:00Z') },
+      { id: 't3', accountId: 'u2', createdAt: new Date('2026-01-03T00:00:00Z') },
+    ]
+    const queryRaw = vi.fn().mockResolvedValue(rows)
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const result = await loadRecentTweetsForAccounts(prisma, ['u1', 'u2', 'u3'], 20)
+
+    expect(queryRaw).toHaveBeenCalledTimes(1)
+    const sql = (queryRaw.mock.calls[0][0] as unknown[]).join('')
+    expect(sql).toContain('CROSS JOIN LATERAL')
+    expect(sql).toContain('ORDER BY "createdAt" DESC')
+    expect(result.get('u1')).toEqual([rows[0], rows[1]])
+    expect(result.get('u2')).toEqual([rows[2]])
+    // u3 はツイート 0 件のため Map にキー自体が存在しない (呼び出し元は ?? [] で扱う)。
+    expect(result.has('u3')).toBe(false)
   })
 })

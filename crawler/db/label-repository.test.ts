@@ -6,6 +6,7 @@ import {
   ensureLabelDefinitionsForRules,
   filterAccountIdsWithExistingLabels,
   recordAccountLabelsBulk,
+  recordAccountLabelsBulkForAccounts,
   recordCrawlAccountLabel,
   recordCrawlAccountLabelsAtomic,
   recordCrawlAccountLabelsAtomicWithinTx,
@@ -295,6 +296,82 @@ describe('recordAccountLabelsBulk', () => {
     expect(sqlText).toContain('LEFT JOIN "AccountLabelLatest"')
     expect(sqlText).toContain('al."confidence" IS DISTINCT FROM')
     expect(sqlText).toContain('al."reason" IS DISTINCT FROM')
+  })
+})
+
+describe('recordAccountLabelsBulkForAccounts', () => {
+  it('does not call queryRaw when there are no labels to persist', async () => {
+    const queryRaw = vi.fn()
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const result = await recordAccountLabelsBulkForAccounts(prisma, {
+      sourceKind: 'relabel',
+      labels: [],
+    })
+
+    expect(result).toEqual([])
+    expect(queryRaw).not.toHaveBeenCalled()
+  })
+
+  it('persists labels across multiple accounts via a single queryRaw call, each row keeping its own accountId', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([
+      {
+        id: 'al1',
+        accountId: 'u1',
+        labelDefinitionId: 'ld1',
+        value: true,
+        confidence: 1,
+        reason: 'because a',
+        method: 'rule-a',
+        ruleVersion: '1.0.0',
+        labeledAt: new Date('2026-08-04T00:00:00Z'),
+        historyInserted: true,
+        latestUpserted: true,
+      },
+      {
+        id: 'al2',
+        accountId: 'u2',
+        labelDefinitionId: 'ld1',
+        value: false,
+        confidence: 0.5,
+        reason: 'because b',
+        method: 'rule-a',
+        ruleVersion: '1.0.0',
+        labeledAt: new Date('2026-08-04T00:00:00Z'),
+        historyInserted: true,
+        latestUpserted: true,
+      },
+    ])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const result = await recordAccountLabelsBulkForAccounts(prisma, {
+      sourceKind: 'relabel',
+      labels: [
+        {
+          accountId: 'u1',
+          labelDefinitionId: 'ld1',
+          result: { value: true, confidence: 1, reason: 'because a' },
+          method: 'rule-a',
+          ruleVersion: '1.0.0',
+        },
+        {
+          accountId: 'u2',
+          labelDefinitionId: 'ld1',
+          result: { value: false, confidence: 0.5, reason: 'because b' },
+          method: 'rule-a',
+          ruleVersion: '1.0.0',
+        },
+      ],
+    })
+
+    expect(result).toEqual([
+      expect.objectContaining({ id: 'al1', accountId: 'u1' }),
+      expect.objectContaining({ id: 'al2', accountId: 'u2' }),
+    ])
+    expect(queryRaw).toHaveBeenCalledTimes(1)
+    const [, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    // recordAccountLabelsBulk と異なり、accountId 列は行ごとに異なる値を持つ。
+    expect(values[1]).toEqual(['u1', 'u2'])
   })
 })
 

@@ -280,3 +280,41 @@ export async function completeAccountRelabelWorkItem(
   if (!row) return 'lease_lost'
   return row.status === 'queued' ? 'requeued' : 'succeeded'
 }
+
+export interface CompleteAccountRelabelWorkItemsBulkInput {
+  workItemIds: string[]
+  leaseOwner: string
+}
+
+/**
+ * account_relabel の完了処理を 1 チャンク分まとめて 1 ラウンドトリップで行う。
+ * ロジックは `completeAccountRelabelWorkItem` と同じで、対象を `id = ANY(...)` に広げただけ。
+ * チャンク内の全 item が同じ lease owner (同一 worker の同一チャンク claim) を持つため、
+ * item ごとに往復する必要がない。
+ * @param prisma - Prisma クライアント
+ * @param input - 対象 WorkItem の id 一覧と claim 時の lease owner
+ * @returns lease を保持できていた item の id と、その完了ステータス
+ */
+export async function completeAccountRelabelWorkItemsBulk(
+  prisma: PrismaClient,
+  input: CompleteAccountRelabelWorkItemsBulkInput,
+): Promise<{ id: string; status: 'succeeded' | 'requeued' }[]> {
+  if (input.workItemIds.length === 0) return []
+
+  const rows = await prisma.$queryRaw<{ id: string; status: string }[]>`
+    UPDATE "AnalysisWorkItem"
+    SET
+      "status" = CASE WHEN "staleRequestedAt" IS NOT NULL THEN 'queued' ELSE 'succeeded' END,
+      "availableAt" = CASE WHEN "staleRequestedAt" IS NOT NULL THEN now() ELSE "availableAt" END,
+      "staleRequestedAt" = NULL,
+      "leaseOwner" = NULL,
+      "leaseExpiresAt" = NULL,
+      "attemptCount" = 0
+    WHERE "id" = ANY(${input.workItemIds}) AND "leaseOwner" = ${input.leaseOwner}
+    RETURNING "id", "status"
+  `
+  return rows.map((row) => ({
+    id: row.id,
+    status: row.status === 'queued' ? ('requeued' as const) : ('succeeded' as const),
+  }))
+}
