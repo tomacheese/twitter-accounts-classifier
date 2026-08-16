@@ -342,13 +342,22 @@ export async function runBlockAccountCycle(
         candidate,
         account.username,
       )
-      if (result === true) blockedCount++
-      else if (result === false) failedCount++
-      else if (result === 'actor_unavailable') {
-        failedCount++
-        actorUnavailable = true
-        break
+      switch (result) {
+        case true: {
+          blockedCount++
+          break
+        }
+        case false: {
+          failedCount++
+          break
+        }
+        case 'actor_unavailable': {
+          failedCount++
+          actorUnavailable = true
+          break
+        }
       }
+      if (actorUnavailable) break
     }
 
     await deps.finishBlockAccountRun(deps.prisma, accountRun.id, {

@@ -5,21 +5,19 @@ const cookies = { ct0: 'csrf-token', authToken: 'auth-token-value' }
 
 describe('createBlock actor unavailable', () => {
   it('throws BlockActorUnavailableError for HTTP 403 + X error code 64', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(
-        Response.json(
-          {
-            errors: [
-              {
-                code: 64,
-                message: 'Your account is suspended and is not permitted to access this feature.',
-              },
-            ],
-          },
-          { status: 403 },
-        ),
-      )
+    const fetchImpl = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          errors: [
+            {
+              code: 64,
+              message: 'Your account is suspended and is not permitted to access this feature.',
+            },
+          ],
+        },
+        { status: 403 },
+      ),
+    )
 
     await expect(
       createBlock(cookies, fetchImpl as unknown as typeof fetch, '999'),
@@ -40,7 +38,10 @@ describe('createBlock actor unavailable', () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValue(
-        Response.json({ errors: [{ code: 9999, message: 'fixture generic error' }] }, { status: 403 }),
+        Response.json(
+          { errors: [{ code: 9999, message: 'fixture generic error' }] },
+          { status: 403 },
+        ),
       )
 
     await expect(
