@@ -199,6 +199,33 @@ function isBlockTargetNotFoundResponse(status: number, body: string): boolean {
   }
 }
 
+function isBlockActorUnavailableResponse(status: number, body: string): boolean {
+  if (status !== 403) return false
+  try {
+    const payload = JSON.parse(body) as { errors?: { code?: number }[] }
+    return payload.errors?.some((error) => error.code === 64) ?? false
+  } catch {
+    return false
+  }
+}
+
+/**
+ * block を実行するログインアカウント自体が suspended 等で操作不能な場合に throw するエラー。
+ * message に block 対象ユーザー ID を含めると、GlitchTip のデフォルトの message ベース fingerprint が
+ * 対象ごとに別 Issue へ grouping してしまうため、あえて含めない。
+ */
+export class BlockActorUnavailableError extends Error {
+  readonly httpStatus: number
+  readonly xErrorCode: number
+
+  constructor(httpStatus: number, xErrorCode: number) {
+    super(`Block actor account is unavailable (HTTP ${httpStatus}, X error code ${xErrorCode})`)
+    this.name = 'BlockActorUnavailableError'
+    this.httpStatus = httpStatus
+    this.xErrorCode = xErrorCode
+  }
+}
+
 /**
  * `twitter-openapi-typescript` にはブロック一覧エンドポイントに対応するメソッドが存在しないため、`trends-client.ts` が `guide.json` をハンドロールしているのと同じ要領で GraphQL リクエストを自前で組み立てている。
  * ライブラリ自身の GraphQL リクエストと異なり `x-client-transaction-id` を付与していないが、対応には追加調査が必要なため既知のギャップとして残している。
@@ -277,6 +304,9 @@ export async function createBlock(
     const body = await response.text().catch(() => '')
     if (isBlockTargetNotFoundResponse(response.status, body)) {
       throw new BlockTargetNotFoundError(targetUserId)
+    }
+    if (isBlockActorUnavailableResponse(response.status, body)) {
+      throw new BlockActorUnavailableError(response.status, 64)
     }
     throw new BlocksResponseError(
       `Failed to create block for user ${targetUserId}: HTTP ${response.status}${body ? ` - ${body}` : ''}`,
