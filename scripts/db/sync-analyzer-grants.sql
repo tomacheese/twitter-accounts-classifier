@@ -47,7 +47,8 @@ GRANT INSERT, UPDATE, DELETE ON TABLE
   "AttentionItemCurrent", "OverviewSnapshot",
   "ReadModelGeneration", "ReadModelPointer", "ReadModelState", "DetectorState",
   "AccountClassificationValueCount", "AccountClassificationConfidenceBucketCount",
-  "AccountClassificationRuleVersionCount", "AccountClassificationFreshnessBucket"
+  "AccountClassificationRuleVersionCount", "AccountClassificationFreshnessBucket",
+  "AccountClassificationReasonCount"
   TO analyzer;
 
 -- build identity は analyzer 自身の起動情報を upsert するため INSERT/UPDATE のみ許可する。
