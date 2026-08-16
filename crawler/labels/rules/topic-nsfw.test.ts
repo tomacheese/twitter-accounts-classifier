@@ -157,4 +157,10 @@ describe('topicNsfwRule', () => {
       ).value,
     ).toBe(false)
   })
+
+  it('is false for a bio whose product model code happens to contain "R18"', () => {
+    expect(
+      topicNsfwRule.evaluate(makeBundle({ bio: '愛用カメラはAR18です。散歩と写真が趣味' })).value,
+    ).toBe(false)
+  })
 })

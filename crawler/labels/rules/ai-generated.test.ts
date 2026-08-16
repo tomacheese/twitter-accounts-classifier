@@ -250,6 +250,24 @@ describe('aiGeneratedRule', () => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })
 
+  it('is false for a PdM bio describing building products with generative AI, not declaring its own posts as AI-generated', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({
+        bio: '生成AIでプロダクトを作っているPdMです。趣味は登山とカメラ。',
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for an anti-AI artist bio whose non-use declaration uses the formal "しておりません" negation form', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({
+        bio: '手描きイラスト専門のアカウントです。生成AIは自分の作品には一切使用しておりません。',
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
   it('is false for a bio that blocks accounts posting AI-generated content, not declaring its own', () => {
     const result = aiGeneratedRule.evaluate(
       makeBundle({

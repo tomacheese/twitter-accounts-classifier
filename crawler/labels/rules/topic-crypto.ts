@@ -11,8 +11,10 @@ const CRYPTO_PATTERN =
 // イラストレーターが自作の無断 NFT 化を拒否する目的で bio に NFT 等の語を書くことが多く、
 // これを関心事の申告と誤認してしまう。禁止マーカーが用語の直後に来ることが多いため、
 // 一致箇所の前後を確認する。
+// 「NG」「no」「not」は単語境界なしだと "posting" や "morning" のような
+// 無関係な英単語中の部分文字列にまで誤って一致するため、単語境界必須にしている。
 const REJECTION_WINDOW_LENGTH = 15
-const REJECTION_PATTERN = /🚫|🈲|❌|禁止|お断り|お断わり|NG/i
+const REJECTION_PATTERN = /🚫|🈲|❌|禁止|お断り|お断わり|\bNG\b|\bno\b|\bnot\b/i
 
 function isRejectedMention(bio: string, match: RegExpMatchArray): boolean {
   const index = match.index ?? 0
@@ -36,7 +38,7 @@ const KEYWORD_SCORE = 0.8
 export const topicCryptoRule: LabelRule = {
   key: 'topic_crypto',
   description: 'プロフィールの直接証拠、またはフォロー関係から暗号資産/web3 との強い関連が示される',
-  version: '1.3.1',
+  version: '1.3.2',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
