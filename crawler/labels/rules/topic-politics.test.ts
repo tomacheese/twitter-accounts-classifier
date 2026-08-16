@@ -30,6 +30,13 @@ describe('topicPoliticsRule', () => {
     ).toBe(true)
   })
 
+  it.each(['自民党党員です', '公明党公認、次の選挙に向けて活動中', '共産党支部長を務めています'])(
+    'is true for a bio naming a party affiliation via the %s suffix',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
   it('is true for an English politician bio', () => {
     expect(topicPoliticsRule.evaluate(makeBundle({ bio: 'State senator, district 4' })).value).toBe(
       true,
@@ -56,6 +63,14 @@ describe('topicPoliticsRule', () => {
     '地元の市議会議員を支持します',
     'Supporting senator Jane Doe',
   ])("does not treat a supporter bio as the account holder's political office: %s", (bio) => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    '元衆議院議員です。現在は評論家として活動しています',
+    '元自民党所属、今はフリーで活動しています',
+    'Former state senator, now a lobbyist',
+  ])('does not treat a former-officeholder bio as a current political office: %s', (bio) => {
     expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })
 

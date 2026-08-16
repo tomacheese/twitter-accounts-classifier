@@ -135,6 +135,17 @@ describe('spamRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it('is false for a bio that declines dating/investment/adult-content DM solicitation using "受け付けません", even with a mass-following pattern', () => {
+    const result = spamRule.evaluate(
+      makeBundle({
+        bio: '出会い系・投資・アダルト系のDMは受け付けません。趣味の話がしたいです。',
+        followersCount: 10,
+        followingCount: 800,
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
   it('is true for a bio with an early rejected dating-solicitation mention followed by a separate, unrejected side-hustle solicitation', () => {
     const result = spamRule.evaluate(
       makeBundle({

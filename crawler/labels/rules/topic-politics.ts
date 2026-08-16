@@ -13,19 +13,36 @@ const JAPANESE_OFFICE_SELF_IDENTIFICATION_PATTERN =
 const ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN =
   /\b(?:state\s+)?(?:politician|congressman|senator)\b(?:\s*,|\s+(?:for|of|district)\b|$)/i
 
+// 「元衆議院議員」「Former state senator」のように「元/former」を伴う bio は、
+// 現職ではなく過去の在職を述べているだけで、
+// description が要求する「現に公職者である」ことの自己申告にはならない。
+// 一致箇所の直前だけを見れば足りるため、window は短くしている。
+const FORMER_PREFIX_WINDOW_LENGTH = 10
+const FORMER_PREFIX_PATTERN = /元\s*$|\bformer\s*$/i
+
+function isFormerOfficeMention(bio: string, matchIndex: number): boolean {
+  const beforeMatch = bio.slice(Math.max(0, matchIndex - FORMER_PREFIX_WINDOW_LENGTH), matchIndex)
+  return FORMER_PREFIX_PATTERN.test(beforeMatch)
+}
+
+function matchesCurrentOffice(bio: string, pattern: RegExp): boolean {
+  const match = pattern.exec(bio)
+  return match !== null && !isFormerOfficeMention(bio, match.index)
+}
+
 export const topicPoliticsRule: LabelRule = {
   key: 'topic_politics',
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.1.2',
+  version: '1.2.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =
       bio !== null &&
-      (PARTY_AFFILIATION_PATTERN.test(bio) ||
-        JAPANESE_OFFICE_SELF_IDENTIFICATION_PATTERN.test(bio) ||
-        ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN.test(bio))
+      (matchesCurrentOffice(bio, PARTY_AFFILIATION_PATTERN) ||
+        matchesCurrentOffice(bio, JAPANESE_OFFICE_SELF_IDENTIFICATION_PATTERN) ||
+        matchesCurrentOffice(bio, ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN))
     return {
       value: keywordMatch,
       confidence: toConfidence(keywordMatch, keywordMatch ? 0.8 : 0),
