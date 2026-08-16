@@ -6,15 +6,11 @@ export interface PlanningDefinitionRow {
   currentRuleVersion: string | null
 }
 
-export interface PlanningAggregateRow {
-  labelDefinitionId: string
-  trueCount: number
-  totalCount: number
-}
-
 export interface PlanningSnapshotRow extends PlanningMetrics {
   labelDefinitionId: string
   observedAt: Date
+  trueCount: number
+  evaluatedCount: number
 }
 
 export interface PlanningCountRow {
@@ -34,7 +30,6 @@ export interface PlanningPopulationCountRow {
 
 export interface PlanningDataRows {
   definitions: PlanningDefinitionRow[]
-  aggregates: PlanningAggregateRow[]
   snapshots: PlanningSnapshotRow[]
   activeFindingCounts: PlanningCountRow[]
   recentChangeCounts: PlanningCountRow[]
@@ -59,7 +54,6 @@ function metrics(row: PlanningSnapshotRow | undefined): PlanningMetrics | undefi
 }
 
 export function assemblePlanningData(rows: PlanningDataRows): PlanningData {
-  const aggregates = new Map(rows.aggregates.map((row) => [row.labelDefinitionId, row]))
   const activeFindingCounts = new Map(
     rows.activeFindingCounts.map((row) => [row.labelDefinitionId, row.count]),
   )
@@ -74,7 +68,6 @@ export function assemblePlanningData(rows: PlanningDataRows): PlanningData {
   }
 
   const labels = rows.definitions.map((definition) => {
-    const aggregate = aggregates.get(definition.id)
     const orderedSnapshots = (snapshots.get(definition.id) ?? []).toSorted(
       (a, b) => b.observedAt.getTime() - a.observedAt.getTime(),
     )
@@ -82,8 +75,8 @@ export function assemblePlanningData(rows: PlanningDataRows): PlanningData {
       id: definition.id,
       key: definition.key,
       currentRuleVersion: definition.currentRuleVersion ?? 'unknown',
-      trueCount: aggregate?.trueCount ?? 0,
-      totalCount: aggregate?.totalCount ?? 0,
+      trueCount: orderedSnapshots[0]?.trueCount ?? 0,
+      totalCount: orderedSnapshots[0]?.evaluatedCount ?? 0,
       activeFindingCount: activeFindingCounts.get(definition.id) ?? 0,
       recentChangeCount: recentChangeCounts.get(definition.id) ?? 0,
       latestMetrics: metrics(orderedSnapshots[0]),
@@ -110,7 +103,6 @@ export function assemblePlanningData(rows: PlanningDataRows): PlanningData {
 
 export interface WeeklyReviewPlanningDataSource {
   listDefinitions(): Promise<PlanningDefinitionRow[]>
-  listAggregates(): Promise<PlanningAggregateRow[]>
   listSnapshots(targetTo: Date): Promise<PlanningSnapshotRow[]>
   listActiveFindingCounts(): Promise<PlanningCountRow[]>
   listRecentChangeCounts(targetFrom: Date, targetTo: Date): Promise<PlanningCountRow[]>
@@ -148,7 +140,6 @@ export async function loadWeeklyReviewPlanningData(
 ): Promise<PlanningData> {
   const [
     definitions,
-    aggregates,
     activeFindingCounts,
     snapshots,
     recentChangeCounts,
@@ -157,7 +148,6 @@ export async function loadWeeklyReviewPlanningData(
     populationCounts,
   ] = await Promise.all([
     source.listDefinitions(),
-    source.listAggregates(),
     source.listActiveFindingCounts(),
     source.listSnapshots(options.targetTo),
     source.listRecentChangeCounts(options.targetFrom, options.targetTo),
@@ -173,7 +163,6 @@ export async function loadWeeklyReviewPlanningData(
 
   return assemblePlanningData({
     definitions,
-    aggregates,
     snapshots,
     activeFindingCounts,
     recentChangeCounts,

@@ -504,16 +504,6 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
           accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
         },
       })
-      await prisma.labelAggregate.create({
-        data: {
-          labelDefinitionId: label.id,
-          labelKey,
-          labelDescription: '架空の週次レビューテストラベル',
-          trueCount: 1,
-          totalCount: 10,
-          updatedAt: now,
-        },
-      })
       await prisma.labelMetricSnapshot.createMany({
         data: [
           {
@@ -612,7 +602,7 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
       )
 
       expect(plannedLabel).toMatchObject({
-        trueCount: 1,
+        trueCount: 2,
         totalCount: 10,
         activeFindingCount: 1,
         recentChangeCount: 2,
@@ -630,7 +620,6 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
       await prisma.accountLabel.deleteMany({ where: { accountId } })
       await prisma.reviewFinding.deleteMany({ where: { fingerprint: findingFingerprint } })
       await prisma.labelMetricSnapshot.deleteMany({ where: { labelDefinitionId: label.id } })
-      await prisma.labelAggregate.deleteMany({ where: { labelDefinitionId: label.id } })
       await prisma.account.deleteMany({ where: { id: accountId } })
       await prisma.labelDefinition.deleteMany({ where: { id: label.id } })
     }

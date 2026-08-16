@@ -9,9 +9,6 @@ function emptySource(): WeeklyReviewPlanningDataSource {
     listDefinitions() {
       return Promise.resolve([])
     },
-    listAggregates() {
-      return Promise.resolve([])
-    },
     listSnapshots() {
       return Promise.resolve([])
     },

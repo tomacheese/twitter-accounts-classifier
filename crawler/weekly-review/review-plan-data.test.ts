@@ -7,10 +7,9 @@ import {
 } from './review-plan-data'
 
 describe('assemblePlanningData', () => {
-  it('snapshot は observedAt の新しい順で latest/previous に割り当てる', () => {
+  it('snapshot は observedAt の新しい順で latest/previous に割り当て、trueCount/totalCountも最新snapshotから導出する', () => {
     const rows: PlanningDataRows = {
       definitions: [{ id: 'l1', key: 'topic_alpha', currentRuleVersion: '2.0.0' }],
-      aggregates: [{ labelDefinitionId: 'l1', trueCount: 20, totalCount: 100 }],
       snapshots: [
         {
           labelDefinitionId: 'l1',
@@ -18,6 +17,8 @@ describe('assemblePlanningData', () => {
           prevalence: 0.1,
           coverage: 0.9,
           staleRatio: 0.01,
+          trueCount: 10,
+          evaluatedCount: 50,
         },
         {
           labelDefinitionId: 'l1',
@@ -25,6 +26,8 @@ describe('assemblePlanningData', () => {
           prevalence: 0.2,
           coverage: 0.8,
           staleRatio: 0.05,
+          trueCount: 20,
+          evaluatedCount: 100,
         },
       ],
       activeFindingCounts: [{ labelDefinitionId: 'l1', count: 2 }],
@@ -63,7 +66,6 @@ describe('assemblePlanningData', () => {
     }
     const rows: PlanningDataRows = {
       definitions: [{ id: 'l1', key: 'spam_alpha', currentRuleVersion: '1.0.0' }],
-      aggregates: [],
       snapshots: [],
       activeFindingCounts: [],
       recentChangeCounts: [],
@@ -77,10 +79,9 @@ describe('assemblePlanningData', () => {
     expect(result.candidates).toEqual([{ ...common, changeType: 'removed' }])
   })
 
-  it('aggregate が無い新規ラベルも zero count で計画対象に残す', () => {
+  it('snapshot が無い新規ラベルも zero count で計画対象に残す', () => {
     const rows: PlanningDataRows = {
       definitions: [{ id: 'new', key: 'topic_new', currentRuleVersion: null }],
-      aggregates: [],
       snapshots: [],
       activeFindingCounts: [],
       recentChangeCounts: [],
@@ -98,11 +99,11 @@ describe('assemblePlanningData', () => {
       totalCount: 0,
     })
   })
+
   it('data source の各 read を同じ対象期間で集約する', async () => {
     const calls: string[] = []
     const emptyRows: PlanningDataRows = {
       definitions: [],
-      aggregates: [],
       snapshots: [],
       activeFindingCounts: [],
       recentChangeCounts: [],
@@ -114,10 +115,6 @@ describe('assemblePlanningData', () => {
       listDefinitions() {
         calls.push('definitions')
         return Promise.resolve(emptyRows.definitions)
-      },
-      listAggregates() {
-        calls.push('aggregates')
-        return Promise.resolve(emptyRows.aggregates)
       },
       listSnapshots(targetTo) {
         calls.push(`snapshots:${targetTo.toISOString()}`)
@@ -158,7 +155,6 @@ describe('assemblePlanningData', () => {
 
     expect(calls).toEqual([
       'definitions',
-      'aggregates',
       'findings',
       `snapshots:${targetTo.toISOString()}`,
       `change-counts:${targetFrom.toISOString()}:${targetTo.toISOString()}`,
