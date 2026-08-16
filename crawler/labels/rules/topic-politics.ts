@@ -10,6 +10,8 @@ const PARTY_AFFILIATION_PATTERN =
   /(?:自民党|立憲民主党|公明党|共産党|日本維新の会|国民民主党|れいわ新選組|参政党)(?:\s*(?:所属|党員|公認|支部長))/i
 const JAPANESE_OFFICE_SELF_IDENTIFICATION_PATTERN =
   /(?:衆議院議員|参議院議員|県議会議員|市議会議員|国会議員|政治家)(?:を)?(?:しています|です|として活動|として働いています|[、,]|$)/i
+// 修飾語を伴わない裸の "politician" は自嘲や他者評など自己申告以外の文脈でも現れるため、
+// 誤検知の回避を優先し、修飾語を伴う明確な自己申告のみを対象とする。
 const ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN =
   /\b(?:state\s+)?(?:politician|congressman|senator)\b(?:\s*,|\s+(?:for|of|district)\b|$)/i
 

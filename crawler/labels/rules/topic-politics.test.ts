@@ -80,4 +80,15 @@ describe('topicPoliticsRule', () => {
       expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
     },
   )
+
+  it.each([
+    'Writer | Politician | Father',
+    'Author. Politician. Speaker.',
+    'They call me a politician sometimes',
+  ])(
+    'does not treat a bare "Politician" self-label without qualifiers as a current political office: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
 })
