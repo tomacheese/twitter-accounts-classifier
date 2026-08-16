@@ -222,11 +222,13 @@ interface FreshnessCountRow {
   delayedCount: bigint | null
   staleCount: bigint | null
 }
-/** AccountClassificationLatest から reasonDistribution 用に読み取った行。 */
+/** AccountClassificationReasonCount の読み取り行。 */
 interface ReasonCountRow {
   labelDefinitionId: string
   reason: string
-  count: bigint
+  // AccountClassificationReasonCount.count は INTEGER 列の直接 SELECT であり、
+  // COUNT(*) 等の集約ではないため node-postgres 経由でも number になる。
+  count: number
 }
 
 /**
@@ -327,10 +329,9 @@ export async function buildLabelAggregateSnapshotSet(
                 GROUP BY 1
               `,
               tx.$queryRaw<ReasonCountRow[]>`
-                SELECT "labelDefinitionId", "reason", COUNT(*) AS count
-                FROM "AccountClassificationLatest"
-                WHERE "labelDefinitionId" IN (${Prisma.join(labelIds)}) AND "value" = true
-                GROUP BY 1, 2
+                SELECT "labelDefinitionId", "reason", "count"
+                FROM "AccountClassificationReasonCount"
+                WHERE "labelDefinitionId" IN (${Prisma.join(labelIds)})
               `,
             ])
 
