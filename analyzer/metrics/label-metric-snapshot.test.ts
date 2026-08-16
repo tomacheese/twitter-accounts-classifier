@@ -1423,7 +1423,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await prisma.accountClassificationConfidenceBucketCount.deleteMany()
       await prisma.accountClassificationRuleVersionCount.deleteMany()
       await prisma.accountClassificationFreshnessBucket.deleteMany()
-    await prisma.accountClassificationReasonCount.deleteMany()
+      await prisma.accountClassificationReasonCount.deleteMany()
       await prisma.accountClassificationLatest.deleteMany()
       await prisma.accountSummaryLatest.deleteMany()
       await prisma.accountLabelLatest.deleteMany()
