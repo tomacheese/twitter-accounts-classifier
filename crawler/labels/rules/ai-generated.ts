@@ -11,9 +11,9 @@ const BIO_DECLARATION_PATTERN =
 // そのため一致箇所の前後双方を否定語で確認する。
 // 禁止マーカー(🚫/🈲/❌/NG)は用語の後ろではなく前に書かれることが多いため、
 // 確認範囲は前後に十分な幅を持たせている。
-const NEGATION_WINDOW_LENGTH = 25
+const NEGATION_WINDOW_LENGTH = 30
 const NEGATION_PATTERN =
-  /しません|していません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|不要|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|✖|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
+  /しません|していません|しておりません|おりません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|不要|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|✖|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
 
 function isNegatedDeclaration(bio: string): boolean {
   const match = BIO_DECLARATION_PATTERN.exec(bio)
@@ -32,7 +32,7 @@ function isNegatedDeclaration(bio: string): boolean {
 // ただし「画像は」「投稿しています」のような自身のコンテンツを指す明示的な表現を伴う場合は、
 // 実際に自己申告しているとみなす。
 const INSTITUTIONAL_CONTEXT_PATTERN =
-  /教授|研究者|代表取締役|\bCEO\b|公式(アカウント)?|メディア|事業|コンサル(ティング)?|規制派|反対派|賛成派|推進(派)?|アドバイザー|著書|委員|エンジニア|CAMP|ウェビナー|セミナー|活用ノウハウ|解説|考察|紹介します|エバンジェリスト|evangelist|お仕事受付中|お仕事募集中|ジャーナリスト|記者|講師/i
+  /教授|研究者|代表取締役|\bCEO\b|公式(アカウント)?|メディア|事業|コンサル(ティング)?|規制派|反対派|賛成派|推進(派)?|アドバイザー|著書|委員|エンジニア|\bPdM\b|プロダクトマネージャー|プロダクトオーナー|プロダクト開発|CAMP|ウェビナー|セミナー|活用ノウハウ|解説|考察|紹介します|エバンジェリスト|evangelist|お仕事受付中|お仕事募集中|ジャーナリスト|記者|講師/i
 const PERSONAL_CONTENT_DECLARATION_PATTERN =
   /画像は|イラストは|作品(です|を投稿)|ヘッダーは|アイコンは|投稿して(います|ます)|保管庫|ポートレート|-generated (images?|art|content|portraits?)|images? are AI/i
 
@@ -119,7 +119,7 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.9.3',
+  version: '1.9.4',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =

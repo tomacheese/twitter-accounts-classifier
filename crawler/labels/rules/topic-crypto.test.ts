@@ -67,6 +67,20 @@ describe('topicCryptoRule', () => {
     ).toBe(true)
   })
 
+  it('is false for a bio that rejects crypto with an English "NO" disclaimer', () => {
+    expect(
+      topicCryptoRule.evaluate(makeBundle({ bio: 'NO POLITICS / NO CRYPTO / cat photos daily' }))
+        .value,
+    ).toBe(false)
+  })
+
+  it('is true for a crypto bio where an unrelated word merely contains "ng" near the keyword (not a real rejection marker)', () => {
+    expect(
+      topicCryptoRule.evaluate(makeBundle({ bio: 'crypto trader, posting charts every morning' }))
+        .value,
+    ).toBe(true)
+  })
+
   it('bio・ツイートにキーワードを含まず、フォローグラフシグナルがしきい値を満たす場合は value: true・confidence が 0.5 超になる', () => {
     const bundle = {
       ...makeBundle({}),

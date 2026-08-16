@@ -6,9 +6,9 @@ import type { LabelRule } from '../types'
 // 英単語は無関係な語の内部に一致しないよう単語境界で判定している。
 // 日本語の「アダルト」は \b が効かないため、
 // NSFW とは無関係な心理学用語「アダルトチルドレン」を否定先読みで個別に除外している。
-// 格闘ゲームの MR (マスターレート) 表記は「MR18xx」のように「R18」を部分文字列として
-// 含んでしまうため、直前が M の場合は除外している。
-const NSFW_PATTERN = /\bNSFW\b|(?<!M)R-?18|18禁|成人向け|アダルト(?!チルドレン)|無修正/i
+// 格闘ゲームの MR (マスターレート) 表記や型番のような「XR18」表記は
+// 「R18」を部分文字列として含んでしまうため、直前が英字の場合は除外している。
+const NSFW_PATTERN = /\bNSFW\b|(?<![A-Za-z])R-?18|18禁|成人向け|アダルト(?!チルドレン)|無修正/i
 
 // NSFW 語を含みつつ実際には投稿しない/望まない旨を宣言するだけの bio は誤検知の主因となるため、
 // これらに一致した場合はラベルを抑制している。
@@ -41,7 +41,7 @@ export const topicNsfwRule: LabelRule = {
   description: 'プロフィールでアダルト/NSFW コンテンツを投稿していることを自己申告している',
   // 性的指向に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.6.1',
+  version: '1.6.2',
   evaluate(bundle) {
     const { bio } = bundle.account
     const optedOut = bio !== null && ANTI_NSFW_PATTERNS.some((pattern) => pattern.test(bio))
