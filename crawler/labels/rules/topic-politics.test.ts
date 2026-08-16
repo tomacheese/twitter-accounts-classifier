@@ -80,4 +80,34 @@ describe('topicPoliticsRule', () => {
       expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
     },
   )
+
+  it.each([
+    'Writer | Politician | Father',
+    'Writer | Father | Politician',
+    'Author. Politician. Speaker.',
+    'They call me a politician sometimes',
+    'I am a politician',
+    'Politician, dad, coffee lover',
+    'my dad was basically a politician',
+    'I hate every politician',
+  ])(
+    'does not treat a bare "Politician" self-label without a state prefix or for/of/district qualifier as a current political office: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it.each(['State politician', 'Politician for district 5'])(
+    'keeps "Politician" self-identification positive when qualified by a state prefix or for/of/district: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it('does not treat a former state politician bio as a current political office', () => {
+    expect(
+      topicPoliticsRule.evaluate(makeBundle({ bio: 'Former state politician, now a comedian' }))
+        .value,
+    ).toBe(false)
+  })
 })
