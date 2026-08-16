@@ -182,6 +182,65 @@ describe('runBlockCycle', () => {
     )
   })
 
+  it('runs the second account normally after the first account fails with actor_unavailable', async () => {
+    const config: BlockerAppConfig = {
+      accounts: [
+        {
+          email: 'a@example.com',
+          username: 'alice',
+          password: 'p',
+          otpSecret: null,
+          blockEnabled: true,
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+        },
+        {
+          email: 'b@example.com',
+          username: 'bob',
+          password: 'p',
+          otpSecret: null,
+          blockEnabled: true,
+          blockRule: { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+        },
+      ],
+      discordWebhookUrl: null,
+    }
+    const runBlockAccountCycle = vi
+      .fn()
+      .mockResolvedValueOnce({ username: 'alice', blockedCount: 0, failedCount: 1, failed: true })
+      .mockResolvedValueOnce({ username: 'bob', blockedCount: 2, failedCount: 0, failed: false })
+    const notifyDiscord = vi.fn().mockResolvedValue(undefined)
+    const deps = {
+      config,
+      startOrResumeBlockRun: vi.fn().mockResolvedValue({ id: 'run-1', completedUsernames: [] }),
+      finishBlockRun: vi.fn().mockResolvedValue(undefined),
+      touchBlockRunHeartbeat: vi.fn().mockResolvedValue(undefined),
+      runBlockAccountCycle,
+      notifyDiscord,
+      reconcileAccountOutbox: vi.fn().mockResolvedValue(undefined),
+      prisma: {},
+    }
+
+    await runBlockCycle(deps as never)
+
+    expect(runBlockAccountCycle).toHaveBeenCalledTimes(2)
+    expect(runBlockAccountCycle).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({ username: 'bob' }),
+      'run-1',
+    )
+    expect(notifyDiscord).toHaveBeenCalledWith(null, [
+      { username: 'alice', blockedCount: 0, failedCount: 1, failed: true },
+      { username: 'bob', blockedCount: 2, failedCount: 0, failed: false },
+    ])
+    expect(deps.finishBlockRun).toHaveBeenCalledWith(
+      deps.prisma,
+      'run-1',
+      expect.any(Date),
+      'failed',
+    )
+  })
+
   it('failedCount > 0 だが完走した場合 BlockRun.status は partial になる', async () => {
     const config: BlockerAppConfig = {
       accounts: [
