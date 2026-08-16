@@ -102,7 +102,7 @@ async function getActiveLabelKeysByAccount(
  * アカウント一覧ページのラベルフィルタ向けに、登録済みの全ラベルキーを読み込む。
  * {@link getLabelDistribution} (dashboard.ts) より意図的に軽量にしてあり、
  * フィルタにはキー一覧のみで十分で true/total の集計は不要なため、
- * 事前計算テーブルの `LabelAggregate` を経由せず `LabelDefinition` のみを問い合わせる。
+ * read model を経由せず `LabelDefinition` のみを問い合わせる。
  * @param prisma - クエリを実行する Prisma クライアント
  * @returns アルファベット順に並べた全ラベルキー
  */
