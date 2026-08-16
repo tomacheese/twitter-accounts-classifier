@@ -41,7 +41,7 @@ describe('deriveCompletenessFromCoverage', () => {
 })
 
 describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
-  it('reads population count from AccountSummaryLatest and aggregates from the 4 count tables', async () => {
+  it('reads population count from AccountSummaryLatest and aggregates from the 5 count tables', async () => {
     const snapshotAt = new Date('2026-08-09T00:00:00Z')
     const queryRaw = vi.fn((strings: TemplateStringsArray) => {
       const sql = strings.join('?')
@@ -80,23 +80,22 @@ describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
     expect(populationQuery).toContain('classificationObservedAt')
 
     // 集計本体が旧来の AccountClassificationLatest 直接 GROUP BY ではなく、
-    // 4 つの集計テーブルから読むことを確認する。
+    // 5 つの集計テーブルから読むことを確認する。
     for (const table of [
       'AccountClassificationValueCount',
       'AccountClassificationConfidenceBucketCount',
       'AccountClassificationRuleVersionCount',
       'AccountClassificationFreshnessBucket',
+      'AccountClassificationReasonCount',
     ]) {
       expect(queriedSql.some((sql) => sql.includes(`FROM "${table}"`))).toBe(true)
     }
-    // AccountClassificationLatest への直接参照は reasonDistribution 用の
-    // 1 クエリだけに限られ、value/confidence/ruleVersion/freshness の
-    // 集計はすべて上記の集計テーブル読み取りに置き換わっていることを確認する。
+    // reasonDistribution も集計テーブル読み取りに置き換わったため、
+    // AccountClassificationLatest への直接参照はゼロになる。
     const classificationLatestQueries = queriedSql.filter((sql) =>
       sql.includes('FROM "AccountClassificationLatest"'),
     )
-    expect(classificationLatestQueries).toHaveLength(1)
-    expect(classificationLatestQueries[0]).toContain('"reason"')
+    expect(classificationLatestQueries).toHaveLength(0)
   })
 })
 
@@ -168,6 +167,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     await prisma.accountClassificationConfidenceBucketCount.deleteMany()
     await prisma.accountClassificationRuleVersionCount.deleteMany()
     await prisma.accountClassificationFreshnessBucket.deleteMany()
+    await prisma.accountClassificationReasonCount.deleteMany()
     await prisma.accountClassificationLatest.deleteMany()
     await prisma.accountSummaryLatest.deleteMany()
     await prisma.accountLabelLatest.deleteMany()
@@ -419,6 +419,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     await prisma.accountClassificationConfidenceBucketCount.deleteMany()
     await prisma.accountClassificationRuleVersionCount.deleteMany()
     await prisma.accountClassificationFreshnessBucket.deleteMany()
+    await prisma.accountClassificationReasonCount.deleteMany()
     await prisma.accountClassificationLatest.deleteMany()
     await prisma.accountLabelLatest.deleteMany()
     await prisma.accountLabel.deleteMany()
@@ -558,6 +559,63 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
       where: { labelDefinitionId: label.id },
     })
     expect(freshnessRows.reduce((sum, row) => sum + row.count, 0)).toBe(1)
+
+    const reasonCount = await prisma.accountClassificationReasonCount.findUnique({
+      where: { labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'r1' } },
+    })
+    expect(reasonCount).toBeNull()
+
+    const reasonCountRemaining = await prisma.accountClassificationReasonCount.findUniqueOrThrow({
+      where: { labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'r2' } },
+    })
+    expect(reasonCountRemaining.count).toBe(1)
+  })
+
+  it('value=false の行を DELETE しても reasonCount は変化しない', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_trigger_delete_false', description: 'テスト用ラベル' },
+    })
+    await prisma.account.create({
+      data: {
+        id: 'acct_trig_del_false',
+        screenName: 'acct_trig_del_false',
+        displayName: 'acct_trig_del_false',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date(),
+      },
+    })
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_del_false',
+        labelDefinitionId: label.id,
+        value: false,
+        confidence: 0.1,
+        reason: 'reason_false_delete',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-13T00:00:00Z'),
+        sourceObservationId: null,
+      },
+    ])
+
+    await prisma.accountClassificationLatest.delete({
+      where: {
+        accountId_labelDefinitionId: {
+          accountId: 'acct_trig_del_false',
+          labelDefinitionId: label.id,
+        },
+      },
+    })
+
+    const reasonCount = await prisma.accountClassificationReasonCount.findUnique({
+      where: {
+        labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'reason_false_delete' },
+      },
+    })
+    expect(reasonCount).toBeNull()
   })
 
   it('value/confidence/ruleVersion と分単位バケットが変わらない UPDATE は集計を変えない', async () => {
@@ -622,6 +680,153 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
       },
     })
     expect(row.observedAt.toISOString()).toBe('2026-08-13T00:00:40.000Z')
+
+    // reason は r1 → r1_recrawled へ変わっているため、早期リターンではなく
+    // 通常の decrement/increment 経路を通り、reasonCount も新しい reason へ移る。
+    const oldReasonRow = await prisma.accountClassificationReasonCount.findUnique({
+      where: { labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'r1' } },
+    })
+    expect(oldReasonRow).toBeNull()
+    const newReasonRow = await prisma.accountClassificationReasonCount.findUniqueOrThrow({
+      where: { labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'r1_recrawled' } },
+    })
+    expect(newReasonRow.count).toBe(1)
+  })
+
+  it('value=true のまま reason が A→B に変わると A が -1、B が +1 になる', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_trigger_reason_change', description: 'テスト用ラベル' },
+    })
+    await prisma.account.create({
+      data: {
+        id: 'acct_trig_reason_change',
+        screenName: 'acct_trig_reason_change',
+        displayName: 'acct_trig_reason_change',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date(),
+      },
+    })
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_reason_change',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'reason_a',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-17T00:00:00Z'),
+        sourceObservationId: null,
+      },
+    ])
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_reason_change',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'reason_b',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-17T00:00:00Z'),
+        sourceObservationId: null,
+      },
+    ])
+
+    const reasonARow = await prisma.accountClassificationReasonCount.findUnique({
+      where: { labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'reason_a' } },
+    })
+    expect(reasonARow).toBeNull()
+
+    const reasonBRow = await prisma.accountClassificationReasonCount.findUniqueOrThrow({
+      where: { labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'reason_b' } },
+    })
+    expect(reasonBRow.count).toBe(1)
+  })
+
+  it('value が false→true / true→false と遷移すると reasonCount が正しく増減し、false 側の reason は現れない', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_trigger_reason_value_transition', description: 'テスト用ラベル' },
+    })
+    await prisma.account.create({
+      data: {
+        id: 'acct_trig_reason_transition',
+        screenName: 'acct_trig_reason_transition',
+        displayName: 'acct_trig_reason_transition',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date(),
+      },
+    })
+    // false で挿入: reasonCount は増えない。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_reason_transition',
+        labelDefinitionId: label.id,
+        value: false,
+        confidence: 0.1,
+        reason: 'reason_false',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-17T00:00:00Z'),
+        sourceObservationId: null,
+      },
+    ])
+    const afterInsertFalse = await prisma.accountClassificationReasonCount.findUnique({
+      where: {
+        labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'reason_false' },
+      },
+    })
+    expect(afterInsertFalse).toBeNull()
+
+    // false→true: 新 reason が +1 される。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_reason_transition',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.8,
+        reason: 'reason_true',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-17T00:01:00Z'),
+        sourceObservationId: null,
+      },
+    ])
+    const afterTrue = await prisma.accountClassificationReasonCount.findUniqueOrThrow({
+      where: { labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'reason_true' } },
+    })
+    expect(afterTrue.count).toBe(1)
+
+    // true→false: reason が -1 され、行ごと消える。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_reason_transition',
+        labelDefinitionId: label.id,
+        value: false,
+        confidence: 0.1,
+        reason: 'reason_false_again',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-17T00:02:00Z'),
+        sourceObservationId: null,
+      },
+    ])
+    const afterFalseAgain = await prisma.accountClassificationReasonCount.findUnique({
+      where: { labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'reason_true' } },
+    })
+    expect(afterFalseAgain).toBeNull()
+    const newReasonRow = await prisma.accountClassificationReasonCount.findUnique({
+      where: {
+        labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'reason_false_again' },
+      },
+    })
+    expect(newReasonRow).toBeNull()
   })
 
   it('同一 key への並行更新後も逐次実行と同じ集計になる', async () => {
@@ -1218,6 +1423,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await prisma.accountClassificationConfidenceBucketCount.deleteMany()
       await prisma.accountClassificationRuleVersionCount.deleteMany()
       await prisma.accountClassificationFreshnessBucket.deleteMany()
+    await prisma.accountClassificationReasonCount.deleteMany()
       await prisma.accountClassificationLatest.deleteMany()
       await prisma.accountSummaryLatest.deleteMany()
       await prisma.accountLabelLatest.deleteMany()
