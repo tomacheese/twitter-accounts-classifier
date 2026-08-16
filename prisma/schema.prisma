@@ -115,7 +115,6 @@ model LabelDefinition {
   createdAt           DateTime             @default(now())
   accountLabels       AccountLabel[]
   accountLabelsLatest AccountLabelLatest[]
-  labelAggregate      LabelAggregate?
   blockActions        BlockAction[]
   blockOutboxEntries  BlockOutboxEntry[]
 }
@@ -182,32 +181,6 @@ model AccountLabelLatest {
   @@index([value, accountId])
   // viewer の relabel coverage クエリを支えるインデックス。
   @@index([labelDefinitionId, ruleVersion])
-}
-
-// AccountLabelLatest から都度集計すると全件 Seq Scan になり本番の応答時間を守れないため、
-// crawler がラベリング完了時に計算した結果をここへ書き込み、viewer はここだけを読む。
-model LabelAggregate {
-  labelDefinitionId String          @id
-  labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
-  labelKey          String
-  labelDescription  String
-  trueCount         Int
-  totalCount        Int
-  updatedAt         DateTime
-
-  @@index([labelKey])
-}
-
-// 集計処理自体の成否と全体件数を LabelAggregate とは別テーブルに分けているのは、
-// 集計失敗時に LabelAggregate 側を上書きせず前回成功時点の値を残したまま、
-// 「前回成功時点の値を表示中かどうか」だけをこのテーブルで viewer から判別できるようにするため。
-model LabelAggregateStatus {
-  id                String    @id
-  labeledAccounts   Int
-  lastSuccessAt     DateTime?
-  lastAttemptAt     DateTime
-  lastAttemptStatus String
-  lastErrorMessage  String?
 }
 
 model WeeklyAnalysisRun {
@@ -420,6 +393,15 @@ model AccountSummaryLatest {
   @@index([highestFindingSeverity, activeFindingCount, accountId])
   @@index([normalizedScreenName])
   @@index([activeLabelKeys], type: Gin, map: "AccountSummaryLatest_activeLabelKeys_gin_idx")
+}
+
+// AccountSummaryLatest.activeLabelCount が 0 ⇔ 正 を跨いだ行だけをトリガーで
+// 増減させ、少なくとも1つ true ラベルを持つ distinct account 数を O(1) で保持する。
+// 維持方法の詳細は該当 migration のトリガー定義コメントを参照。
+model LabeledAccountCounter {
+  id              String   @id
+  labeledAccounts Int
+  updatedAt       DateTime @updatedAt
 }
 
 model AccountClassificationLatest {
