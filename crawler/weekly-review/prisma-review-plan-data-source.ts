@@ -1,7 +1,6 @@
 import { Prisma, type PrismaClient } from '../generated/prisma'
 import { runWithConcurrencyLimit } from '../utils/concurrency-limit'
 import type {
-  PlanningAggregateRow,
   PlanningCandidateRow,
   PlanningCountRow,
   PlanningDefinitionRow,
@@ -29,12 +28,6 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
     })
   }
 
-  public async listAggregates(): Promise<PlanningAggregateRow[]> {
-    return this.prisma.labelAggregate.findMany({
-      select: { labelDefinitionId: true, trueCount: true, totalCount: true },
-    })
-  }
-
   public async listSnapshots(targetTo: Date): Promise<PlanningSnapshotRow[]> {
     return this.prisma.$queryRaw<PlanningSnapshotRow[]>(Prisma.sql`
       SELECT
@@ -42,7 +35,9 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
         ranked."observedAt",
         ranked.prevalence,
         ranked.coverage,
-        ranked."staleRatio"
+        ranked."staleRatio",
+        ranked."trueCount",
+        ranked."evaluatedCount"
       FROM (
         SELECT
           snapshot."labelDefinitionId",
@@ -50,6 +45,8 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
           snapshot.prevalence,
           snapshot.coverage,
           snapshot."staleRatio",
+          snapshot."trueCount",
+          snapshot."evaluatedCount",
           row_number() OVER (
             PARTITION BY snapshot."labelDefinitionId"
             ORDER BY snapshot."observedAt" DESC, snapshot.id DESC

@@ -7,6 +7,7 @@ const MODEL_KEY = 'label_summary'
 export interface LabelSummaryListItem {
   labelDefinitionId: string
   labelKey: string
+  labelDescription: string
   evaluatedCount: number
   trueCount: number
   populationCount: number
@@ -56,11 +57,12 @@ export async function listLabelSummaries(prisma: PrismaClient): Promise<ListLabe
   const labelDefinitions = await prisma.labelDefinition.findMany({
     where: { id: { in: rows.map((row) => row.labelDefinitionId) } },
   })
-  const keyById = new Map(labelDefinitions.map((label) => [label.id, label.key]))
+  const definitionById = new Map(labelDefinitions.map((label) => [label.id, label]))
 
   const items: LabelSummaryListItem[] = rows.map((row) => ({
     labelDefinitionId: row.labelDefinitionId,
-    labelKey: keyById.get(row.labelDefinitionId) ?? row.labelDefinitionId,
+    labelKey: definitionById.get(row.labelDefinitionId)?.key ?? row.labelDefinitionId,
+    labelDescription: definitionById.get(row.labelDefinitionId)?.description ?? '',
     evaluatedCount: row.evaluatedCount,
     trueCount: row.trueCount,
     populationCount: row.populationCount,

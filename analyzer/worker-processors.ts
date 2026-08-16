@@ -1,5 +1,6 @@
 import path from 'node:path'
-import type { AnalysisWorkItem, PrismaClient } from './generated/prisma'
+import { Prisma, type AnalysisWorkItem, type PrismaClient } from './generated/prisma'
+import { captureException } from './monitoring/sentry'
 import { enqueueWorkItem } from './queue/work-item-repository'
 import { buildLabelAggregateSnapshotSet } from './metrics/label-metric-snapshot'
 import { generateFindingsForAggregateRefresh } from './findings/generate-findings'
@@ -60,6 +61,37 @@ export class LabelAggregateRefreshError extends Error {
     this.errorCode = errorCode
     this.name = 'LabelAggregateRefreshError'
   }
+}
+
+/**
+ * Prisma の raw query 失敗は error.code が `P2010` のようなラッパーコードになり、
+ * 実際の SQLSTATE は error.meta.code に入る。
+ * @param error - 発生した例外
+ * @returns 抽出できた場合は SQLSTATE 文字列、できない場合は null
+ */
+function extractPostgresSqlState(error: unknown): string | null {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return null
+  const code = error.meta?.code
+  return typeof code === 'string' ? code : null
+}
+
+/**
+ * label_aggregate_refresh の失敗を、動的な SQL 本文や機密情報を含めない範囲で GlitchTip へ送出する。
+ * @param error - 発生した例外
+ * @param errorCode - 失敗した段階
+ * @param aggregateName - 失敗時点で書き込み対象だった read model 名
+ */
+function reportLabelAggregateRefreshFailure(
+  error: unknown,
+  errorCode: LabelAggregateRefreshErrorCode,
+  aggregateName: 'LabelMetricSnapshot' | 'LabelSummaryCurrent',
+): void {
+  captureException(error, {
+    source: 'processLabelAggregateRefresh',
+    errorCode,
+    sqlState: extractPostgresSqlState(error),
+    aggregateName,
+  })
 }
 
 // CommonJS を採用する本プロジェクトでは __dirname がモジュールの位置を得る素直な手段であり、
@@ -375,6 +407,11 @@ export async function processLabelAggregateRefresh(
       freshnessThresholdsMs,
     }))
   } catch (error) {
+    reportLabelAggregateRefreshFailure(
+      error,
+      'label_aggregate_snapshot_failed',
+      'LabelMetricSnapshot',
+    )
     throw new LabelAggregateRefreshError(
       'label_aggregate_snapshot_failed',
       error instanceof Error ? error.message : String(error),
@@ -418,6 +455,11 @@ export async function processLabelAggregateRefresh(
             }),
         })
       } catch (error) {
+        reportLabelAggregateRefreshFailure(
+          error,
+          'label_finding_generation_failed',
+          'LabelMetricSnapshot',
+        )
         throw new LabelAggregateRefreshError(
           'label_finding_generation_failed',
           error instanceof Error ? error.message : String(error),
@@ -443,6 +485,7 @@ export async function processLabelAggregateRefresh(
         }),
     })
   } catch (error) {
+    reportLabelAggregateRefreshFailure(error, 'label_summary_publish_failed', 'LabelSummaryCurrent')
     throw new LabelAggregateRefreshError(
       'label_summary_publish_failed',
       error instanceof Error ? error.message : String(error),

@@ -604,7 +604,6 @@ describe.skipIf(!process.env.DATABASE_URL)('getReadModelReadiness', () => {
     // 残した LabelDefinition が残っていると誤って不一致になる。全件削除して分離する。
     await prisma.accountLabel.deleteMany()
     await prisma.accountLabelLatest.deleteMany()
-    await prisma.labelAggregate.deleteMany()
     await prisma.blockAction.deleteMany()
     await prisma.blockOutboxEntry.deleteMany()
     await prisma.labelDefinition.deleteMany()

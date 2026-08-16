@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { Logger } from '@book000/node-utils'
 import { getPrismaClient } from './db/client'
+import { Prisma } from './generated/prisma'
 import { detectAnalysisStageFailure } from './operational-issues/detect-run-failures'
 import * as labelMetricSnapshotModule from './metrics/label-metric-snapshot'
 import * as publishModule from './read-models/publish'
+import * as sentryModule from './monitoring/sentry'
 import {
   processReadModelRefresh,
   processLabelAggregateRefresh,
@@ -798,6 +800,36 @@ describe('processLabelAggregateRefresh のエラーコード分岐', () => {
         triggerId: 'run-1',
       } as never),
     ).rejects.toMatchObject({ errorCode: 'label_aggregate_snapshot_failed' })
+  })
+
+  it('PrismaClientKnownRequestError の失敗時に sqlState を含む診断情報を captureException へ渡す', async () => {
+    const knownRequestError = new Prisma.PrismaClientKnownRequestError('statement timeout', {
+      code: 'P2010',
+      clientVersion: '6.19.3',
+      meta: { code: '57014' },
+    })
+    vi.spyOn(labelMetricSnapshotModule, 'buildLabelAggregateSnapshotSet').mockRejectedValue(
+      knownRequestError,
+    )
+    const captureExceptionSpy = vi.spyOn(sentryModule, 'captureException')
+
+    await expect(
+      processLabelAggregateRefresh(prisma, {
+        id: 'wi-1',
+        triggerType: 'crawl_run',
+        triggerId: 'run-1',
+      } as never),
+    ).rejects.toMatchObject({ errorCode: 'label_aggregate_snapshot_failed' })
+
+    expect(captureExceptionSpy).toHaveBeenCalledWith(
+      knownRequestError,
+      expect.objectContaining({
+        source: 'processLabelAggregateRefresh',
+        errorCode: 'label_aggregate_snapshot_failed',
+        sqlState: '57014',
+        aggregateName: 'LabelMetricSnapshot',
+      }),
+    )
   })
 
   it('publishGeneration が失敗すると label_summary_publish_failed を投げる', async () => {

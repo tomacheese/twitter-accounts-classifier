@@ -19,7 +19,6 @@ import {
   ensureLabelDefinitionsForRules,
   filterAccountIdsWithExistingLabels,
 } from './db/label-repository'
-import { refreshLabelAggregate } from './db/label-aggregate-repository'
 import {
   requestAccountRelabel,
   requestAccountRelabelBulk,
@@ -1950,16 +1949,6 @@ async function main(): Promise<void> {
   try {
     await runCrawlCycle(deps)
   } finally {
-    // runCrawlCycle はアカウント単位で逐次ラベルを書き込むため、
-    // 一部で失敗しても finally で必ず集計し直す
-    // (relabel.ts はバックフィル全体が未完了のまま反映すると
-    // 新旧ラベルが混在した中途半端な集計を表示してしまうため、成功時のみ呼ぶ)。
-    try {
-      await refreshLabelAggregate(prisma)
-    } catch (error) {
-      logger.error('Failed to refresh label aggregate:', error as Error)
-      captureException(error, { source: 'crawl.refreshLabelAggregate' })
-    }
     await disconnectPrisma()
   }
 }
