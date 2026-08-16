@@ -452,6 +452,14 @@ model AccountClassificationFreshnessBucket {
   @@id([labelDefinitionId, observedAtBucket])
 }
 
+model AccountClassificationReasonCount {
+  labelDefinitionId String
+  reason            String
+  count             Int    @default(0)
+
+  @@id([labelDefinitionId, reason])
+}
+
 model AccountClassificationObservation {
   id         String   @id @default(cuid())
   accountId  String
