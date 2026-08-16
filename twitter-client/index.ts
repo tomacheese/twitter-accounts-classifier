@@ -26,7 +26,15 @@ export type {
   NormalizedTweetSource,
   ToTweetInputContext,
 } from './mappers'
-export { createBlocksClient, createBlock, BlockTargetNotFoundError } from './blocks-client'
+export {
+  createBlocksClient,
+  createBlock,
+  BlockTargetNotFoundError,
+  BlockActorUnavailableError,
+  formatBlockActorUnavailableMessage,
+  BLOCK_ACTOR_UNAVAILABLE_HTTP_STATUS,
+  BLOCK_ACTOR_UNAVAILABLE_X_ERROR_CODE,
+} from './blocks-client'
 export type { BlocksListPage, BlocksListRawApiLike } from './blocks-client'
 export { createTrendsClient } from './trends-client'
 export {

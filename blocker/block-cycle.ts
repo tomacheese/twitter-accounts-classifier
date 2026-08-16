@@ -1,7 +1,11 @@
 import { Logger } from '@book000/node-utils'
 import {
+  BlockActorUnavailableError,
   BlockTargetNotFoundError,
   withTwitterRetry,
+  formatBlockActorUnavailableMessage,
+  BLOCK_ACTOR_UNAVAILABLE_HTTP_STATUS,
+  BLOCK_ACTOR_UNAVAILABLE_X_ERROR_CODE,
   type IssuedCookies,
   type OpenApiClientContext,
 } from 'twitter-client'
@@ -82,7 +86,9 @@ export async function resolveOwnAccountId(
  * @param blockAccountRunId - 記録先の `BlockAccountRun` ID
  * @param blockerId - ブロックを実行するアカウント
  * @param candidate - ブロック対象と根拠ラベル・確信度
- * @returns 成功時は true、通常失敗時は false、対象不存在で処理不要なら skipped
+ * @param username - ログ・GlitchTip 報告に使うブロック実行アカウントのユーザー名
+ * @returns 成功時は true、通常失敗時は false、対象不存在で処理不要なら skipped、
+ * ブロック実行アカウント自体が操作不能なら actor_unavailable
  */
 export async function attemptBlock(
   client: OpenApiClientContext,
@@ -90,7 +96,8 @@ export async function attemptBlock(
   blockAccountRunId: string,
   blockerId: string,
   candidate: BlockCandidate,
-): Promise<boolean | 'skipped'> {
+  username: string,
+): Promise<boolean | 'skipped' | 'actor_unavailable'> {
   let outboxEntry: OutboxEntryRef
   try {
     outboxEntry = await deps.findOrCreateOutboxEntry(deps.prisma, {
@@ -150,6 +157,40 @@ export async function attemptBlock(
         captureException(persistError, { blockerId, blockedId: candidate.accountId })
       }
       return 'skipped'
+    }
+
+    if (error instanceof BlockActorUnavailableError) {
+      logger.error(
+        `Failed to block account ${candidate.accountId} on behalf of ${blockerId}`,
+        error,
+      )
+      captureException(error, {
+        username,
+        blockerId,
+        httpStatus: error.httpStatus,
+        xErrorCode: error.xErrorCode,
+      })
+      try {
+        // 永続化に失敗して false を返すと、呼び出し元が通常失敗と誤認して残り候補への createBlock を続けてしまう。
+        await deps.markOutboxRemoteFailed(deps.prisma, outboxEntry.id)
+        await deps.recordBlockAction(deps.prisma, {
+          blockAccountRunId,
+          blockerId,
+          blockedId: candidate.accountId,
+          labelDefinitionId: candidate.labelDefinitionId,
+          confidence: candidate.confidence,
+          result: 'failure',
+          errorMessage: error.message,
+          outboxEntryId: outboxEntry.id,
+        })
+      } catch (persistError) {
+        logger.error(
+          `Failed to persist actor_unavailable failure for ${candidate.accountId} on behalf of ${blockerId}`,
+          persistError as Error,
+        )
+        captureException(persistError, { blockerId, blockedId: candidate.accountId })
+      }
+      return 'actor_unavailable'
     }
 
     logger.error(
@@ -290,25 +331,52 @@ export async function runBlockAccountCycle(
 
     let blockedCount = 0
     let failedCount = 0
+    let actorUnavailable = false
     const sleepImpl = deps.sleepImpl ?? defaultSleep
 
     for (const [index, candidate] of candidates.entries()) {
       if (index > 0) await sleepImpl(deps.limits.actionDelayMs)
-      const result = await attemptBlock(context, deps, accountRun.id, blockerId, candidate)
-      if (result === true) blockedCount++
-      else if (result === false) failedCount++
+      const result = await attemptBlock(
+        context,
+        deps,
+        accountRun.id,
+        blockerId,
+        candidate,
+        account.username,
+      )
+      switch (result) {
+        case true: {
+          blockedCount++
+          break
+        }
+        case false: {
+          failedCount++
+          break
+        }
+        case 'actor_unavailable': {
+          failedCount++
+          actorUnavailable = true
+          break
+        }
+      }
+      if (actorUnavailable) break
     }
 
     await deps.finishBlockAccountRun(deps.prisma, accountRun.id, {
       finishedAt: new Date(),
-      status: 'completed',
+      status: actorUnavailable ? 'failed' : 'completed',
       candidatesCount: candidates.length,
       blockedCount,
       failedCount,
-      errorMessage: null,
+      errorMessage: actorUnavailable
+        ? formatBlockActorUnavailableMessage(
+            BLOCK_ACTOR_UNAVAILABLE_HTTP_STATUS,
+            BLOCK_ACTOR_UNAVAILABLE_X_ERROR_CODE,
+          )
+        : null,
     })
 
-    return { username: account.username, blockedCount, failedCount, failed: false }
+    return { username: account.username, blockedCount, failedCount, failed: actorUnavailable }
   } finally {
     await deps.closeOpenApiClient(context)
   }

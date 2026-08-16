@@ -20,8 +20,10 @@ export function captureException(error: unknown, context?: Record<string, unknow
   if (!initialized) return
   // GlitchTip への報告はベストエフォートであり、
   // ここでの throw を呼び出し元のエラーハンドリングに伝播させてはならない。
+  // context をそのまま渡すと Sentry の CaptureContext 判定にヒットせず、
+  // 未知キーのオブジェクトとして黙って破棄されるため extra に包む。
   try {
-    Sentry.captureException(error, context)
+    Sentry.captureException(error, { extra: context })
   } catch (reportError) {
     logger.warn('Failed to report exception to GlitchTip', reportError as Error)
   }
