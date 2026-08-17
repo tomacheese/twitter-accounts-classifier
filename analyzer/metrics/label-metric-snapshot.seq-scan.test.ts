@@ -179,15 +179,16 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
     expect(collectSeqScans(plan, 'AccountClassificationLatest')).toHaveLength(0)
   })
 
-  it('5つの集計テーブル読み取りクエリ', async () => {
-    const queries = [
-      `SELECT "labelDefinitionId", "value", "count", "confidenceSum" FROM "AccountClassificationValueCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
-      `SELECT "labelDefinitionId", "confidenceBucket", "count" FROM "AccountClassificationConfidenceBucketCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
-      `SELECT "labelDefinitionId", "ruleVersion", "count" FROM "AccountClassificationRuleVersionCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
-      `SELECT "labelDefinitionId", SUM("count") FROM "AccountClassificationFreshnessBucket" WHERE "labelDefinitionId" IN ('${labelId}') GROUP BY 1`,
-      `SELECT "labelDefinitionId", "reason", "count" FROM "AccountClassificationReasonCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
-    ]
-    for (const sql of queries) {
+  const perTableQueries = [
+    `SELECT "labelDefinitionId", "value", "count", "confidenceSum" FROM "AccountClassificationValueCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
+    `SELECT "labelDefinitionId", "confidenceBucket", "count" FROM "AccountClassificationConfidenceBucketCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
+    `SELECT "labelDefinitionId", "ruleVersion", "count" FROM "AccountClassificationRuleVersionCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
+    `SELECT "labelDefinitionId", SUM("count") FROM "AccountClassificationFreshnessBucket" WHERE "labelDefinitionId" IN ('${labelId}') GROUP BY 1`,
+    `SELECT "labelDefinitionId", "reason", "count" FROM "AccountClassificationReasonCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
+  ]
+
+  it(`${perTableQueries.length} つの集計テーブル読み取りクエリ`, async () => {
+    for (const sql of perTableQueries) {
       const plan = await explain(sql)
       const table = /FROM "(\w+)"/.exec(sql)?.[1] ?? ''
       expect(collectSeqScans(plan, table)).toHaveLength(0)
@@ -209,10 +210,9 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
       return (node.Plans ?? []).some((child) => referencesClassificationLatest(child))
     }
 
-    // AccountClassificationReasonCount 自体は labelDefinitionId 数程度の小さな
-    // テーブルであり、全ラベルを対象にした場合 Seq Scan の方が安いと planner が
-    // 判断してもそれ自体は問題ではない。ここで検証すべきは、巨大な
-    // AccountClassificationLatest を一切参照しないことだけである。
+    // AccountClassificationReasonCount の行数は reason の異なり数に比例し、
+    // 常に小さいとは限らない。ここで固定したいのは、
+    // 巨大な AccountClassificationLatest を一切参照しないことだけである。
     expect(referencesClassificationLatest(plan)).toBe(false)
   })
 })

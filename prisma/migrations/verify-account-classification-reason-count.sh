@@ -7,9 +7,21 @@ if [ -z "${DATABASE_URL:-}" ]; then
   echo "ERROR: DATABASE_URL is not set" >&2
   exit 1
 fi
+# libpq は ?host= クエリパラメータで authority 部分の host を上書きできるため、
+# 先にこれを弾いておかないと authority だけを見るチェックをすり抜けられる。
+if printf '%s' "$DATABASE_URL" | grep -qiE '[?&]host='; then
+  echo "ERROR: DATABASE_URL contains a host= query parameter, which can override the actual connection target; refusing to run migrate reset" >&2
+  exit 1
+fi
 # 部分一致だと evil-localhost.example.com のような decoy host も通ってしまうため、
-# host 部分だけを取り出して比較する。
-DB_HOST=$(printf '%s' "$DATABASE_URL" | sed -E 's#^[a-zA-Z]+://([^:@/]+(:[^@]*)?@)?([^:/?]+).*#\3#')
+# host 部分だけを取り出して比較する。パターンが一致しない場合は sed -n/p により
+# 何も出力しない (元の DATABASE_URL をそのまま漏らさない) ので、次の空文字チェックで
+# 弾かれる。
+DB_HOST=$(printf '%s' "$DATABASE_URL" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^:@/?]+(:[^@]*)?@)?([^:/?]+).*#\3#p')
+if [ -z "$DB_HOST" ]; then
+  echo "ERROR: could not parse a host from DATABASE_URL; refusing to run migrate reset" >&2
+  exit 1
+fi
 case "$DB_HOST" in
   localhost|127.0.0.1) ;;
   *)
@@ -32,7 +44,7 @@ cleanup() {
   done
   rm -rf "$STASH_DIR"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 # 1. 新 migration 群を一時退避し、旧 schema 相当まで適用する。
 for name in $NEW_MIGRATION_NAMES; do
@@ -64,8 +76,15 @@ pnpm --filter analyzer exec prisma migrate deploy --schema=../prisma/schema.pris
 
 # 4. backfill 後の AccountClassificationReasonCount が、AccountClassificationLatest
 #    WHERE value=true から素朴に集計した値と一致することを検証する。
-MISMATCH=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
-  SELECT count(*) FROM (
+MISMATCH_ROWS=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
+  SELECT string_agg(
+    format(
+      '(%s, %s): naive=%s agg=%s',
+      COALESCE(naive.\"labelDefinitionId\", agg.\"labelDefinitionId\"),
+      COALESCE(naive.\"reason\", agg.\"reason\"),
+      naive.naive_count, agg.count
+    ), '; '
+  ) FROM (
     SELECT \"labelDefinitionId\", \"reason\", COUNT(*) AS naive_count
     FROM \"AccountClassificationLatest\" WHERE \"value\" = true GROUP BY 1, 2
   ) naive
@@ -73,29 +92,8 @@ MISMATCH=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
     ON agg.\"labelDefinitionId\" = naive.\"labelDefinitionId\" AND agg.\"reason\" = naive.\"reason\"
   WHERE naive.naive_count IS DISTINCT FROM agg.count
 ")
-if [ "$MISMATCH" -ne 0 ]; then
-  echo "FAIL: AccountClassificationReasonCount does not match naive aggregate ($MISMATCH mismatched rows)" >&2
-  exit 1
-fi
-
-# 5. value=false の reason が一切保持されていないことを検証する。
-FALSE_LEAK=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
-  SELECT count(*) FROM \"AccountClassificationReasonCount\" agg
-  WHERE EXISTS (
-    SELECT 1 FROM \"AccountClassificationLatest\" src
-    WHERE src.\"labelDefinitionId\" = agg.\"labelDefinitionId\"
-      AND src.\"reason\" = agg.\"reason\"
-      AND src.\"value\" = false
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM \"AccountClassificationLatest\" src
-    WHERE src.\"labelDefinitionId\" = agg.\"labelDefinitionId\"
-      AND src.\"reason\" = agg.\"reason\"
-      AND src.\"value\" = true
-  )
-")
-if [ "$FALSE_LEAK" -ne 0 ]; then
-  echo "FAIL: AccountClassificationReasonCount contains value=false-only reason rows ($FALSE_LEAK rows)" >&2
+if [ -n "$MISMATCH_ROWS" ]; then
+  echo "FAIL: AccountClassificationReasonCount does not match naive aggregate: $MISMATCH_ROWS" >&2
   exit 1
 fi
 

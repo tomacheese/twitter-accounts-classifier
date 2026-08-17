@@ -41,7 +41,15 @@ describe('deriveCompletenessFromCoverage', () => {
 })
 
 describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
-  it('reads population count from AccountSummaryLatest and aggregates from the 5 count tables', async () => {
+  const aggregateCountTables = [
+    'AccountClassificationValueCount',
+    'AccountClassificationConfidenceBucketCount',
+    'AccountClassificationRuleVersionCount',
+    'AccountClassificationFreshnessBucket',
+    'AccountClassificationReasonCount',
+  ]
+
+  it(`reads population count from AccountSummaryLatest and aggregates from the ${aggregateCountTables.length} count tables`, async () => {
     const snapshotAt = new Date('2026-08-09T00:00:00Z')
     const queryRaw = vi.fn((strings: TemplateStringsArray) => {
       const sql = strings.join('?')
@@ -80,14 +88,8 @@ describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
     expect(populationQuery).toContain('classificationObservedAt')
 
     // 集計本体が旧来の AccountClassificationLatest 直接 GROUP BY ではなく、
-    // 5 つの集計テーブルから読むことを確認する。
-    for (const table of [
-      'AccountClassificationValueCount',
-      'AccountClassificationConfidenceBucketCount',
-      'AccountClassificationRuleVersionCount',
-      'AccountClassificationFreshnessBucket',
-      'AccountClassificationReasonCount',
-    ]) {
+    // 集計テーブル群から読むことを確認する。
+    for (const table of aggregateCountTables) {
       expect(queriedSql.some((sql) => sql.includes(`FROM "${table}"`))).toBe(true)
     }
     // reasonDistribution も集計テーブル読み取りに置き換わったため、
@@ -571,9 +573,21 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     expect(reasonCountRemaining.count).toBe(1)
   })
 
-  it('value=false の行を DELETE しても reasonCount は変化しない', async () => {
+  it('value=false の行を DELETE しても同じ reason の value=true 側の reasonCount は減らない', async () => {
     const label = await prisma.labelDefinition.create({
       data: { key: 'test_trigger_delete_false', description: 'テスト用ラベル' },
+    })
+    await prisma.account.create({
+      data: {
+        id: 'acct_trig_del_false_sibling',
+        screenName: 'acct_trig_del_false_sibling',
+        displayName: 'acct_trig_del_false_sibling',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date(),
+      },
     })
     await prisma.account.create({
       data: {
@@ -587,6 +601,19 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         lastCrawledAt: new Date(),
       },
     })
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: 'acct_trig_del_false_sibling',
+        labelDefinitionId: label.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'reason_false_delete',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: new Date('2026-08-13T00:00:00Z'),
+        sourceObservationId: null,
+      },
+    ])
     await upsertAccountClassificationLatest(prisma, [
       {
         accountId: 'acct_trig_del_false',
@@ -610,12 +637,12 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
       },
     })
 
-    const reasonCount = await prisma.accountClassificationReasonCount.findUnique({
+    const reasonCount = await prisma.accountClassificationReasonCount.findUniqueOrThrow({
       where: {
         labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'reason_false_delete' },
       },
     })
-    expect(reasonCount).toBeNull()
+    expect(reasonCount.count).toBe(1)
   })
 
   it('value/confidence/ruleVersion と分単位バケットが変わらない UPDATE は集計を変えない', async () => {
@@ -648,14 +675,14 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
       },
     ])
     // 同一分内で observedAt だけが微増する再クロールを模す。value/confidence/
-    // ruleVersion は変えない。
+    // ruleVersion/reason は変えない。
     await upsertAccountClassificationLatest(prisma, [
       {
         accountId: 'acct_trig_noop',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.9,
-        reason: 'r1_recrawled',
+        reason: 'r1',
         method: 'rule',
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:40Z'),
@@ -681,16 +708,10 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     expect(row.observedAt.toISOString()).toBe('2026-08-13T00:00:40.000Z')
 
-    // reason は r1 → r1_recrawled へ変わっているため、早期リターンではなく
-    // 通常の decrement/increment 経路を通り、reasonCount も新しい reason へ移る。
-    const oldReasonRow = await prisma.accountClassificationReasonCount.findUnique({
+    const reasonRow = await prisma.accountClassificationReasonCount.findUniqueOrThrow({
       where: { labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'r1' } },
     })
-    expect(oldReasonRow).toBeNull()
-    const newReasonRow = await prisma.accountClassificationReasonCount.findUniqueOrThrow({
-      where: { labelDefinitionId_reason: { labelDefinitionId: label.id, reason: 'r1_recrawled' } },
-    })
-    expect(newReasonRow.count).toBe(1)
+    expect(reasonRow.count).toBe(1)
   })
 
   it('value=true のまま reason が A→B に変わると A が -1、B が +1 になる', async () => {
@@ -763,7 +784,6 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         lastCrawledAt: new Date(),
       },
     })
-    // false で挿入: reasonCount は増えない。
     await upsertAccountClassificationLatest(prisma, [
       {
         accountId: 'acct_trig_reason_transition',
@@ -784,7 +804,6 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     expect(afterInsertFalse).toBeNull()
 
-    // false→true: 新 reason が +1 される。
     await upsertAccountClassificationLatest(prisma, [
       {
         accountId: 'acct_trig_reason_transition',
@@ -803,7 +822,6 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     expect(afterTrue.count).toBe(1)
 
-    // true→false: reason が -1 され、行ごと消える。
     await upsertAccountClassificationLatest(prisma, [
       {
         accountId: 'acct_trig_reason_transition',

@@ -8,16 +8,16 @@ CREATE TABLE "AccountClassificationReasonCount" (
 );
 
 -- AccountClassificationLatest への書き込みと同一トランザクション・同一行ロックの
--- 範囲内で5集計テーブルを維持する。アプリケーション層での read-modify-write では
+-- 範囲内で 5 集計テーブルを維持する。アプリケーション層での read-modify-write では
 -- 並行 upsert 時に stale な値を減算してしまうため、トリガーで行ロックと遷移の
 -- 確定を同一 SQL 文にまとめる。
 -- "observedAt"/"observedAtBucket" は TIMESTAMP (timezone なし) で UTC の
 -- wall-clock 値として扱う運用のため、timestamptz を返す now() と直接比較すると
 -- セッションの timezone 設定に応じて implicit cast がずれる。now() は必ず
 -- AT TIME ZONE 'UTC' で naive UTC に変換してから比較する。
--- reasonDistribution snapshot が AccountClassificationLatest を直接 GROUP BY せずに
--- 済むよう、value=true 行専用の reason count を他4集計テーブルと同じトリガーで
--- 維持する。value=false の reason は snapshot 側で使われないため保持しない。
+-- reasonDistribution snapshot は AccountClassificationLatest を直接 GROUP BY しない。
+-- value=true 行専用の reason count を他 4 集計テーブルと同じトリガーで維持し、
+-- value=false の reason は保持しない。
 CREATE OR REPLACE FUNCTION account_classification_latest_aggregate_trigger()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -28,10 +28,13 @@ DECLARE
   v_literal_old_bucket TIMESTAMP;
   v_literal_new_bucket TIMESTAMP;
 BEGIN
-  -- 5集計テーブルに影響する列 (value/confidence/ruleVersion/reason と、分単位に
+  -- 5 集計テーブルに影響する列 (value/confidence/ruleVersion/reason と、分単位に
   -- 丸めた observedAt) が UPDATE 前後で変わらないなら、decrement/increment は
   -- 差し引きゼロにしかならない。単なる再クロールで observedAt が同一分内で
   -- 微増するだけの多発ケースで、不要な行ロックを取らずに済ませる。
+  -- reason を対象列に含めると早期リターン率は下がるが、
+  -- reasonDistribution の正しさには reason 変化の検知が必須であり、
+  -- 省くことはできない。
   IF TG_OP = 'UPDATE'
     AND NEW."value" IS NOT DISTINCT FROM OLD."value"
     AND NEW."confidence" IS NOT DISTINCT FROM OLD."confidence"
@@ -76,8 +79,7 @@ BEGIN
       WHERE "labelDefinitionId" = OLD."labelDefinitionId" AND "ruleVersion" = OLD."ruleVersion"
         AND "count" <= 0;
 
-    -- reasonDistribution が対象にするのは value=true 行だけなので、
-    -- OLD が true だった場合のみ減算する。
+    -- reasonDistribution は value=true 行だけを対象にするため、false 行は数えない。
     IF OLD."value" THEN
       UPDATE "AccountClassificationReasonCount"
         SET "count" = "count" - 1
@@ -133,8 +135,7 @@ BEGIN
     ON CONFLICT ("labelDefinitionId", "ruleVersion") DO UPDATE SET
       "count" = "AccountClassificationRuleVersionCount"."count" + 1;
 
-  -- reasonDistribution が対象にするのは value=true 行だけなので、
-  -- NEW が true の場合のみ加算する。
+  -- reasonDistribution は value=true 行だけを対象にするため、false 行は数えない。
   IF NEW."value" THEN
     INSERT INTO "AccountClassificationReasonCount" ("labelDefinitionId", "reason", "count")
       VALUES (NEW."labelDefinitionId", NEW."reason", 1)
@@ -168,9 +169,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 既存データの backfill。CREATE OR REPLACE FUNCTION (上記) がコミットされるまで
--- 新関数は有効にならないが、本 migration はトランザクション内で実行されるため、
--- 関数置き換えと backfill の間に別接続からの書き込みが commit されることはない。
+-- 既存データの backfill。CREATE OR REPLACE FUNCTION は関数定義の置き換えのみで、
+-- CREATE TRIGGER と異なり対象テーブルへのロックを取らない。backfill 前に
+-- 明示的にロックを取り、旧トリガー実行中の書き込みが抜け落ちるのを防ぐ。
+LOCK TABLE "AccountClassificationLatest" IN SHARE ROW EXCLUSIVE MODE;
+
 INSERT INTO "AccountClassificationReasonCount" ("labelDefinitionId", "reason", "count")
 SELECT "labelDefinitionId", "reason", COUNT(*)
 FROM "AccountClassificationLatest" WHERE "value" = true GROUP BY 1, 2;
