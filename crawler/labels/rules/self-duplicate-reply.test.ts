@@ -149,6 +149,16 @@ describe('selfDuplicateReplyRule', () => {
     expect(result.value).toBe(true)
   })
 
+  it('is not evaluable when no tweets have ever been crawled for the account, rather than reporting full confidence on absent data', () => {
+    const bundle = makeBundle([])
+
+    const result = selfDuplicateReplyRule.evaluate(bundle)
+
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBeCloseTo(0.5)
+  })
+
   it('is false when only one external duplicate pair exists alongside an excluded self-thread duplicate', () => {
     const bundle = makeBundle([
       { fullText: '会場に到着しました、これから配信を始めます', isReply: false },

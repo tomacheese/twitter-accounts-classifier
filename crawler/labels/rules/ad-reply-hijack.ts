@@ -16,9 +16,17 @@ export const adReplyHijackRule: LabelRule = {
   key: 'ad_reply_hijack',
   description:
     '無関係なツイートへの返信を乗っ取り、広告・転職勧誘・暗号資産のギブアウェイ/エアドロップ勧誘を宣伝している',
-  version: '1.2.0',
+  version: '1.3.0',
   evaluate(bundle) {
-    const replies = bundle.recentTweets.filter((t) => t.isReply)
+    // リプライ先が自分自身の直近ツイートである場合、それは他者のツイートへの
+    // 乗っ取りではなく、自分の宣伝文をスレッド内で連投しているだけであるため除外する。
+    // `self_duplicate_reply` ルールの自己スレッド除外と同じ考え方。
+    const ownTweetIds = new Set(bundle.recentTweets.map((t) => t.id))
+    const replies = bundle.recentTweets.filter((t) => {
+      if (!t.isReply) return false
+      const isSelfThreadReply = t.inReplyToTweetId != null && ownTweetIds.has(t.inReplyToTweetId)
+      return !isSelfThreadReply
+    })
     const adPitchReplies = replies.filter((t) => AD_JOB_PITCH_PATTERN.test(t.fullText))
     const adReplyRatio = replies.length > 0 ? adPitchReplies.length / replies.length : 0
     const hasEnoughSample = replies.length >= MIN_REPLY_SAMPLE
