@@ -19,7 +19,8 @@ DECLARE
     'AttentionItemCurrent', 'OverviewSnapshot',
     'ReadModelGeneration', 'ReadModelPointer', 'ReadModelState', 'DetectorState',
     'AccountClassificationValueCount', 'AccountClassificationConfidenceBucketCount',
-    'AccountClassificationRuleVersionCount', 'AccountClassificationFreshnessBucket'
+    'AccountClassificationRuleVersionCount', 'AccountClassificationFreshnessBucket',
+    'AccountClassificationReasonCount'
   ];
   limited_write_allowlist text[] := ARRAY['ComponentBuildIdentity'];
   missing_writes text;

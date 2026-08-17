@@ -23,11 +23,6 @@ function collectSeqScans(node: ExplainPlanNode, targetTable: string): ExplainPla
   return [...found, ...(node.Plans ?? []).flatMap((child) => collectSeqScans(child, targetTable))]
 }
 
-function collectIndexNames(node: ExplainPlanNode): string[] {
-  const current = node['Index Name'] ? [node['Index Name']] : []
-  return [...current, ...(node.Plans ?? []).flatMap((child) => collectIndexNames(child))]
-}
-
 /**
  * @param sql - `EXPLAIN (FORMAT JSON)` を付けて実行する SQL
  * @returns プランのルートノード
@@ -93,6 +88,16 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
         count: 1,
       })),
     })
+    await prisma.accountClassificationReasonCount.create({
+      data: { labelDefinitionId: labelId, reason: 'reason_seqscan', count: 1 },
+    })
+    await prisma.accountClassificationReasonCount.createMany({
+      data: noiseLabelIds.map((id) => ({
+        labelDefinitionId: id,
+        reason: 'reason_seqscan',
+        count: 1,
+      })),
+    })
 
     await prisma.account.createMany({
       data: Array.from({ length: NOISE_ACCOUNT_COUNT }, (_, index) => ({
@@ -136,6 +141,7 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
     await prisma.$executeRawUnsafe('ANALYZE "AccountClassificationConfidenceBucketCount"')
     await prisma.$executeRawUnsafe('ANALYZE "AccountClassificationRuleVersionCount"')
     await prisma.$executeRawUnsafe('ANALYZE "AccountClassificationFreshnessBucket"')
+    await prisma.$executeRawUnsafe('ANALYZE "AccountClassificationReasonCount"')
   })
 
   afterAll(async () => {
@@ -149,6 +155,9 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
       where: { labelDefinitionId: { in: [labelId, ...noiseLabelIds] } },
     })
     await prisma.accountClassificationFreshnessBucket.deleteMany({
+      where: { labelDefinitionId: { in: [labelId, ...noiseLabelIds] } },
+    })
+    await prisma.accountClassificationReasonCount.deleteMany({
       where: { labelDefinitionId: { in: [labelId, ...noiseLabelIds] } },
     })
     await prisma.accountClassificationLatest.deleteMany({
@@ -170,26 +179,40 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
     expect(collectSeqScans(plan, 'AccountClassificationLatest')).toHaveLength(0)
   })
 
-  it('4つの集計テーブル読み取りクエリ', async () => {
-    const queries = [
-      `SELECT "labelDefinitionId", "value", "count", "confidenceSum" FROM "AccountClassificationValueCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
-      `SELECT "labelDefinitionId", "confidenceBucket", "count" FROM "AccountClassificationConfidenceBucketCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
-      `SELECT "labelDefinitionId", "ruleVersion", "count" FROM "AccountClassificationRuleVersionCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
-      `SELECT "labelDefinitionId", SUM("count") FROM "AccountClassificationFreshnessBucket" WHERE "labelDefinitionId" IN ('${labelId}') GROUP BY 1`,
-    ]
-    for (const sql of queries) {
+  const perTableQueries = [
+    `SELECT "labelDefinitionId", "value", "count", "confidenceSum" FROM "AccountClassificationValueCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
+    `SELECT "labelDefinitionId", "confidenceBucket", "count" FROM "AccountClassificationConfidenceBucketCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
+    `SELECT "labelDefinitionId", "ruleVersion", "count" FROM "AccountClassificationRuleVersionCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
+    `SELECT "labelDefinitionId", SUM("count") FROM "AccountClassificationFreshnessBucket" WHERE "labelDefinitionId" IN ('${labelId}') GROUP BY 1`,
+    `SELECT "labelDefinitionId", "reason", "count" FROM "AccountClassificationReasonCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
+  ]
+
+  it(`${perTableQueries.length} つの集計テーブル読み取りクエリ`, async () => {
+    for (const sql of perTableQueries) {
       const plan = await explain(sql)
       const table = /FROM "(\w+)"/.exec(sql)?.[1] ?? ''
       expect(collectSeqScans(plan, table)).toHaveLength(0)
     }
   })
 
-  it('reasonDistribution クエリは全ラベル指定でも Seq Scan しない', async () => {
+  it('reasonDistribution クエリは AccountClassificationLatest を一切参照しない', async () => {
     const labelIdsSql = allLabelIds.map((id) => `'${id}'`).join(', ')
     const plan = await explain(
-      `SELECT "labelDefinitionId", "reason", COUNT(*) FROM "AccountClassificationLatest" WHERE "labelDefinitionId" IN (${labelIdsSql}) AND "value" = true GROUP BY 1, 2`,
+      `SELECT "labelDefinitionId", "reason", "count" FROM "AccountClassificationReasonCount" WHERE "labelDefinitionId" IN (${labelIdsSql})`,
     )
-    expect(collectSeqScans(plan, 'AccountClassificationLatest')).toHaveLength(0)
-    expect(collectIndexNames(plan)).toContain('AccountClassificationLatest_true_reason_idx')
+
+    /**
+     * @param node - 探索対象のプランノード
+     * @returns プラン木の中に AccountClassificationLatest を参照するノードがあるか
+     */
+    function referencesClassificationLatest(node: ExplainPlanNode): boolean {
+      if (node['Relation Name'] === 'AccountClassificationLatest') return true
+      return (node.Plans ?? []).some((child) => referencesClassificationLatest(child))
+    }
+
+    // AccountClassificationReasonCount の行数は reason の異なり数に比例し、
+    // 常に小さいとは限らない。ここで固定したいのは、
+    // 巨大な AccountClassificationLatest を一切参照しないことだけである。
+    expect(referencesClassificationLatest(plan)).toBe(false)
   })
 })
