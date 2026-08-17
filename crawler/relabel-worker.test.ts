@@ -292,6 +292,61 @@ describe('evaluateAccountRelabelItems', () => {
       data: { lastErrorSummary: expect.stringContaining('broken account data') as string },
     })
   })
+
+  it('1 グループが 100 件を超えると永続化・完了をサブバッチに分割し、1 サブバッチの失敗が他サブバッチの完了済み分を巻き込まない', async () => {
+    const rule: LabelRule = {
+      key: 'test_rule',
+      description: 'test',
+      version: '1.0.0',
+      evaluate: () => ({ value: true, confidence: 1, reason: 'test' }),
+    }
+    const registry = new LabelRuleRegistry()
+    registry.register(rule)
+
+    const items = Array.from(
+      { length: 150 },
+      (_, index) => ({ id: `wi-${index}`, triggerId: `account-${index}` }) as never,
+    )
+    const accounts = Array.from({ length: 150 }, (_, index) => ({ id: `account-${index}` }))
+
+    const recordLabelsSpy = vi
+      .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+      .mockResolvedValue([])
+    let completeCallCount = 0
+    const completeSpy = vi
+      .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
+      .mockImplementation((_prisma, { workItemIds }) => {
+        completeCallCount++
+        if (completeCallCount === 2) return Promise.reject(new Error('DB write failed'))
+        return Promise.resolve(workItemIds.map((id) => ({ id, status: 'succeeded' as const })))
+      })
+    vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
+    const updateSpy = vi.fn().mockResolvedValue({})
+
+    const prisma = {
+      account: { findMany: vi.fn().mockResolvedValue(accounts) },
+      analysisWorkItem: { update: updateSpy },
+    } as unknown as PrismaClient
+
+    const result = await evaluateAccountRelabelItems(prisma, items, {
+      registry,
+      labelDefinitionIds: new Map([['test_rule', 'def-1']]),
+      duplicateReplyIndex: { countOtherAccounts: () => 0 },
+      replyHijackIndex: { swarmSizeFor: () => 0, isEligibleForScreening: () => true },
+      followGraphLabelIndex: { signalsFor: () => ({}) },
+      concurrency: 1,
+      leaseOwner: 'test-worker',
+    })
+
+    // 150 件は 100 件ずつ 2 サブバッチに分かれ、2 サブバッチ目の失敗は 1 サブバッチ目の 100 件を巻き込まない。
+    expect(recordLabelsSpy).toHaveBeenCalledTimes(2)
+    expect(completeSpy).toHaveBeenCalledTimes(2)
+    expect(result.succeeded).toBe(100)
+    expect(updateSpy).toHaveBeenCalledWith({
+      where: { id: 'wi-100' },
+      data: { lastErrorSummary: expect.stringContaining('DB write failed') as string },
+    })
+  })
 })
 
 describe('scanForStaleAccounts', () => {

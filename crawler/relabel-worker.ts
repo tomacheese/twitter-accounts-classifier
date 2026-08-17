@@ -96,10 +96,19 @@ export interface EvaluateAccountRelabelItemsResult {
 }
 
 /**
+ * `evaluateAccountRelabelItemGroup` がラベル永続化・work item 完了を分割する account 数。
+ * グループ全体を 1 回で永続化・完了すると、その 1 回の失敗で claim 済み attemptCount だけが
+ * 消費され、succeeded にできる分まで失われる。maxAttempts (デフォルト 5) を使い切ると
+ * `AnalysisWorkItem` は再 claim も再 enqueue もされず永久に取り残されるため、
+ * 失敗時に失われる範囲をこのサブバッチ単位に留める。
+ */
+const ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE = 100
+
+/**
  * claim 済みの account_relabel work item のうち、1 グループ分 (account 複数件) を評価する。
- * account 取得・tweet 取得・ラベル永続化・work item 完了は、それぞれ 1 ラウンドトリップにまとめる。
- * account 単位の往復をなくした分、ラベル永続化のような失敗の blast radius はこのグループ (chunk size 以下) まで広がる。
+ * account 取得・tweet 取得は、それぞれ 1 ラウンドトリップにまとめる。
  * 個々の account のルール評価は DB I/O を伴わない CPU 処理であり、try/catch で分離しているため、1 account の不正なデータでグループ全体の評価が失敗することはない。
+ * ラベル永続化・work item 完了は `ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE` 件ずつ行い、サブバッチの失敗は他のサブバッチの完了済み結果を巻き込まない。
  * @param prisma - Prisma クライアント
  * @param group - claimAccountRelabelBatchByIds で claim 済みの work item のうち 1 グループ分
  * @param options - 評価に使うルールレジストリと共有インデックス・lease owner 名
@@ -119,13 +128,14 @@ async function evaluateAccountRelabelItemGroup(
   ])
   const accountById = new Map(accounts.map((account) => [account.id, account]))
 
-  const labelsToPersist: {
+  interface PendingLabel {
     accountId: string
     labelDefinitionId: string
     result: LabelRuleResult
     method: string
     ruleVersion: string
-  }[] = []
+  }
+  const labelsByAccountId = new Map<string, PendingLabel[]>()
   const failedItemIds = new Set<string>()
   for (const item of group) {
     // account が既に削除されている場合、これ以上評価しようがないため succeeded 扱いで終端する。
@@ -140,10 +150,11 @@ async function evaluateAccountRelabelItemGroup(
         options.replyHijackIndex,
         options.followGraphLabelIndex,
       )
+      const labels: PendingLabel[] = []
       for (const { rule, result } of options.registry.applyAll(bundle)) {
         const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
         if (!labelDefinitionId) continue
-        labelsToPersist.push({
+        labels.push({
           accountId: account.id,
           labelDefinitionId,
           method: rule.key,
@@ -151,6 +162,7 @@ async function evaluateAccountRelabelItemGroup(
           result,
         })
       }
+      labelsByAccountId.set(account.id, labels)
     } catch (error) {
       logger.error(`Failed to relabel account ${item.triggerId}`, error as Error)
       captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
@@ -164,26 +176,55 @@ async function evaluateAccountRelabelItemGroup(
     }
   }
 
-  if (labelsToPersist.length > 0) {
-    await recordAccountLabelsBulkForAccounts(prisma, {
-      sourceKind: 'relabel',
-      labels: labelsToPersist,
-    })
+  const completableItems = group.filter((item) => !failedItemIds.has(item.id))
+  let succeeded = 0
+  for (
+    let offset = 0;
+    offset < completableItems.length;
+    offset += ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE
+  ) {
+    const subBatch = completableItems.slice(
+      offset,
+      offset + ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE,
+    )
+    try {
+      const subBatchLabels = subBatch.flatMap((item) => labelsByAccountId.get(item.triggerId) ?? [])
+      if (subBatchLabels.length > 0) {
+        await recordAccountLabelsBulkForAccounts(prisma, {
+          sourceKind: 'relabel',
+          labels: subBatchLabels,
+        })
+      }
+      const completions = await completeAccountRelabelWorkItemsBulk(prisma, {
+        workItemIds: subBatch.map((item) => item.id),
+        leaseOwner: options.leaseOwner,
+      })
+      succeeded += completions.length
+    } catch (error) {
+      logger.error(
+        `Failed to persist labels / complete work items for a sub-batch (accounts: ${subBatch.length})`,
+        error as Error,
+      )
+      captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
+      await Promise.allSettled(
+        subBatch.map((item) =>
+          prisma.analysisWorkItem
+            .update({
+              where: { id: item.id },
+              data: { lastErrorSummary: String(error).slice(0, 500) },
+            })
+            .catch(() => undefined),
+        ),
+      )
+    }
   }
-
-  const completableItemIds = group
-    .filter((item) => !failedItemIds.has(item.id))
-    .map((item) => item.id)
-  const completions = await completeAccountRelabelWorkItemsBulk(prisma, {
-    workItemIds: completableItemIds,
-    leaseOwner: options.leaseOwner,
-  })
-  return completions.length
+  return succeeded
 }
 
 /**
  * claim 済みの account_relabel work item を評価・永続化する。
- * account 取得・tweet 取得・ラベル永続化・work item 完了の DB I/O を concurrency 個のグループに分割し、グループ単位にまとめて実行することで 1 account ごとの往復を避ける。
+ * account 取得・tweet 取得の DB I/O を concurrency 個のグループに分割し、グループ単位にまとめて実行することで 1 account ごとの往復を避ける。
+ * ラベル永続化・work item 完了はグループ内でさらに小さいサブバッチに分けて行う (詳細は `evaluateAccountRelabelItemGroup` を参照)。
  * @param prisma - Prisma クライアント
  * @param items - claimAccountRelabelBatchByIds で claim 済みの work item 一覧
  * @param options - 評価に使うルールレジストリ・共有インデックス・並行度・lease owner 名
