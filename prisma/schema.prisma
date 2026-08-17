@@ -176,6 +176,9 @@ model AccountLabelLatest {
   sourceUsername    String?
 
   @@id([accountId, labelDefinitionId])
+  // (labelDefinitionId, value) の複合インデックスは削除した。
+  // accounts.ts の value = true 絞り込みは (value, accountId) 側の Bitmap Index Scan で賄われ、
+  // このインデックスは書き込みコストだけを積んでいた。
   @@index([value, accountId])
   // viewer の relabel coverage クエリを支えるインデックス。
   @@index([labelDefinitionId, ruleVersion])

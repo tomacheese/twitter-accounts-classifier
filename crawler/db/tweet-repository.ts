@@ -197,7 +197,6 @@ export async function loadRecentTweetsForAccounts(
       ORDER BY "createdAt" DESC
       LIMIT ${limitPerAccount}
     ) t
-    ORDER BY target."accountId", t."createdAt" DESC
   `
   for (const row of rows) {
     const existing = tweetsByAccountId.get(row.accountId)

@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { Logger } from '@book000/node-utils'
-import type { AnalysisWorkItem, PrismaClient } from './generated/prisma'
+import type { Account, AnalysisWorkItem, PrismaClient, Tweet } from './generated/prisma'
 import { LabelRuleRegistry } from './labels/registry'
-import type { LabelRuleResult } from './labels/types'
 import { buildAccountFeatureBundle } from './labels/build-account-feature-bundle'
 import type { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import type { buildReplyHijackIndex } from './labels/reply-hijack-index'
@@ -18,6 +17,7 @@ import {
 import {
   recordAccountLabelsBulkForAccounts,
   ensureLabelDefinitionsForRules,
+  type AccountLabelBulkInput,
 } from './db/label-repository'
 import { CRAWL_LIMITS } from './config/crawl-limits'
 import { loadReplyCorpus } from './db/reply-corpus'
@@ -97,9 +97,7 @@ export interface EvaluateAccountRelabelItemsResult {
 
 /**
  * `evaluateAccountRelabelItemGroup` がラベル永続化・work item 完了を分割する account 数。
- * グループ全体を 1 回で永続化・完了すると、その 1 回の失敗で claim 済み attemptCount だけが
- * 消費され、succeeded にできる分まで失われる。maxAttempts (デフォルト 5) を使い切ると
- * `AnalysisWorkItem` は再 claim も再 enqueue もされず永久に取り残されるため、
+ * グループ全体を 1 回で永続化・完了すると、その 1 回の失敗で maxAttempts を使い切った account が二度と claim も再 enqueue もされず取り残される。
  * 失敗時に失われる範囲をこのサブバッチ単位に留める。
  */
 const ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE = 100
@@ -108,7 +106,7 @@ const ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE = 100
  * claim 済みの account_relabel work item のうち、1 グループ分 (account 複数件) を評価する。
  * account 取得・tweet 取得は、それぞれ 1 ラウンドトリップにまとめる。
  * 個々の account のルール評価は DB I/O を伴わない CPU 処理であり、try/catch で分離しているため、1 account の不正なデータでグループ全体の評価が失敗することはない。
- * ラベル永続化・work item 完了は `ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE` 件ずつ行い、サブバッチの失敗は他のサブバッチの完了済み結果を巻き込まない。
+ * サブバッチの失敗は他のサブバッチの完了済み結果を巻き込まない。
  * @param prisma - Prisma クライアント
  * @param group - claimAccountRelabelBatchByIds で claim 済みの work item のうち 1 グループ分
  * @param options - 評価に使うルールレジストリと共有インデックス・lease owner 名
@@ -122,20 +120,28 @@ async function evaluateAccountRelabelItemGroup(
   if (group.length === 0) return 0
 
   const accountIds = group.map((item) => item.triggerId)
-  const [accounts, tweetsByAccountId] = await Promise.all([
-    prisma.account.findMany({ where: { id: { in: accountIds } } }),
-    loadRecentTweetsForAccounts(prisma, accountIds, CRAWL_LIMITS.recentTweetsPerAccount),
-  ])
+  let accounts: Account[]
+  let tweetsByAccountId: Map<string, Tweet[]>
+  try {
+    ;[accounts, tweetsByAccountId] = await Promise.all([
+      prisma.account.findMany({ where: { id: { in: accountIds } } }),
+      loadRecentTweetsForAccounts(prisma, accountIds, CRAWL_LIMITS.recentTweetsPerAccount),
+    ])
+  } catch (error) {
+    logger.error(
+      `Failed to fetch account/tweet data for a group (accounts: ${group.length})`,
+      error as Error,
+    )
+    captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
+    await prisma.analysisWorkItem.updateMany({
+      where: { id: { in: group.map((item) => item.id) }, status: { not: 'succeeded' } },
+      data: { lastErrorSummary: String(error).slice(0, 500) },
+    })
+    return 0
+  }
   const accountById = new Map(accounts.map((account) => [account.id, account]))
 
-  interface PendingLabel {
-    accountId: string
-    labelDefinitionId: string
-    result: LabelRuleResult
-    method: string
-    ruleVersion: string
-  }
-  const labelsByAccountId = new Map<string, PendingLabel[]>()
+  const labelsByAccountId = new Map<string, AccountLabelBulkInput[]>()
   const failedItemIds = new Set<string>()
   for (const item of group) {
     // account が既に削除されている場合、これ以上評価しようがないため succeeded 扱いで終端する。
@@ -150,7 +156,7 @@ async function evaluateAccountRelabelItemGroup(
         options.replyHijackIndex,
         options.followGraphLabelIndex,
       )
-      const labels: PendingLabel[] = []
+      const labels: AccountLabelBulkInput[] = []
       for (const { rule, result } of options.registry.applyAll(bundle)) {
         const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
         if (!labelDefinitionId) continue
@@ -206,16 +212,14 @@ async function evaluateAccountRelabelItemGroup(
         error as Error,
       )
       captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
-      await Promise.allSettled(
-        subBatch.map((item) =>
-          prisma.analysisWorkItem
-            .update({
-              where: { id: item.id },
-              data: { lastErrorSummary: String(error).slice(0, 500) },
-            })
-            .catch(() => undefined),
-        ),
-      )
+      // completeAccountRelabelWorkItemsBulk が commit 済みでレスポンスだけ失われた場合、
+      // 対象は既に succeeded になっている。status ガードで上書きしないようにする。
+      await prisma.analysisWorkItem
+        .updateMany({
+          where: { id: { in: subBatch.map((item) => item.id) }, status: { not: 'succeeded' } },
+          data: { lastErrorSummary: String(error).slice(0, 500) },
+        })
+        .catch(() => undefined)
     }
   }
   return succeeded

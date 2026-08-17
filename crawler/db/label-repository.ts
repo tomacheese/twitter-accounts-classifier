@@ -94,7 +94,7 @@ interface RecordAccountLabelsBulkRow {
   semanticNoOp: boolean
 }
 
-interface RecordAccountLabelsBulkCoreLabel {
+export interface AccountLabelBulkInput {
   accountId: string
   labelDefinitionId: string
   result: LabelRuleResult
@@ -116,7 +116,7 @@ interface RecordAccountLabelsBulkCoreLabel {
  */
 async function recordAccountLabelsBulkCore(
   prisma: PrismaClient,
-  labels: RecordAccountLabelsBulkCoreLabel[],
+  labels: AccountLabelBulkInput[],
   sourceKind: string,
   sourceId: string | undefined,
   sourceUsername: string | undefined,
@@ -234,7 +234,7 @@ export async function recordAccountLabelsBulk(
 
 export interface RecordAccountLabelsBulkForAccountsParams {
   /** 記録対象の評価結果一覧。各行が自分自身の `accountId` を持つ。 */
-  labels: RecordAccountLabelsBulkCoreLabel[]
+  labels: AccountLabelBulkInput[]
   /** どの処理がこの行を書いたか (crawl・relabel など)。 */
   sourceKind: string
   /** 発生源となった run の ID。 */
@@ -252,7 +252,6 @@ const RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE = 2000
 /**
  * 複数アカウント分の評価結果をまとめて、アカウントごとの往復なしで記録する。
  * SQL 本体は `recordAccountLabelsBulkCore` を参照 (`labels` の各行が自分の `accountId` を持つ点のみが違う)。
- * `labels` は `RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE` 行ごとに分割して発行する。
  * @param prisma - Prisma クライアント
  * @param params - 記録対象のアカウントを跨いだ評価結果一覧
  * @returns 作成された `AccountLabel` 履歴行

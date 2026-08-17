@@ -140,6 +140,42 @@ describe.skipIf(!process.env.DATABASE_URL)(
       })
       expect(secondOutcome).toBe('succeeded')
     })
+
+    it('レース (bulk 版): leased 中に再要求が来た場合、complete で succeeded にならず queued に戻る', async () => {
+      await requestAccountRelabel(prisma, 'acct-1')
+      const claimed = await claimNextWorkItem(prisma, {
+        kinds: ['account_relabel'],
+        leaseOwner: 'worker-1',
+        leaseDurationMs: 60_000,
+      })
+      if (!claimed) throw new Error('claim に失敗した')
+
+      // worker がスナップショットを評価している間に、別経路から新しい変更要求が来る。
+      await requestAccountRelabel(prisma, 'acct-1')
+
+      const outcomes = await completeAccountRelabelWorkItemsBulk(prisma, {
+        workItemIds: [claimed.id],
+        leaseOwner: 'worker-1',
+      })
+      expect(outcomes).toEqual([{ id: claimed.id, status: 'requeued' }])
+
+      const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: claimed.id } })
+      expect(item.status).toBe('queued')
+      expect(item.staleRequestedAt).toBeNull()
+
+      // 追加の要求なしで再度 claim → complete すれば、今度こそ succeeded になる。
+      const reclaimed = await claimNextWorkItem(prisma, {
+        kinds: ['account_relabel'],
+        leaseOwner: 'worker-2',
+        leaseDurationMs: 60_000,
+      })
+      if (!reclaimed) throw new Error('再 claim に失敗した')
+      const secondOutcomes = await completeAccountRelabelWorkItemsBulk(prisma, {
+        workItemIds: [reclaimed.id],
+        leaseOwner: 'worker-2',
+      })
+      expect(secondOutcomes).toEqual([{ id: reclaimed.id, status: 'succeeded' }])
+    })
   },
 )
 

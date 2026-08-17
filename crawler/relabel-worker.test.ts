@@ -321,11 +321,11 @@ describe('evaluateAccountRelabelItems', () => {
         return Promise.resolve(workItemIds.map((id) => ({ id, status: 'succeeded' as const })))
       })
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
-    const updateSpy = vi.fn().mockResolvedValue({})
+    const updateManySpy = vi.fn().mockResolvedValue({ count: 0 })
 
     const prisma = {
       account: { findMany: vi.fn().mockResolvedValue(accounts) },
-      analysisWorkItem: { update: updateSpy },
+      analysisWorkItem: { updateMany: updateManySpy },
     } as unknown as PrismaClient
 
     const result = await evaluateAccountRelabelItems(prisma, items, {
@@ -342,9 +342,57 @@ describe('evaluateAccountRelabelItems', () => {
     expect(recordLabelsSpy).toHaveBeenCalledTimes(2)
     expect(completeSpy).toHaveBeenCalledTimes(2)
     expect(result.succeeded).toBe(100)
-    expect(updateSpy).toHaveBeenCalledWith({
-      where: { id: 'wi-100' },
+    expect(updateManySpy).toHaveBeenCalledWith({
+      where: {
+        id: { in: Array.from({ length: 50 }, (_, index) => `wi-${index + 100}`) },
+        status: { not: 'succeeded' },
+      },
       data: { lastErrorSummary: expect.stringContaining('DB write failed') as string },
+    })
+  })
+
+  it('グループの account/tweet 一括取得が失敗しても例外を外に伝播させず、グループ全体を lastErrorSummary 付きで失敗扱いにする', async () => {
+    const rule: LabelRule = {
+      key: 'test_rule',
+      description: 'test',
+      version: '1.0.0',
+      evaluate: () => ({ value: true, confidence: 1, reason: 'test' }),
+    }
+    const registry = new LabelRuleRegistry()
+    registry.register(rule)
+
+    const recordLabelsSpy = vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+    const completeSpy = vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
+    vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockRejectedValue(
+      new Error('connection reset'),
+    )
+    const updateManySpy = vi.fn().mockResolvedValue({ count: 0 })
+
+    const prisma = {
+      account: { findMany: vi.fn().mockResolvedValue([{ id: 'alice' }, { id: 'bob' }]) },
+      analysisWorkItem: { updateMany: updateManySpy },
+    } as unknown as PrismaClient
+
+    const result = await evaluateAccountRelabelItems(
+      prisma,
+      [{ id: 'wi-1', triggerId: 'alice' } as never, { id: 'wi-2', triggerId: 'bob' } as never],
+      {
+        registry,
+        labelDefinitionIds: new Map([['test_rule', 'def-1']]),
+        duplicateReplyIndex: { countOtherAccounts: () => 0 },
+        replyHijackIndex: { swarmSizeFor: () => 0, isEligibleForScreening: () => true },
+        followGraphLabelIndex: { signalsFor: () => ({}) },
+        concurrency: 1,
+        leaseOwner: 'test-worker',
+      },
+    )
+
+    expect(result.succeeded).toBe(0)
+    expect(recordLabelsSpy).not.toHaveBeenCalled()
+    expect(completeSpy).not.toHaveBeenCalled()
+    expect(updateManySpy).toHaveBeenCalledWith({
+      where: { id: { in: ['wi-1', 'wi-2'] }, status: { not: 'succeeded' } },
+      data: { lastErrorSummary: expect.stringContaining('connection reset') as string },
     })
   })
 })
