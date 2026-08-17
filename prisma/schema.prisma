@@ -176,8 +176,6 @@ model AccountLabelLatest {
   sourceUsername    String?
 
   @@id([accountId, labelDefinitionId])
-  // value = true で絞り込む dashboard.ts/accounts.ts の各クエリを支えるインデックス。
-  @@index([labelDefinitionId, value])
   @@index([value, accountId])
   // viewer の relabel coverage クエリを支えるインデックス。
   @@index([labelDefinitionId, ruleVersion])
