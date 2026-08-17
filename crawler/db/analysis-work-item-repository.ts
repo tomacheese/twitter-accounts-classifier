@@ -287,10 +287,8 @@ export interface CompleteAccountRelabelWorkItemsBulkInput {
 }
 
 /**
- * account_relabel の完了処理を 1 チャンク分まとめて 1 ラウンドトリップで行う。
- * ロジックは `completeAccountRelabelWorkItem` と同じで、対象を `id = ANY(...)` に広げただけ。
- * チャンク内の全 item が同じ lease owner (同一 worker の同一チャンク claim) を持つため、
- * item ごとに往復する必要がない。
+ * account_relabel の完了処理を複数 item まとめて 1 ラウンドトリップで行う。
+ * 対象の全 item が同じ lease owner (同一 worker の同一グループ claim) を持つため、item ごとに往復する必要がない。
  * @param prisma - Prisma クライアント
  * @param input - 対象 WorkItem の id 一覧と claim 時の lease owner
  * @returns lease を保持できていた item の id と、その完了ステータス

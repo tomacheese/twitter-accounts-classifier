@@ -96,14 +96,12 @@ export interface EvaluateAccountRelabelItemsResult {
 }
 
 /**
- * claim 済みの account_relabel work item のうち、1 グループ分 (account 複数件) を
- * account 取得・tweet 取得・ラベル永続化・work item 完了それぞれ 1 ラウンドトリップにまとめて評価する。
- * account 単位の往復を無くした分、ラベル永続化のようなグループ全体を巻き込む失敗の
- * blast radius はこのグループ (chunk size 以下) までに広がる。個々の account のルール評価
- * (DB I/O を伴わない CPU 処理) は try/catch で分離しており、1 account の不正なデータで
- * グループ全体の評価が失敗することはない。
+ * claim 済みの account_relabel work item のうち、1 グループ分 (account 複数件) を評価する。
+ * account 取得・tweet 取得・ラベル永続化・work item 完了は、それぞれ 1 ラウンドトリップにまとめる。
+ * account 単位の往復をなくした分、ラベル永続化のような失敗の blast radius はこのグループ (chunk size 以下) まで広がる。
+ * 個々の account のルール評価は DB I/O を伴わない CPU 処理であり、try/catch で分離しているため、1 account の不正なデータでグループ全体の評価が失敗することはない。
  * @param prisma - Prisma クライアント
- * @param group - claimAccountRelabelBatchByIds で claim 済みの work item のうち1グループ分
+ * @param group - claimAccountRelabelBatchByIds で claim 済みの work item のうち 1 グループ分
  * @param options - 評価に使うルールレジストリと共有インデックス・lease owner 名
  * @returns succeeded (requeue 含む) にできた件数
  */
@@ -185,9 +183,7 @@ async function evaluateAccountRelabelItemGroup(
 
 /**
  * claim 済みの account_relabel work item を評価・永続化する。
- * account 単位に往復していた DB I/O (account 取得・tweet 取得・ラベル永続化・
- * work item 完了) をグループ単位にまとめることで、
- * 1 account あたり最大 4 ラウンドトリップかかっていたレイテンシを chunk あたり数回に抑える。
+ * account 取得・tweet 取得・ラベル永続化・work item 完了の DB I/O を concurrency 個のグループに分割し、グループ単位にまとめて実行することで 1 account ごとの往復を避ける。
  * @param prisma - Prisma クライアント
  * @param items - claimAccountRelabelBatchByIds で claim 済みの work item 一覧
  * @param options - 評価に使うルールレジストリ・共有インデックス・並行度・lease owner 名
@@ -204,11 +200,23 @@ export async function evaluateAccountRelabelItems(
     groups[index % concurrency].push(item)
   }
 
-  const groupResults = await Promise.all(
+  const groupResults = await Promise.allSettled(
     groups.map((group) => evaluateAccountRelabelItemGroup(prisma, group, options)),
   )
 
-  return { succeeded: groupResults.reduce((sum, count) => sum + count, 0) }
+  // 1 グループの DB 書き込み失敗を Promise.all で扱うと、他グループが成功していても呼び出し元まで例外が伝播し、その成功分を lastErrorSummary で失敗扱いに巻き込んでしまう。
+  // 失敗したグループの work item は lease を保持したまま残るため、lease 失効後に再試行される。
+  let succeeded = 0
+  for (const result of groupResults) {
+    if (result.status === 'fulfilled') {
+      succeeded += result.value
+      continue
+    }
+    logger.error('Relabel drain failed in a group', result.reason as Error)
+    captureException(result.reason, { source: 'relabel-worker.evaluateAccountRelabelItems' })
+  }
+
+  return { succeeded }
 }
 
 interface StaleAccountRow {

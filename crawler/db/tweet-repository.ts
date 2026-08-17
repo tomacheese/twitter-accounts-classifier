@@ -173,8 +173,7 @@ export async function upsertTweets(
 
 /**
  * 複数 account の直近ツイートを account ごとに `limitPerAccount` 件までまとめて 1 ラウンドトリップで取得する。
- * account ごとに `findMany` を発行する代わりに、`(accountId, createdAt)` 索引を使う
- * `LATERAL JOIN` で account ごとの上位 N 件を1クエリに畳み込む。
+ * account ごとに `findMany` を発行する代わりに、`(accountId, createdAt)` 索引を使う `LATERAL JOIN` で account ごとの上位 N 件を 1 クエリに畳み込む。
  * @param prisma - Prisma クライアント
  * @param accountIds - 取得対象の account ID 一覧
  * @param limitPerAccount - account ごとに取得する直近ツイートの上限件数
@@ -198,6 +197,7 @@ export async function loadRecentTweetsForAccounts(
       ORDER BY "createdAt" DESC
       LIMIT ${limitPerAccount}
     ) t
+    ORDER BY target."accountId", t."createdAt" DESC
   `
   for (const row of rows) {
     const existing = tweetsByAccountId.get(row.accountId)

@@ -316,7 +316,7 @@ describe('loadRecentTweetsForAccounts', () => {
     expect(queryRaw).not.toHaveBeenCalled()
   })
 
-  it('account ごとの直近ツイートを1回の queryRaw でまとめて取得し account 単位にグルーピングする', async () => {
+  it('account ごとの直近ツイートを 1 回の queryRaw でまとめて取得し account 単位にグルーピングする', async () => {
     const rows = [
       { id: 't1', accountId: 'u1', createdAt: new Date('2026-01-02T00:00:00Z') },
       { id: 't2', accountId: 'u1', createdAt: new Date('2026-01-01T00:00:00Z') },

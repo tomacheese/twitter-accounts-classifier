@@ -103,14 +103,9 @@ interface RecordAccountLabelsBulkCoreLabel {
 }
 
 /**
- * ラベルごとに `$queryRaw` を逐次発行する代わりに、
- * 列単位の配列を `UNNEST` で展開し、
- * `AccountLabel` への INSERT と `AccountLabelLatest` への UPSERT を 1 ラウンドトリップにまとめる。
- * `AccountLabelLatest` への UPSERT は値・confidence・reason・method・ruleVersion が不変なら行わない
- * (`recordCrawlAccountLabel` は claim 成立時に無条件で UPSERT する点が異なる)。
- * `labels` の各行が自分自身の `accountId` を持つため、
- * 単一アカウント向けの `recordAccountLabelsBulk` と複数アカウントをまとめて渡す
- * `recordAccountLabelsBulkForAccounts` の両方から共有できる。
+ * ラベルごとに `$queryRaw` を逐次発行する代わりに、列単位の配列を `UNNEST` で展開し、`AccountLabel` への INSERT と `AccountLabelLatest` への UPSERT を 1 ラウンドトリップにまとめる。
+ * `AccountLabelLatest` への UPSERT は値・confidence・reason・method・ruleVersion が不変なら行わない (`recordCrawlAccountLabel` は claim 成立時に無条件で UPSERT する点が異なる)。
+ * `labels` の各行が自分自身の `accountId` を持つため、単一アカウント向けの `recordAccountLabelsBulk` と、複数アカウントをまとめて渡す `recordAccountLabelsBulkForAccounts` の両方から共有できる。
  * @param prisma - Prisma クライアント
  * @param labels - 記録対象の評価結果一覧 (アカウントを跨いでよい)
  * @param sourceKind - どの処理がこの行を書いたか (crawl・relabel など)
@@ -218,7 +213,7 @@ async function recordAccountLabelsBulkCore(
 }
 
 /**
- * 1アカウント分の評価結果をまとめて記録する。SQL 本体は `recordAccountLabelsBulkCore` を参照。
+ * 1 アカウント分の評価結果をまとめて記録する。SQL 本体は `recordAccountLabelsBulkCore` を参照。
  * @param prisma - Prisma クライアント
  * @param params - 記録対象のアカウントと評価結果一覧
  * @returns 作成された `AccountLabel` 履歴行。`labels` と同じ順序とは限らないため、
@@ -238,17 +233,26 @@ export async function recordAccountLabelsBulk(
 }
 
 export interface RecordAccountLabelsBulkForAccountsParams {
+  /** 記録対象の評価結果一覧。各行が自分自身の `accountId` を持つ。 */
   labels: RecordAccountLabelsBulkCoreLabel[]
   /** どの処理がこの行を書いたか (crawl・relabel など)。 */
   sourceKind: string
+  /** 発生源となった run の ID。 */
   sourceId?: string
+  /** 発生源となったログインアカウント。 */
   sourceUsername?: string
 }
 
 /**
- * relabel worker のように、1 チャンクにまとめた複数アカウント分の評価結果を
- * アカウントごとの往復なしで 1 ラウンドトリップで記録する。SQL 本体は
- * `recordAccountLabelsBulkCore` を参照 (`labels` の各行が自分の `accountId` を持つ点のみが違う)。
+ * `recordAccountLabelsBulkForAccounts` が SQL 呼び出しを分割する行数。
+ * この値を超えて 1 回の `$queryRaw` にまとめると、Postgres の推定コストが `jit_above_cost` を超えて JIT コンパイルが走り、実行時間より長いコンパイル時間がかかる。
+ */
+const RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE = 2000
+
+/**
+ * 複数アカウント分の評価結果をまとめて、アカウントごとの往復なしで記録する。
+ * SQL 本体は `recordAccountLabelsBulkCore` を参照 (`labels` の各行が自分の `accountId` を持つ点のみが違う)。
+ * `labels` は `RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE` 行ごとに分割して発行する。
  * @param prisma - Prisma クライアント
  * @param params - 記録対象のアカウントを跨いだ評価結果一覧
  * @returns 作成された `AccountLabel` 履歴行
@@ -257,13 +261,24 @@ export async function recordAccountLabelsBulkForAccounts(
   prisma: PrismaClient,
   params: RecordAccountLabelsBulkForAccountsParams,
 ): Promise<AccountLabel[]> {
-  return recordAccountLabelsBulkCore(
-    prisma,
-    params.labels,
-    params.sourceKind,
-    params.sourceId,
-    params.sourceUsername,
-  )
+  const history: AccountLabel[] = []
+  for (
+    let offset = 0;
+    offset < params.labels.length;
+    offset += RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE
+  ) {
+    const subChunk = params.labels.slice(offset, offset + RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE)
+    history.push(
+      ...(await recordAccountLabelsBulkCore(
+        prisma,
+        subChunk,
+        params.sourceKind,
+        params.sourceId,
+        params.sourceUsername,
+      )),
+    )
+  }
+  return history
 }
 
 /**
