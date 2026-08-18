@@ -108,4 +108,32 @@ describe('adReplyHijackRule', () => {
     expect(result.evaluable).toBe(false)
     expect(result.confidence).toBeCloseTo(0.5)
   })
+
+  it('is false for a self-promotional numbered thread replying to its own preceding tweets, not hijacking others', () => {
+    const ownTweet: AccountFeatureBundle['recentTweets'][number] = {
+      id: 'own0',
+      fullText: '転職エージェントのサービス比較シリーズ、はじめます🧵',
+      createdAt: new Date(),
+      retweetCount: 0,
+      likeCount: 0,
+      isReply: false,
+      isRetweet: false,
+      isPromoted: false,
+      isPaidPromotion: false,
+    }
+    const selfThreadReplies = [1, 2, 3, 4].map((i) => ({
+      id: `self${i}`,
+      fullText: `続き${i}: 転職エージェントに無料相談してみませんか #転職`,
+      createdAt: new Date(),
+      retweetCount: 0,
+      likeCount: 0,
+      isReply: true,
+      isRetweet: false,
+      isPromoted: false,
+      isPaidPromotion: false,
+      inReplyToTweetId: i === 1 ? 'own0' : `self${i - 1}`,
+    }))
+    const result = adReplyHijackRule.evaluate(makeBundle([ownTweet, ...selfThreadReplies]))
+    expect(result.value).toBe(false)
+  })
 })

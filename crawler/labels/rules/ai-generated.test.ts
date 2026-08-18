@@ -38,6 +38,13 @@ describe('aiGeneratedRule', () => {
     expect(result.value).toBe(true)
   })
 
+  it('is still true for a self-declaration phrased as "〜アカウント" without any restriction cue nearby', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: 'AI生成アカウントです。よろしくお願いします。' }),
+    )
+    expect(result.value).toBe(true)
+  })
+
   it('is true for the "生成AI" (generative-AI-first) word order, not just "AI生成"', () => {
     const result = aiGeneratedRule.evaluate(
       makeBundle({ bio: '生成AIと猫への愛50%ずつで構成されています🐾' }),
@@ -213,6 +220,10 @@ describe('aiGeneratedRule', () => {
       'an "unnecessary" opposition phrase using 不要 rather than a prohibition verb',
       '週末は釣りとキャンプ。手描きこそ至高、生成AIは不要と考える派です',
     ],
+    [
+      'the colloquial "アンチ" (anti-) suffix',
+      '創作アカウント。生成AIアンチです。手描きこそ至高。',
+    ],
   ])('is false for a bio that opposes generative AI via %s', (_label, bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })
@@ -322,6 +333,10 @@ describe('aiGeneratedRule', () => {
     [
       'a block policy aimed at other AI users phrased with "使っている方"',
       '手描きイラスト専門の趣味垢。AI生成使っている方はご遠慮ください。',
+    ],
+    [
+      'a contact-restriction policy naming other accounts via "アカウント" rather than "方"',
+      '生成AIアカウント・R-18アカウントはDM/リプ限定でお願いします。',
     ],
   ])('is false for a bio describing a policy toward other accounts via %s', (_label, bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)

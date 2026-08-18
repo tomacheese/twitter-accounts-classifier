@@ -66,7 +66,7 @@ function isTopicInterestMention(bio: string): boolean {
 // 単なる「学習禁止」「転載禁止」は両陣営が書く表現であるため対立とはみなさず、
 // 拒否語がAI用語から離れた場所(無関係な無断転載の注意書きなど)にある場合は無効化しない。
 const AI_OPPOSITION_PATTERN =
-  /反生成AI|反AI生成|(?:生成AI|AI生成)(?:に|には)?反対|無断生成AI|(?:生成AI|AI生成).{0,15}(?:嫌い|きらい|認めません|認めない|ブロ(?:ック)?)|(?:生成AI|AI生成)(?:は)?(?:一切)?(?:不使用|使用していません|使っていません|使いません)|(?:生成AI|AI生成).{0,6}(?:お断り|お断わり)/i
+  /反生成AI|反AI生成|(?:生成AI|AI生成)(?:に|には)?反対|無断生成AI|(?:生成AI|AI生成).{0,15}(?:嫌い|きらい|認めません|認めない|ブロ(?:ック)?|アンチ)|(?:生成AI|AI生成)(?:は)?(?:一切)?(?:不使用|使用していません|使っていません|使いません)|(?:生成AI|AI生成).{0,6}(?:お断り|お断わり)/i
 
 // 「〜している方」は日本語における三人称の言い回しであり、
 // 自身の投稿内容の自己申告ではなく、
@@ -76,8 +76,39 @@ const AI_OPPOSITION_PATTERN =
 const THIRD_PARTY_REFERENCE_PATTERN =
   /(?:生成AI|AI生成).{0,10}(?:して(?:る|いる)|使って(?:る|いる))方/
 
+// 「生成AIアカウント」は「〜している方」と異なり、
+// 自己申告(「生成AIアカウントです」)にも単独で使われる。
+// そのため用語直後の一致だけで無効化すると、
+// 自己申告を大量に誤って除外してしまう。
+// DM/リプライ制限やお断りなど、他アカウントへの制約を示す語が近くにある場合に限り、
+// 他アカウントへの方針を述べているとみなす。
+const ACCOUNT_REFERENCE_PATTERN = /(?:生成AI|AI生成).{0,4}アカウント/
+const ACCOUNT_RESTRICTION_WINDOW_LENGTH = 20
+const ACCOUNT_RESTRICTION_CUE_PATTERN =
+  /DM|リプ(?:ライ)?限定|お断り|お断わり|禁止|ブロック|フォロバ(?:しない|不可)?|遠慮/
+
+function isAccountRestrictionMention(bio: string): boolean {
+  const match = ACCOUNT_REFERENCE_PATTERN.exec(bio)
+  if (match === null) return false
+  const beforeMatch = bio.slice(
+    Math.max(0, match.index - ACCOUNT_RESTRICTION_WINDOW_LENGTH),
+    match.index,
+  )
+  const afterMatch = bio.slice(
+    match.index + match[0].length,
+    match.index + match[0].length + ACCOUNT_RESTRICTION_WINDOW_LENGTH,
+  )
+  return (
+    ACCOUNT_RESTRICTION_CUE_PATTERN.test(beforeMatch) ||
+    ACCOUNT_RESTRICTION_CUE_PATTERN.test(afterMatch)
+  )
+}
+
 function isThirdPartyReference(bio: string): boolean {
-  return THIRD_PARTY_REFERENCE_PATTERN.test(bio) && !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
+  return (
+    (THIRD_PARTY_REFERENCE_PATTERN.test(bio) || isAccountRestrictionMention(bio)) &&
+    !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
+  )
 }
 
 // 「/」「、」「,」やカッコなど、両側とも列挙の区切り文字に挟まれている用語は、
@@ -119,7 +150,7 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.9.4',
+  version: '1.9.5',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =

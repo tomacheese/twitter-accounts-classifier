@@ -81,6 +81,13 @@ describe('topicCryptoRule', () => {
     ).toBe(true)
   })
 
+  it('is true for a bio affirming NFTs where an unrelated "not" merely happens to sit nearby ("NFTs are not going anywhere")', () => {
+    expect(
+      topicCryptoRule.evaluate(makeBundle({ bio: 'NFTs are not going anywhere, huge fan here' }))
+        .value,
+    ).toBe(true)
+  })
+
   it('bio・ツイートにキーワードを含まず、フォローグラフシグナルがしきい値を満たす場合は value: true・confidence が 0.5 超になる', () => {
     const bundle = {
       ...makeBundle({}),

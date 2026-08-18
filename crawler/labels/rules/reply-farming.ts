@@ -13,6 +13,9 @@ const VELOCITY_THRESHOLD_PER_DAY = 150
 // `tweetCount / accountAge` のみでは高頻度アカウントと誤判定してしまう。
 const RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY = 50
 const MIN_SAMPLE = 5
+// 完全にゼロではなく閾値以下(5%)を要求しているのは、
+// リツイートのタイムスタンプ計測誤差などによるノイズ混入により、
+// 本来該当するアカウントを取りこぼさないようにするため。
 const ORIGINAL_CONTENT_RATIO_THRESHOLD = 0.05
 // `originalContentRatio` はリツイートも「オリジナルでない」とみなすため、
 // 一日中転載するだけで返信しない純粋なリツイート主体アカウントもこのガードを素通りしてしまう。
@@ -39,7 +42,7 @@ function recentObservedTweetsPerDay(tweets: { createdAt: Date }[]): number {
 export const replyFarmingRule: LabelRule = {
   key: 'reply_farming',
   description:
-    '自身によるオリジナル投稿が一切なく(直近のツイートがすべてリプライまたはリツイート)、かつ人間としてあり得ない投稿頻度である。大量生産型の AI 生成/エンゲージメント稼ぎリプライボットの特徴',
+    '自身によるオリジナル投稿がほぼなく(直近のツイートのほぼ全てがリプライまたはリツイート)、かつ人間としてあり得ない投稿頻度である。大量生産型の AI 生成/エンゲージメント稼ぎリプライボットの特徴',
   version: '1.4.1',
   evaluate(bundle) {
     const { tweetCount, accountCreatedAt } = bundle.account
