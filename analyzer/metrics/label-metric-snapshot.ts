@@ -125,8 +125,7 @@ async function compactFreshnessBuckets(
  * 全 labelDefinitionId の freshness バケットを、ラベルごとに分けず
  * 固定回数の SQL 文で一括 compaction する。sentinel 行のロックは
  * labelDefinitionId 昇順・SKIP LOCKED で取得し、トリガー側のロック順序とは揃えつつ、
- * いずれかの labelDefinitionId が分類書き込み側と競合していても
- * そのロックを待たずに読み飛ばす。全件を待ち合わせる設計だと、
+ * 分類書き込み側と競合しているロックはそのまま読み飛ばす。全件を待ち合わせる設計だと、
  * 1件の競合が compaction 全体の所要時間に積み上がり timeout の主因になるため、
  * 競合した labelDefinitionId は今回の compaction 対象から外し次回に委ねる。
  * snapshot 本体の REPEATABLE READ トランザクションより先に、それとは

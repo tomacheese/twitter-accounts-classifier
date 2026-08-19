@@ -82,8 +82,9 @@ export function averagePairwiseSimilarity(
 }
 
 // リンクのみの投稿は、言語やトピックに関わらず内容比較上のシグナルを持たない空サンプルにすぎない。
-// URL・メンション・自己リツイートの接頭辞を除去し、実質的なテキストが残っている場合のみ
-// 「言語的内容を持つ」とみなす。reply-language-mismatch と bare-link-spam の両方が、
+// URL・メンション・自己リツイートの接頭辞を除去し、
+// 実質的なテキストが残っている場合のみ「言語的内容を持つ」とみなす。
+// reply-language-mismatch と bare-link-spam の両方が、
 // この「実質空かどうか」の判定を同じ基準で必要とするため共有する。
 export function hasLinguisticContent(text: string): boolean {
   const stripped = text

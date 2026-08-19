@@ -67,6 +67,12 @@ describe('topicMovieRule', () => {
     )
   })
 
+  it('is true for a bio starting with a movie keyword even when it ends with a slash-delimited tag', () => {
+    expect(topicMovieRule.evaluate(makeBundle({ bio: '映画は最高です/おすすめ/' })).value).toBe(
+      true,
+    )
+  })
+
   it('bio・ツイートにキーワードを含まず、フォローグラフシグナルがしきい値を満たす場合は value: true・confidence が 0.5 超になる', () => {
     const bundle = {
       ...makeBundle({}),

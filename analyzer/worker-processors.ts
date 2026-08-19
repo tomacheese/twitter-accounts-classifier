@@ -76,9 +76,9 @@ function extractPostgresSqlState(error: unknown): string | null {
 }
 
 /**
- * Prisma のラッパーエラーコード (`P2010` 等) を取得する。SQLSTATE (`extractPostgresSqlState`) が
- * 取れない失敗 (transaction expiration 等、DB がエラーを返さないクライアント側 timeout) を
- * この値で区別するために使う。
+ * Prisma のラッパーエラーコード (`P2010` 等) を取得する。
+ * transaction expiration 等、DB がエラーを返さないクライアント側 timeout は
+ * SQLSTATE (`extractPostgresSqlState`) が取れないため、この値で区別する。
  * @param error - 発生した例外
  * @returns 取得できた場合は Prisma エラーコード、できない場合は null
  */

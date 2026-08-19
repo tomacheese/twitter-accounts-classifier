@@ -22,8 +22,9 @@ export const replyLanguageMismatchRule: LabelRule = {
   version: '1.3.0',
   evaluate(bundle) {
     const { screenName } = bundle.account
-    // リンクのみの投稿はスクリプト比率が常に0になり、言語の「不一致」の根拠ではなく
-    // 単に言語的内容を持たない空サンプルにすぎないため、比率の算出対象から除く。
+    // リンクのみの投稿はスクリプト比率が常に0になり、
+    // 言語の「不一致」の根拠ではなく単に言語的内容を持たない空サンプルにすぎないため、
+    // 比率の算出対象から除く。
     const ownPosts = bundle.recentTweets.filter(
       (t) => !t.isReply && !t.isRetweet && hasLinguisticContent(t.fullText),
     )

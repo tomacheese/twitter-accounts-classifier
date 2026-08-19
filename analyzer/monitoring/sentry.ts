@@ -19,8 +19,9 @@ export function initMonitoring(): void {
 /** grouping (fingerprint) とタグ付けのための追加オプション。 */
 export interface CaptureGroupingOptions {
   /**
-   * 低 cardinality な識別子の配列。指定すると例外クラス+スタックトレースによる
-   * デフォルトの grouping を上書きし、この値で GlitchTip の issue を分離する。
+   * 低 cardinality な識別子の配列。
+   * 指定すると例外クラス+スタックトレースによるデフォルトの grouping を上書きし、
+   * この値で GlitchTip の issue を分離する。
    */
   fingerprint?: string[]
   /** 検索・フィルタ用の低 cardinality なタグ。動的値や機密情報を含めないこと。 */

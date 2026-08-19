@@ -44,6 +44,18 @@ describe('lib/monitoring/sentry', () => {
 
     const error = new Error('boom')
     captureException(error)
-    expect(captureExceptionMock).toHaveBeenCalledWith(error, undefined)
+    expect(captureExceptionMock).toHaveBeenCalledWith(error, { extra: undefined })
+  })
+
+  it('contextをextraへ包んでSentryへ渡す', async () => {
+    process.env.GLITCHTIP_DSN = 'https://example.test/1'
+    const { initMonitoring, captureException } = await import('./sentry')
+    initMonitoring()
+
+    const error = new Error('boom')
+    captureException(error, { accountId: 'fictional-account' })
+    expect(captureExceptionMock).toHaveBeenCalledWith(error, {
+      extra: { accountId: 'fictional-account' },
+    })
   })
 })

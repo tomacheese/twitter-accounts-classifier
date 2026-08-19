@@ -21,7 +21,9 @@ const MIN_LIST_DELIMITER_COUNT = 2
 function isSlashDelimitedTagListItem(bio: string, match: RegExpExecArray): boolean {
   const delimiterCount = bio.match(LIST_DELIMITER_PATTERN)?.length ?? 0
   if (delimiterCount < MIN_LIST_DELIMITER_COUNT) return false
-  const before = bio.at(match.index - 1) ?? ''
+  // `String.prototype.at` は負のインデックスを末尾からの位置として扱うため、
+  // match.index が0のときそのまま渡すと bio の末尾文字を誤って前方文字とみなしてしまう。
+  const before = match.index > 0 ? (bio.at(match.index - 1) ?? '') : ''
   const after = bio.at(match.index + match[0].length) ?? ''
   return LIST_DELIMITER_CHARS.has(before) || LIST_DELIMITER_CHARS.has(after)
 }

@@ -996,8 +996,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     releaseLock()
     await holderTx
 
-    // 別トランザクションが sentinel 行を保持している間は SKIP LOCKED で
-    // その labelDefinitionId を読み飛ばすため、保持側を解放するまで待たずに完了する。
+    // SKIP LOCKED によりロック中の labelDefinitionId を読み飛ばすため、
+    // 別トランザクションが sentinel 行を保持していても解放を待たずに完了する。
     expect(elapsedMs).toBeLessThan(1000)
   })
 

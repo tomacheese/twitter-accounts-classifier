@@ -12,9 +12,9 @@ export interface IssuedCookies {
 export class CookieIssuerError extends Error {
   readonly status?: number
   /**
-   * cookie-issuer が timeout/network error 等により cookie の有効性を確定できなかった
-   * (503 + `status: indeterminate`) ことを示す。確定 invalid とは区別し、
-   * このフラグが立った失敗を再ログインの根拠として扱ってはならない。
+   * cookie-issuer が timeout/network error 等により
+   * cookie の有効性を確定できなかった (503 + `status: indeterminate`) ことを示す。
+   * 確定 invalid とは区別し、このフラグが立った失敗を再ログインの根拠として扱ってはならない。
    */
   readonly indeterminate: boolean
 
@@ -122,7 +122,7 @@ export function createCookieIssuerClient(options: CookieIssuerClientOptions) {
       } catch (error) {
         lastError = error
 
-        // indeterminate の retry budget は busy(409) の attempt/maxAttempts を消費しない:
+        // indeterminate の retry budget は busy(409) の attempt/maxAttempts を消費しない。
         // 両者は原因が異なり、片方の再試行上限に達したからといってもう一方を打ち切る理由にならないため。
         if (error instanceof CookieIssuerError && error.indeterminate) {
           indeterminateAttempt++
