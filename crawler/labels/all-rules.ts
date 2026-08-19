@@ -45,6 +45,7 @@ import { replyFloodingRule } from './rules/reply-flooding'
 import { crossTargetTemplatedReplyRule } from './rules/cross-target-templated-reply'
 import { replyHijackSwarmRule } from './rules/reply-hijack-swarm'
 import { scamLinkDomainRule } from './rules/scam-link-domain'
+import { bareLinkSpamRule } from './rules/bare-link-spam'
 
 /**
  * クローラーに登録される全ラベルルールの正規リスト。
@@ -98,4 +99,5 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   crossTargetTemplatedReplyRule,
   replyHijackSwarmRule,
   scamLinkDomainRule,
+  bareLinkSpamRule,
 ]
