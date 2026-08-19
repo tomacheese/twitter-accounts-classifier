@@ -16,12 +16,31 @@ export function initMonitoring(): void {
   initialized = true
 }
 
-export function captureException(error: unknown, context?: Record<string, unknown>): void {
+/** grouping (fingerprint) とタグ付けのための追加オプション。 */
+export interface CaptureGroupingOptions {
+  /**
+   * 低 cardinality な識別子の配列。指定すると例外クラス+スタックトレースによる
+   * デフォルトの grouping を上書きし、この値で GlitchTip の issue を分離する。
+   */
+  fingerprint?: string[]
+  /** 検索・フィルタ用の低 cardinality なタグ。動的値や機密情報を含めないこと。 */
+  tags?: Record<string, string | number | boolean>
+}
+
+export function captureException(
+  error: unknown,
+  context?: Record<string, unknown>,
+  grouping?: CaptureGroupingOptions,
+): void {
   if (!initialized) return
   // GlitchTip への報告はベストエフォートであり、
   // ここでの throw を呼び出し元のエラーハンドリングに伝播させてはならない。
   try {
-    Sentry.captureException(error, context)
+    Sentry.captureException(error, {
+      extra: context,
+      fingerprint: grouping?.fingerprint,
+      tags: grouping?.tags,
+    })
   } catch (reportError) {
     logger.warn('Failed to report exception to GlitchTip', reportError as Error)
   }
@@ -33,11 +52,21 @@ export function captureException(error: unknown, context?: Record<string, unknow
  * その場合のみ例外を投げずログ出力に留める。
  * @param message - 報告する概要テキスト
  * @param context - イベントの `extra` として付与する追加の構造化データ
+ * @param grouping - grouping (fingerprint) とタグ付けのための追加オプション
  */
-export function captureMessage(message: string, context?: Record<string, unknown>): void {
+export function captureMessage(
+  message: string,
+  context?: Record<string, unknown>,
+  grouping?: CaptureGroupingOptions,
+): void {
   if (!initialized) return
   try {
-    Sentry.captureMessage(message, { level: 'warning', extra: context })
+    Sentry.captureMessage(message, {
+      level: 'warning',
+      extra: context,
+      fingerprint: grouping?.fingerprint,
+      tags: grouping?.tags,
+    })
   } catch (reportError) {
     logger.warn('Failed to report message to GlitchTip', reportError as Error)
   }

@@ -1747,6 +1747,10 @@ describe('runCrawlCycle', () => {
           warningThreshold: 1,
           warningCounts: { own_account_sync_failed: 1 },
         }),
+        expect.objectContaining({
+          fingerprint: ['crawl-warning-threshold-exceeded', 'v', 'own_account_sync_failed'],
+          tags: { dominantWarningType: 'own_account_sync_failed' },
+        }),
       )
     } finally {
       if (originalThreshold === undefined) {
@@ -1801,6 +1805,10 @@ describe('runCrawlCycle', () => {
         expect.objectContaining({
           warningCount: 3,
           warningCounts: { author_processing_failed: 2, own_account_sync_failed: 1 },
+        }),
+        expect.objectContaining({
+          fingerprint: ['crawl-warning-threshold-exceeded', 'v', 'author_processing_failed'],
+          tags: { dominantWarningType: 'author_processing_failed' },
         }),
       )
     } finally {

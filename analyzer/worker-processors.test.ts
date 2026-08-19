@@ -829,6 +829,47 @@ describe('processLabelAggregateRefresh のエラーコード分岐', () => {
         sqlState: '57014',
         aggregateName: 'LabelMetricSnapshot',
       }),
+      expect.objectContaining({
+        fingerprint: [
+          'label-aggregate-refresh',
+          'label_aggregate_snapshot_failed',
+          'P2010',
+          '57014',
+        ],
+        tags: expect.objectContaining({ sqlState: '57014', prismaErrorCode: 'P2010' }),
+      }),
+    )
+  })
+
+  it('sqlState を取得できない失敗 (transaction expiration 等) は Prisma エラーコードのみで fingerprint を分離する', async () => {
+    const transactionExpiredError = new Prisma.PrismaClientKnownRequestError(
+      'Transaction already closed',
+      { code: 'P2028', clientVersion: '6.19.3' },
+    )
+    vi.spyOn(labelMetricSnapshotModule, 'buildLabelAggregateSnapshotSet').mockRejectedValue(
+      transactionExpiredError,
+    )
+    const captureExceptionSpy = vi.spyOn(sentryModule, 'captureException')
+
+    await expect(
+      processLabelAggregateRefresh(prisma, {
+        id: 'wi-1',
+        triggerType: 'crawl_run',
+        triggerId: 'run-1',
+      } as never),
+    ).rejects.toMatchObject({ errorCode: 'label_aggregate_snapshot_failed' })
+
+    expect(captureExceptionSpy).toHaveBeenCalledWith(
+      transactionExpiredError,
+      expect.objectContaining({ sqlState: null }),
+      expect.objectContaining({
+        fingerprint: [
+          'label-aggregate-refresh',
+          'label_aggregate_snapshot_failed',
+          'P2028',
+          'no-sqlstate',
+        ],
+      }),
     )
   })
 
