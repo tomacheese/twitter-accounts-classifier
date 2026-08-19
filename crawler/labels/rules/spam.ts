@@ -64,8 +64,9 @@ function isMassFollowingPattern(followingCount: number, followersCount: number):
 export const spamRule: LabelRule = {
   key: 'spam',
   description:
-    'プロフィールで出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある',
-  version: '1.9.0',
+    'プロフィールで出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある。' +
+    'bio に勧誘文言が無くても、リツイート主体の釣り的タイムラインと大量フォロー傾向の両方が同時に強く出ている場合は、それ自体を独立したエンゲージメント水増しの証拠として扱う',
+  version: '1.10.0',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
     const hasSolicitation = bio !== null && hasGenuineSolicitation(bio)
@@ -77,7 +78,14 @@ export const spamRule: LabelRule = {
 
     const hasMassFollowingPattern = isMassFollowingPattern(followingCount, followersCount)
 
-    const value = hasSolicitation && (hasBaitRetweetPattern || hasMassFollowingPattern)
+    // bio 勧誘文言の AND ゲートは、新規アカウントの正当な大量フォロー等、
+    // 単一シグナルだけの誤検知を防ぐガードとして維持する。
+    // 一方、リツイート主体の釣り的タイムラインと大量フォローが両方同時に強く出ているアカウントは、
+    // 単一シグナルの正当な挙動とは考えにくいため、bio 勧誘文言が無くても独立に検出対象とする。
+    const hasStrongEngagementInflation = hasBaitRetweetPattern && hasMassFollowingPattern
+    const value =
+      hasStrongEngagementInflation ||
+      (hasSolicitation && (hasBaitRetweetPattern || hasMassFollowingPattern))
 
     const retweetScore = rampScore(retweetRatio, 0.8, 0.2, 'higher-is-positive')
     const followingCountScore = rampScore(
@@ -97,13 +105,21 @@ export const spamRule: LabelRule = {
     // 勧誘が無い bio では他シグナルの強弱に関わらず evidenceScore を 0 に落とす。
     // 含めないと勧誘無しでも大量フォロー等の副シグナルだけで evidenceScore が高止まりし、
     // value=false の confidence が不当に低くなるため。
-    const evidenceScore = combineRequired([
+    const bioGatedScore = combineRequired([
       hasSolicitation ? 1 : 0,
       combineAlternatives([
         retweetScore,
         combineRequired([followingCountScore, followingRatioScore]),
       ]),
     ])
+    // bio 勧誘文言なしの独立経路は、両シグナルが同時に強い場合のみを評価するため、
+    // AND (combineRequired) で合成する。
+    const strongInflationScore = combineRequired([
+      retweetScore,
+      followingCountScore,
+      followingRatioScore,
+    ])
+    const evidenceScore = combineAlternatives([bioGatedScore, strongInflationScore])
 
     return {
       value,

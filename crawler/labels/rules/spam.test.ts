@@ -212,6 +212,31 @@ describe('spamRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it('is true for mass-following combined with a bait-like retweet ratio even without a solicitation bio', () => {
+    const tweets: AccountFeatureBundle['recentTweets'] = Array.from({ length: 5 }, (_, i) => ({
+      id: `t${i}`,
+      fullText: 'RT @someone: ...',
+      createdAt: new Date(),
+      retweetCount: 0,
+      likeCount: 0,
+      isReply: false,
+      isRetweet: true,
+      isPromoted: false,
+      isPaidPromotion: false,
+    }))
+    const result = spamRule.evaluate(
+      makeBundle({ bio: '日常アカウントです', followersCount: 10, followingCount: 800 }, tweets),
+    )
+    expect(result.value).toBe(true)
+  })
+
+  it('is false for mass-following alone (no bait retweet ratio) without a solicitation bio', () => {
+    const result = spamRule.evaluate(
+      makeBundle({ bio: '日常アカウントです', followersCount: 10, followingCount: 800 }),
+    )
+    expect(result.value).toBe(false)
+  })
+
   it('gives a higher confidence to a stronger reinforcing signal among value=true cases', () => {
     const weak = spamRule.evaluate(
       makeBundle({ bio: '副業紹介します', followersCount: 100, followingCount: 500 }),
