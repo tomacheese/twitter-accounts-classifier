@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { AccountFeatureBundle } from '../types'
 import { scamLinkDomainRule } from './scam-link-domain'
 
-function makeBundle(recentTweets: AccountFeatureBundle['recentTweets']): AccountFeatureBundle {
+function makeBundle(
+  recentTweets: AccountFeatureBundle['recentTweets'],
+  accountOverrides: Partial<AccountFeatureBundle['account']> = {},
+): AccountFeatureBundle {
   return {
     account: {
       id: 'fictional-account',
@@ -15,6 +18,7 @@ function makeBundle(recentTweets: AccountFeatureBundle['recentTweets']): Account
       accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
       isBlueVerified: false,
       verifiedType: null,
+      ...accountOverrides,
     },
     recentTweets,
   }
@@ -107,5 +111,20 @@ describe('scamLinkDomainRule', () => {
     const bundle = makeBundle([tweet()])
     delete bundle.recentTweets[0].expandedUrls
     expect(scamLinkDomainRule.evaluate(bundle).value).toBe(false)
+  })
+
+  it('recentTweets が未取得 (null) の場合、false のまま evaluable: false になる', () => {
+    const result = scamLinkDomainRule.evaluate(makeBundle([], { recentTweetsFetchStatus: null }))
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBeCloseTo(0.5)
+  })
+
+  it('recentTweets が取得済み (success) の場合、証拠が無ければ evaluable: true のまま false になる', () => {
+    const result = scamLinkDomainRule.evaluate(
+      makeBundle([], { recentTweetsFetchStatus: 'success' }),
+    )
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(true)
   })
 })
