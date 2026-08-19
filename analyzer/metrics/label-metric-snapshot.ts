@@ -1,7 +1,10 @@
+import { Logger } from '@book000/node-utils'
 import { Prisma, type PrismaClient } from '../generated/prisma'
 
 /** LabelMetricSnapshot.completeness の値。 */
 export type SnapshotCompleteness = 'complete' | 'partial' | 'unknown'
+
+const logger = Logger.configure('metrics/label-metric-snapshot')
 
 const CONFIDENCE_BUCKET_COUNT = 10
 const FRESHNESS_BUCKET_BACKLOG_CEILING_MS = 7 * 24 * 60 * 60 * 1000
@@ -10,6 +13,9 @@ const MIN_FRESHNESS_THRESHOLD_MS = 5 * 60 * 1000
 // トランザクションになったため、旧 COUNT(DISTINCT) 全件scan を見込んだ 300 秒は
 // 過大。account_summary_refresh と同じ水準に合わせる。
 const LABEL_AGGREGATE_SNAPSHOT_TRANSACTION_TIMEOUT_MS = 60_000
+// compaction は全 labelDefinitionId を一括で SKIP LOCKED 取得するだけの短時間処理であり、
+// Prisma の既定 5 秒 timeout では単発の遅延クエリでも簡単に超過するため、余裕を明示する。
+const FRESHNESS_COMPACTION_TRANSACTION_TIMEOUT_MS = 30_000
 
 /**
  * @param bucket - 0 から 9 までのバケット番号
@@ -118,7 +124,10 @@ async function compactFreshnessBuckets(
 /**
  * 全 labelDefinitionId の freshness バケットを、ラベルごとに分けず
  * 固定回数の SQL 文で一括 compaction する。sentinel 行のロックは
- * labelDefinitionId 昇順で一括取得し、トリガー側のロック順序と一致させる。
+ * labelDefinitionId 昇順・SKIP LOCKED で取得し、トリガー側のロック順序とは揃えつつ、
+ * 分類書き込み側と競合しているロックはそのまま読み飛ばす。全件を待ち合わせる設計だと、
+ * 1件の競合が compaction 全体の所要時間に積み上がり timeout の主因になるため、
+ * 競合した labelDefinitionId は今回の compaction 対象から外し次回に委ねる。
  * snapshot 本体の REPEATABLE READ トランザクションより先に、それとは
  * 独立した短時間トランザクションとして実行することで、分類書き込み側が
  * 待たされる時間を compaction 自体の実行時間に限定する。
@@ -131,41 +140,61 @@ async function compactFreshnessBucketsForAllLabels(
 ): Promise<void> {
   if (labelIds.length === 0) return
   const sortedLabelIds = labelIds.toSorted()
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`
-      INSERT INTO "AccountClassificationFreshnessBucket" ("labelDefinitionId", "observedAtBucket", "count")
-      SELECT "id", TIMESTAMP '1970-01-01', 0
-      FROM UNNEST(${sortedLabelIds}::text[]) AS "id"
-      ON CONFLICT DO NOTHING
-    `
-    await tx.$queryRaw`
-      SELECT * FROM "AccountClassificationFreshnessBucket"
-      WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::text[]) AND "observedAtBucket" = TIMESTAMP '1970-01-01'
-      ORDER BY "labelDefinitionId"
-      FOR UPDATE
-    `
-    await tx.$executeRaw`
-      WITH stale_totals AS (
-        SELECT "labelDefinitionId", SUM("count") AS total
-        FROM "AccountClassificationFreshnessBucket"
-        WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::text[])
+  const startedAt = performance.now()
+
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`
+        INSERT INTO "AccountClassificationFreshnessBucket" ("labelDefinitionId", "observedAtBucket", "count")
+        SELECT "id", TIMESTAMP '1970-01-01', 0
+        FROM UNNEST(${sortedLabelIds}::text[]) AS "id"
+        ON CONFLICT DO NOTHING
+      `
+
+      const lockedAt = performance.now()
+      const lockedRows = await tx.$queryRaw<{ labelDefinitionId: string }[]>`
+        SELECT "labelDefinitionId" FROM "AccountClassificationFreshnessBucket"
+        WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::text[]) AND "observedAtBucket" = TIMESTAMP '1970-01-01'
+        ORDER BY "labelDefinitionId"
+        FOR UPDATE SKIP LOCKED
+      `
+      const lockWaitMs = performance.now() - lockedAt
+      const lockedLabelIds = lockedRows.map((row) => row.labelDefinitionId)
+      if (lockedLabelIds.length < sortedLabelIds.length) {
+        logger.warn(
+          `compactFreshnessBucketsForAllLabels skipped ${sortedLabelIds.length - lockedLabelIds.length} of ${sortedLabelIds.length} labelDefinitionId(s) held by a concurrent writer (lockWaitMs=${lockWaitMs.toFixed(1)})`,
+        )
+      }
+      if (lockedLabelIds.length === 0) return
+
+      await tx.$executeRaw`
+        WITH stale_totals AS (
+          SELECT "labelDefinitionId", SUM("count") AS total
+          FROM "AccountClassificationFreshnessBucket"
+          WHERE "labelDefinitionId" = ANY(${lockedLabelIds}::text[])
+            AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
+            AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
+          GROUP BY 1
+        )
+        UPDATE "AccountClassificationFreshnessBucket" AS sentinel
+        SET "count" = sentinel."count" + stale_totals."total"
+        FROM stale_totals
+        WHERE sentinel."labelDefinitionId" = stale_totals."labelDefinitionId"
+          AND sentinel."observedAtBucket" = TIMESTAMP '1970-01-01'
+      `
+      await tx.$executeRaw`
+        DELETE FROM "AccountClassificationFreshnessBucket"
+        WHERE "labelDefinitionId" = ANY(${lockedLabelIds}::text[])
           AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
           AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
-        GROUP BY 1
-      )
-      UPDATE "AccountClassificationFreshnessBucket" AS sentinel
-      SET "count" = sentinel."count" + stale_totals."total"
-      FROM stale_totals
-      WHERE sentinel."labelDefinitionId" = stale_totals."labelDefinitionId"
-        AND sentinel."observedAtBucket" = TIMESTAMP '1970-01-01'
-    `
-    await tx.$executeRaw`
-      DELETE FROM "AccountClassificationFreshnessBucket"
-      WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::text[])
-        AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
-        AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
-    `
-  })
+      `
+    },
+    { timeout: FRESHNESS_COMPACTION_TRANSACTION_TIMEOUT_MS },
+  )
+
+  logger.debug(
+    `compactFreshnessBucketsForAllLabels took ${(performance.now() - startedAt).toFixed(1)}ms for ${sortedLabelIds.length} labelDefinitionId(s)`,
+  )
 }
 
 /** buildLabelAggregateSnapshotSet の入力。 */
@@ -454,4 +483,7 @@ export async function buildLabelAggregateSnapshotSet(
   return { triggerWorkItemId: input.triggerWorkItemId, snapshotAt, reused: false }
 }
 
-export { compactFreshnessBuckets as compactFreshnessBucketsForTest }
+export {
+  compactFreshnessBuckets as compactFreshnessBucketsForTest,
+  compactFreshnessBucketsForAllLabels as compactFreshnessBucketsForAllLabelsForTest,
+}

@@ -18,5 +18,7 @@ export function initMonitoring(): void {
 
 export function captureException(error: unknown, context?: Record<string, unknown>): void {
   if (!initialized) return
-  Sentry.captureException(error, context)
+  // context をそのまま渡すと Sentry の CaptureContext 判定にヒットせず、
+  // 未知キーのオブジェクトとして黙って破棄されるため extra に包む。
+  Sentry.captureException(error, { extra: context })
 }

@@ -23,6 +23,14 @@ export interface AccountFeatureBundle {
      * 任意項目にする理由は `professionalType` と同じ。
      */
     parodyCommentaryFanLabel?: string | null
+    /**
+     * `Account.recentTweetsFetchStatus` の値 (`'success' | 'failed'` 等)。
+     * `recentTweets` が「取得済みで証拠なし」なのか「未取得のため空」なのかを区別できないと、
+     * ルールが未取得を確信度の高い陰性と誤認してしまうため、bundle 側にも伝播させる。
+     * この項目が存在する前に作られたルール単体テストの bundle も無修正でコンパイルが通るよう、
+     * 任意項目にし、省略時は取得済みとして扱う (`professionalType` と同じ理由)。
+     */
+    recentTweetsFetchStatus?: string | null
   }
   recentTweets: {
     id: string

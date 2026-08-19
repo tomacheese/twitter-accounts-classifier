@@ -325,6 +325,26 @@ function summarizeWarningsByType(
   return counts
 }
 
+/**
+ * 最も件数の多い警告種別を返す。GlitchTip の fingerprint/tag に使い、
+ * warning 種別が混在するイベントでも代表原因を1件のイベントから判別できるようにする。
+ * @param counts - `summarizeWarningsByType` の結果
+ * @returns 最頻の警告種別。warning が無い場合は null
+ */
+function dominantWarningType(
+  counts: Partial<Record<CrawlWarningType, number>>,
+): CrawlWarningType | null {
+  let dominant: CrawlWarningType | null = null
+  let dominantCount = 0
+  for (const [type, count] of Object.entries(counts) as [CrawlWarningType, number][]) {
+    if (count > dominantCount) {
+      dominant = type
+      dominantCount = count
+    }
+  }
+  return dominant
+}
+
 const LABELING_INPUT_WARNING_TYPES = new Set<CrawlWarningType>([
   'recommended_timeline_failed',
   'following_timeline_failed',
@@ -1665,15 +1685,35 @@ async function runAccountCycle(
     // 同一アカウントの繰り返し超過を 1 つのイシューにまとめられなくなるため。
     const warningThreshold = getCrawlWarningThreshold()
     if (warnings.length >= warningThreshold) {
-      captureMessage(`Crawl warnings threshold exceeded for ${account.username}`, {
-        crawlRunId,
-        username: account.username,
-        status,
-        appVersion: APP_VERSION,
-        warningCount: warnings.length,
-        warningThreshold,
-        warningCounts: summarizeWarningsByType(warnings),
-      })
+      const warningCounts = summarizeWarningsByType(warnings)
+      const dominantType = dominantWarningType(warningCounts)
+      const representativeCause = dominantType
+        ? warnings.find((warning) => warning.type === dominantType)?.errorMessage
+        : undefined
+      captureMessage(
+        `Crawl warnings threshold exceeded for ${account.username}`,
+        {
+          crawlRunId,
+          username: account.username,
+          status,
+          appVersion: APP_VERSION,
+          warningCount: warnings.length,
+          warningThreshold,
+          warningCounts,
+          representativeCause,
+        },
+        {
+          // 既定の grouping はメッセージ文言 (username を含む) 単体であり、
+          // warning 種別が混在していても同一 issue にまとまってしまう。
+          // username を保った上で dominantType を加え、代表原因ごとに issue を分離する。
+          fingerprint: [
+            'crawl-warning-threshold-exceeded',
+            account.username,
+            dominantType ?? 'unknown',
+          ],
+          tags: { dominantWarningType: dominantType ?? 'unknown' },
+        },
+      )
     }
 
     return status

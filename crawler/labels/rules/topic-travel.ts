@@ -7,6 +7,10 @@ import type { LabelRule } from '../types'
 //
 // 旅 単体は人名や店舗名の一部としても一般的に使われる文字であるため対象語から除外し、
 // 明確な複合語のみを用いている。
+//
+// 「観光大使」「観光 PR 大使」のような肩書きは意図的にキーワード化していない。
+// このルールの意図は本人の旅行への関心の自己申告を検出することであり、
+// 大使という職務上の役割の言及はそれ自体が個人の関心を表明したものではないため。
 const TRAVEL_PATTERN =
   /旅行|旅好き|一人旅|旅が好き|温泉巡り|\b(travel|travels|traveling|travelling|traveler|traveller|backpacker)\b/i
 

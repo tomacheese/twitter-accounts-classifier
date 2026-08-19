@@ -23,6 +23,7 @@ function replyOnlyTweets(count: number): AccountFeatureBundle['recentTweets'] {
 function makeBundle(
   replyHijackSwarmSize: number | undefined,
   recentTweets: AccountFeatureBundle['recentTweets'] = replyOnlyTweets(5),
+  accountOverrides: Partial<AccountFeatureBundle['account']> = {},
 ): AccountFeatureBundle {
   return {
     account: {
@@ -36,6 +37,7 @@ function makeBundle(
       accountCreatedAt: new Date(),
       isBlueVerified: false,
       verifiedType: null,
+      ...accountOverrides,
     },
     recentTweets,
     replyHijackSwarmSize,
@@ -100,5 +102,15 @@ describe('replyHijackSwarmRule', () => {
     const result = replyHijackSwarmRule.evaluate(makeBundle(5))
 
     expect(result.reason).toMatch(/replyRatio=1\.00 \(n=5\)/)
+  })
+
+  it('recentTweets が未取得 (null) の場合、サンプル数が十分でも evaluable: false になる', () => {
+    const result = replyHijackSwarmRule.evaluate(
+      makeBundle(10, replyOnlyTweets(5), { recentTweetsFetchStatus: null }),
+    )
+
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBeCloseTo(0.5)
   })
 })

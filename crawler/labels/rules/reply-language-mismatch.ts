@@ -1,4 +1,5 @@
 import { rampScore, toConfidence } from '../confidence'
+import { hasLinguisticContent } from '../text-similarity'
 import type { LabelRule } from '../types'
 
 // 完全な言語判定ではなく日本語スクリプト(ひらがな/カタカナ/漢字)の有無のみを判定する。
@@ -14,20 +15,6 @@ function japaneseScriptRatio(texts: string[]): number {
   return texts.filter((text) => JAPANESE_SCRIPT_PATTERN.test(text)).length / texts.length
 }
 
-// リンクのみのリプライは、言語に関わらずスクリプト比率が0になり、
-// 言語の「不一致」の根拠ではなく、
-// 単に言語的内容を持たない空サンプルにすぎない。
-// URL・メンション・自己リツイートの接頭辞を除去し、
-// 実質的なテキストが残っている場合のみ、どちらか一方の比率に算入する。
-function hasLinguisticContent(text: string): boolean {
-  const stripped = text
-    .replace(/^RT @\w+:\s*/i, '')
-    .replaceAll(/https?:\/\/\S+/gi, '')
-    .replaceAll(/@\w+/g, '')
-    .trim()
-  return stripped.length > 0
-}
-
 export const replyLanguageMismatchRule: LabelRule = {
   key: 'reply_language_mismatch',
   description:
@@ -35,6 +22,9 @@ export const replyLanguageMismatchRule: LabelRule = {
   version: '1.3.0',
   evaluate(bundle) {
     const { screenName } = bundle.account
+    // リンクのみの投稿はスクリプト比率が常に0になり、
+    // 言語の「不一致」の根拠ではなく単に言語的内容を持たない空サンプルにすぎないため、
+    // 比率の算出対象から除く。
     const ownPosts = bundle.recentTweets.filter(
       (t) => !t.isReply && !t.isRetweet && hasLinguisticContent(t.fullText),
     )

@@ -60,6 +60,12 @@ describe('topicTravelRule', () => {
     expect(topicTravelRule.evaluate(makeBundle({ bio: null })).value).toBe(false)
   })
 
+  it('is false for a tourism-ambassador title, which is a role rather than a self-reported interest', () => {
+    expect(topicTravelRule.evaluate(makeBundle({ bio: '〇〇市観光大使をしています' })).value).toBe(
+      false,
+    )
+  })
+
   it('bio・ツイートにキーワードを含まず、フォローグラフシグナルがしきい値を満たす場合は value: true・confidence が 0.5 超になる', () => {
     const bundle = {
       ...makeBundle({}),

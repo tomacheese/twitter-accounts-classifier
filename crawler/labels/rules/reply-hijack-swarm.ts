@@ -1,4 +1,5 @@
 import { combineRequired, rampScore, toConfidence } from '../confidence'
+import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 import type { LabelRule } from '../types'
 
 const MIN_DISTINCT_AUTHORS = 5
@@ -36,13 +37,16 @@ export const replyHijackSwarmRule: LabelRule = {
   key: 'reply_hijack_swarm',
   description:
     '別々のアカウントが1件ずつ、似た言い回しの低努力リプライを1つの高エンゲージメントツイートに乗せてインプレッションを稼ぐ「一斉提灯リプライ」ネットワークの一員であり、かつ自身のアカウントもオリジナル投稿がほぼない低努力アカウントである',
-  version: '1.4.0',
+  version: '1.5.0',
   evaluate(bundle) {
     const size = bundle.replyHijackSwarmSize ?? 0
     const isSwarmMember = size >= MIN_DISTINCT_AUTHORS
 
     const sampled = bundle.recentTweets
-    const hasEnoughSample = sampled.length >= MIN_SAMPLE
+    // サンプル数だけでは、recentTweets が未取得で 0 件のケースと、
+    // 取得済みで実際に投稿が少ないケースを区別できないため、
+    // fetchStatus による判定と AND で組み合わせる。
+    const hasEnoughSample = sampled.length >= MIN_SAMPLE && isRecentTweetsEvaluable(bundle)
     const replyRatio =
       sampled.length > 0 ? sampled.filter((t) => t.isReply).length / sampled.length : 0
     const looksReplyFocused = hasEnoughSample && replyRatio >= REPLY_RATIO_THRESHOLD

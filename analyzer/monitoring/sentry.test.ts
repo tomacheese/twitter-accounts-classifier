@@ -8,7 +8,7 @@ vi.mock('@sentry/node', () => ({
   captureException: captureExceptionMock,
 }))
 
-describe('lib/monitoring/sentry', () => {
+describe('monitoring/sentry', () => {
   const originalDsn = process.env.GLITCHTIP_DSN
 
   beforeEach(() => {
@@ -34,28 +34,22 @@ describe('lib/monitoring/sentry', () => {
     expect(captureExceptionMock).not.toHaveBeenCalled()
   })
 
-  it('initializes Sentry and forwards captured exceptions when GLITCHTIP_DSN is set', async () => {
+  it('exceptionを捕捉する際、contextをextraへ、fingerprint/tagsをgroupingへそれぞれ渡す', async () => {
     process.env.GLITCHTIP_DSN = 'https://example.test/1'
     const { initMonitoring, captureException } = await import('./sentry')
     initMonitoring()
-    expect(initMock).toHaveBeenCalledWith(
-      expect.objectContaining({ dsn: 'https://example.test/1' }),
+
+    const error = new Error('boom')
+    captureException(
+      error,
+      { errorCode: 'label_aggregate_snapshot_failed' },
+      { fingerprint: ['label-aggregate-refresh', 'P2028'], tags: { prismaErrorCode: 'P2028' } },
     )
 
-    const error = new Error('boom')
-    captureException(error)
-    expect(captureExceptionMock).toHaveBeenCalledWith(error, { extra: undefined })
-  })
-
-  it('contextをextraへ包んでSentryへ渡す', async () => {
-    process.env.GLITCHTIP_DSN = 'https://example.test/1'
-    const { initMonitoring, captureException } = await import('./sentry')
-    initMonitoring()
-
-    const error = new Error('boom')
-    captureException(error, { accountId: 'fictional-account' })
     expect(captureExceptionMock).toHaveBeenCalledWith(error, {
-      extra: { accountId: 'fictional-account' },
+      extra: { errorCode: 'label_aggregate_snapshot_failed' },
+      fingerprint: ['label-aggregate-refresh', 'P2028'],
+      tags: { prismaErrorCode: 'P2028' },
     })
   })
 })

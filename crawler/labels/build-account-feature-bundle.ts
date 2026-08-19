@@ -54,6 +54,7 @@ export function buildAccountFeatureBundle(
       verifiedType: account.verifiedType,
       professionalType: account.professionalType,
       parodyCommentaryFanLabel: account.parodyCommentaryFanLabel,
+      recentTweetsFetchStatus: account.recentTweetsFetchStatus,
     },
     recentTweets: recentTweets.map((tweet) => ({
       id: tweet.id,

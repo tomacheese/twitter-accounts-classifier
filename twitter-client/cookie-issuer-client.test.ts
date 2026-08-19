@@ -143,6 +143,84 @@ describe('createCookieIssuerClient', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(10)
   })
 
+  it('一時的な 503 indeterminate の後に成功した場合、確定 invalid にせず bounded backoff の後で成功する', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ status: 'indeterminate' }, 503))
+      .mockResolvedValueOnce(jsonResponse({ status: 'ok', ct0: 'c0', auth_token: 'a0' }))
+    const sleepImpl = vi.fn().mockResolvedValue(undefined)
+    const client = createCookieIssuerClient({
+      baseUrl: 'http://issuer.local',
+      fetchImpl,
+      sleepImpl,
+    })
+
+    const cookies = await client.issueCookiesWithRetry(
+      { username: 'x', password: 'y', otp_secret: null },
+      { indeterminateDelayMs: 10 },
+    )
+
+    expect(cookies).toEqual({ ct0: 'c0', authToken: 'a0' })
+    expect(sleepImpl).toHaveBeenCalledWith(10)
+  })
+
+  it('503 indeterminate が続く場合、確定 invalid に丸めず判定不能のまま失敗する', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(jsonResponse({ status: 'indeterminate' }, 503)))
+    const sleepImpl = vi.fn().mockResolvedValue(undefined)
+    const client = createCookieIssuerClient({
+      baseUrl: 'http://issuer.local',
+      fetchImpl,
+      sleepImpl,
+    })
+
+    const error = await client
+      .issueCookiesWithRetry(
+        { username: 'x', password: 'y', otp_secret: null },
+        { indeterminateMaxAttempts: 3, indeterminateDelayMs: 10 },
+      )
+      .catch((error_: unknown) => error_)
+
+    expect(error).toBeInstanceOf(CookieIssuerError)
+    expect((error as CookieIssuerError).status).toBe(503)
+    expect((error as CookieIssuerError).indeterminate).toBe(true)
+    expect((error as Error).message).toMatch(
+      /exhausted 3 attempts \(last status 503 indeterminate\)/,
+    )
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('確定 invalid (403) の場合は indeterminate 扱いにせず即座に失敗する', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response('invalid credentials', { status: 403 }))
+    const client = createCookieIssuerClient({ baseUrl: 'http://issuer.local', fetchImpl })
+
+    const error = await client
+      .issueCookiesWithRetry({ username: 'x', password: 'y', otp_secret: null })
+      .catch((error_: unknown) => error_)
+
+    expect(error).toBeInstanceOf(CookieIssuerError)
+    expect((error as CookieIssuerError).status).toBe(403)
+    expect((error as CookieIssuerError).indeterminate).toBe(false)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('503 だが body が indeterminate を示さない場合は確定失敗として即座に扱う', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response('service unavailable', { status: 503 }))
+    const client = createCookieIssuerClient({ baseUrl: 'http://issuer.local', fetchImpl })
+
+    const error = await client
+      .issueCookies({ username: 'x', password: 'y', otp_secret: null })
+      .catch((error_: unknown) => error_)
+
+    expect(error).toBeInstanceOf(CookieIssuerError)
+    expect((error as CookieIssuerError).indeterminate).toBe(false)
+  })
+
   it('clientName を指定した場合、X-Client-Name header を付与する', async () => {
     const fetchImpl = vi
       .fn()

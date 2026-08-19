@@ -49,7 +49,30 @@ describe('monitoring/sentry', () => {
 
     const error = new Error('boom')
     captureException(error)
-    expect(captureExceptionMock).toHaveBeenCalledWith(error, undefined)
+    expect(captureExceptionMock).toHaveBeenCalledWith(error, {
+      extra: undefined,
+      fingerprint: undefined,
+      tags: undefined,
+    })
+  })
+
+  it('exceptionを捕捉する際、contextをextraへ、fingerprint/tagsをgroupingへそれぞれ渡す', async () => {
+    process.env.GLITCHTIP_DSN = 'https://example.test/1'
+    const { initMonitoring, captureException } = await import('./sentry')
+    initMonitoring()
+
+    const error = new Error('boom')
+    captureException(
+      error,
+      { ruleKey: 'topic_movie' },
+      { fingerprint: ['prisma-error', 'P2028'], tags: { errorCode: 'P2028' } },
+    )
+
+    expect(captureExceptionMock).toHaveBeenCalledWith(error, {
+      extra: { ruleKey: 'topic_movie' },
+      fingerprint: ['prisma-error', 'P2028'],
+      tags: { errorCode: 'P2028' },
+    })
   })
 
   it('forwards captured messages with a warning level and extra context when GLITCHTIP_DSN is set', async () => {
@@ -63,5 +86,30 @@ describe('monitoring/sentry', () => {
       level: 'warning',
       extra: { username: 'test_user', warningCount: 7 },
     })
+  })
+
+  it('messageを捕捉する際、fingerprint/tagsを指定するとそのまま渡す', async () => {
+    process.env.GLITCHTIP_DSN = 'https://example.test/1'
+    const { initMonitoring, captureMessage } = await import('./sentry')
+    initMonitoring()
+
+    captureMessage(
+      'Crawl warnings threshold exceeded for test_user',
+      { warningCount: 7 },
+      {
+        fingerprint: ['crawl-warning', 'author_processing_failed'],
+        tags: { dominantWarningType: 'author_processing_failed' },
+      },
+    )
+
+    expect(captureMessageMock).toHaveBeenCalledWith(
+      'Crawl warnings threshold exceeded for test_user',
+      {
+        level: 'warning',
+        extra: { warningCount: 7 },
+        fingerprint: ['crawl-warning', 'author_processing_failed'],
+        tags: { dominantWarningType: 'author_processing_failed' },
+      },
+    )
   })
 })

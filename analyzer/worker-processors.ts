@@ -76,7 +76,21 @@ function extractPostgresSqlState(error: unknown): string | null {
 }
 
 /**
+ * Prisma のラッパーエラーコード (`P2010` 等) を取得する。
+ * transaction expiration 等、DB がエラーを返さないクライアント側 timeout は
+ * SQLSTATE (`extractPostgresSqlState`) が取れないため、この値で区別する。
+ * @param error - 発生した例外
+ * @returns 取得できた場合は Prisma エラーコード、できない場合は null
+ */
+function extractPrismaErrorCode(error: unknown): string | null {
+  return error instanceof Prisma.PrismaClientKnownRequestError ? error.code : null
+}
+
+/**
  * label_aggregate_refresh の失敗を、動的な SQL 本文や機密情報を含めない範囲で GlitchTip へ送出する。
+ * デフォルトの fingerprint は例外クラス+スタックトレースのみで grouping するため、
+ * transaction expiration と PostgreSQL 57P01 のような異なる根本原因が同一 issue に混ざる。
+ * component/Prisma エラーコード/SQLSTATE を fingerprint に含め、原因ごとに issue を分離する。
  * @param error - 発生した例外
  * @param errorCode - 失敗した段階
  * @param aggregateName - 失敗時点で書き込み対象だった read model 名
@@ -86,12 +100,30 @@ function reportLabelAggregateRefreshFailure(
   errorCode: LabelAggregateRefreshErrorCode,
   aggregateName: 'LabelMetricSnapshot' | 'LabelSummaryCurrent',
 ): void {
-  captureException(error, {
-    source: 'processLabelAggregateRefresh',
-    errorCode,
-    sqlState: extractPostgresSqlState(error),
-    aggregateName,
-  })
+  const prismaErrorCode = extractPrismaErrorCode(error)
+  const sqlState = extractPostgresSqlState(error)
+  captureException(
+    error,
+    {
+      source: 'processLabelAggregateRefresh',
+      errorCode,
+      sqlState,
+      aggregateName,
+    },
+    {
+      fingerprint: [
+        'label-aggregate-refresh',
+        errorCode,
+        prismaErrorCode ?? 'no-prisma-code',
+        sqlState ?? 'no-sqlstate',
+      ],
+      tags: {
+        errorCode,
+        prismaErrorCode: prismaErrorCode ?? 'none',
+        sqlState: sqlState ?? 'none',
+      },
+    },
+  )
 }
 
 // CommonJS を採用する本プロジェクトでは __dirname がモジュールの位置を得る素直な手段であり、
