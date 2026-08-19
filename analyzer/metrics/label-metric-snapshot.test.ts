@@ -3,6 +3,7 @@ import { getPrismaClient } from '../db/client'
 import { upsertAccountClassificationLatest } from '../read-models/account-summary-latest'
 import {
   buildLabelAggregateSnapshotSet,
+  compactFreshnessBucketsForAllLabelsForTest,
   compactFreshnessBucketsForTest,
   deriveCompletenessFromCoverage,
 } from './label-metric-snapshot'
@@ -962,6 +963,42 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     }
     expect(valueCountRows.reduce((sum, row) => sum + row.count, 0)).toBe(1)
     expect(finalRow.value).toBe(false)
+  })
+
+  it('sentinel 行を別トランザクションがロック中でも compaction が待たずに完了する', async () => {
+    const label = await prisma.labelDefinition.create({
+      data: { key: 'test_freshness_lock_contention', description: 'テスト用ラベル' },
+    })
+    await prisma.$executeRaw`
+      INSERT INTO "AccountClassificationFreshnessBucket" ("labelDefinitionId", "observedAtBucket", "count")
+      VALUES (${label.id}, TIMESTAMP '1970-01-01', 0)
+      ON CONFLICT DO NOTHING
+    `
+
+    let releaseLock!: () => void
+    const lockHeld = new Promise<void>((resolve) => {
+      releaseLock = resolve
+    })
+    const holderTx = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT * FROM "AccountClassificationFreshnessBucket"
+        WHERE "labelDefinitionId" = ${label.id} AND "observedAtBucket" = TIMESTAMP '1970-01-01'
+        FOR UPDATE
+      `
+      await lockHeld
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const startedAt = Date.now()
+    await compactFreshnessBucketsForAllLabelsForTest(prisma, [label.id])
+    const elapsedMs = Date.now() - startedAt
+
+    releaseLock()
+    await holderTx
+
+    // 別トランザクションが sentinel 行を保持している間は SKIP LOCKED で
+    // その labelDefinitionId を読み飛ばすため、保持側を解放するまで待たずに完了する。
+    expect(elapsedMs).toBeLessThan(1000)
   })
 
   it('observedAt が7日境界の前後でバケット割り当てが切り替わる', async () => {
