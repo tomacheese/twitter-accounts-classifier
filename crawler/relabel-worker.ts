@@ -122,11 +122,33 @@ async function evaluateAccountRelabelItemGroup(
   const accountIds = group.map((item) => item.triggerId)
   let accounts: Account[]
   let tweetsByAccountId: Map<string, Tweet[]>
+  let parentTweetTextById: Map<string, string>
   try {
     ;[accounts, tweetsByAccountId] = await Promise.all([
       prisma.account.findMany({ where: { id: { in: accountIds } } }),
       loadRecentTweetsForAccounts(prisma, accountIds, CRAWL_LIMITS.recentTweetsPerAccount),
     ])
+
+    const allRecentTweets = [...tweetsByAccountId.values()].flat()
+    const replyParentIds = [
+      ...new Set(
+        allRecentTweets
+          .filter(
+            (tweet): tweet is Tweet & { inReplyToTweetId: string } =>
+              tweet.inReplyToTweetId !== null,
+          )
+          .map((tweet) => tweet.inReplyToTweetId),
+      ),
+    ]
+    // labelLookupChunkSize は accountLabelLatest の chunk 済み IN 句と同じ値を流用し、
+    // 大規模グループで1回の IN 句に数千件の id を渡さないようにする。
+    const lookupChunkSize = getRelabelerLabelLookupChunkSize()
+    parentTweetTextById = new Map()
+    for (let i = 0; i < replyParentIds.length; i += lookupChunkSize) {
+      const chunk = replyParentIds.slice(i, i + lookupChunkSize)
+      const chunkResult = await findTweetTextsByIds(prisma, chunk)
+      for (const [id, text] of chunkResult) parentTweetTextById.set(id, text)
+    }
   } catch (error) {
     logger.error(
       `Failed to fetch account/tweet data for a group (accounts: ${group.length})`,
@@ -140,18 +162,6 @@ async function evaluateAccountRelabelItemGroup(
     return 0
   }
   const accountById = new Map(accounts.map((account) => [account.id, account]))
-
-  const allRecentTweets = [...tweetsByAccountId.values()].flat()
-  const replyParentIds = [
-    ...new Set(
-      allRecentTweets
-        .filter(
-          (tweet): tweet is Tweet & { inReplyToTweetId: string } => tweet.inReplyToTweetId !== null,
-        )
-        .map((tweet) => tweet.inReplyToTweetId),
-    ),
-  ]
-  const parentTweetTextById = await findTweetTextsByIds(prisma, replyParentIds)
 
   const labelsByAccountId = new Map<string, AccountLabelBulkInput[]>()
   const failedItemIds = new Set<string>()
