@@ -45,6 +45,9 @@ export interface PersistAuthorResultAtomicParams {
   followSampleRequestCount?: number
   followSampleRateLimitRemaining?: number | null
   followSampleRateLimitReset?: number | null
+  parentTweetFetchRequestCount?: number
+  parentTweetFetchRateLimitRemaining?: number | null
+  parentTweetFetchRateLimitReset?: number | null
   registry: LabelRuleRegistry
   labelDefinitionIds: Map<string, string>
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
@@ -169,6 +172,9 @@ export async function persistAuthorResultAtomic(
         followSampleRequestCount: params.followSampleRequestCount ?? 0,
         followSampleRateLimitRemaining: params.followSampleRateLimitRemaining ?? null,
         followSampleRateLimitReset: params.followSampleRateLimitReset ?? null,
+        parentTweetFetchRequestCount: params.parentTweetFetchRequestCount ?? 0,
+        parentTweetFetchRateLimitRemaining: params.parentTweetFetchRateLimitRemaining ?? null,
+        parentTweetFetchRateLimitReset: params.parentTweetFetchRateLimitReset ?? null,
         appVersion: params.appVersion,
       })
 
