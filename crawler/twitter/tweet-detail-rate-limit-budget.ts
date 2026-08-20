@@ -29,7 +29,7 @@ export class TweetDetailRateLimitBudget {
     this.fallbackRemaining = options.fallbackRequests ?? 450
   }
 
-  /** parent ツイート取得のように「なくても致命的ではない」呼び出しを送ってよいか判定し、送る場合は予約する。 */
+  /** parent ツイート取得は受信リプライ検出と異なり必須の呼び出しではないため、quota 逼迫時は積極的に後退させる。 */
   acquireOptionalFetch(): TweetDetailFetchDecision {
     this.resetExpiredState()
     if (
@@ -46,7 +46,7 @@ export class TweetDetailRateLimitBudget {
     return 'allowed'
   }
 
-  /** 成功レスポンスの実測 quota を反映する。 */
+  /** fallback 予算ではなく実測ヘッダーを優先し、固定値による過小/過大評価を避ける。 */
   recordSuccess(diagnostics: TweetDetailRateLimitDiagnostics): void {
     if (diagnostics.rateLimitRemaining !== undefined) {
       this.state.remaining = diagnostics.rateLimitRemaining
