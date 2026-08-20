@@ -3118,6 +3118,38 @@ describe('runCrawlCycle checkpoint phase timing', () => {
   })
 })
 
+function singleTweetTimelineSnapshot() {
+  const topTweet: TweetInput = {
+    id: 'tweet1',
+    accountId: 'author1',
+    fullText: 'hello',
+    createdAt: new Date('2020-01-01T00:00:00Z'),
+    retweetCount: 5,
+    likeCount: 5,
+    replyCount: 0,
+    quoteCount: 0,
+    isReply: false,
+    inReplyToTweetId: null,
+    isAuthorReply: false,
+    isRetweet: false,
+    retweetedTweetId: null,
+    isPromoted: false,
+    isPaidPromotion: false,
+    hasAiGeneratedMedia: null,
+    aiGeneratedDetectionSource: null,
+    quotedTweetId: null,
+    quotedTweetAuthorId: null,
+    quotedTweetHasVideo: null,
+    source: 'recommended',
+  }
+  return {
+    recommended: { tweets: [topTweet], authors: [] },
+    following: { tweets: [], authors: [] },
+    trending: { tweets: [], authors: [] },
+    warnings: [],
+  }
+}
+
 describe('runRepliesPhase', () => {
   it('fetchReplies を常に発火させたうえで TweetDetail budget の消費を記録する', async () => {
     const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [] } })
@@ -3128,40 +3160,41 @@ describe('runRepliesPhase', () => {
     const recordSuccessSpy = vi.spyOn(budget, 'recordSuccess')
     const recordRateLimitedSpy = vi.spyOn(budget, 'recordRateLimited')
     const deps = makeDeps()
-    const topTweet: TweetInput = {
-      id: 'tweet1',
-      accountId: 'author1',
-      fullText: 'hello',
-      createdAt: new Date('2020-01-01T00:00:00Z'),
-      retweetCount: 5,
-      likeCount: 5,
-      replyCount: 0,
-      quoteCount: 0,
-      isReply: false,
-      inReplyToTweetId: null,
-      isAuthorReply: false,
-      isRetweet: false,
-      retweetedTweetId: null,
-      isPromoted: false,
-      isPaidPromotion: false,
-      hasAiGeneratedMedia: null,
-      aiGeneratedDetectionSource: null,
-      quotedTweetId: null,
-      quotedTweetAuthorId: null,
-      quotedTweetHasVideo: null,
-      source: 'recommended',
-    }
-    const timelineSnapshot = {
-      recommended: { tweets: [topTweet], authors: [] },
-      following: { tweets: [], authors: [] },
-      trending: { tweets: [], authors: [] },
-      warnings: [],
-    }
 
-    await runRepliesPhase(deps, timelineSnapshot, client, budget, vi.fn())
+    await runRepliesPhase(deps, singleTweetTimelineSnapshot(), client, budget, vi.fn())
 
     expect(getTweetDetail).toHaveBeenCalledTimes(1)
     expect(recordSuccessSpy).toHaveBeenCalledTimes(1)
     expect(recordRateLimitedSpy).not.toHaveBeenCalled()
+  })
+
+  it('429 の場合は recordRateLimited を記録し、他の top tweet の処理は継続する', async () => {
+    const error = responseError(
+      429,
+      new Headers({
+        'x-rate-limit-remaining': '0',
+        'x-rate-limit-reset': '1760000000',
+      }),
+    )
+    const getTweetDetail = vi.fn().mockRejectedValue(error)
+    const client = {
+      getTweetApi: () => ({ getTweetDetail }),
+    } as unknown as CrawlOpenApiClient
+    const budget = new TweetDetailRateLimitBudget({ now: () => 0 })
+    const recordSuccessSpy = vi.spyOn(budget, 'recordSuccess')
+    const recordRateLimitedSpy = vi.spyOn(budget, 'recordRateLimited')
+    const deps = makeDeps()
+
+    const result = await runRepliesPhase(
+      deps,
+      singleTweetTimelineSnapshot(),
+      client,
+      budget,
+      vi.fn(),
+    )
+
+    expect(recordRateLimitedSpy).toHaveBeenCalledTimes(1)
+    expect(recordSuccessSpy).not.toHaveBeenCalled()
+    expect(result.replyTweets).toEqual([])
   })
 })

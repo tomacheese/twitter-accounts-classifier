@@ -64,6 +64,7 @@ import {
   fetchReplies,
   createTweetDetailApiLike,
   type TweetDetailApiLike,
+  type RepliesResult as FetchRepliesResult,
 } from './twitter/engagement'
 import {
   fetchAccountProfile,
@@ -492,20 +493,26 @@ export async function runRepliesPhase(
   // 判定の根拠となった返信自体が失われてしまう。
   const otherRepliesByAuthor = new Map<string, TweetInput[]>()
   for (const topTweet of topTweets) {
-    const { authorReplies, otherReplies, authors } = await withTwitterRetry(
-      () => fetchReplies(tweetApi, topTweet, deps.limits.repliesPerTweet),
-      retryOptions(deps, trackRetryWait),
-    )
-    const captured = getLastResponseMatching('TweetDetail')
-    const diagnostics = {
-      rateLimitRemaining: captured?.rateLimitRemaining,
-      rateLimitReset: captured?.rateLimitReset,
-    }
-    if (captured?.status === 429) {
+    let repliesResult: FetchRepliesResult | undefined
+    try {
+      repliesResult = await withTwitterRetry(
+        () => fetchReplies(tweetApi, topTweet, deps.limits.repliesPerTweet),
+        retryOptions(deps, trackRetryWait),
+      )
+      const captured = getLastResponseMatching('TweetDetail')
+      tweetDetailRateLimitBudget.recordSuccess({
+        rateLimitRemaining: captured?.rateLimitRemaining,
+        rateLimitReset: captured?.rateLimitReset,
+      })
+    } catch (error) {
+      const diagnostics = getResponseErrorDiagnostics(error)
+      if (diagnostics?.httpStatus !== 429) throw error
+      // 429 は他の top tweet の返信取得を試す価値があるため、
+      // Following/Followers と同様に個別の失敗として扱いループを継続する。
       tweetDetailRateLimitBudget.recordRateLimited(diagnostics)
-    } else {
-      tweetDetailRateLimitBudget.recordSuccess(diagnostics)
+      continue
     }
+    const { authorReplies, otherReplies, authors } = repliesResult
     replyTweets.push(...authorReplies, ...otherReplies)
     for (const reply of otherReplies) {
       replyHijackCandidateIds.add(reply.accountId)
