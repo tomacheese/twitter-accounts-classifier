@@ -1,4 +1,5 @@
 import { combineAlternatives, combineRequired, rampScore, toConfidence } from '../confidence'
+import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 import type { LabelRule } from '../types'
 
 // 「フォロバ」「相互フォロー」「無言フォロー」「DMください」のような通常の礼儀表現は、
@@ -47,6 +48,14 @@ function hasGenuineSolicitation(bio: string): boolean {
   return matches.some((match) => !isRejectedMatch(normalized, match))
 }
 
+// 単発のツイート本文勧誘は日常的な相互フォロー依頼等との区別が難しいため、
+// bio 版と同水準の誤検知対策として、同一アカウント内で複数回 (2件以上) 繰り返された場合のみを独立シグナルとする。
+const TWEET_SOLICITATION_MIN_REPEATS = 2
+
+function countGenuineSolicitationTweets(tweets: { fullText: string }[]): number {
+  return tweets.filter((tweet) => hasGenuineSolicitation(tweet.fullText)).length
+}
+
 // スパムボットはフォロー返しを期待して大量のアカウントをフォローするため、
 // followingCount が followersCount に対して高くなる。
 // 逆の形(フォロー少・フォロワー多)は著名・公式アカウントの特徴であり、
@@ -66,12 +75,18 @@ export const spamRule: LabelRule = {
   description:
     'プロフィールで出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある。' +
     'bio に勧誘文言が無くても、リツイート主体の釣り的タイムラインと大量フォロー傾向の両方が同時に強く出ている場合は、それ自体を独立したエンゲージメント水増しの証拠として扱う',
-  version: '1.10.0',
+  version: '1.11.0',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
     const hasSolicitation = bio !== null && hasGenuineSolicitation(bio)
 
     const sampled = bundle.recentTweets
+    const tweetSolicitationCount = isRecentTweetsEvaluable(bundle)
+      ? countGenuineSolicitationTweets(sampled)
+      : 0
+    const hasRepeatedTweetSolicitation = tweetSolicitationCount >= TWEET_SOLICITATION_MIN_REPEATS
+    const hasAnySolicitation = hasSolicitation || hasRepeatedTweetSolicitation
+
     const retweetRatio =
       sampled.length > 0 ? sampled.filter((t) => t.isRetweet).length / sampled.length : 0
     const hasBaitRetweetPattern = sampled.length >= 5 && retweetRatio >= 0.8
@@ -85,7 +100,7 @@ export const spamRule: LabelRule = {
     const hasStrongEngagementInflation = hasBaitRetweetPattern && hasMassFollowingPattern
     const value =
       hasStrongEngagementInflation ||
-      (hasSolicitation && (hasBaitRetweetPattern || hasMassFollowingPattern))
+      (hasAnySolicitation && (hasBaitRetweetPattern || hasMassFollowingPattern))
 
     const retweetScore = rampScore(retweetRatio, 0.8, 0.2, 'higher-is-positive')
     const followingCountScore = rampScore(
@@ -101,12 +116,12 @@ export const spamRule: LabelRule = {
       5,
       'higher-is-positive',
     )
-    // hasSolicitation を combineRequired の一員に含めることで、
+    // hasAnySolicitation を combineRequired の一員に含めることで、
     // 勧誘が無い bio では他シグナルの強弱に関わらず evidenceScore を 0 に落とす。
     // 含めないと勧誘無しでも大量フォロー等の副シグナルだけで evidenceScore が高止まりし、
     // value=false の confidence が不当に低くなるため。
     const bioGatedScore = combineRequired([
-      hasSolicitation ? 1 : 0,
+      hasAnySolicitation ? 1 : 0,
       combineAlternatives([
         retweetScore,
         combineRequired([followingCountScore, followingRatioScore]),
@@ -124,7 +139,7 @@ export const spamRule: LabelRule = {
     return {
       value,
       confidence: toConfidence(value, evidenceScore),
-      reason: `bio solicitation=${hasSolicitation}, retweetRatio=${retweetRatio.toFixed(2)} (n=${sampled.length}), followingCount=${followingCount}, followersCount=${followersCount}`,
+      reason: `bio solicitation=${hasSolicitation}, tweetSolicitationCount=${tweetSolicitationCount}, retweetRatio=${retweetRatio.toFixed(2)} (n=${sampled.length}), followingCount=${followingCount}, followersCount=${followersCount}`,
     }
   },
 }
