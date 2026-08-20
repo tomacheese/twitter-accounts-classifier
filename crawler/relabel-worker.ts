@@ -21,7 +21,7 @@ import {
 } from './db/label-repository'
 import { CRAWL_LIMITS } from './config/crawl-limits'
 import { loadReplyCorpus } from './db/reply-corpus'
-import { loadRecentTweetsForAccounts } from './db/tweet-repository'
+import { loadRecentTweetsForAccounts, findTweetTextsByIds } from './db/tweet-repository'
 import { buildDuplicateReplyIndex as buildDuplicateReplyIndexImpl } from './labels/duplicate-reply-index'
 import { buildReplyHijackIndex as buildReplyHijackIndexImpl } from './labels/reply-hijack-index'
 import { buildFollowGraphLabelIndex } from './labels/follow-graph-label-index'
@@ -141,6 +141,18 @@ async function evaluateAccountRelabelItemGroup(
   }
   const accountById = new Map(accounts.map((account) => [account.id, account]))
 
+  const allRecentTweets = [...tweetsByAccountId.values()].flat()
+  const replyParentIds = [
+    ...new Set(
+      allRecentTweets
+        .filter(
+          (tweet): tweet is Tweet & { inReplyToTweetId: string } => tweet.inReplyToTweetId !== null,
+        )
+        .map((tweet) => tweet.inReplyToTweetId),
+    ),
+  ]
+  const parentTweetTextById = await findTweetTextsByIds(prisma, replyParentIds)
+
   const labelsByAccountId = new Map<string, AccountLabelBulkInput[]>()
   const failedItemIds = new Set<string>()
   for (const item of group) {
@@ -155,6 +167,7 @@ async function evaluateAccountRelabelItemGroup(
         options.duplicateReplyIndex,
         options.replyHijackIndex,
         options.followGraphLabelIndex,
+        parentTweetTextById,
       )
       const labels: AccountLabelBulkInput[] = []
       for (const { rule, result } of options.registry.applyAll(bundle)) {

@@ -133,6 +133,11 @@ export async function persistAuthorResultAtomic(
         await replaceLabelingFollowSampleWithinTx(txClient, params.authorId, followeeIds)
       }
 
+      const parentTweetTextById = new Map(
+        upsertedTweets
+          .filter((tweet) => tweet.accountId !== params.authorId)
+          .map((tweet) => [tweet.id, tweet.fullText]),
+      )
       const authorOwnTweets = upsertedTweets.filter((tweet) => tweet.accountId === params.authorId)
       const bundle = buildAccountFeatureBundle(
         account,
@@ -140,6 +145,7 @@ export async function persistAuthorResultAtomic(
         params.duplicateReplyIndex,
         params.replyHijackIndex,
         params.followGraphLabelIndex,
+        parentTweetTextById,
       )
       const ruleResults = params.registry.applyAll(bundle).flatMap(({ rule, result }) => {
         const labelDefinitionId = params.labelDefinitionIds.get(rule.key)

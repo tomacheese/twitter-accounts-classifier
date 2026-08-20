@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
-import type { LabelRule } from '../labels/types'
+import type { AccountFeatureBundle, LabelRule } from '../labels/types'
 import { LabelRuleRegistry } from '../labels/registry'
 import { buildDuplicateReplyIndex } from '../labels/duplicate-reply-index'
 import { buildReplyHijackIndex } from '../labels/reply-hijack-index'
@@ -39,7 +39,7 @@ function baseTweet(id: string, accountId: string) {
     replyCount: 0,
     quoteCount: 0,
     isReply: false,
-    inReplyToTweetId: null,
+    inReplyToTweetId: null as string | null,
     isAuthorReply: false,
     isRetweet: false,
     retweetedTweetId: null,
@@ -133,6 +133,74 @@ describe('persistAuthorResultAtomic', () => {
         }),
       }),
     )
+  })
+
+  it('resolves parentTweetFullText from a context tweet belonging to another account', async () => {
+    let capturedBundle: AccountFeatureBundle | undefined
+    const rule: LabelRule = {
+      key: 'capture_rule',
+      description: 'test',
+      version: '1.0.0',
+      evaluate: (bundle) => {
+        capturedBundle = bundle
+        return { value: false, confidence: 0.5, reason: 'test' }
+      },
+    }
+    const registry = new LabelRuleRegistry()
+    registry.register(rule)
+
+    const tweetUpsert = vi.fn((args: { where: { id: string } }) => {
+      if (args.where.id === 'tweet1') {
+        return Promise.resolve({
+          id: 'tweet1',
+          accountId: 'author1',
+          fullText: 'reply text',
+          inReplyToTweetId: 'parent1',
+        })
+      }
+      return Promise.resolve({
+        id: 'parent1',
+        accountId: 'context1',
+        fullText: '親ツイートの本文です',
+      })
+    })
+    const txClient = {
+      account: {
+        upsert: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      tweet: { findUnique: vi.fn().mockResolvedValue(null), upsert: tweetUpsert },
+      crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
+    }
+    const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
+    const prisma = { $transaction: transaction } as unknown as PrismaClient
+
+    await persistAuthorResultAtomic(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      authorId: 'author1',
+      profile: profile('author1'),
+      recentTweets: [
+        tweet('tweet1', 'author1', { isReply: true, inReplyToTweetId: 'parent1' }),
+        tweet('parent1', 'context1'),
+      ],
+      additionalOwnTweets: [],
+      recentTweetsFallbackAuthors: [profile('author1'), profile('context1')],
+      followSample: null,
+      registry,
+      labelDefinitionIds: new Map([['capture_rule', 'def-1']]),
+      duplicateReplyIndex: buildDuplicateReplyIndex([]),
+      replyHijackIndex: buildReplyHijackIndex([]),
+      followGraphLabelIndex: noFollowGraphSignals,
+      warnings: [],
+      durationMs: 10,
+      retryWaitMs: 0,
+      appVersion: 'test',
+    })
+
+    expect(capturedBundle?.recentTweets[0].parentTweetFullText).toBe('親ツイートの本文です')
   })
 
   it('skips the labeling follow sample write when followSample is null, without failing the transaction', async () => {

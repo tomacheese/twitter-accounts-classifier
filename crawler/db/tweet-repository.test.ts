@@ -5,6 +5,7 @@ import {
   upsertTweets,
   loadRecentTweetsForAccounts,
   findMissingTweetIds,
+  findTweetTextsByIds,
   type TweetInput,
 } from './tweet-repository'
 
@@ -361,5 +362,30 @@ describe('findMissingTweetIds', () => {
 
     expect(findMany).not.toHaveBeenCalled()
     expect(result).toEqual([])
+  })
+})
+
+describe('findTweetTextsByIds', () => {
+  it('returns a map of id to fullText for existing tweets, skipping missing ids', async () => {
+    const prisma = {
+      tweet: {
+        findMany: vi.fn().mockResolvedValue([{ id: 't1', fullText: '本文1' }]),
+      },
+    } as unknown as PrismaClient
+
+    const result = await findTweetTextsByIds(prisma, ['t1', 't2'])
+
+    expect(result.get('t1')).toBe('本文1')
+    expect(result.has('t2')).toBe(false)
+  })
+
+  it('returns an empty map without querying when ids is empty', async () => {
+    const findMany = vi.fn()
+    const prisma = { tweet: { findMany } } as unknown as PrismaClient
+
+    const result = await findTweetTextsByIds(prisma, [])
+
+    expect(result.size).toBe(0)
+    expect(findMany).not.toHaveBeenCalled()
   })
 })
