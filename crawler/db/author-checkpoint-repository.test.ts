@@ -111,6 +111,9 @@ describe('persistAuthorResultAtomic', () => {
       warnings: [],
       durationMs: 10,
       retryWaitMs: 0,
+      parentTweetFetchRequestCount: 1,
+      parentTweetFetchRateLimitRemaining: 5,
+      parentTweetFetchRateLimitReset: 1_760_000_000,
       appVersion: 'test',
     })
 
@@ -124,6 +127,9 @@ describe('persistAuthorResultAtomic', () => {
           authorId: 'author1',
           status: 'success',
           profileCount: 1,
+          parentTweetFetchRequestCount: 1,
+          parentTweetFetchRateLimitRemaining: 5,
+          parentTweetFetchRateLimitReset: 1_760_000_000,
         }),
       }),
     )

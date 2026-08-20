@@ -14,6 +14,7 @@ export type CrawlWarningType =
   | 'followers_sync_failed'
   | 'blocks_sync_failed'
   | 'labeling_follow_sample_failed'
+  | 'parent_tweet_fetch_failed'
 
 /**
  * `errorMessage` は元のエラーメッセージだけを保持し、
@@ -58,6 +59,7 @@ export interface RecordCrawlAccountRunParams {
   replyCount: number
   profileCount: number
   labelsAppliedCount: number
+  parentTweetFetchCount: number
   followingSynced: boolean
   followersSynced: boolean
   blocksSynced: boolean
@@ -255,6 +257,9 @@ export interface CrawlAuthorCheckpointParams {
   followSampleRequestCount?: number
   followSampleRateLimitRemaining?: number | null
   followSampleRateLimitReset?: number | null
+  parentTweetFetchRequestCount?: number
+  parentTweetFetchRateLimitRemaining?: number | null
+  parentTweetFetchRateLimitReset?: number | null
   appVersion: string
 }
 
@@ -267,6 +272,9 @@ export interface CrawlAuthorCheckpointRecord {
   followSampleRequestCount: number
   followSampleRateLimitRemaining: number | null
   followSampleRateLimitReset: number | null
+  parentTweetFetchRequestCount: number
+  parentTweetFetchRateLimitRemaining: number | null
+  parentTweetFetchRateLimitReset: number | null
 }
 
 function isFollowSampleStatus(value: unknown): value is Exclude<FollowSampleStatus, null> {
@@ -316,6 +324,9 @@ export async function loadCrawlAuthorCheckpoints(
       followSampleRequestCount: true,
       followSampleRateLimitRemaining: true,
       followSampleRateLimitReset: true,
+      parentTweetFetchRequestCount: true,
+      parentTweetFetchRateLimitRemaining: true,
+      parentTweetFetchRateLimitReset: true,
     },
   })
   const knownStatuses: ReadonlySet<CrawlAuthorCheckpointStatus> = new Set([
@@ -342,6 +353,9 @@ export async function loadCrawlAuthorCheckpoints(
         followSampleRequestCount: checkpoint.followSampleRequestCount,
         followSampleRateLimitRemaining: checkpoint.followSampleRateLimitRemaining,
         followSampleRateLimitReset: checkpoint.followSampleRateLimitReset,
+        parentTweetFetchRequestCount: checkpoint.parentTweetFetchRequestCount,
+        parentTweetFetchRateLimitRemaining: checkpoint.parentTweetFetchRateLimitRemaining,
+        parentTweetFetchRateLimitReset: checkpoint.parentTweetFetchRateLimitReset,
       },
     ]),
   )

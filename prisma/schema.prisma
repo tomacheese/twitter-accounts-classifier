@@ -305,6 +305,7 @@ model CrawlAccountRun {
   replyCount           Int       @default(0)
   profileCount         Int       @default(0)
   labelsAppliedCount   Int       @default(0)
+  parentTweetFetchCount Int      @default(0)
   followingSynced      Boolean   @default(false)
   followersSynced      Boolean   @default(false)
   blocksSynced         Boolean   @default(false)
@@ -365,6 +366,9 @@ model CrawlAuthorCheckpoint {
   followSampleRequestCount Int @default(0)
   followSampleRateLimitRemaining Int?
   followSampleRateLimitReset Int?
+  parentTweetFetchRequestCount   Int      @default(0)
+  parentTweetFetchRateLimitRemaining Int?
+  parentTweetFetchRateLimitReset Int?
   appVersion         String   @default("unknown")
   completedAt        DateTime @default(now())
 

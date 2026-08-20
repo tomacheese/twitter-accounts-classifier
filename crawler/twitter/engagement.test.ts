@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { sortByEngagement, fetchReplies, type TweetDetailApiLike } from './engagement'
+import {
+  sortByEngagement,
+  fetchReplies,
+  fetchParentTweet,
+  type TweetDetailApiLike,
+} from './engagement'
 import type { TweetInput } from '../db/tweet-repository'
 import type { RawTweetResult } from 'twitter-client'
 
@@ -90,5 +95,42 @@ describe('fetchReplies', () => {
     expect(authorReplies.map((t) => t.id)).toEqual(['r1'])
     expect(otherReplies.map((t) => t.id)).toEqual(['r2'])
     expect(authors.map((a) => a.id)).toEqual(['author1', 'someone-else'])
+  })
+})
+
+describe('fetchParentTweet', () => {
+  it('returns the tweet and author matching the requested parent id', async () => {
+    const parentRaw = {
+      restId: 'parent1',
+      legacy: { fullText: 'parent post', inReplyToStatusIdStr: null },
+      user: { restId: 'parentAuthor1', legacy: { screenName: 'parent_author' } },
+    } as unknown as RawTweetResult
+    const otherRaw = {
+      restId: 'sibling1',
+      legacy: { fullText: 'unrelated tweet', inReplyToStatusIdStr: null },
+      user: { restId: 'someoneElse', legacy: { screenName: 'someone_else' } },
+    } as unknown as RawTweetResult
+    const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [parentRaw, otherRaw] } })
+    const client: TweetDetailApiLike = { getTweetDetail }
+
+    const result = await fetchParentTweet(client, 'parent1')
+
+    expect(getTweetDetail).toHaveBeenCalledWith({ focalTweetId: 'parent1' })
+    expect(result?.tweet.id).toBe('parent1')
+    expect(result?.author.id).toBe('parentAuthor1')
+  })
+
+  it('returns undefined when the parent id is not present in the response', async () => {
+    const otherRaw = {
+      restId: 'sibling1',
+      legacy: { fullText: 'unrelated tweet', inReplyToStatusIdStr: null },
+      user: { restId: 'someoneElse', legacy: { screenName: 'someone_else' } },
+    } as unknown as RawTweetResult
+    const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [otherRaw] } })
+    const client: TweetDetailApiLike = { getTweetDetail }
+
+    const result = await fetchParentTweet(client, 'missing-parent')
+
+    expect(result).toBeUndefined()
   })
 })

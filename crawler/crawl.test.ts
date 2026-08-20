@@ -2,13 +2,20 @@ import { Logger } from '@book000/node-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   runCrawlCycle,
+  runRepliesPhase,
+  runAuthorUnitPhase,
   deriveClassificationStatus,
   measurePhaseDuration,
   type CrawlDependencies,
+  type CrawlOpenApiClient,
 } from './crawl'
 import type { CrawlAccountCheckpointParams } from './db/crawl-run-repository'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
+import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
+import { TweetDetailRateLimitBudget } from './twitter/tweet-detail-rate-limit-budget'
+import { FollowRateLimitBudget } from './twitter/follow-rate-limit-budget'
+import type { TweetInput } from './db/tweet-repository'
 
 const { captureMessageMock } = vi.hoisted(() => ({ captureMessageMock: vi.fn() }))
 vi.mock('./monitoring/sentry', async (importOriginal) => ({
@@ -168,6 +175,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
     persistAuthorResultAtomic: vi
       .fn()
       .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 1 }),
+    findMissingTweetIds: vi.fn().mockResolvedValue([]),
     recordCrawlAuthorCheckpoint: vi.fn().mockResolvedValue(undefined),
     loadCrawlAuthorCheckpoints: vi.fn().mockResolvedValue(new Map()),
     syncFollowing: vi.fn().mockResolvedValue(undefined),
@@ -221,6 +229,7 @@ describe('runCrawlCycle', () => {
         username: 'v',
         status: 'failed',
         errorMessage: expect.stringContaining('exceeded 20ms timeout'),
+        parentTweetFetchCount: 0,
       }),
     )
     expect(closeTrendsScraper).toHaveBeenCalled()
@@ -2140,6 +2149,7 @@ describe('runCrawlCycle', () => {
         username: 'done',
         status: 'success',
         classificationStatus: 'skipped',
+        parentTweetFetchCount: 0,
       }),
     )
     expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
@@ -2147,6 +2157,7 @@ describe('runCrawlCycle', () => {
         username: 'partial',
         status: 'partial',
         classificationStatus: 'skipped',
+        parentTweetFetchCount: 0,
       }),
     )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('resumed-run', expect.any(Date), 'partial')
@@ -3111,5 +3122,383 @@ describe('runCrawlCycle checkpoint phase timing', () => {
         }),
       )
     }
+  })
+})
+
+function singleTweetTimelineSnapshot() {
+  const topTweet: TweetInput = {
+    id: 'tweet1',
+    accountId: 'author1',
+    fullText: 'hello',
+    createdAt: new Date('2020-01-01T00:00:00Z'),
+    retweetCount: 5,
+    likeCount: 5,
+    replyCount: 0,
+    quoteCount: 0,
+    isReply: false,
+    inReplyToTweetId: null,
+    isAuthorReply: false,
+    isRetweet: false,
+    retweetedTweetId: null,
+    isPromoted: false,
+    isPaidPromotion: false,
+    hasAiGeneratedMedia: null,
+    aiGeneratedDetectionSource: null,
+    quotedTweetId: null,
+    quotedTweetAuthorId: null,
+    quotedTweetHasVideo: null,
+    source: 'recommended',
+  }
+  return {
+    recommended: { tweets: [topTweet], authors: [] },
+    following: { tweets: [], authors: [] },
+    trending: { tweets: [], authors: [] },
+    warnings: [],
+  }
+}
+
+describe('runRepliesPhase', () => {
+  it('fetchReplies を常に発火させたうえで TweetDetail budget の消費を記録する', async () => {
+    const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [] } })
+    const client = {
+      getTweetApi: () => ({ getTweetDetail }),
+    } as unknown as CrawlOpenApiClient
+    const budget = new TweetDetailRateLimitBudget({ now: () => 0 })
+    const recordSuccessSpy = vi.spyOn(budget, 'recordSuccess')
+    const recordRateLimitedSpy = vi.spyOn(budget, 'recordRateLimited')
+    const deps = makeDeps()
+
+    await runRepliesPhase(deps, singleTweetTimelineSnapshot(), client, budget, vi.fn())
+
+    expect(getTweetDetail).toHaveBeenCalledTimes(1)
+    expect(recordSuccessSpy).toHaveBeenCalledTimes(1)
+    expect(recordRateLimitedSpy).not.toHaveBeenCalled()
+  })
+
+  it('429 の場合は recordRateLimited を記録したうえでエラーを再送出する', async () => {
+    const error = responseError(
+      429,
+      new Headers({
+        'x-rate-limit-remaining': '0',
+        'x-rate-limit-reset': '1760000000',
+      }),
+    )
+    const getTweetDetail = vi.fn().mockRejectedValue(error)
+    const client = {
+      getTweetApi: () => ({ getTweetDetail }),
+    } as unknown as CrawlOpenApiClient
+    const budget = new TweetDetailRateLimitBudget({ now: () => 0 })
+    const recordSuccessSpy = vi.spyOn(budget, 'recordSuccess')
+    const recordRateLimitedSpy = vi.spyOn(budget, 'recordRateLimited')
+    const deps = makeDeps()
+
+    await expect(
+      runRepliesPhase(deps, singleTweetTimelineSnapshot(), client, budget, vi.fn()),
+    ).rejects.toThrow(error)
+
+    expect(recordRateLimitedSpy).toHaveBeenCalledTimes(1)
+    expect(recordSuccessSpy).not.toHaveBeenCalled()
+  })
+})
+
+function testAccount() {
+  return { email: 'a@example.com', username: 'v', password: 'p', otpSecret: null }
+}
+
+function emptyRepliesResult() {
+  return {
+    replyTweets: [],
+    replyAuthors: [],
+    replyHijackCandidateIds: [],
+    otherRepliesByAuthor: {},
+    warnings: [],
+  }
+}
+
+function buildParentFetchClient(options: {
+  replyRaws: ReturnType<typeof rawTweet>[]
+  getTweetDetail: ReturnType<typeof vi.fn>
+}): CrawlOpenApiClient {
+  return {
+    getTweetApi: () => ({ getTweetDetail: options.getTweetDetail }),
+    getUserApi: () => ({
+      getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+      getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+      getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: options.replyRaws } }),
+    }),
+    getUserListApi: () => ({
+      getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+      getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+    }),
+    getBlocksApi: () => ({
+      getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+    }),
+  } as unknown as CrawlOpenApiClient
+}
+
+describe('runAuthorUnitPhase parent tweet fetch', () => {
+  it('dedups repeated parent ids and fetches each still-missing parent tweet once', async () => {
+    const reply1 = rawTweet('reply1', rawUser('author1'), 'parent1')
+    const reply2 = rawTweet('reply2', rawUser('author1'), 'parent1')
+    const parentRaw = rawTweet('parent1', rawUser('parentAuthor1', 'parent_author'))
+    const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [parentRaw] } })
+    const findMissingTweetIds = vi.fn().mockResolvedValue(['parent1'])
+    const persistAuthorResultAtomic = vi
+      .fn()
+      .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 0 })
+    const deps = makeDeps({ findMissingTweetIds, persistAuthorResultAtomic })
+    const client = buildParentFetchClient({ replyRaws: [reply1, reply2], getTweetDetail })
+
+    const metrics = await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      client,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      new TweetDetailRateLimitBudget({ now: () => 0 }),
+      vi.fn(),
+    )
+
+    // 同一サイクル内で同じ parent id への返信が複数あっても、重複排除した 1 件だけを問い合わせる。
+    expect(findMissingTweetIds).toHaveBeenCalledWith(['parent1'])
+    expect(getTweetDetail).toHaveBeenCalledTimes(1)
+    expect(getTweetDetail).toHaveBeenCalledWith({ focalTweetId: 'parent1' })
+    expect(metrics.parentTweetFetchCount).toBe(1)
+    const persistedCall = persistAuthorResultAtomic.mock.calls[0][0] as {
+      recentTweets: TweetInput[]
+      recentTweetsFallbackAuthors: { id: string }[]
+    }
+    expect(persistedCall.recentTweets.some((t) => t.id === 'parent1')).toBe(true)
+    expect(persistedCall.recentTweetsFallbackAuthors.some((a) => a.id === 'parentAuthor1')).toBe(
+      true,
+    )
+  })
+
+  it('does not fetch a parent tweet that findMissingTweetIds reports as already stored', async () => {
+    const reply1 = rawTweet('reply1', rawUser('author1'), 'known-parent')
+    const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [] } })
+    const findMissingTweetIds = vi.fn().mockResolvedValue([])
+    const deps = makeDeps({ findMissingTweetIds })
+    const client = buildParentFetchClient({ replyRaws: [reply1], getTweetDetail })
+
+    const metrics = await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      client,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      new TweetDetailRateLimitBudget({ now: () => 0 }),
+      vi.fn(),
+    )
+
+    expect(findMissingTweetIds).toHaveBeenCalledWith(['known-parent'])
+    expect(getTweetDetail).not.toHaveBeenCalled()
+    expect(metrics.parentTweetFetchCount).toBe(0)
+  })
+
+  it('skips fetchParentTweet when the rate-limit budget denies the optional fetch', async () => {
+    const reply1 = rawTweet('reply1', rawUser('author1'), 'parent1')
+    const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [] } })
+    const findMissingTweetIds = vi.fn().mockResolvedValue(['parent1'])
+    const deps = makeDeps({ findMissingTweetIds })
+    const client = buildParentFetchClient({ replyRaws: [reply1], getTweetDetail })
+    // fallbackRequests: 0 で acquireOptionalFetch() が常に 'budget_skipped' を返す状態を再現する。
+    const exhaustedBudget = new TweetDetailRateLimitBudget({ now: () => 0, fallbackRequests: 0 })
+
+    const metrics = await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      client,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      exhaustedBudget,
+      vi.fn(),
+    )
+
+    expect(findMissingTweetIds).toHaveBeenCalledWith(['parent1'])
+    expect(getTweetDetail).not.toHaveBeenCalled()
+    expect(metrics.parentTweetFetchCount).toBe(0)
+  })
+
+  it('logs and continues without a warning when the parent tweet is not found in the response', async () => {
+    const reply1 = rawTweet('reply1', rawUser('author1'), 'parent1')
+    const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [] } })
+    const findMissingTweetIds = vi.fn().mockResolvedValue(['parent1'])
+    const persistAuthorResultAtomic = vi
+      .fn()
+      .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 0 })
+    const deps = makeDeps({ findMissingTweetIds, persistAuthorResultAtomic })
+    const client = buildParentFetchClient({ replyRaws: [reply1], getTweetDetail })
+
+    const metrics = await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      client,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      new TweetDetailRateLimitBudget({ now: () => 0 }),
+      vi.fn(),
+    )
+
+    expect(getTweetDetail).toHaveBeenCalledWith({ focalTweetId: 'parent1' })
+    expect(metrics.parentTweetFetchCount).toBe(0)
+    expect(metrics.warnings).toEqual([])
+    expect(persistAuthorResultAtomic).toHaveBeenCalled()
+  })
+
+  it('records a parent_tweet_fetch_failed warning (not counted toward classificationStatus) on a generic fetch error', async () => {
+    const reply1 = rawTweet('reply1', rawUser('author1'), 'parent1')
+    const getTweetDetail = vi.fn().mockRejectedValue(new Error('network unavailable'))
+    const findMissingTweetIds = vi.fn().mockResolvedValue(['parent1'])
+    const persistAuthorResultAtomic = vi
+      .fn()
+      .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 0 })
+    const deps = makeDeps({ findMissingTweetIds, persistAuthorResultAtomic })
+    const client = buildParentFetchClient({ replyRaws: [reply1], getTweetDetail })
+
+    const metrics = await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      client,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      new TweetDetailRateLimitBudget({ now: () => 0 }),
+      vi.fn(),
+    )
+
+    expect(metrics.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'parent_tweet_fetch_failed',
+          authorId: 'author1',
+          errorMessage: 'network unavailable',
+        }),
+      ]),
+    )
+    expect(
+      deriveClassificationStatus({
+        warnings: metrics.warnings,
+        wasSkipped: false,
+        wasCaughtException: false,
+      }),
+    ).toBe('success')
+  })
+
+  it('persists parentTweetFetchRateLimitRemaining as 0 (not undefined) when a 429 has no rate-limit header', async () => {
+    const reply1 = rawTweet('reply1', rawUser('author1'), 'parent1')
+    const getTweetDetail = vi.fn().mockRejectedValue(responseError(429))
+    const findMissingTweetIds = vi.fn().mockResolvedValue(['parent1'])
+    const persistAuthorResultAtomic = vi
+      .fn()
+      .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 0 })
+    const deps = makeDeps({ findMissingTweetIds, persistAuthorResultAtomic })
+    const client = buildParentFetchClient({ replyRaws: [reply1], getTweetDetail })
+
+    await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      client,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      new TweetDetailRateLimitBudget({ now: () => 0 }),
+      vi.fn(),
+    )
+
+    const persistedCall = persistAuthorResultAtomic.mock.calls[0][0] as {
+      parentTweetFetchRateLimitRemaining: number | undefined
+    }
+    expect(persistedCall.parentTweetFetchRateLimitRemaining).toBe(0)
+  })
+
+  it('restores parent-tweet-fetch budget state from an existing checkpoint on resume', async () => {
+    const tweetDetailRateLimitBudget = new TweetDetailRateLimitBudget({ now: () => 0 })
+    const restoreFetchCountSpy = vi.spyOn(tweetDetailRateLimitBudget, 'restoreFetchCount')
+    const restoreRateLimitSpy = vi.spyOn(tweetDetailRateLimitBudget, 'restoreRateLimit')
+    const existingCheckpoints = new Map([
+      [
+        'author1',
+        {
+          status: 'success' as const,
+          profileCount: 1,
+          labelsAppliedCount: 0,
+          warnings: [],
+          followSampleStatus: null,
+          followSampleRequestCount: 0,
+          followSampleRateLimitRemaining: null,
+          followSampleRateLimitReset: null,
+          parentTweetFetchRequestCount: 5,
+          parentTweetFetchRateLimitRemaining: 0,
+          parentTweetFetchRateLimitReset: null,
+        },
+      ],
+    ])
+    const deps = makeDeps({
+      loadCrawlAuthorCheckpoints: vi.fn().mockResolvedValue(existingCheckpoints),
+    })
+    const client = { getUserApi: () => ({}) } as unknown as CrawlOpenApiClient
+
+    await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      client,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      tweetDetailRateLimitBudget,
+      vi.fn(),
+    )
+
+    // checkpoint 済みの status: 'success' は再試行の対象にならないため、
+    // restore だけが観測できる純粋なシナリオになる。
+    expect(restoreFetchCountSpy).toHaveBeenCalledWith(5)
+    expect(restoreRateLimitSpy).toHaveBeenCalledTimes(1)
   })
 })
