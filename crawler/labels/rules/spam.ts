@@ -79,7 +79,7 @@ export const spamRule: LabelRule = {
   description:
     'プロフィールで出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある。' +
     'bio に勧誘文言が無くても、リツイート主体の釣り的タイムラインと大量フォロー傾向の両方が同時に強く出ている場合は、それ自体を独立したエンゲージメント水増しの証拠として扱う',
-  version: '1.11.0',
+  version: '1.11.1',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
     const hasSolicitation = bio !== null && hasGenuineSolicitation(bio)
