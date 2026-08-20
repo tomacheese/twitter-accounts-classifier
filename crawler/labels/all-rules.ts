@@ -46,7 +46,10 @@ import { crossTargetTemplatedReplyRule } from './rules/cross-target-templated-re
 import { replyHijackSwarmRule } from './rules/reply-hijack-swarm'
 import { scamLinkDomainRule } from './rules/scam-link-domain'
 import { bareLinkSpamRule } from './rules/bare-link-spam'
-import { irrelevantReplyRule } from './rules/irrelevant-reply'
+// irrelevant_reply は実データ検証が完了するまで無効化する。
+// bigram 類似度は言い換え検出の性質上、
+// 話題に沿っているが親ツイートの語句を引用しないだけの通常のリプライと、
+// 真に無関係なリプライを統計的に区別できないため。
 
 /**
  * クローラーに登録される全ラベルルールの正規リスト。
@@ -101,5 +104,4 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   replyHijackSwarmRule,
   scamLinkDomainRule,
   bareLinkSpamRule,
-  irrelevantReplyRule,
 ]

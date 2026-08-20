@@ -123,4 +123,52 @@ describe('irrelevantReplyRule', () => {
     const result = irrelevantReplyRule.evaluate(bundle)
     expect(result.evaluable).toBe(false)
   })
+
+  it('is evaluable=false for short @handle-prefixed acknowledgement replies', () => {
+    const bundle = makeBundle([
+      { fullText: '@example_target うん', parentTweetFullText: '今日は暑かったね' },
+      { fullText: '@example_target わかる', parentTweetFullText: '眠くて仕方ない' },
+      { fullText: '@example_target ですね', parentTweetFullText: 'それは大変だったね' },
+      { fullText: '@example_target そうそう', parentTweetFullText: '最近忙しいんだよね' },
+      { fullText: '@example_target ほんとそれ', parentTweetFullText: '今日は疲れた' },
+      { fullText: '@example_target たしかに', parentTweetFullText: 'この前の話だけど' },
+    ])
+    const result = irrelevantReplyRule.evaluate(bundle)
+    expect(result.evaluable).toBe(false)
+  })
+
+  // このケースは true になる (話題に沿っているが親ツイートの語句を引用しない通常のリプライを、
+  // 真に無関係なリプライと bigram 類似度だけでは区別できない)。
+  // これが all-rules.ts でこのルールの登録を見送っている理由そのものであるため、
+  // 既知の誤検知として記録しておく。
+  it('documents a known false positive: ordinary on-topic replies that do not lexically overlap with the parent', () => {
+    const bundle = makeBundle([
+      {
+        fullText: '@example_target それは大変でしたね、お疲れ様です',
+        parentTweetFullText: '今日は残業続きで疲れた',
+      },
+      {
+        fullText: '@example_target 楽しそうで何よりです',
+        parentTweetFullText: '週末は友達と遊びに行ってきた',
+      },
+      {
+        fullText: '@example_target 気をつけてくださいね',
+        parentTweetFullText: '体調を崩してしまった',
+      },
+      {
+        fullText: '@example_target おめでとうございます',
+        parentTweetFullText: '資格試験に合格した',
+      },
+      {
+        fullText: '@example_target 早く良くなるといいですね',
+        parentTweetFullText: '風邪をひいてしまった',
+      },
+      {
+        fullText: '@example_target それは羨ましいです',
+        parentTweetFullText: '旅行に行ってきた',
+      },
+    ])
+    const result = irrelevantReplyRule.evaluate(bundle)
+    expect(result.value).toBe(true)
+  })
 })

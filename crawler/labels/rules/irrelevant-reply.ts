@@ -1,20 +1,24 @@
 import { posteriorProbabilityAtLeast, toConfidence } from '../confidence'
 import type { AccountFeatureBundle, LabelRule } from '../types'
 import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
-import { averagePairwiseSimilarity, hasLinguisticContent } from '../text-similarity'
+import {
+  averagePairwiseSimilarity,
+  hasLinguisticContent,
+  normalizeForSimilarity,
+} from '../text-similarity'
 
 // テンプレート一致や広告キーワードを伴わない話題無関係リプライは、
 // templated_reply_network や ad_reply_hijack など既存のリプライ濫用系ルールのいずれにも引っかからない。
 // 一方、話題に沿った通常のリプライは相手ツイートの語句をほとんど引用せずに応答するのが通常であり、
 // 単発の低類似度だけを根拠にすると通常の会話まで誤検知してしまう。
-// そのため単発ではなく、
-// このアカウントのリプライの多くが parent と無関係という統計的な偏りを要求することで、
-// 通常の会話パターンとの区別を図る。
+// そのため単発ではなく、アカウント全体でリプライの多くが無関係という統計的な偏りを要求する。
 const MIN_SAMPLE = 5
 const SIMILARITY_THRESHOLD = 0.03
 const IRRELEVANT_RATIO_THRESHOLD = 0.6
 // 短すぎるリプライ(相槌等)は元々 parent との字面の重なりが小さくなりやすく、
 // 無関係リプライと区別できないため評価対象から除外する。
+// 本番のリプライは先頭に @handle が付くため、
+// 生の fullText ではなく @mention・URL を除去した正規化後の長さで判定する。
 const MIN_REPLY_LENGTH = 10
 
 interface EvaluableCandidate {
@@ -29,7 +33,7 @@ function isEvaluableCandidate(tweet: RecentTweet): tweet is RecentTweet & Evalua
     tweet.isReply &&
     !tweet.isRetweet &&
     typeof tweet.parentTweetFullText === 'string' &&
-    tweet.fullText.length >= MIN_REPLY_LENGTH &&
+    normalizeForSimilarity(tweet.fullText).length >= MIN_REPLY_LENGTH &&
     hasLinguisticContent(tweet.fullText) &&
     hasLinguisticContent(tweet.parentTweetFullText)
   )
