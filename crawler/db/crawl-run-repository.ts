@@ -14,6 +14,7 @@ export type CrawlWarningType =
   | 'followers_sync_failed'
   | 'blocks_sync_failed'
   | 'labeling_follow_sample_failed'
+  | 'parent_tweet_fetch_failed'
 
 /**
  * `errorMessage` は元のエラーメッセージだけを保持し、

@@ -3175,7 +3175,7 @@ describe('runRepliesPhase', () => {
     expect(recordRateLimitedSpy).not.toHaveBeenCalled()
   })
 
-  it('429 の場合は recordRateLimited を記録し、他の top tweet の処理は継続する', async () => {
+  it('429 の場合は recordRateLimited を記録したうえでエラーを再送出する', async () => {
     const error = responseError(
       429,
       new Headers({
@@ -3192,17 +3192,12 @@ describe('runRepliesPhase', () => {
     const recordRateLimitedSpy = vi.spyOn(budget, 'recordRateLimited')
     const deps = makeDeps()
 
-    const result = await runRepliesPhase(
-      deps,
-      singleTweetTimelineSnapshot(),
-      client,
-      budget,
-      vi.fn(),
-    )
+    await expect(
+      runRepliesPhase(deps, singleTweetTimelineSnapshot(), client, budget, vi.fn()),
+    ).rejects.toThrow(error)
 
     expect(recordRateLimitedSpy).toHaveBeenCalledTimes(1)
     expect(recordSuccessSpy).not.toHaveBeenCalled()
-    expect(result.replyTweets).toEqual([])
   })
 })
 
@@ -3346,7 +3341,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
     expect(metrics.parentTweetFetchCount).toBe(0)
   })
 
-  it('records a warning and continues when the parent tweet is not found in the response', async () => {
+  it('logs and continues without a warning when the parent tweet is not found in the response', async () => {
     const reply1 = rawTweet('reply1', rawUser('author1'), 'parent1')
     const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [] } })
     const findMissingTweetIds = vi.fn().mockResolvedValue(['parent1'])
@@ -3375,12 +3370,53 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
 
     expect(getTweetDetail).toHaveBeenCalledWith({ focalTweetId: 'parent1' })
     expect(metrics.parentTweetFetchCount).toBe(0)
+    expect(metrics.warnings).toEqual([])
+    expect(persistAuthorResultAtomic).toHaveBeenCalled()
+  })
+
+  it('records a parent_tweet_fetch_failed warning (not counted toward classificationStatus) on a generic fetch error', async () => {
+    const reply1 = rawTweet('reply1', rawUser('author1'), 'parent1')
+    const getTweetDetail = vi.fn().mockRejectedValue(new Error('network unavailable'))
+    const findMissingTweetIds = vi.fn().mockResolvedValue(['parent1'])
+    const persistAuthorResultAtomic = vi
+      .fn()
+      .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 0 })
+    const deps = makeDeps({ findMissingTweetIds, persistAuthorResultAtomic })
+    const client = buildParentFetchClient({ replyRaws: [reply1], getTweetDetail })
+
+    const metrics = await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      client,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      new TweetDetailRateLimitBudget({ now: () => 0 }),
+      vi.fn(),
+    )
+
     expect(metrics.warnings).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: 'author_processing_failed', authorId: 'author1' }),
+        expect.objectContaining({
+          type: 'parent_tweet_fetch_failed',
+          authorId: 'author1',
+          errorMessage: 'network unavailable',
+        }),
       ]),
     )
-    expect(persistAuthorResultAtomic).toHaveBeenCalled()
+    expect(
+      deriveClassificationStatus({
+        warnings: metrics.warnings,
+        wasSkipped: false,
+        wasCaughtException: false,
+      }),
+    ).toBe('success')
   })
 
   it('persists parentTweetFetchRateLimitRemaining as 0 (not undefined) when a 429 has no rate-limit header', async () => {

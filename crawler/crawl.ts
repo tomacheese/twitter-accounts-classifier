@@ -510,10 +510,10 @@ export async function runRepliesPhase(
     } catch (error) {
       const diagnostics = getResponseErrorDiagnostics(error)
       if (diagnostics?.httpStatus !== 429) throw error
-      // 429 は他の top tweet の返信取得を試す価値があるため、
-      // Following/Followers と同様に個別の失敗として扱いループを継続する。
+      // recordRateLimited を呼んでから再送出することで、
+      // budget には消費を反映しつつ既存の abort-and-retry 挙動は変えない。
       tweetDetailRateLimitBudget.recordRateLimited(diagnostics)
-      continue
+      throw error
     }
     const { authorReplies, otherReplies, authors } = repliesResult
     replyTweets.push(...authorReplies, ...otherReplies)
@@ -788,20 +788,14 @@ export async function runAuthorUnitPhase(
               parentTweetFetchCount += 1
             } else {
               const notFoundMessage = `Parent tweet ${parentTweetId} for author ${authorId} was not found in the getTweetDetail response (deleted or protected)`
-              authorWarnings.push({
-                type: 'author_processing_failed',
-                message: notFoundMessage,
-                authorId,
-                errorMessage: notFoundMessage,
-                appVersion: APP_VERSION,
-              })
+              logger.info(notFoundMessage)
             }
           } catch (error) {
             const diagnostics = getResponseErrorDiagnostics(error)
             if (diagnostics?.httpStatus === 429) {
               tweetDetailRateLimitBudget.recordRateLimited(diagnostics)
-              // ヘッダーが欠けて undefined のまま保存すると、再開時の
-              // `parentTweetFetchRateLimitRemaining === 0` 判定が素通りしてしまうため、
+              // ヘッダーが欠けて undefined のまま保存すると、
+              // 再開時の `parentTweetFetchRateLimitRemaining === 0` 判定が素通りしてしまうため、
               // 429 を観測した事実そのものを 0 として残す。
               parentTweetFetchRateLimitRemaining = diagnostics.rateLimitRemaining ?? 0
               parentTweetFetchRateLimitReset = diagnostics.rateLimitReset
@@ -815,7 +809,7 @@ export async function runAuthorUnitPhase(
                 logger.error(message, error as Error)
               }
               authorWarnings.push({
-                type: 'author_processing_failed',
+                type: 'parent_tweet_fetch_failed',
                 message,
                 authorId,
                 errorMessage: toErrorMessage(error),
@@ -1268,6 +1262,7 @@ function isCrawlWarning(value: unknown): value is CrawlWarning {
       'followers_sync_failed',
       'blocks_sync_failed',
       'labeling_follow_sample_failed',
+      'parent_tweet_fetch_failed',
     ].includes(value.type as string)
   ) {
     return false
