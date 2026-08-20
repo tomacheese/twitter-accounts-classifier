@@ -384,4 +384,35 @@ describe('spamRule', () => {
     const result = spamRule.evaluate(bundle)
     expect(result.value).toBe(false)
   })
+
+  it('is false when the only tweet-body solicitation phrases appear in retweeted (not own) tweets', () => {
+    const bundle: AccountFeatureBundle = {
+      account: {
+        id: '1',
+        screenName: 'x',
+        displayName: 'X',
+        bio: null,
+        followersCount: 500,
+        followingCount: 600,
+        tweetCount: 10,
+        accountCreatedAt: new Date(),
+        isBlueVerified: false,
+        verifiedType: null,
+      },
+      recentTweets: Array.from({ length: 5 }, (_, i) => ({
+        id: `t${i}`,
+        fullText:
+          i < 2 ? '副業紹介してます、稼げる情報あります' : `RT @someone: おすすめの一冊その${i}`,
+        createdAt: new Date(),
+        retweetCount: 0,
+        likeCount: 0,
+        isReply: false,
+        isRetweet: true,
+        isPromoted: false,
+        isPaidPromotion: false,
+      })),
+    }
+    const result = spamRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+  })
 })

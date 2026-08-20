@@ -49,11 +49,15 @@ function hasGenuineSolicitation(bio: string): boolean {
 }
 
 // 単発のツイート本文勧誘は日常的な相互フォロー依頼等との区別が難しいため、
-// bio 版と同水準の誤検知対策として、同一アカウント内で複数回 (2件以上) 繰り返された場合のみを独立シグナルとする。
+// bio 版と同水準の誤検知対策として、同一アカウント内で複数回繰り返された場合のみを独立シグナルとする。
 const TWEET_SOLICITATION_MIN_REPEATS = 2
 
-function countGenuineSolicitationTweets(tweets: { fullText: string }[]): number {
-  return tweets.filter((tweet) => hasGenuineSolicitation(tweet.fullText)).length
+// リツイートの本文はアカウント自身の発言ではないため、
+// 引用元が勧誘文言を含んでいても対象から除く。
+function countGenuineSolicitationTweets(
+  tweets: { fullText: string; isRetweet: boolean }[],
+): number {
+  return tweets.filter((tweet) => !tweet.isRetweet && hasGenuineSolicitation(tweet.fullText)).length
 }
 
 // スパムボットはフォロー返しを期待して大量のアカウントをフォローするため、
@@ -116,8 +120,8 @@ export const spamRule: LabelRule = {
       5,
       'higher-is-positive',
     )
-    // hasAnySolicitation を combineRequired の一員に含めることで、
-    // 勧誘が無い bio では他シグナルの強弱に関わらず evidenceScore を 0 に落とす。
+    // hasAnySolicitation (bio・ツイート本文いずれかの勧誘) を combineRequired の一員に含めることで、
+    // 勧誘文言が無い場合は他シグナルの強弱に関わらず evidenceScore を 0 に落とす。
     // 含めないと勧誘無しでも大量フォロー等の副シグナルだけで evidenceScore が高止まりし、
     // value=false の confidence が不当に低くなるため。
     const bioGatedScore = combineRequired([
