@@ -81,6 +81,12 @@ export interface AccountFeatureBundle {
      * 任意項目にする理由は `quotedTweetAuthorId` と同じ。
      */
     quotedTweetHasVideo?: boolean | null
+    /**
+     * このツイートがリプライしている parent ツイートの本文。
+     * parent が未取得・削除済みなどで解決できない場合は `null`/未設定にする。
+     * 任意項目にする理由は `inReplyToTweetId` と同じ。
+     */
+    parentTweetFullText?: string | null
   }[]
   /**
    * URL・メンション除去後、この投稿者自身のいずれかのリプライ本文と完全一致するリプライを投稿した、

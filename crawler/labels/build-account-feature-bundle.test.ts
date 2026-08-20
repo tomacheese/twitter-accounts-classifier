@@ -71,6 +71,7 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
+      new Map(),
     )
 
     expect(bundle.recentTweets[0].hasAiGeneratedMedia).toBe(true)
@@ -84,6 +85,7 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
+      new Map(),
     )
 
     expect(bundle.account.isBlueVerified).toBe(true)
@@ -115,8 +117,35 @@ describe('buildAccountFeatureBundle', () => {
       duplicateReplyIndex,
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
+      new Map(),
     )
 
     expect(bundle.templatedReplyNetworkSize).toBe(2)
+  })
+
+  it('parent ツイート本文が parentTweetTextById にあれば recentTweets に反映する', () => {
+    const bundle = buildAccountFeatureBundle(
+      makeAccount(),
+      [makeTweet({ isReply: true, inReplyToTweetId: 'parent-1' })],
+      buildDuplicateReplyIndex([]),
+      buildReplyHijackIndex([]),
+      emptyFollowGraphLabelIndex,
+      new Map([['parent-1', 'これが親ツイートの本文です']]),
+    )
+
+    expect(bundle.recentTweets[0].parentTweetFullText).toBe('これが親ツイートの本文です')
+  })
+
+  it('parentTweetTextById に該当がなければ parentTweetFullText を null にする', () => {
+    const bundle = buildAccountFeatureBundle(
+      makeAccount(),
+      [makeTweet({ isReply: true, inReplyToTweetId: 'unknown-parent' })],
+      buildDuplicateReplyIndex([]),
+      buildReplyHijackIndex([]),
+      emptyFollowGraphLabelIndex,
+      new Map(),
+    )
+
+    expect(bundle.recentTweets[0].parentTweetFullText).toBeNull()
   })
 })
