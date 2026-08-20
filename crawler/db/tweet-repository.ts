@@ -208,3 +208,18 @@ export async function loadRecentTweetsForAccounts(
   }
   return tweetsByAccountId
 }
+
+/**
+ * @param prisma - Prisma クライアント
+ * @param ids - 存在確認したい Tweet ID の一覧
+ * @returns `ids` のうち `Tweet` テーブルにまだ存在しないものだけを抽出した一覧
+ */
+export async function findMissingTweetIds(prisma: PrismaClient, ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return []
+  const existing = await prisma.tweet.findMany({
+    where: { id: { in: ids } },
+    select: { id: true },
+  })
+  const existingIds = new Set(existing.map((row) => row.id))
+  return ids.filter((id) => !existingIds.has(id))
+}

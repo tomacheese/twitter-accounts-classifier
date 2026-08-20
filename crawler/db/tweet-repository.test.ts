@@ -4,6 +4,7 @@ import {
   upsertTweet,
   upsertTweets,
   loadRecentTweetsForAccounts,
+  findMissingTweetIds,
   type TweetInput,
 } from './tweet-repository'
 
@@ -335,5 +336,30 @@ describe('loadRecentTweetsForAccounts', () => {
     expect(result.get('u2')).toEqual([rows[2]])
     // u3 はツイート 0 件のため Map にキー自体が存在しない (呼び出し元は ?? [] で扱う)。
     expect(result.has('u3')).toBe(false)
+  })
+})
+
+describe('findMissingTweetIds', () => {
+  it('returns only the ids not present in the Tweet table', async () => {
+    const findMany = vi.fn().mockResolvedValue([{ id: 'known1' }])
+    const prisma = { tweet: { findMany } } as unknown as PrismaClient
+
+    const result = await findMissingTweetIds(prisma, ['known1', 'missing1', 'missing2'])
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['known1', 'missing1', 'missing2'] } },
+      select: { id: true },
+    })
+    expect(result).toEqual(['missing1', 'missing2'])
+  })
+
+  it('returns an empty array without querying the database when given no ids', async () => {
+    const findMany = vi.fn()
+    const prisma = { tweet: { findMany } } as unknown as PrismaClient
+
+    const result = await findMissingTweetIds(prisma, [])
+
+    expect(findMany).not.toHaveBeenCalled()
+    expect(result).toEqual([])
   })
 })
