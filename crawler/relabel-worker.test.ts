@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import type { PrismaClient } from './generated/prisma'
+import type { PrismaClient, Tweet } from './generated/prisma'
 import { LabelRuleRegistry } from './labels/registry'
-import type { LabelRule } from './labels/types'
+import type { AccountFeatureBundle, LabelRule } from './labels/types'
 import * as workItemRepository from './db/analysis-work-item-repository'
 import * as labelRepository from './db/label-repository'
 import * as tweetRepository from './db/tweet-repository'
@@ -67,6 +67,60 @@ describe('evaluateAccountRelabelItems', () => {
       workItemIds: ['wi-1'],
       leaseOwner: 'test-worker',
     })
+  })
+
+  it('resolves parentTweetFullText for reply tweets before evaluating rules', async () => {
+    let capturedBundle: AccountFeatureBundle | undefined
+    const rule: LabelRule = {
+      key: 'capture_rule',
+      description: 'test',
+      version: '1.0.0',
+      evaluate: (bundle) => {
+        capturedBundle = bundle
+        return { value: false, confidence: 0.5, reason: 'test' }
+      },
+    }
+    const registry = new LabelRuleRegistry()
+    registry.register(rule)
+
+    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
+      { id: 'wi-1', status: 'succeeded' },
+    ])
+    vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts').mockResolvedValue([])
+    vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(
+      new Map([
+        [
+          'alice',
+          [
+            {
+              id: 't1',
+              fullText: 'reply text',
+              isReply: true,
+              inReplyToTweetId: 'parent1',
+            } as unknown as Tweet,
+          ],
+        ],
+      ]),
+    )
+    vi.spyOn(tweetRepository, 'findTweetTextsByIds').mockResolvedValue(
+      new Map([['parent1', '親ツイートの本文です']]),
+    )
+
+    const prisma = {
+      account: { findMany: vi.fn().mockResolvedValue([{ id: 'alice' }]) },
+    } as unknown as PrismaClient
+
+    await evaluateAccountRelabelItems(prisma, [{ id: 'wi-1', triggerId: 'alice' } as never], {
+      registry,
+      labelDefinitionIds: new Map([['capture_rule', 'def-1']]),
+      duplicateReplyIndex: { countOtherAccounts: () => 0 },
+      replyHijackIndex: { swarmSizeFor: () => 0, isEligibleForScreening: () => true },
+      followGraphLabelIndex: { signalsFor: () => ({}) },
+      concurrency: 1,
+      leaseOwner: 'test-worker',
+    })
+
+    expect(capturedBundle?.recentTweets[0].parentTweetFullText).toBe('親ツイートの本文です')
   })
 
   it('account が既に削除されている場合は評価をスキップして succeeded 扱いにする', async () => {

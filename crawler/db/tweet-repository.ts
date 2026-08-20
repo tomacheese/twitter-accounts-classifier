@@ -223,3 +223,20 @@ export async function findMissingTweetIds(prisma: PrismaClient, ids: string[]): 
   const existingIds = new Set(existing.map((row) => row.id))
   return ids.filter((id) => !existingIds.has(id))
 }
+
+/**
+ * @param prisma - Prisma クライアント
+ * @param ids - 本文を取得したい Tweet ID の一覧
+ * @returns 存在する Tweet の id をキー、fullText を値とする Map。存在しない id は含まない
+ */
+export async function findTweetTextsByIds(
+  prisma: PrismaClient,
+  ids: string[],
+): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map()
+  const rows = await prisma.tweet.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, fullText: true },
+  })
+  return new Map(rows.map((row) => [row.id, row.fullText]))
+}

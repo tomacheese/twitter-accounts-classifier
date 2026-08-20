@@ -266,4 +266,153 @@ describe('spamRule', () => {
     expect(strong.value).toBe(true)
     expect(strong.confidence).toBeGreaterThan(weak.confidence)
   })
+
+  it('is true when tweet-body solicitation phrases repeat across multiple recent tweets, even without bio solicitation', () => {
+    const bundle: AccountFeatureBundle = {
+      account: {
+        id: '1',
+        screenName: 'x',
+        displayName: 'X',
+        bio: 'よろしくお願いします',
+        followersCount: 50,
+        followingCount: 600,
+        tweetCount: 10,
+        accountCreatedAt: new Date(),
+        isBlueVerified: false,
+        verifiedType: null,
+      },
+      recentTweets: [
+        {
+          id: 't1',
+          fullText: '副業紹介してます、稼げる情報あります',
+          createdAt: new Date(),
+          retweetCount: 0,
+          likeCount: 0,
+          isReply: false,
+          isRetweet: false,
+          isPromoted: false,
+          isPaidPromotion: false,
+        },
+        {
+          id: 't2',
+          fullText: '今日も副業募集中!稼げるチャンスです',
+          createdAt: new Date(),
+          retweetCount: 0,
+          likeCount: 0,
+          isReply: false,
+          isRetweet: false,
+          isPromoted: false,
+          isPaidPromotion: false,
+        },
+      ],
+    }
+    const result = spamRule.evaluate(bundle)
+    expect(result.value).toBe(true)
+  })
+
+  it('is false when only a single tweet contains a solicitation phrase', () => {
+    const bundle: AccountFeatureBundle = {
+      account: {
+        id: '1',
+        screenName: 'x',
+        displayName: 'X',
+        bio: null,
+        followersCount: 50,
+        followingCount: 600,
+        tweetCount: 10,
+        accountCreatedAt: new Date(),
+        isBlueVerified: false,
+        verifiedType: null,
+      },
+      recentTweets: [
+        {
+          id: 't1',
+          fullText: '副業紹介してます、稼げる情報あります',
+          createdAt: new Date(),
+          retweetCount: 0,
+          likeCount: 0,
+          isReply: false,
+          isRetweet: false,
+          isPromoted: false,
+          isPaidPromotion: false,
+        },
+      ],
+    }
+    const result = spamRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+  })
+
+  it('does not count a solicitation-like tweet that is itself a rejection', () => {
+    const bundle: AccountFeatureBundle = {
+      account: {
+        id: '1',
+        screenName: 'x',
+        displayName: 'X',
+        bio: null,
+        followersCount: 50,
+        followingCount: 600,
+        tweetCount: 10,
+        accountCreatedAt: new Date(),
+        isBlueVerified: false,
+        verifiedType: null,
+      },
+      recentTweets: [
+        {
+          id: 't1',
+          fullText: '副業の勧誘はお断りしています',
+          createdAt: new Date(),
+          retweetCount: 0,
+          likeCount: 0,
+          isReply: false,
+          isRetweet: false,
+          isPromoted: false,
+          isPaidPromotion: false,
+        },
+        {
+          id: 't2',
+          fullText: '副業のDMはお断りです、ご遠慮ください',
+          createdAt: new Date(),
+          retweetCount: 0,
+          likeCount: 0,
+          isReply: false,
+          isRetweet: false,
+          isPromoted: false,
+          isPaidPromotion: false,
+        },
+      ],
+    }
+    const result = spamRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+  })
+
+  it('is false when the only tweet-body solicitation phrases appear in retweeted (not own) tweets', () => {
+    const bundle: AccountFeatureBundle = {
+      account: {
+        id: '1',
+        screenName: 'x',
+        displayName: 'X',
+        bio: null,
+        followersCount: 500,
+        followingCount: 600,
+        tweetCount: 10,
+        accountCreatedAt: new Date(),
+        isBlueVerified: false,
+        verifiedType: null,
+      },
+      recentTweets: Array.from({ length: 5 }, (_, i) => ({
+        id: `t${i}`,
+        fullText:
+          i < 2 ? '副業紹介してます、稼げる情報あります' : `RT @someone: おすすめの一冊その${i}`,
+        createdAt: new Date(),
+        retweetCount: 0,
+        likeCount: 0,
+        isReply: false,
+        isRetweet: true,
+        isPromoted: false,
+        isPaidPromotion: false,
+      })),
+    }
+    const result = spamRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+  })
 })

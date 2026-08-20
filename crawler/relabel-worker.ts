@@ -21,7 +21,7 @@ import {
 } from './db/label-repository'
 import { CRAWL_LIMITS } from './config/crawl-limits'
 import { loadReplyCorpus } from './db/reply-corpus'
-import { loadRecentTweetsForAccounts } from './db/tweet-repository'
+import { loadRecentTweetsForAccounts, findTweetTextsByIds } from './db/tweet-repository'
 import { buildDuplicateReplyIndex as buildDuplicateReplyIndexImpl } from './labels/duplicate-reply-index'
 import { buildReplyHijackIndex as buildReplyHijackIndexImpl } from './labels/reply-hijack-index'
 import { buildFollowGraphLabelIndex } from './labels/follow-graph-label-index'
@@ -122,11 +122,33 @@ async function evaluateAccountRelabelItemGroup(
   const accountIds = group.map((item) => item.triggerId)
   let accounts: Account[]
   let tweetsByAccountId: Map<string, Tweet[]>
+  let parentTweetTextById: Map<string, string>
   try {
     ;[accounts, tweetsByAccountId] = await Promise.all([
       prisma.account.findMany({ where: { id: { in: accountIds } } }),
       loadRecentTweetsForAccounts(prisma, accountIds, CRAWL_LIMITS.recentTweetsPerAccount),
     ])
+
+    const allRecentTweets = [...tweetsByAccountId.values()].flat()
+    const replyParentIds = [
+      ...new Set(
+        allRecentTweets
+          .filter(
+            (tweet): tweet is Tweet & { inReplyToTweetId: string } =>
+              tweet.inReplyToTweetId !== null,
+          )
+          .map((tweet) => tweet.inReplyToTweetId),
+      ),
+    ]
+    // labelLookupChunkSize は accountLabelLatest の chunk 済み IN 句と同じ値を流用し、
+    // 大規模グループで1回の IN 句に数千件の id を渡さないようにする。
+    const lookupChunkSize = getRelabelerLabelLookupChunkSize()
+    parentTweetTextById = new Map()
+    for (let i = 0; i < replyParentIds.length; i += lookupChunkSize) {
+      const chunk = replyParentIds.slice(i, i + lookupChunkSize)
+      const chunkResult = await findTweetTextsByIds(prisma, chunk)
+      for (const [id, text] of chunkResult) parentTweetTextById.set(id, text)
+    }
   } catch (error) {
     logger.error(
       `Failed to fetch account/tweet data for a group (accounts: ${group.length})`,
@@ -155,6 +177,7 @@ async function evaluateAccountRelabelItemGroup(
         options.duplicateReplyIndex,
         options.replyHijackIndex,
         options.followGraphLabelIndex,
+        parentTweetTextById,
       )
       const labels: AccountLabelBulkInput[] = []
       for (const { rule, result } of options.registry.applyAll(bundle)) {

@@ -13,6 +13,7 @@ import type { FollowGraphLabelIndex } from './follow-graph-label-index'
  * @param duplicateReplyIndex - アカウント横断で共有する重複返信インデックス
  * @param replyHijackIndex - アカウント横断で共有するリプライハイジャック群インデックス
  * @param followGraphLabelIndex - アカウント横断で共有するフォローグラフラベルインデックス
+ * @param parentTweetTextById - リプライ先ツイート ID から本文を引くための共有マップ
  * @returns アカウントの feature bundle
  */
 export function buildAccountFeatureBundle(
@@ -21,6 +22,7 @@ export function buildAccountFeatureBundle(
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
   followGraphLabelIndex: FollowGraphLabelIndex,
+  parentTweetTextById: Map<string, string>,
 ): AccountFeatureBundle {
   // 複数の異なるテンプレ返信ネットワーク・リプライハイジャック群に属することがあるため、
   // 合計や平均ではなく最大値を最も強いシグナルとして採用する。
@@ -73,6 +75,10 @@ export function buildAccountFeatureBundle(
       inReplyToTweetId: tweet.inReplyToTweetId,
       quotedTweetAuthorId: tweet.quotedTweetAuthorId,
       quotedTweetHasVideo: tweet.quotedTweetHasVideo,
+      parentTweetFullText:
+        tweet.inReplyToTweetId === null
+          ? null
+          : (parentTweetTextById.get(tweet.inReplyToTweetId) ?? null),
     })),
     templatedReplyNetworkSize,
     replyHijackSwarmSize,

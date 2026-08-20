@@ -8,7 +8,7 @@ import type { FollowGraphLabelIndex } from '../labels/follow-graph-label-index'
 import { buildAccountFeatureBundle } from '../labels/build-account-feature-bundle'
 import type { FollowListResult } from '../twitter/follows'
 import { upsertAccount, type AccountProfileInput } from './account-repository'
-import { upsertTweet, type TweetInput } from './tweet-repository'
+import { upsertTweet, findTweetTextsByIds, type TweetInput } from './tweet-repository'
 import {
   upsertFollowSampleAuthors,
   replaceLabelingFollowSampleWithinTx,
@@ -133,13 +133,33 @@ export async function persistAuthorResultAtomic(
         await replaceLabelingFollowSampleWithinTx(txClient, params.authorId, followeeIds)
       }
 
+      const parentTweetTextById = new Map(
+        upsertedTweets
+          .filter((tweet) => tweet.accountId !== params.authorId)
+          .map((tweet) => [tweet.id, tweet.fullText]),
+      )
       const authorOwnTweets = upsertedTweets.filter((tweet) => tweet.accountId === params.authorId)
+      // parent が今回の crawl で fetch されなかった (`findMissingTweetIds` が既存 DB 行と判定した) リプライは、
+      // `upsertedTweets` に現れないため上記の in-memory map だけでは解決できない。
+      // 未解決分だけ DB から補うことで、crawl 経路と relabel-worker 経路の評価結果を一致させる。
+      const missingParentIds = [
+        ...new Set(
+          authorOwnTweets
+            .map((tweet) => tweet.inReplyToTweetId)
+            .filter((id): id is string => id !== null && !parentTweetTextById.has(id)),
+        ),
+      ]
+      if (missingParentIds.length > 0) {
+        const dbParentTweetTextById = await findTweetTextsByIds(txClient, missingParentIds)
+        for (const [id, text] of dbParentTweetTextById) parentTweetTextById.set(id, text)
+      }
       const bundle = buildAccountFeatureBundle(
         account,
         authorOwnTweets,
         params.duplicateReplyIndex,
         params.replyHijackIndex,
         params.followGraphLabelIndex,
+        parentTweetTextById,
       )
       const ruleResults = params.registry.applyAll(bundle).flatMap(({ rule, result }) => {
         const labelDefinitionId = params.labelDefinitionIds.get(rule.key)

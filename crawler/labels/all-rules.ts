@@ -46,6 +46,8 @@ import { crossTargetTemplatedReplyRule } from './rules/cross-target-templated-re
 import { replyHijackSwarmRule } from './rules/reply-hijack-swarm'
 import { scamLinkDomainRule } from './rules/scam-link-domain'
 import { bareLinkSpamRule } from './rules/bare-link-spam'
+// irrelevant_reply は無効化する。
+// bigram 類似度では、話題に沿った通常のリプライと真に無関係なリプライを統計的に区別できないため。
 
 /**
  * クローラーに登録される全ラベルルールの正規リスト。

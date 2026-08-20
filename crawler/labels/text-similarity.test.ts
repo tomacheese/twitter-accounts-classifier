@@ -55,3 +55,34 @@ describe('averagePairwiseSimilarity', () => {
     expect(averagePairwiseSimilarity(['abc'])).toBe(0)
   })
 })
+
+describe('averagePairwiseSimilarity with removeCommonPhrases', () => {
+  it('ignores a shared running-gag phrase that appears in most texts of the group', () => {
+    const texts = [
+      '実況実況 このシーンで泣いた',
+      '実況実況 まさかの展開すぎる',
+      '実況実況 ここで笑うとは思わなかった',
+      '実況実況 次の場面が気になる',
+      '実況実況 このセリフ好き',
+    ]
+    const withoutRemoval = averagePairwiseSimilarity(texts)
+    const withRemoval = averagePairwiseSimilarity(texts, { removeCommonPhrases: true })
+    expect(withRemoval).toBeLessThan(withoutRemoval)
+  })
+
+  it('still detects paraphrased duplicates that do not share a fixed common phrase', () => {
+    const texts = [
+      'この動画おもしろすぎて何回も見ちゃった',
+      '何回見てもこの動画おもしろすぎる',
+      'この動画ほんとにおもしろい、笑いが止まらない',
+    ]
+    const similarity = averagePairwiseSimilarity(texts, { removeCommonPhrases: true })
+    expect(similarity).toBeGreaterThan(0.03)
+  })
+
+  it('does not collapse to 0 for a group of texts that are literally identical', () => {
+    const texts = Array.from({ length: 10 }, () => 'これはひどい')
+    const similarity = averagePairwiseSimilarity(texts, { removeCommonPhrases: true })
+    expect(similarity).toBe(1)
+  })
+})
