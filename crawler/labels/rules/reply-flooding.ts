@@ -20,7 +20,7 @@ export const replyFloodingRule: LabelRule = {
   key: 'reply_flooding',
   description:
     '同一相手への返信を短時間のうちに大量投稿しており、その文面が言い換えや翻訳違いを含めて内容的に酷似している。1つのバズったツイートに大量の言い換えリプライを浴びせてインプレッションを稼ぐ「インプレゾンビ」の典型パターン',
-  version: '1.2.1',
+  version: '1.3.0',
   evaluate(bundle) {
     // 先頭の @メンション(会話相手)でグルーピングすると、
     // 通常の相互会話との区別ができない。一人との往復チャットや口論でも、
@@ -54,6 +54,7 @@ export const replyFloodingRule: LabelRule = {
         replies.map((r) => r.fullText),
         {
           removeHashtags: true,
+          removeCommonPhrases: true,
         },
       )
       if (similarity < SIMILARITY_THRESHOLD) continue

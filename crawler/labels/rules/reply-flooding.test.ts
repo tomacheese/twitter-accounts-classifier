@@ -185,4 +185,26 @@ describe('replyFloodingRule', () => {
 
     expect(result.value).toBe(false)
   })
+
+  it('is false for live-commentary replies that only share a running-gag phrase and hashtag, not actual content', () => {
+    const bundle = makeBundle(
+      [
+        'このシーンで泣いた #実況中 見てて',
+        'まさかの展開すぎる #実況中 見てて',
+        'ここで笑うとは思わなかった #実況中 見てて',
+        '次の場面が気になる #実況中 見てて',
+        'このセリフ好き #実況中 見てて',
+        '音楽が良すぎる #実況中 見てて',
+        'このキャラ推せる #実況中 見てて',
+        '展開が読めない #実況中 見てて',
+        '演技がうまい #実況中 見てて',
+      ].map((text, i) => ({
+        fullText: `@example_target ${text}`,
+        isReply: true,
+        minutesAgo: i * 5,
+      })),
+    )
+    const result = replyFloodingRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+  })
 })
