@@ -61,9 +61,13 @@ function removeCommonPhrases(normalizedTexts: string[]): string[] {
       .map(([token]) => token),
   )
   if (commonTokens.size === 0) return normalizedTexts
-  return tokenizedTexts.map((tokens) =>
-    tokens.filter((token) => !commonTokens.has(token)).join(' '),
-  )
+  // 一致リプライが大半を占めるグループでは、そのテキスト全体が共通トークン1つ分になり得る。
+  // 除去してテキストが空になる場合、その一致自体が検出したい類似度シグナルであるため、
+  // 除去前の原文を残す。
+  return tokenizedTexts.map((tokens, index) => {
+    const filtered = tokens.filter((token) => !commonTokens.has(token))
+    return filtered.length > 0 ? filtered.join(' ') : normalizedTexts[index]
+  })
 }
 
 /**

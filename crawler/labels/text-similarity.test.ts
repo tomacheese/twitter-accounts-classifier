@@ -79,4 +79,10 @@ describe('averagePairwiseSimilarity with removeCommonPhrases', () => {
     const similarity = averagePairwiseSimilarity(texts, { removeCommonPhrases: true })
     expect(similarity).toBeGreaterThan(0.03)
   })
+
+  it('does not collapse to 0 for a group of texts that are literally identical', () => {
+    const texts = Array.from({ length: 10 }, () => 'これはひどい')
+    const similarity = averagePairwiseSimilarity(texts, { removeCommonPhrases: true })
+    expect(similarity).toBe(1)
+  })
 })
