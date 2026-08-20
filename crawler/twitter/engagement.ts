@@ -47,6 +47,25 @@ export async function fetchReplies(
 }
 
 /**
+ * @param client - ツイート詳細 API クライアント
+ * @param parentTweetId - 本文を取得したい parent ツイートの ID
+ * @returns parent ツイートとその発信者。会話レスポンスに parent が含まれない場合 (削除済み・鍵アカウント化など) は undefined
+ */
+export async function fetchParentTweet(
+  client: TweetDetailApiLike,
+  parentTweetId: string,
+): Promise<{ tweet: TweetInput; author: AccountProfileInput } | undefined> {
+  const response = await client.getTweetDetail({ focalTweetId: parentTweetId })
+  const parentRaw = response.data.data.find((raw) => raw.restId === parentTweetId)
+  if (!parentRaw) return undefined
+
+  return {
+    tweet: toTweetInput(parentRaw, { source: 'manual', viewerAccountId: parentRaw.user.restId }),
+    author: toAccountProfileInput(parentRaw.user),
+  }
+}
+
+/**
  * `getTweetDetail` の形状は `./timeline` が変換する timeline 系エンドポイントと同一のため、
  * 専用の変換処理を新設せず {@link convertTimelineResponse} を流用する。
  * @param tweetApi - 実際のツイート API (例: `TwitterOpenApiClient.getTweetApi()`)
