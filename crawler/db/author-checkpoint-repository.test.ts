@@ -203,6 +203,78 @@ describe('persistAuthorResultAtomic', () => {
     expect(capturedBundle?.recentTweets[0].parentTweetFullText).toBe('親ツイートの本文です')
   })
 
+  it('resolves parentTweetFullText via DB lookup when the parent was not fetched this run', async () => {
+    let capturedBundle: AccountFeatureBundle | undefined
+    const rule: LabelRule = {
+      key: 'capture_rule',
+      description: 'test',
+      version: '1.0.0',
+      evaluate: (bundle) => {
+        capturedBundle = bundle
+        return { value: false, confidence: 0.5, reason: 'test' }
+      },
+    }
+    const registry = new LabelRuleRegistry()
+    registry.register(rule)
+
+    // 今回の crawl では reply1 だけが fetch され、その parent (parent1) は
+    // `findMissingTweetIds` によって既に DB にある扱いになったため recentTweets に含まれない。
+    const tweetUpsert = vi.fn((args: { where: { id: string } }) =>
+      Promise.resolve({
+        id: args.where.id,
+        accountId: 'author1',
+        fullText: 'reply text',
+        inReplyToTweetId: 'parent1',
+      }),
+    )
+    const tweetFindMany = vi
+      .fn()
+      .mockResolvedValue([{ id: 'parent1', fullText: '既に DB にある親ツイートの本文です' }])
+    const txClient = {
+      account: {
+        upsert: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      tweet: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: tweetUpsert,
+        findMany: tweetFindMany,
+      },
+      crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
+    }
+    const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
+    const prisma = { $transaction: transaction } as unknown as PrismaClient
+
+    await persistAuthorResultAtomic(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      authorId: 'author1',
+      profile: profile('author1'),
+      recentTweets: [tweet('reply1', 'author1', { isReply: true, inReplyToTweetId: 'parent1' })],
+      additionalOwnTweets: [],
+      recentTweetsFallbackAuthors: [profile('author1')],
+      followSample: null,
+      registry,
+      labelDefinitionIds: new Map([['capture_rule', 'def-1']]),
+      duplicateReplyIndex: buildDuplicateReplyIndex([]),
+      replyHijackIndex: buildReplyHijackIndex([]),
+      followGraphLabelIndex: noFollowGraphSignals,
+      warnings: [],
+      durationMs: 10,
+      retryWaitMs: 0,
+      appVersion: 'test',
+    })
+
+    expect(tweetFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: ['parent1'] } } }),
+    )
+    expect(capturedBundle?.recentTweets[0].parentTweetFullText).toBe(
+      '既に DB にある親ツイートの本文です',
+    )
+  })
+
   it('skips the labeling follow sample write when followSample is null, without failing the transaction', async () => {
     const accountUpsert = vi.fn().mockResolvedValue({})
     const accountFindUnique = vi.fn().mockResolvedValue(null)
