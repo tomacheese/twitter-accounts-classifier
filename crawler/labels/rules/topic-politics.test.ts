@@ -110,4 +110,27 @@ describe('topicPoliticsRule', () => {
         .value,
     ).toBe(false)
   })
+
+  it.each([
+    'my dad was basically a congressman',
+    'I hate every senator',
+    'I am a congressman',
+    'Writer | Congressman | Father',
+  ])(
+    'does not treat a bare "congressman"/"senator" self-label without a state prefix or for/of/district qualifier as a current political office: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it.each(['State congressman', 'Congressman for the 5th district', 'Senator of the district'])(
+    'keeps "congressman"/"senator" self-identification positive when qualified by a state prefix or for/of/district: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it('does not treat a bare aspirational mention of "政治家" without a self-identification suffix as a current political office', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: '私の夢は政治家' })).value).toBe(false)
+  })
 })
