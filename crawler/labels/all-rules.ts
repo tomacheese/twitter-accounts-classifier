@@ -46,6 +46,7 @@ import { crossTargetTemplatedReplyRule } from './rules/cross-target-templated-re
 import { replyHijackSwarmRule } from './rules/reply-hijack-swarm'
 import { scamLinkDomainRule } from './rules/scam-link-domain'
 import { bareLinkSpamRule } from './rules/bare-link-spam'
+import { irrelevantReplyRule } from './rules/irrelevant-reply'
 
 /**
  * クローラーに登録される全ラベルルールの正規リスト。
@@ -100,4 +101,5 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   replyHijackSwarmRule,
   scamLinkDomainRule,
   bareLinkSpamRule,
+  irrelevantReplyRule,
 ]
