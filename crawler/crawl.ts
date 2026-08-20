@@ -14,7 +14,7 @@ import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertComponentBuildIdentity } from './build-identity'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
-import { upsertTweets, type TweetInput } from './db/tweet-repository'
+import { upsertTweets, findMissingTweetIds, type TweetInput } from './db/tweet-repository'
 import {
   ensureLabelDefinitionsForRules,
   filterAccountIdsWithExistingLabels,
@@ -62,6 +62,7 @@ import {
 import {
   sortByEngagement,
   fetchReplies,
+  fetchParentTweet,
   createTweetDetailApiLike,
   type TweetDetailApiLike,
   type RepliesResult as FetchRepliesResult,
@@ -162,6 +163,7 @@ export interface CrawlDependencies {
   persistAuthorResultAtomic: (
     params: PersistAuthorResultAtomicParams,
   ) => Promise<PersistAuthorResultAtomicResult>
+  findMissingTweetIds: (ids: string[]) => Promise<string[]>
   recordCrawlAuthorCheckpoint: (params: CrawlAuthorCheckpointParams) => Promise<void>
   loadCrawlAuthorCheckpoints: (
     crawlRunId: string,
@@ -379,6 +381,7 @@ interface AccountCycleMetrics {
   replyCount: number
   profileCount: number
   labelsAppliedCount: number
+  parentTweetFetchCount: number
   warnings: CrawlWarning[]
 }
 
@@ -532,7 +535,7 @@ export async function runRepliesPhase(
   }
 }
 
-async function runAuthorUnitPhase(
+export async function runAuthorUnitPhase(
   deps: CrawlDependencies,
   registry: LabelRuleRegistry,
   labelDefinitionIds: Map<string, string>,
@@ -545,6 +548,7 @@ async function runAuthorUnitPhase(
   repliesResult: RepliesResult,
   client: CrawlOpenApiClient,
   followRateLimitBudget: FollowRateLimitBudget,
+  tweetDetailRateLimitBudget: TweetDetailRateLimitBudget,
   trackRetryWait: (ms: number) => void,
 ): Promise<AccountCycleMetrics> {
   const userApi = client.getUserApi()
@@ -622,6 +626,7 @@ async function runAuthorUnitPhase(
   const warnings: CrawlWarning[] = []
   const succeededAuthorIds = new Set<string>()
   let labelsAppliedCount = 0
+  let parentTweetFetchCount = 0
   // 集計を再起動回数に依存させないため、前回までの checkpoint 分をまず合算する。
   for (const [authorId, checkpoint] of existingCheckpoints) {
     if (checkpoint.status === 'success') succeededAuthorIds.add(authorId)
@@ -634,6 +639,10 @@ async function runAuthorUnitPhase(
     })
     if (checkpoint.followSampleStatus === 'rate_limit_skipped') {
       followRateLimitBudget.restoreOptionalFollowingRateLimit()
+    }
+    tweetDetailRateLimitBudget.restoreFetchCount(checkpoint.parentTweetFetchRequestCount)
+    if (checkpoint.parentTweetFetchRateLimitRemaining === 0) {
+      tweetDetailRateLimitBudget.restoreRateLimit()
     }
   }
 
@@ -656,6 +665,9 @@ async function runAuthorUnitPhase(
     let followSampleRequestCount = 0
     let followSampleRateLimitRemaining: number | undefined
     let followSampleRateLimitReset: number | undefined
+    let parentTweetFetchRequestCount = 0
+    let parentTweetFetchRateLimitRemaining: number | undefined
+    let parentTweetFetchRateLimitReset: number | undefined
     let profile: AccountProfileInput | null = null
     let recentTweetsAttemptedAt: Date | null = null
     let recentTweetsFetchSucceeded = false
@@ -744,6 +756,74 @@ async function runAuthorUnitPhase(
         }
       }
 
+      const replyParentIds = [
+        ...new Set(
+          recentTweets
+            .filter(
+              (tweet): tweet is TweetInput & { inReplyToTweetId: string } =>
+                tweet.isReply && tweet.inReplyToTweetId !== null,
+            )
+            .map((tweet) => tweet.inReplyToTweetId),
+        ),
+      ]
+      if (replyParentIds.length > 0) {
+        const missingParentIds = await deps.findMissingTweetIds(replyParentIds)
+        const tweetApi = client.getTweetApi()
+        for (const parentTweetId of missingParentIds) {
+          const decision = tweetDetailRateLimitBudget.acquireOptionalFetch()
+          if (decision !== 'allowed') break
+          parentTweetFetchRequestCount += 1
+          try {
+            const parent = await fetchParentTweet(tweetApi, parentTweetId)
+            const captured = getLastResponseMatching('TweetDetail')
+            parentTweetFetchRateLimitRemaining = captured?.rateLimitRemaining
+            parentTweetFetchRateLimitReset = captured?.rateLimitReset
+            tweetDetailRateLimitBudget.recordSuccess({
+              rateLimitRemaining: captured?.rateLimitRemaining,
+              rateLimitReset: captured?.rateLimitReset,
+            })
+            if (parent) {
+              recentTweets.push(parent.tweet)
+              fallbackAuthors.push(parent.author)
+              parentTweetFetchCount += 1
+            } else {
+              const notFoundMessage = `Parent tweet ${parentTweetId} for author ${authorId} was not found in the getTweetDetail response (deleted or protected)`
+              authorWarnings.push({
+                type: 'author_processing_failed',
+                message: notFoundMessage,
+                authorId,
+                errorMessage: notFoundMessage,
+                appVersion: APP_VERSION,
+              })
+            }
+          } catch (error) {
+            const diagnostics = getResponseErrorDiagnostics(error)
+            if (diagnostics?.httpStatus === 429) {
+              tweetDetailRateLimitBudget.recordRateLimited(diagnostics)
+              parentTweetFetchRateLimitRemaining = diagnostics.rateLimitRemaining
+              parentTweetFetchRateLimitReset = diagnostics.rateLimitReset
+            } else {
+              const message = diagnostics
+                ? `Failed to fetch parent tweet ${parentTweetId} for author ${authorId} (${formatResponseErrorDiagnostics(diagnostics)})`
+                : `Failed to fetch parent tweet ${parentTweetId} for author ${authorId}`
+              if (isResponseError(error)) {
+                logger.error(message, toSafeResponseErrorForLog(error))
+              } else {
+                logger.error(message, error as Error)
+              }
+              authorWarnings.push({
+                type: 'author_processing_failed',
+                message,
+                authorId,
+                errorMessage: toErrorMessage(error),
+                ...diagnostics,
+                appVersion: APP_VERSION,
+              })
+            }
+          }
+        }
+      }
+
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
       const authorOtherReplies = otherRepliesByAuthor.get(authorId) ?? []
 
@@ -762,6 +842,9 @@ async function runAuthorUnitPhase(
           followSampleRequestCount,
           followSampleRateLimitRemaining,
           followSampleRateLimitReset,
+          parentTweetFetchRequestCount,
+          parentTweetFetchRateLimitRemaining,
+          parentTweetFetchRateLimitReset,
           registry,
           labelDefinitionIds,
           duplicateReplyIndex,
@@ -808,6 +891,9 @@ async function runAuthorUnitPhase(
             followSampleRequestCount,
             followSampleRateLimitRemaining,
             followSampleRateLimitReset,
+            parentTweetFetchRequestCount,
+            parentTweetFetchRateLimitRemaining,
+            parentTweetFetchRateLimitReset,
             appVersion: APP_VERSION,
           })
         } catch (checkpointError) {
@@ -850,6 +936,9 @@ async function runAuthorUnitPhase(
             followSampleRequestCount,
             followSampleRateLimitRemaining,
             followSampleRateLimitReset,
+            parentTweetFetchRequestCount,
+            parentTweetFetchRateLimitRemaining,
+            parentTweetFetchRateLimitReset,
             appVersion: APP_VERSION,
           })
         } catch (checkpointError) {
@@ -890,6 +979,7 @@ async function runAuthorUnitPhase(
     replyCount: repliesResult.replyTweets.length,
     profileCount: succeededAuthorIds.size,
     labelsAppliedCount,
+    parentTweetFetchCount,
     warnings: [...timelineSnapshot.warnings, ...repliesResult.warnings, ...warnings],
   }
 }
@@ -1336,7 +1426,7 @@ function restoreAccountCycleMetrics(value: unknown): AccountCycleMetrics | undef
   if (!isRecord(value)) return undefined
   const warnings = restoreWarnings(value.warnings)
   if (!warnings) return undefined
-  const metricKeys: (keyof Omit<AccountCycleMetrics, 'warnings'>)[] = [
+  const metricKeys: (keyof Omit<AccountCycleMetrics, 'warnings' | 'parentTweetFetchCount'>)[] = [
     'recommendedCount',
     'followingCount',
     'trendingCount',
@@ -1345,6 +1435,9 @@ function restoreAccountCycleMetrics(value: unknown): AccountCycleMetrics | undef
     'labelsAppliedCount',
   ]
   if (metricKeys.some((key) => typeof value[key] !== 'number')) return undefined
+  // 本フィールド追加前に書かれた checkpoint には存在しないため、その場合は未取得 (0 件) とみなす。
+  const parentTweetFetchCount =
+    typeof value.parentTweetFetchCount === 'number' ? value.parentTweetFetchCount : 0
   return {
     recommendedCount: value.recommendedCount as number,
     followingCount: value.followingCount as number,
@@ -1352,6 +1445,7 @@ function restoreAccountCycleMetrics(value: unknown): AccountCycleMetrics | undef
     replyCount: value.replyCount as number,
     profileCount: value.profileCount as number,
     labelsAppliedCount: value.labelsAppliedCount as number,
+    parentTweetFetchCount,
     warnings,
   }
 }
@@ -1480,6 +1574,9 @@ async function runAccountCycle(
               cycleTlsCleanups.push(() => deps.closeOpenApiClient(openApiContext))
               try {
                 const followRateLimitBudget = new FollowRateLimitBudget({ now: Date.now })
+                const tweetDetailRateLimitBudget = new TweetDetailRateLimitBudget({
+                  now: Date.now,
+                })
                 if (needsTimeline) {
                   if (!trendsContext) {
                     throw new Error('Missing trends context for timeline checkpoint')
@@ -1515,7 +1612,7 @@ async function runAccountCycle(
                       deps,
                       resolvedTimelineSnapshotForReplies,
                       openApiContext.client,
-                      new TweetDetailRateLimitBudget({ now: Date.now }),
+                      tweetDetailRateLimitBudget,
                       trackRetryWait,
                     ),
                   )
@@ -1597,6 +1694,7 @@ async function runAccountCycle(
                       resolvedRepliesResult,
                       openApiContext.client,
                       followRateLimitBudget,
+                      tweetDetailRateLimitBudget,
                       trackRetryWait,
                     ),
                   )
@@ -1686,6 +1784,7 @@ async function runAccountCycle(
       replyCount: metrics.replyCount,
       profileCount: metrics.profileCount,
       labelsAppliedCount: metrics.labelsAppliedCount,
+      parentTweetFetchCount: metrics.parentTweetFetchCount,
       followingSynced: following.synced,
       followersSynced: followers.synced,
       blocksSynced: blocks.synced,
@@ -1750,6 +1849,7 @@ async function runAccountCycle(
       replyCount: 0,
       profileCount: 0,
       labelsAppliedCount: 0,
+      parentTweetFetchCount: 0,
       followingSynced: false,
       followersSynced: false,
       blocksSynced: false,
@@ -1814,6 +1914,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
             replyCount: 0,
             profileCount: 0,
             labelsAppliedCount: 0,
+            parentTweetFetchCount: 0,
             followingSynced: false,
             followersSynced: false,
             blocksSynced: false,
@@ -1980,6 +2081,7 @@ async function main(): Promise<void> {
     loadFollowGraphLabelIndex: (labelDefinitionIds, accountIds) =>
       buildFollowGraphLabelIndex(prisma, labelDefinitionIds, { accountIds }),
     persistAuthorResultAtomic: (params) => persistAuthorResultAtomicRecord(prisma, params),
+    findMissingTweetIds: (ids) => findMissingTweetIds(prisma, ids),
     recordCrawlAuthorCheckpoint: (params) => recordCrawlAuthorCheckpointRecord(prisma, params),
     loadCrawlAuthorCheckpoints: (crawlRunId, username) =>
       loadCrawlAuthorCheckpointsRecord(prisma, crawlRunId, username),
