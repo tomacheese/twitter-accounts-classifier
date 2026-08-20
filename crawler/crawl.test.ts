@@ -2,13 +2,17 @@ import { Logger } from '@book000/node-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   runCrawlCycle,
+  runRepliesPhase,
   deriveClassificationStatus,
   measurePhaseDuration,
   type CrawlDependencies,
+  type CrawlOpenApiClient,
 } from './crawl'
 import type { CrawlAccountCheckpointParams } from './db/crawl-run-repository'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
+import { TweetDetailRateLimitBudget } from './twitter/tweet-detail-rate-limit-budget'
+import type { TweetInput } from './db/tweet-repository'
 
 const { captureMessageMock } = vi.hoisted(() => ({ captureMessageMock: vi.fn() }))
 vi.mock('./monitoring/sentry', async (importOriginal) => ({
@@ -3111,5 +3115,53 @@ describe('runCrawlCycle checkpoint phase timing', () => {
         }),
       )
     }
+  })
+})
+
+describe('runRepliesPhase', () => {
+  it('fetchReplies を常に発火させたうえで TweetDetail budget の消費を記録する', async () => {
+    const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [] } })
+    const client = {
+      getTweetApi: () => ({ getTweetDetail }),
+    } as unknown as CrawlOpenApiClient
+    const budget = new TweetDetailRateLimitBudget({ now: () => 0 })
+    const recordSuccessSpy = vi.spyOn(budget, 'recordSuccess')
+    const recordRateLimitedSpy = vi.spyOn(budget, 'recordRateLimited')
+    const deps = makeDeps()
+    const topTweet: TweetInput = {
+      id: 'tweet1',
+      accountId: 'author1',
+      fullText: 'hello',
+      createdAt: new Date('2020-01-01T00:00:00Z'),
+      retweetCount: 5,
+      likeCount: 5,
+      replyCount: 0,
+      quoteCount: 0,
+      isReply: false,
+      inReplyToTweetId: null,
+      isAuthorReply: false,
+      isRetweet: false,
+      retweetedTweetId: null,
+      isPromoted: false,
+      isPaidPromotion: false,
+      hasAiGeneratedMedia: null,
+      aiGeneratedDetectionSource: null,
+      quotedTweetId: null,
+      quotedTweetAuthorId: null,
+      quotedTweetHasVideo: null,
+      source: 'recommended',
+    }
+    const timelineSnapshot = {
+      recommended: { tweets: [topTweet], authors: [] },
+      following: { tweets: [], authors: [] },
+      trending: { tweets: [], authors: [] },
+      warnings: [],
+    }
+
+    await runRepliesPhase(deps, timelineSnapshot, client, budget, vi.fn())
+
+    expect(getTweetDetail).toHaveBeenCalledTimes(1)
+    expect(recordSuccessSpy).toHaveBeenCalledTimes(1)
+    expect(recordRateLimitedSpy).not.toHaveBeenCalled()
   })
 })

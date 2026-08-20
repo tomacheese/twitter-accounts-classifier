@@ -82,6 +82,7 @@ import {
   FollowRateLimitBudget,
   OptionalFollowingSkipError,
 } from './twitter/follow-rate-limit-budget'
+import { TweetDetailRateLimitBudget } from './twitter/tweet-detail-rate-limit-budget'
 import {
   syncFollowers as syncFollowersEdges,
   syncFollowing as syncFollowingEdges,
@@ -468,10 +469,11 @@ async function fetchTimelineSnapshot(
   return { recommended, following, trending, warnings }
 }
 
-async function runRepliesPhase(
+export async function runRepliesPhase(
   deps: CrawlDependencies,
   timelineSnapshot: TimelineSnapshot,
   client: CrawlOpenApiClient,
+  tweetDetailRateLimitBudget: TweetDetailRateLimitBudget,
   trackRetryWait: (ms: number) => void,
 ): Promise<RepliesResult> {
   const tweetApi = client.getTweetApi()
@@ -494,6 +496,16 @@ async function runRepliesPhase(
       () => fetchReplies(tweetApi, topTweet, deps.limits.repliesPerTweet),
       retryOptions(deps, trackRetryWait),
     )
+    const captured = getLastResponseMatching('TweetDetail')
+    const diagnostics = {
+      rateLimitRemaining: captured?.rateLimitRemaining,
+      rateLimitReset: captured?.rateLimitReset,
+    }
+    if (captured?.status === 429) {
+      tweetDetailRateLimitBudget.recordRateLimited(diagnostics)
+    } else {
+      tweetDetailRateLimitBudget.recordSuccess(diagnostics)
+    }
     replyTweets.push(...authorReplies, ...otherReplies)
     for (const reply of otherReplies) {
       replyHijackCandidateIds.add(reply.accountId)
@@ -1496,6 +1508,7 @@ async function runAccountCycle(
                       deps,
                       resolvedTimelineSnapshotForReplies,
                       openApiContext.client,
+                      new TweetDetailRateLimitBudget({ now: Date.now }),
                       trackRetryWait,
                     ),
                   )
