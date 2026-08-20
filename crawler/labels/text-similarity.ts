@@ -8,6 +8,13 @@ const HASHTAG_PATTERN = /#[^\s#]+/g
 
 export interface SimilarityNormalizationOptions {
   removeHashtags?: boolean
+  /**
+   * グループ内の大半のテキストに共通して出現する語句 (決まり文句・running gag) を、
+   * 類似度計算前に除去するか。
+   * ハッシュタグ除去と同じ「グループ内で共有される要素は言い換え検出のシグナルにならない」という考え方の拡張で、
+   * 実況リプライ等の非ハッシュタグの決まり文句による誤検知を防ぐために使う。
+   */
+  removeCommonPhrases?: boolean
 }
 
 /**
@@ -24,6 +31,39 @@ export function normalizeForSimilarity(
   if (options.removeHashtags) normalized = normalized.replaceAll(HASHTAG_PATTERN, '')
 
   return normalized.replaceAll(WHITESPACE_PATTERN, ' ').trim().toLowerCase()
+}
+
+// 決まり文句除去の粒度は、文字バイグラムではなく空白区切りのトークンにする。
+// ハッシュタグ同様「グループ全体で使い回されている固定の語句」を狙い撃ちで除去したいが、
+// バイグラム単位で除去すると通常の言い換え文中の偶然の文字列一致まで削ってしまうため。
+const COMMON_PHRASE_MIN_GROUP_FRACTION = 0.6
+const COMMON_PHRASE_MIN_TOKEN_LENGTH = 2
+
+/**
+ * グループ内の大半のテキストに共通して出現するトークンを除去する。
+ * @param normalizedTexts - 正規化済みのテキスト群
+ * @returns 共通トークンを除去したテキスト群
+ */
+function removeCommonPhrases(normalizedTexts: string[]): string[] {
+  if (normalizedTexts.length < 2) return normalizedTexts
+  const tokenizedTexts = normalizedTexts.map((text) => text.split(' ').filter(Boolean))
+  const documentCountByToken = new Map<string, number>()
+  for (const tokens of tokenizedTexts) {
+    for (const token of new Set(tokens)) {
+      if (token.length < COMMON_PHRASE_MIN_TOKEN_LENGTH) continue
+      documentCountByToken.set(token, (documentCountByToken.get(token) ?? 0) + 1)
+    }
+  }
+  const minCount = Math.ceil(normalizedTexts.length * COMMON_PHRASE_MIN_GROUP_FRACTION)
+  const commonTokens = new Set(
+    [...documentCountByToken.entries()]
+      .filter(([, count]) => count >= minCount)
+      .map(([token]) => token),
+  )
+  if (commonTokens.size === 0) return normalizedTexts
+  return tokenizedTexts.map((tokens) =>
+    tokens.filter((token) => !commonTokens.has(token)).join(' '),
+  )
 }
 
 /**
@@ -69,7 +109,9 @@ export function averagePairwiseSimilarity(
   texts: string[],
   options: SimilarityNormalizationOptions = {},
 ): number {
-  const bigramSets = texts.map((text) => bigramSet(normalizeForSimilarity(text, options)))
+  let normalizedTexts = texts.map((text) => normalizeForSimilarity(text, options))
+  if (options.removeCommonPhrases) normalizedTexts = removeCommonPhrases(normalizedTexts)
+  const bigramSets = normalizedTexts.map((text) => bigramSet(text))
   let total = 0
   let pairs = 0
   for (let i = 0; i < bigramSets.length; i++) {
