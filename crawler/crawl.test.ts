@@ -3383,6 +3383,39 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
     expect(persistAuthorResultAtomic).toHaveBeenCalled()
   })
 
+  it('persists parentTweetFetchRateLimitRemaining as 0 (not undefined) when a 429 has no rate-limit header', async () => {
+    const reply1 = rawTweet('reply1', rawUser('author1'), 'parent1')
+    const getTweetDetail = vi.fn().mockRejectedValue(responseError(429))
+    const findMissingTweetIds = vi.fn().mockResolvedValue(['parent1'])
+    const persistAuthorResultAtomic = vi
+      .fn()
+      .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 0 })
+    const deps = makeDeps({ findMissingTweetIds, persistAuthorResultAtomic })
+    const client = buildParentFetchClient({ replyRaws: [reply1], getTweetDetail })
+
+    await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      client,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      new TweetDetailRateLimitBudget({ now: () => 0 }),
+      vi.fn(),
+    )
+
+    const persistedCall = persistAuthorResultAtomic.mock.calls[0][0] as {
+      parentTweetFetchRateLimitRemaining: number | undefined
+    }
+    expect(persistedCall.parentTweetFetchRateLimitRemaining).toBe(0)
+  })
+
   it('restores parent-tweet-fetch budget state from an existing checkpoint on resume', async () => {
     const tweetDetailRateLimitBudget = new TweetDetailRateLimitBudget({ now: () => 0 })
     const restoreFetchCountSpy = vi.spyOn(tweetDetailRateLimitBudget, 'restoreFetchCount')

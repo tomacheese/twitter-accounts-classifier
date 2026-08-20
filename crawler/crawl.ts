@@ -800,7 +800,10 @@ export async function runAuthorUnitPhase(
             const diagnostics = getResponseErrorDiagnostics(error)
             if (diagnostics?.httpStatus === 429) {
               tweetDetailRateLimitBudget.recordRateLimited(diagnostics)
-              parentTweetFetchRateLimitRemaining = diagnostics.rateLimitRemaining
+              // ヘッダーが欠けて undefined のまま保存すると、再開時の
+              // `parentTweetFetchRateLimitRemaining === 0` 判定が素通りしてしまうため、
+              // 429 を観測した事実そのものを 0 として残す。
+              parentTweetFetchRateLimitRemaining = diagnostics.rateLimitRemaining ?? 0
               parentTweetFetchRateLimitReset = diagnostics.rateLimitReset
             } else {
               const message = diagnostics
