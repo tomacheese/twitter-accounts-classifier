@@ -217,8 +217,7 @@ describe('persistAuthorResultAtomic', () => {
     const registry = new LabelRuleRegistry()
     registry.register(rule)
 
-    // 今回の crawl では reply1 だけが fetch され、その parent (parent1) は
-    // `findMissingTweetIds` によって既に DB にある扱いになったため recentTweets に含まれない。
+    // 今回の crawl では reply1 だけが fetch され、parent1 は既に DB にある扱いのため recentTweets に含まれない。
     const tweetUpsert = vi.fn((args: { where: { id: string } }) =>
       Promise.resolve({
         id: args.where.id,
