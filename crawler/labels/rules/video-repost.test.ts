@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { videoRepostRule } from './video-repost'
 import type { AccountFeatureBundle } from '../types'
 
-function makeBundle(recentTweets: AccountFeatureBundle['recentTweets']): AccountFeatureBundle {
+function makeBundle(
+  recentTweets: AccountFeatureBundle['recentTweets'],
+  accountOverrides: Partial<AccountFeatureBundle['account']> = {},
+): AccountFeatureBundle {
   return {
     account: {
       id: 'alice',
@@ -15,6 +18,7 @@ function makeBundle(recentTweets: AccountFeatureBundle['recentTweets']): Account
       accountCreatedAt: new Date(),
       isBlueVerified: false,
       verifiedType: null,
+      ...accountOverrides,
     },
     recentTweets,
   }
@@ -80,5 +84,12 @@ describe('videoRepostRule', () => {
     expect(result.value).toBe(false)
     expect(result.confidence).toBe(1)
     expect(result.reason).toBe('foreignVideoPostCount=0 (n=3)')
+  })
+
+  it('is false with neutral evaluable=false when recentTweets were never fetched, instead of a confident false', () => {
+    const result = videoRepostRule.evaluate(makeBundle([], { recentTweetsFetchStatus: null }))
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBe(0.5)
   })
 })

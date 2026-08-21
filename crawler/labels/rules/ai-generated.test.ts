@@ -52,6 +52,13 @@ describe('aiGeneratedRule', () => {
     expect(result.value).toBe(true)
   })
 
+  it('is true for a self-declaration phrased as "〜を紹介します" rather than "〜は" (object particle, not topic particle)', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: 'AI生成のイラストを紹介します。よろしくお願いします。' }),
+    )
+    expect(result.value).toBe(true)
+  })
+
   it('has higher confidence when tweet text also matches AI-boilerplate phrasing', () => {
     const withoutCorroboration = aiGeneratedRule.evaluate(makeBundle({ bio: 'AI生成してます' }, []))
     const withCorroboration = aiGeneratedRule.evaluate(
@@ -257,6 +264,14 @@ describe('aiGeneratedRule', () => {
       '昼の仕事はデータアナリスト/ 最近の関心は生成AI(LLM)/ Like:音楽, 3DCG',
     ],
     ['topic-watching framing', '会社員。生成AIによる著作権問題と犯罪、政治等ウォチ。ねこ好き。'],
+    [
+      'a generic hobby-enthusiast framing using "オタク"',
+      '生成AIオタクの雑談垢です。日々の出来事をつぶやきます。',
+    ],
+    [
+      'a generic hobby-enthusiast framing using "マニア"',
+      '生成AIマニアの雑談垢です。日々の出来事をつぶやきます。',
+    ],
   ])('is false for a bio that mentions generative AI via %s', (_label, bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })
