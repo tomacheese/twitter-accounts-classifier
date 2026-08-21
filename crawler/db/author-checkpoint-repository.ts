@@ -105,9 +105,14 @@ export async function persistAuthorResultAtomic(
     async (tx) => {
       const txClient = tx as unknown as PrismaClient
 
-      const { account } = await upsertAccount(txClient, params.profile)
-      await txClient.account.update({
-        where: { id: account.id },
+      const { account: accountBeforeFetchStatusUpdate } = await upsertAccount(
+        txClient,
+        params.profile,
+      )
+      // `upsertAccount` の戻り値は `recentTweetsFetchStatus: 'success'` を反映する前の状態のため、
+      // 以降のラベル評価には必ず update 後の戻り値を使う。
+      const account = await txClient.account.update({
+        where: { id: accountBeforeFetchStatusUpdate.id },
         data: {
           lastRecentTweetsAttemptedAt: params.recentTweetsFetchedAt ?? new Date(),
           lastRecentTweetsFetchedAt: params.recentTweetsFetchedAt ?? new Date(),

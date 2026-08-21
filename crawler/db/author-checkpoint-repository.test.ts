@@ -90,7 +90,11 @@ describe('persistAuthorResultAtomic', () => {
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const queryRaw = vi.fn().mockResolvedValue([])
     const txClient = {
-      account: { upsert: accountUpsert, findUnique: accountFindUnique, update: vi.fn() },
+      account: {
+        upsert: accountUpsert,
+        findUnique: accountFindUnique,
+        update: vi.fn().mockResolvedValue({ id: 'author1' }),
+      },
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
       $queryRaw: queryRaw,
@@ -168,7 +172,7 @@ describe('persistAuthorResultAtomic', () => {
       account: {
         upsert: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn(),
+        update: vi.fn().mockResolvedValue({ id: 'author1' }),
       },
       tweet: { findUnique: vi.fn().mockResolvedValue(null), upsert: tweetUpsert },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
@@ -233,7 +237,7 @@ describe('persistAuthorResultAtomic', () => {
       account: {
         upsert: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn(),
+        update: vi.fn().mockResolvedValue({ id: 'author1' }),
       },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -274,6 +278,69 @@ describe('persistAuthorResultAtomic', () => {
     )
   })
 
+  it('passes the post-update recentTweetsFetchStatus to label evaluation within the same cycle', async () => {
+    let capturedBundle: AccountFeatureBundle | undefined
+    const rule: LabelRule = {
+      key: 'capture_rule',
+      description: 'test',
+      version: '1.0.0',
+      evaluate: (bundle) => {
+        capturedBundle = bundle
+        return { value: false, confidence: 0.5, reason: 'test' }
+      },
+    }
+    const registry = new LabelRuleRegistry()
+    registry.register(rule)
+
+    // upsertAccount 直後の戻り値は今回の fetch 前の状態(未取得)を表し、
+    // 直後の update で 'success' に変わることを再現する。
+    const accountUpsert = vi.fn().mockResolvedValue({
+      id: 'author1',
+      recentTweetsFetchStatus: null,
+    })
+    const accountUpdate = vi.fn().mockResolvedValue({
+      id: 'author1',
+      recentTweetsFetchStatus: 'success',
+    })
+    const txClient = {
+      account: {
+        upsert: accountUpsert,
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: accountUpdate,
+      },
+      tweet: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
+      },
+      crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
+    }
+    const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
+    const prisma = { $transaction: transaction } as unknown as PrismaClient
+
+    await persistAuthorResultAtomic(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      authorId: 'author1',
+      profile: profile('author1'),
+      recentTweets: [],
+      additionalOwnTweets: [],
+      recentTweetsFallbackAuthors: [],
+      followSample: null,
+      registry,
+      labelDefinitionIds: new Map([['capture_rule', 'def-1']]),
+      duplicateReplyIndex: buildDuplicateReplyIndex([]),
+      replyHijackIndex: buildReplyHijackIndex([]),
+      followGraphLabelIndex: noFollowGraphSignals,
+      warnings: [],
+      durationMs: 10,
+      retryWaitMs: 0,
+      appVersion: 'test',
+    })
+
+    expect(capturedBundle?.account.recentTweetsFetchStatus).toBe('success')
+  })
+
   it('skips the labeling follow sample write when followSample is null, without failing the transaction', async () => {
     const accountUpsert = vi.fn().mockResolvedValue({})
     const accountFindUnique = vi.fn().mockResolvedValue(null)
@@ -282,7 +349,11 @@ describe('persistAuthorResultAtomic', () => {
     const followSampleDeleteMany = vi.fn()
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
-      account: { upsert: accountUpsert, findUnique: accountFindUnique, update: vi.fn() },
+      account: {
+        upsert: accountUpsert,
+        findUnique: accountFindUnique,
+        update: vi.fn().mockResolvedValue({ id: 'author1' }),
+      },
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
       labelingFollowSample: { deleteMany: followSampleDeleteMany },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
@@ -332,7 +403,7 @@ describe('persistAuthorResultAtomic', () => {
       account: {
         upsert: accountUpsert,
         findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn(),
+        update: vi.fn().mockResolvedValue({ id: 'author1' }),
       },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -380,7 +451,7 @@ describe('persistAuthorResultAtomic', () => {
       account: {
         upsert: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn(),
+        update: vi.fn().mockResolvedValue({ id: 'author1' }),
       },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -420,7 +491,7 @@ describe('persistAuthorResultAtomic', () => {
       account: {
         upsert: accountUpsert,
         findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn(),
+        update: vi.fn().mockResolvedValue({ id: 'author1' }),
       },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),

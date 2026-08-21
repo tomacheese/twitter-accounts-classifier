@@ -10,8 +10,14 @@ const PARTY_AFFILIATION_PATTERN =
   /(?:自民党|立憲民主党|公明党|共産党|日本維新の会|国民民主党|れいわ新選組|参政党)(?:\s*(?:所属|党員|公認|支部長))/i
 // 修飾語を伴わない裸の公職名も、congressman/senator/politician と同様に
 // 自己申告以外の文脈 (願望・他者評など) で文末に現れうるため、無条件の文末一致 ($) は対象としない。
-const JAPANESE_OFFICE_SELF_IDENTIFICATION_PATTERN =
-  /(?:衆議院議員|参議院議員|県議会議員|市議会議員|国会議員|政治家)(?:を)?(?:しています|です|として活動|として働いています|[、,])/i
+// 具体的な議席名 (市議会議員など) は、
+// "｜"/"∣" によるタグ区切り形式の bio でも自己申告として現れる。
+// "/" は「A議員/B議員の会合」のように他者の列挙にも使われるため対象から除く。
+// 「政治家」は自称としての具体性が低く、タグ区切りの対象にもしない。
+const JAPANESE_SPECIFIC_OFFICE_TITLE_PATTERN =
+  /(?:衆議院議員|参議院議員|県議会議員|市議会議員|国会議員)(?:を)?(?:しています|です|として活動|として働いています|[、,｜∣])/i
+const JAPANESE_GENERIC_POLITICIAN_PATTERN =
+  /政治家(?:を)?(?:しています|です|として活動|として働いています|[、,])/i
 // 修飾語を伴わない裸の "congressman"/"senator"/"politician" は自嘲や他者評など
 // 自己申告以外の文脈でも現れるため、地域を示す state 接頭辞か for/of/district を伴う場合のみ対象とする。
 const ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN =
@@ -39,13 +45,14 @@ export const topicPoliticsRule: LabelRule = {
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.3.1',
+  version: '1.4.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =
       bio !== null &&
       (matchesCurrentOffice(bio, PARTY_AFFILIATION_PATTERN) ||
-        matchesCurrentOffice(bio, JAPANESE_OFFICE_SELF_IDENTIFICATION_PATTERN) ||
+        matchesCurrentOffice(bio, JAPANESE_SPECIFIC_OFFICE_TITLE_PATTERN) ||
+        matchesCurrentOffice(bio, JAPANESE_GENERIC_POLITICIAN_PATTERN) ||
         matchesCurrentOffice(bio, ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN))
     return {
       value: keywordMatch,
