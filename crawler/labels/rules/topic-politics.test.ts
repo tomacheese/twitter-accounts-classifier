@@ -133,4 +133,24 @@ describe('topicPoliticsRule', () => {
   it('does not treat a bare aspirational mention of "政治家" without a self-identification suffix as a current political office', () => {
     expect(topicPoliticsRule.evaluate(makeBundle({ bio: '私の夢は政治家' })).value).toBe(false)
   })
+
+  it.each(['○○市議会議員｜Ally🌈｜防災士', '○○県議会議員∣二児の父'])(
+    'is true for a specific office title in a tag-delimited profile listing: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it.each(['作家｜政治家｜父', '作家∣政治家∣父', '作家/政治家/父'])(
+    'does not treat a bare "政治家" in a tag-delimited profile listing as a current political office: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('does not treat "/" between office titles naming other people as a self-identification', () => {
+    expect(
+      topicPoliticsRule.evaluate(makeBundle({ bio: '市議会議員/元県議の会合に出席' })).value,
+    ).toBe(false)
+  })
 })
