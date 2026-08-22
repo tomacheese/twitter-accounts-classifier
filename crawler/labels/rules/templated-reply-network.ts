@@ -1,5 +1,6 @@
 import { rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
+import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 
 // チャットボット駆動のリプライネットワークは、
 // テンプレート化されたリプライを大量生成する。このルールが捉えるのは、
@@ -11,7 +12,7 @@ export const templatedReplyNetworkRule: LabelRule = {
   key: 'templated_reply_network',
   description:
     '投稿したリプライの文面(URL/メンションを除去した上で比較)が、他の複数の別アカウントと一字一句同一である。定型文を大量生成するリプライボットネットワークの特徴',
-  version: '1.2.0',
+  version: '1.3.0',
   evaluate(bundle) {
     const networkSize = bundle.templatedReplyNetworkSize ?? 0
     const value = networkSize >= MIN_NETWORK_SIZE
@@ -21,10 +22,16 @@ export const templatedReplyNetworkRule: LabelRule = {
       MIN_NETWORK_SIZE,
       'higher-is-positive',
     )
+    // networkSize は自身のリプライを走査して集計するため、
+    // recentTweets が未取得の場合は「一致が無かった」のではなく判定材料が無いだけである。
+    // value が true の場合は実際に一致の証拠が見つかっているため、
+    // 直近の取得試行が失敗扱いでも evaluable を無条件で true にする。
+    const evaluable = value || isRecentTweetsEvaluable(bundle)
     return {
       value,
-      confidence: toConfidence(value, evidenceScore),
+      confidence: toConfidence(value, evidenceScore, evaluable),
       reason: `templatedReplyNetworkSize=${networkSize}`,
+      evaluable,
     }
   },
 }

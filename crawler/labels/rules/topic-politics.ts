@@ -35,9 +35,26 @@ function isFormerOfficeMention(bio: string, matchIndex: number): boolean {
   return FORMER_PREFIX_PATTERN.test(beforeMatch)
 }
 
+// 「夢は政治家です」「将来なりたいのは市議会議員です」のような願望表現は、
+// 自己申告の suffix (「です」「しています」等) を伴っていても
+// 現に公職者・党員であることの自己申告にはならない。
+// 願望の語と職名の間に「のは」のような助詞が挟まることがあるため、
+// former-office-holder のチェックと異なり直前固定位置ではなく窓内の存在有無で判定する。
+const ASPIRATION_WINDOW_LENGTH = 15
+const ASPIRATION_CUE_PATTERN = /夢は|目指(?:し|す)|なりたい|志望/
+
+function isAspirationMention(bio: string, matchIndex: number): boolean {
+  const beforeMatch = bio.slice(Math.max(0, matchIndex - ASPIRATION_WINDOW_LENGTH), matchIndex)
+  return ASPIRATION_CUE_PATTERN.test(beforeMatch)
+}
+
 function matchesCurrentOffice(bio: string, pattern: RegExp): boolean {
   const match = pattern.exec(bio)
-  return match !== null && !isFormerOfficeMention(bio, match.index)
+  return (
+    match !== null &&
+    !isFormerOfficeMention(bio, match.index) &&
+    !isAspirationMention(bio, match.index)
+  )
 }
 
 export const topicPoliticsRule: LabelRule = {
@@ -45,7 +62,7 @@ export const topicPoliticsRule: LabelRule = {
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.4.0',
+  version: '1.5.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =

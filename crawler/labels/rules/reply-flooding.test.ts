@@ -10,6 +10,7 @@ function makeBundle(
     minutesAgo?: number
     inReplyToTweetId?: string | null
   }[],
+  accountOverrides: Partial<AccountFeatureBundle['account']> = {},
 ): AccountFeatureBundle {
   return {
     account: {
@@ -23,6 +24,7 @@ function makeBundle(
       accountCreatedAt: new Date(),
       isBlueVerified: false,
       verifiedType: null,
+      ...accountOverrides,
     },
     recentTweets: tweets.map((t, i) => ({
       id: `t${i}`,
@@ -206,5 +208,21 @@ describe('replyFloodingRule', () => {
     )
     const result = replyFloodingRule.evaluate(bundle)
     expect(result.value).toBe(false)
+  })
+
+  it('is false with neutral evaluable=false when recentTweets were never fetched, instead of a confident false', () => {
+    const result = replyFloodingRule.evaluate(makeBundle([], { recentTweetsFetchStatus: null }))
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBe(0.5)
+  })
+
+  it('keeps a confident false when recentTweets were fetched successfully but no flooding target exists', () => {
+    const result = replyFloodingRule.evaluate(
+      makeBundle([], { recentTweetsFetchStatus: 'success' }),
+    )
+    expect(result.value).toBe(false)
+    expect(result.evaluable ?? true).toBe(true)
+    expect(result.confidence).toBe(1)
   })
 })

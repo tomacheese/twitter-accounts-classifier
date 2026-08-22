@@ -12,6 +12,7 @@ function makeBundle(
     createdAt?: Date
     inReplyToTweetId?: string | null
   }[],
+  accountOverrides: Partial<AccountFeatureBundle['account']> = {},
 ): AccountFeatureBundle {
   return {
     account: {
@@ -25,6 +26,7 @@ function makeBundle(
       accountCreatedAt: new Date(),
       isBlueVerified: false,
       verifiedType: null,
+      ...accountOverrides,
     },
     recentTweets: tweets.map((t, i) => ({
       id: `t${i}`,
@@ -288,5 +290,23 @@ describe('crossTargetTemplatedReplyRule', () => {
     expect(result.value).toBe(true)
     expect(result.reason).toContain('replies=6')
     expect(result.reason).toContain('spanHours=4.0')
+  })
+
+  it('is false with neutral evaluable=false when recentTweets were never fetched, instead of a confident false', () => {
+    const result = crossTargetTemplatedReplyRule.evaluate(
+      makeBundle([], { recentTweetsFetchStatus: null }),
+    )
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBe(0.5)
+  })
+
+  it('keeps a confident false when recentTweets were fetched successfully but no templated group exists', () => {
+    const result = crossTargetTemplatedReplyRule.evaluate(
+      makeBundle([], { recentTweetsFetchStatus: 'success' }),
+    )
+    expect(result.value).toBe(false)
+    expect(result.evaluable ?? true).toBe(true)
+    expect(result.confidence).toBe(1)
   })
 })

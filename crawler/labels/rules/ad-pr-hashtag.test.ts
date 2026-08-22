@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { adPrHashtagRule } from './ad-pr-hashtag'
 import type { AccountFeatureBundle } from '../types'
 
-function makeBundle(recentTweets: AccountFeatureBundle['recentTweets']): AccountFeatureBundle {
+function makeBundle(
+  recentTweets: AccountFeatureBundle['recentTweets'],
+  accountOverrides: Partial<AccountFeatureBundle['account']> = {},
+): AccountFeatureBundle {
   return {
     account: {
       id: '1',
@@ -15,6 +18,7 @@ function makeBundle(recentTweets: AccountFeatureBundle['recentTweets']): Account
       accountCreatedAt: new Date(),
       isBlueVerified: false,
       verifiedType: null,
+      ...accountOverrides,
     },
     recentTweets,
   }
@@ -68,12 +72,12 @@ describe('adPrHashtagRule', () => {
     expect(result.value).toBe(false)
   })
 
-  it('is false when neither signal is present', () => {
+  it('is false with high confidence, not a fixed 0, when neither signal is present', () => {
     const result = adPrHashtagRule.evaluate(
       makeBundle([tweet({ fullText: '今日はいい天気ですね' })]),
     )
     expect(result.value).toBe(false)
-    expect(result.confidence).toBe(0)
+    expect(result.confidence).toBe(1)
   })
 
   it('does not match "#PR" as a substring of a longer hashtag', () => {
@@ -221,5 +225,23 @@ describe('adPrHashtagRule isPaidPromotion sample threshold removal', () => {
       makeBundle([tweet({ fullText: 'こんにちは', isPaidPromotion: true })]),
     )
     expect(result.value).toBe(true)
+  })
+})
+
+describe('adPrHashtagRule missing-data handling', () => {
+  it('is false with neutral evaluable=false when recentTweets were never fetched, instead of a confident false', () => {
+    const result = adPrHashtagRule.evaluate(makeBundle([], { recentTweetsFetchStatus: null }))
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBe(0.5)
+  })
+
+  it('keeps a confident false, not a fixed 0, when recentTweets were fetched successfully but none disclose PR', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: 'こんにちは' })], { recentTweetsFetchStatus: 'success' }),
+    )
+    expect(result.value).toBe(false)
+    expect(result.evaluable ?? true).toBe(true)
+    expect(result.confidence).toBe(1)
   })
 })

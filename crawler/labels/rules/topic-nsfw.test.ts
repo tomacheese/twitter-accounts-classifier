@@ -163,4 +163,10 @@ describe('topicNsfwRule', () => {
       topicNsfwRule.evaluate(makeBundle({ bio: '愛用カメラはAR18です。散歩と写真が趣味' })).value,
     ).toBe(false)
   })
+
+  it('is false for a bio whose model number happens to start with "R18" followed by more digits', () => {
+    expect(
+      topicNsfwRule.evaluate(makeBundle({ bio: '愛用レンズはR1850です。散歩と写真が趣味' })).value,
+    ).toBe(false)
+  })
 })

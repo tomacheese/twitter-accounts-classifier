@@ -1,6 +1,7 @@
 import { rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 import { averagePairwiseSimilarity } from '../text-similarity'
+import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 
 // この「インプレゾンビ」的なアーキタイプ(言い換えや、
 // 時には AI による書き換え・翻訳を伴うリプライを1つのツイートに大量投稿する)は、
@@ -20,7 +21,7 @@ export const replyFloodingRule: LabelRule = {
   key: 'reply_flooding',
   description:
     '同一相手への返信を短時間のうちに大量投稿しており、その文面が言い換えや翻訳違いを含めて内容的に酷似している。1つのバズったツイートに大量の言い換えリプライを浴びせてインプレッションを稼ぐ「インプレゾンビ」の典型パターン',
-  version: '1.3.0',
+  version: '1.4.0',
   evaluate(bundle) {
     // 先頭の @メンション(会話相手)でグルーピングすると、
     // 通常の相互会話との区別ができない。一人との往復チャットや口論でも、
@@ -65,10 +66,13 @@ export const replyFloodingRule: LabelRule = {
     }
 
     if (best === null) {
+      // recentTweets が未取得の場合、単に対象が無いだけの陰性とは区別する。
+      const evaluable = isRecentTweetsEvaluable(bundle)
       return {
         value: false,
-        confidence: toConfidence(false, 0),
+        confidence: toConfidence(false, 0, evaluable),
         reason: 'no reply-flooding target found',
+        evaluable,
       }
     }
 

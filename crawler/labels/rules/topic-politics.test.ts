@@ -134,6 +134,13 @@ describe('topicPoliticsRule', () => {
     expect(topicPoliticsRule.evaluate(makeBundle({ bio: '私の夢は政治家' })).value).toBe(false)
   })
 
+  it.each(['私の夢は政治家です', '将来なりたいのは市議会議員です', '政治家を目指しています'])(
+    'does not treat an aspirational "夢は"/"目指す"/"なりたい" phrasing followed by a self-identification suffix as a current political office: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
   it.each(['○○市議会議員｜Ally🌈｜防災士', '○○県議会議員∣二児の父'])(
     'is true for a specific office title in a tag-delimited profile listing: %s',
     (bio) => {

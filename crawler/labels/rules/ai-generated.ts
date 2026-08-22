@@ -33,8 +33,11 @@ function isNegatedDeclaration(bio: string): boolean {
 // 実際に自己申告しているとみなす。
 const INSTITUTIONAL_CONTEXT_PATTERN =
   /教授|研究者|代表取締役|\bCEO\b|公式(アカウント)?|メディア|事業|コンサル(ティング)?|規制派|反対派|賛成派|推進(派)?|アドバイザー|著書|委員|エンジニア|\bPdM\b|プロダクトマネージャー|プロダクトオーナー|プロダクト開発|CAMP|ウェビナー|セミナー|活用ノウハウ|解説|考察|紹介します|エバンジェリスト|evangelist|お仕事受付中|お仕事募集中|ジャーナリスト|記者|講師/i
+// 「〜を紹介します」は INSTITUTIONAL_CONTEXT_PATTERN の職業的文脈語(メディア・解説等)としても
+// 使われるが、「画像/イラスト/作品を紹介します」のように自身のコンテンツ名詞を目的語に取る場合は、
+// 「画像は」のような主題化(は)ではなく目的語化(を)であっても、実質的に自己申告と同じである。
 const PERSONAL_CONTENT_DECLARATION_PATTERN =
-  /画像は|イラストは|作品(です|を投稿)|ヘッダーは|アイコンは|投稿して(います|ます)|保管庫|ポートレート|-generated (images?|art|content|portraits?)|images? are AI/i
+  /画像は|イラストは|作品(です|を投稿)|ヘッダーは|アイコンは|投稿して(います|ます)|保管庫|ポートレート|(?:画像|イラスト|作品)を紹介(?:します|しています)|-generated (images?|art|content|portraits?)|images? are AI/i
 
 function isInstitutionalMention(bio: string): boolean {
   return INSTITUTIONAL_CONTEXT_PATTERN.test(bio) && !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
@@ -45,7 +48,7 @@ function isInstitutionalMention(bio: string): boolean {
 // 業務効率化のための言及にも適用したもの。`isInstitutionalMention` と同様、
 // 自身のコンテンツを指す明示的な表現を伴う場合のみ宣言として扱う。
 const TOPIC_INTEREST_CONTEXT_PATTERN =
-  /情報収集|実?活用|遊び|勉強中|興味|関心|ウォッチ|ウォチ|先端技術|追って|学ぼう|学ぶ|半導体|銘柄|効率化|業務改善|著作権問題/i
+  /情報収集|実?活用|遊び|勉強中|興味|関心|ウォッチ|ウォチ|先端技術|追って|学ぼう|学ぶ|半導体|銘柄|効率化|業務改善|著作権問題|オタク|マニア/i
 
 function isTopicInterestMention(bio: string): boolean {
   return TOPIC_INTEREST_CONTEXT_PATTERN.test(bio) && !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
@@ -150,7 +153,7 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.9.5',
+  version: '1.9.7',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
