@@ -72,6 +72,19 @@ describe('bareLinkSpamRule', () => {
     expect(result.value).toBe(true)
   })
 
+  it('is true when the bare-link ratio is exactly at the threshold (3/5 = 0.6)', () => {
+    const result = bareLinkSpamRule.evaluate(
+      makeBundle([
+        bareLinkTweet('t1'),
+        bareLinkTweet('t2'),
+        bareLinkTweet('t3'),
+        captionedLinkTweet('t4'),
+        captionedLinkTweet('t5'),
+      ]),
+    )
+    expect(result.value).toBe(true)
+  })
+
   it('is false when most of own posts have a caption alongside the link', () => {
     const result = bareLinkSpamRule.evaluate(
       makeBundle([

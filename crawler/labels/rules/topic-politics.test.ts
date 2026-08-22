@@ -74,6 +74,12 @@ describe('topicPoliticsRule', () => {
     expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })
 
+  it('does not treat a bio denying party membership as a current political office', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: '私は非自民党党員です' })).value).toBe(
+      false,
+    )
+  })
+
   it.each(['自民党所属、市議会議員をしています', 'State senator, district 4'])(
     'keeps explicit self-identification positive: %s',
     (bio) => {

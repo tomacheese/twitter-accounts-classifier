@@ -23,7 +23,7 @@ const NSFW_PATTERN = /\bNSFW\b|(?<![A-Za-z])R-?18|18禁|成人向け|アダル�
 // あるいは別アカウントへ誘導しているだけの bio も同様に誤検知の原因となるため、
 // 抑制対象に含めている。
 const JP_REJECT_OR_REDIRECT_PATTERNS = [
-  /(?:NSFW|R-?18|18禁|成人向け|アダルト|無修正)[^\n]{0,20}(?:受け付け(?:ません|ない)|お断り|拒否|禁止|NG|フォロー(?:は)?(?:しません|していません))/i,
+  /(?:NSFW|R-?18|18禁|成人向け|アダルト|無修正)[^\n]{0,20}(?:受け付け(?:ません|ない)|お断り|拒否|禁止|NG|フォロー(?:は)?(?:しません|していません)|ブロック(?:します|する|しています)?)/i,
   /(?:NSFW|R-?18|18禁|成人向け|アダルト|無修正)[^\n]{0,40}報告/i,
   /(?:NSFW|R-?18|18禁|成人向け|アダルト|無修正)(?:版)?→@/i,
 ]
@@ -41,7 +41,7 @@ export const topicNsfwRule: LabelRule = {
   description: 'プロフィールでアダルト/NSFW コンテンツを投稿していることを自己申告している',
   // 性的指向に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.6.2',
+  version: '1.6.3',
   evaluate(bundle) {
     const { bio } = bundle.account
     const optedOut = bio !== null && ANTI_NSFW_PATTERNS.some((pattern) => pattern.test(bio))

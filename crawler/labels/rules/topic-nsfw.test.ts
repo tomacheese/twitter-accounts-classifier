@@ -144,6 +144,16 @@ describe('topicNsfwRule', () => {
     ).toBe(false)
   })
 
+  it('is false for a bio declaring it blocks NSFW accounts without a "報告" mention', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({
+          bio: 'トイレ写真が好きな趣味垢です。アダルト系のアカウントはブロックします。',
+        }),
+      ).value,
+    ).toBe(false)
+  })
+
   it('is true for a bio that self-declares adult content without a rejection/redirect phrase', () => {
     expect(
       topicNsfwRule.evaluate(makeBundle({ bio: 'アダルトグッズのレビューを投稿しています' })).value,
