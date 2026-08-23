@@ -41,6 +41,11 @@ analyzer_component_build_identity_privileges() {
     "SELECT has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'SELECT')::text || ':' || has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'INSERT')::text || ':' || has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'UPDATE')::text || ':' || has_table_privilege('analyzer', 'public.\"ComponentBuildIdentity\"', 'DELETE')::text"
 }
 
+analyzer_labeled_account_counter_privileges() {
+  psql -At "$DATABASE_URL" -c \
+    "SELECT has_table_privilege('analyzer', 'public.\"LabeledAccountCounter\"', 'SELECT')::text || ':' || has_table_privilege('analyzer', 'public.\"LabeledAccountCounter\"', 'INSERT')::text || ':' || has_table_privilege('analyzer', 'public.\"LabeledAccountCounter\"', 'UPDATE')::text || ':' || has_table_privilege('analyzer', 'public.\"LabeledAccountCounter\"', 'DELETE')::text"
+}
+
 if psql -At "$DATABASE_URL" -c "SELECT rolname FROM pg_roles WHERE rolname IN ('viewer', 'analyzer')" | grep -q .; then
   echo "viewer/analyzer must not exist before this test" >&2
   exit 1
@@ -58,6 +63,7 @@ test "$(role_state analyzer)" = "false:false"
 test -z "$(psql -At "$DATABASE_URL" -c "SELECT rolname FROM pg_roles WHERE rolname = 'weekly_review'")"
 test "$(viewer_component_build_identity_privileges)" = "true:true:true:false"
 test "$(analyzer_component_build_identity_privileges)" = "true:true:true:false"
+test "$(analyzer_labeled_account_counter_privileges)" = "true:false:true:false"
 test "$(role_config_has crawler client_connection_check_interval=5s)" = "true"
 test "$(role_config_has viewer client_connection_check_interval=5s)" = "true"
 test "$(role_config_has analyzer client_connection_check_interval=5s)" = "true"

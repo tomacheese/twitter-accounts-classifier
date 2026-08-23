@@ -23,9 +23,12 @@ DECLARE
     'AccountClassificationReasonCount'
   ];
   limited_write_allowlist text[] := ARRAY['ComponentBuildIdentity'];
+  update_only_allowlist text[] := ARRAY['LabeledAccountCounter'];
   missing_writes text;
   missing_limited_writes text;
+  missing_update_only text;
   unexpected_limited_deletes text;
+  unexpected_update_only_writes text;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'analyzer') THEN
     RAISE EXCEPTION 'role analyzer does not exist';
@@ -93,6 +96,33 @@ BEGIN
       unexpected_limited_deletes;
   END IF;
 
+  SELECT string_agg(t, ', ')
+  INTO missing_update_only
+  FROM unnest(update_only_allowlist) AS t
+  WHERE to_regclass(format('public.%I', t)) IS NOT NULL
+    AND NOT has_table_privilege(
+      'analyzer', format('public.%I', t), 'UPDATE'
+    );
+
+  IF missing_update_only IS NOT NULL THEN
+    RAISE EXCEPTION 'analyzer lacks UPDATE on update-only tables: %',
+      missing_update_only;
+  END IF;
+
+  SELECT string_agg(t, ', ')
+  INTO unexpected_update_only_writes
+  FROM unnest(update_only_allowlist) AS t
+  WHERE to_regclass(format('public.%I', t)) IS NOT NULL
+    AND has_table_privilege(
+      'analyzer', format('public.%I', t),
+      'INSERT, DELETE, TRUNCATE, REFERENCES, TRIGGER'
+    );
+
+  IF unexpected_update_only_writes IS NOT NULL THEN
+    RAISE EXCEPTION 'analyzer has unexpected non-UPDATE writes on update-only tables: %',
+      unexpected_update_only_writes;
+  END IF;
+
   SELECT string_agg(format('%I.%I', n.nspname, c.relname), ', ' ORDER BY c.relname)
   INTO unexpected_write_tables
   FROM pg_class c
@@ -101,6 +131,7 @@ BEGIN
     AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
     AND NOT (c.relname = ANY (write_allowlist))
     AND NOT (c.relname = ANY (limited_write_allowlist))
+    AND NOT (c.relname = ANY (update_only_allowlist))
     AND has_table_privilege(
       'analyzer',
       format('%I.%I', n.nspname, c.relname),

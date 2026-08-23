@@ -51,6 +51,9 @@ GRANT INSERT, UPDATE, DELETE ON TABLE
   "AccountClassificationReasonCount"
   TO analyzer;
 
+-- AccountSummaryLatest のトリガーが labeled counter を更新するため UPDATE のみ許可する。
+GRANT UPDATE ON TABLE "LabeledAccountCounter" TO analyzer;
+
 -- build identity は analyzer 自身の起動情報を upsert するため INSERT/UPDATE のみ許可する。
 GRANT INSERT, UPDATE ON TABLE "ComponentBuildIdentity" TO analyzer;
 
