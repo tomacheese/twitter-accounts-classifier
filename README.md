@@ -63,6 +63,20 @@ Viewer には認証機構がなく、フォロー・フォロワー・ブロッ�
 
 **重要**: 本番機の `compose.prod.yaml` はこのリポジトリに含まれないため、このリポジトリの `compose.yaml` に追随して本番の compose 定義へ `relabeler` サービスを追加するまでは、本番へのデプロイと同時に relabel が一切実行されなくなる (`entrypoint.sh` からの `relabel-worker` 呼び出しを本 PR で削除したため)。crawler イメージの更新と `relabeler` サービス追加は同一デプロイで反映すること。
 
+## recent tweets backfill の運用契約
+
+recent tweets が未取得で対象ラベルを評価できなかったアカウントは、次の dry-run コマンドで確認する。dry-run がデフォルトであり、認証クライアントの作成や DB 更新は行わない。
+
+```bash
+pnpm --filter crawler run backfill:recent-tweets -- --limit 100 --dry-run
+```
+
+実際に取得・保存する構文は次のとおり。`<configured-account>` には `data/config.json` に設定済みの username を指定する。本番での実行には、この構文の記載とは別に明示的な承認が必要である。password、OTP secret、cookie などの認証情報をコマンドへ含めてはならない。
+
+```bash
+pnpm --filter crawler run backfill:recent-tweets -- --limit 100 --execute --username <configured-account>
+```
+
 ## データ
 
 - `data/config.json`: Twitter アカウントの認証情報 (git 管理外)

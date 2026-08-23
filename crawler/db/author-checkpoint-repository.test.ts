@@ -1,10 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
 import type { AccountFeatureBundle, LabelRule } from '../labels/types'
 import { LabelRuleRegistry } from '../labels/registry'
 import { buildDuplicateReplyIndex } from '../labels/duplicate-reply-index'
 import { buildReplyHijackIndex } from '../labels/reply-hijack-index'
+import { replyHijackSwarmRule } from '../labels/rules/reply-hijack-swarm'
 import { ensureLabelDefinitionsForRules } from './label-repository'
+import * as labelRepository from './label-repository'
+import * as evidenceRepository from './reply-hijack-evidence-repository'
 import { getPrismaClient } from './client'
 import { persistAuthorResultAtomic } from './author-checkpoint-repository'
 
@@ -74,7 +77,183 @@ function emptyRegistryParams() {
   }
 }
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 describe('persistAuthorResultAtomic', () => {
+  it('persists positive reply-hijack evidence in the author transaction using the deterministic target tie-break', async () => {
+    const registry = new LabelRuleRegistry()
+    registry.register(replyHijackSwarmRule)
+    const evidenceSpy = vi
+      .spyOn(evidenceRepository, 'upsertReplyHijackEvidence')
+      .mockResolvedValue()
+    vi.spyOn(labelRepository, 'recordCrawlAccountLabelsAtomicWithinTx').mockResolvedValue(
+      'observation-1',
+    )
+    const authorProfile = profile('author1')
+    const txClient = {
+      account: {
+        upsert: vi.fn().mockResolvedValue(authorProfile),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue({ ...authorProfile, recentTweetsFetchStatus: 'success' }),
+      },
+      tweet: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+        upsert: vi.fn(({ create }: { create: ReturnType<typeof baseTweet> }) =>
+          Promise.resolve({
+            ...create,
+            expandedUrls: [],
+            foreignVideoSourceCount: null,
+            collectedAt: new Date('2026-01-01T00:00:00Z'),
+          }),
+        ),
+      },
+      crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+    }
+    const prisma = {
+      $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient)),
+    } as unknown as PrismaClient
+    const evidenceByTarget = {
+      'target-b': {
+        targetTweetId: 'target-b',
+        swarmSize: 5,
+        averageSimilarity: 0.8,
+        spanHours: 3,
+        replyTweetIds: ['reply-b-1'],
+      },
+      'target-a': {
+        targetTweetId: 'target-a',
+        swarmSize: 5,
+        averageSimilarity: 0.9,
+        spanHours: 2,
+        replyTweetIds: ['reply-a-1'],
+      },
+    }
+
+    await persistAuthorResultAtomic(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      authorId: 'author1',
+      profile: authorProfile,
+      recentTweets: [
+        tweet('reply-b-1', 'author1', { isReply: true, inReplyToTweetId: 'target-b' }),
+        tweet('reply-a-1', 'author1', { isReply: true, inReplyToTweetId: 'target-a' }),
+        tweet('post-1', 'author1'),
+      ],
+      additionalOwnTweets: [],
+      recentTweetsFallbackAuthors: [],
+      followSample: null,
+      registry,
+      labelDefinitionIds: new Map([['reply_hijack_swarm', 'def-1']]),
+      duplicateReplyIndex: buildDuplicateReplyIndex([]),
+      replyHijackIndex: {
+        swarmSizeFor: () => 5,
+        isEligibleForScreening: () => true,
+        evidenceFor: (_accountId, targetTweetId) =>
+          evidenceByTarget[targetTweetId as keyof typeof evidenceByTarget],
+      },
+      followGraphLabelIndex: noFollowGraphSignals,
+      warnings: [],
+      durationMs: 10,
+      retryWaitMs: 0,
+      appVersion: 'test',
+    })
+
+    expect(evidenceSpy).toHaveBeenCalledWith(txClient, {
+      accountId: 'author1',
+      targetTweetId: 'target-a',
+      ruleVersion: replyHijackSwarmRule.version,
+      swarmSize: 5,
+      averageSimilarity: 0.9,
+      spanHours: 2,
+      replyTweetIds: ['reply-a-1'],
+    })
+  })
+
+  it.each([
+    { name: 'the reply-ratio guard rejects the account', claimedObservationId: 'observation-1' },
+    { name: 'the crawl label claim is already taken', claimedObservationId: null },
+  ])('does not persist reply-hijack evidence when $name', async ({ claimedObservationId }) => {
+    const registry = new LabelRuleRegistry()
+    registry.register(replyHijackSwarmRule)
+    const evidenceSpy = vi
+      .spyOn(evidenceRepository, 'upsertReplyHijackEvidence')
+      .mockResolvedValue()
+    vi.spyOn(labelRepository, 'recordCrawlAccountLabelsAtomicWithinTx').mockResolvedValue(
+      claimedObservationId,
+    )
+    const authorProfile = profile('author1')
+    const txClient = {
+      account: {
+        upsert: vi.fn().mockResolvedValue(authorProfile),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue({ ...authorProfile, recentTweetsFetchStatus: 'success' }),
+      },
+      tweet: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+        upsert: vi.fn(({ create }: { create: ReturnType<typeof baseTweet> }) =>
+          Promise.resolve({
+            ...create,
+            expandedUrls: [],
+            foreignVideoSourceCount: null,
+            collectedAt: new Date('2026-01-01T00:00:00Z'),
+          }),
+        ),
+      },
+      crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+    }
+    const prisma = {
+      $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient)),
+    } as unknown as PrismaClient
+    const recentTweets =
+      claimedObservationId === null
+        ? [
+            tweet('reply-1', 'author1', { isReply: true, inReplyToTweetId: 'target-1' }),
+            tweet('reply-2', 'author1', { isReply: true, inReplyToTweetId: 'target-1' }),
+            tweet('post-1', 'author1'),
+          ]
+        : [
+            tweet('reply-1', 'author1', { isReply: true, inReplyToTweetId: 'target-1' }),
+            tweet('post-1', 'author1'),
+            tweet('post-2', 'author1'),
+          ]
+
+    await persistAuthorResultAtomic(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      authorId: 'author1',
+      profile: authorProfile,
+      recentTweets,
+      additionalOwnTweets: [],
+      recentTweetsFallbackAuthors: [],
+      followSample: null,
+      registry,
+      labelDefinitionIds: new Map([['reply_hijack_swarm', 'def-1']]),
+      duplicateReplyIndex: buildDuplicateReplyIndex([]),
+      replyHijackIndex: {
+        swarmSizeFor: () => 5,
+        isEligibleForScreening: () => true,
+        evidenceFor: () => ({
+          targetTweetId: 'target-1',
+          swarmSize: 5,
+          averageSimilarity: 0.8,
+          spanHours: 3,
+          replyTweetIds: ['reply-1'],
+        }),
+      },
+      followGraphLabelIndex: noFollowGraphSignals,
+      warnings: [],
+      durationMs: 10,
+      retryWaitMs: 0,
+      appVersion: 'test',
+    })
+
+    expect(evidenceSpy).not.toHaveBeenCalled()
+  })
+
   it('upserts the fallback author before the context tweet that references it', async () => {
     const calls: string[] = []
     const accountUpsert = vi.fn((args: { where: { id: string } }) => {

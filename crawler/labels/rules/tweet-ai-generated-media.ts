@@ -1,4 +1,5 @@
 import type { LabelRule } from '../types'
+import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 
 /**
  * `aiGeneratedDetectionSource` の値ごとに割り当てる confidence。各判定方法の信頼度を反映する。
@@ -33,8 +34,17 @@ function confidenceForSource(source: string | null | undefined): number {
 export const tweetAiGeneratedMediaRule: LabelRule = {
   key: 'tweet_ai_generated_media',
   description: 'X の投稿ごとの AI 生成メディア開示 (contentDisclosure) が直近ツイートに1件以上ある',
-  version: '1.0.0',
+  version: '1.0.1',
   evaluate(bundle) {
+    if (!isRecentTweetsEvaluable(bundle)) {
+      return {
+        value: false,
+        confidence: 0.5,
+        reason: 'recentTweets not evaluable',
+        evaluable: false,
+      }
+    }
+
     const flagged = bundle.recentTweets.filter((t) => t.hasAiGeneratedMedia === true)
     const value = flagged.length > 0
 

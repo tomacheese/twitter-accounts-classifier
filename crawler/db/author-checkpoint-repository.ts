@@ -14,6 +14,7 @@ import {
   replaceLabelingFollowSampleWithinTx,
 } from './labeling-follow-sample-repository'
 import { recordCrawlAccountLabelsAtomicWithinTx } from './label-repository'
+import { upsertReplyHijackEvidence } from './reply-hijack-evidence-repository'
 import {
   recordCrawlAuthorCheckpoint,
   type CrawlWarning,
@@ -166,7 +167,8 @@ export async function persistAuthorResultAtomic(
         params.followGraphLabelIndex,
         parentTweetTextById,
       )
-      const ruleResults = params.registry.applyAll(bundle).flatMap(({ rule, result }) => {
+      const appliedRules = params.registry.applyAll(bundle)
+      const ruleResults = appliedRules.flatMap(({ rule, result }) => {
         const labelDefinitionId = params.labelDefinitionIds.get(rule.key)
         if (!labelDefinitionId) {
           logger.warn(`No LabelDefinition id found for rule "${rule.key}", skipping persistence`)
@@ -174,6 +176,9 @@ export async function persistAuthorResultAtomic(
         }
         return [{ labelDefinitionId, result, method: rule.key, ruleVersion: rule.version }]
       })
+      const positiveReplyHijackRule = appliedRules.find(
+        ({ rule, result }) => rule.key === 'reply_hijack_swarm' && result.value,
+      )
 
       const observationId = await recordCrawlAccountLabelsAtomicWithinTx(txClient, {
         accountId: params.profile.id,
@@ -181,6 +186,13 @@ export async function persistAuthorResultAtomic(
         username: params.username,
         labels: ruleResults,
       })
+      if (observationId !== null && positiveReplyHijackRule && bundle.replyHijackEvidence) {
+        await upsertReplyHijackEvidence(txClient, {
+          accountId: params.profile.id,
+          ruleVersion: positiveReplyHijackRule.rule.version,
+          ...bundle.replyHijackEvidence,
+        })
+      }
       const labelsAppliedCount = observationId === null ? 0 : ruleResults.length
 
       await recordCrawlAuthorCheckpoint(txClient, {

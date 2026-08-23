@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { Logger } from '@book000/node-utils'
-import type { AccountLabel, LabelDefinition, PrismaClient } from '../generated/prisma'
+import type { AccountLabel, LabelDefinition, Prisma, PrismaClient } from '../generated/prisma'
 import type { LabelRule, LabelRuleResult } from '../labels/types'
 import { enqueueWorkItem } from './analysis-work-item-repository'
 
@@ -115,7 +115,7 @@ export interface AccountLabelBulkInput {
  *   対応付けが必要なら `accountId`・`labelDefinitionId` で突き合わせる。
  */
 async function recordAccountLabelsBulkCore(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   labels: AccountLabelBulkInput[],
   sourceKind: string,
   sourceId: string | undefined,
@@ -257,7 +257,7 @@ const RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE = 2000
  * @returns 作成された `AccountLabel` 履歴行
  */
 export async function recordAccountLabelsBulkForAccounts(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   params: RecordAccountLabelsBulkForAccountsParams,
 ): Promise<AccountLabel[]> {
   const history: AccountLabel[] = []

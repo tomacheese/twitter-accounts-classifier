@@ -582,6 +582,7 @@ export async function runAuthorUnitPhase(
     if (cached) return cached
     const ownReplies = otherRepliesByAuthor.get(accountId) ?? []
     const ownReplyEntries: ReplyHijackCorpusEntry[] = ownReplies.map((t) => ({
+      tweetId: t.id,
       accountId,
       fullText: t.fullText,
       inReplyToTweetId: t.inReplyToTweetId,

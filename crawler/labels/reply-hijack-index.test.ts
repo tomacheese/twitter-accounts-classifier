@@ -6,8 +6,10 @@ function entry(
   fullText: string,
   inReplyToTweetId: string | null,
   hoursAgo: number,
+  tweetId = `reply-${accountId}-${hoursAgo}`,
 ): ReplyHijackCorpusEntry {
   return {
+    tweetId,
     accountId,
     fullText,
     inReplyToTweetId,
@@ -128,5 +130,42 @@ describe('ReplyHijackIndex.isEligibleForScreening', () => {
     expect(index.isEligibleForScreening('member0', 'target1')).toBe(true)
     expect(index.isEligibleForScreening('member0', 'other-target')).toBe(false)
     expect(index.isEligibleForScreening('non-member', 'target1')).toBe(false)
+  })
+})
+
+describe('ReplyHijackIndex.evidenceFor', () => {
+  it('returns the qualifying target metrics and retained reply IDs for a swarm member', () => {
+    const corpus = Array.from({ length: 5 }, (_, index) =>
+      entry(
+        `member-${index}`,
+        'これは十分な長さのテスト用リプライ本文サンプルです',
+        'target-1',
+        index,
+        `reply-${index}`,
+      ),
+    )
+    const index = buildReplyHijackIndex(corpus)
+
+    expect(index.evidenceFor('member-0', 'target-1')).toEqual({
+      targetTweetId: 'target-1',
+      swarmSize: 5,
+      averageSimilarity: 1,
+      spanHours: 4,
+      replyTweetIds: ['reply-0', 'reply-1', 'reply-2', 'reply-3', 'reply-4'],
+    })
+  })
+
+  it('returns undefined for an account outside the qualifying swarm', () => {
+    const corpus = Array.from({ length: 5 }, (_, index) =>
+      entry(
+        `member-${index}`,
+        'これは十分な長さのテスト用リプライ本文サンプルです',
+        'target-1',
+        index,
+      ),
+    )
+    const index = buildReplyHijackIndex(corpus)
+
+    expect(index.evidenceFor('non-member', 'target-1')).toBeUndefined()
   })
 })

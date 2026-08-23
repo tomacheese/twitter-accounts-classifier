@@ -1,6 +1,12 @@
+import { randomUUID } from 'node:crypto'
 import type { PrismaClient } from '../generated/prisma'
 import { upsertAccountsBulk } from './account-repository'
 import type { FollowListResult } from '../twitter/follows'
+
+interface FollowEdge {
+  followerId: string
+  followeeId: string
+}
 
 async function upsertFollowAuthors(
   prisma: PrismaClient,
@@ -23,22 +29,26 @@ export async function syncFollowing(
 ): Promise<void> {
   const upsertedIds = await upsertFollowAuthors(prisma, result)
   // Account upsert が失敗した id は外部キー制約に違反するため、edge 同期・complete-sync 判定から除外する。
-  const safeIds = result.ids.filter((id) => upsertedIds.has(id))
+  const safeIds = [...new Set(result.ids.filter((id) => upsertedIds.has(id)))]
   const isCompleteObservation = result.ids.every((id) => upsertedIds.has(id))
   const now = new Date()
 
   await prisma.$transaction(
     async (tx) => {
       if (safeIds.length > 0) {
-        await tx.follow.createMany({
-          data: safeIds.map((followeeId) => ({
-            followerId,
-            followeeId,
-            firstSeenAt: now,
-            lastSeenAt: now,
-          })),
-          skipDuplicates: true,
-        })
+        const newIds = safeIds.map(() => randomUUID())
+        const addedEdges = await tx.$queryRaw<FollowEdge[]>`
+          INSERT INTO "Follow" ("id", "followerId", "followeeId", "firstSeenAt", "lastSeenAt")
+          SELECT input."id", ${followerId}, input."followeeId", ${now}, ${now}
+          FROM UNNEST(${newIds}::text[], ${safeIds}::text[]) AS input("id", "followeeId")
+          ON CONFLICT ("followerId", "followeeId") DO NOTHING
+          RETURNING "followerId", "followeeId"
+        `
+        if (addedEdges.length > 0) {
+          await tx.followStateChange.createMany({
+            data: addedEdges.map((edge) => ({ ...edge, changeType: 'followed', observedAt: now })),
+          })
+        }
         await tx.follow.updateMany({
           where: { followerId, followeeId: { in: safeIds } },
           data: { lastSeenAt: now },
@@ -48,9 +58,20 @@ export async function syncFollowing(
       // `reachedEnd` だけでは削除しない: 一時的な空応答や Account upsert 失敗だけで
       // 記録済みの edge を全消去しかねないため、全件を確認できた場合のみ削除する。
       if (result.reachedEnd && safeIds.length > 0 && isCompleteObservation) {
-        await tx.follow.deleteMany({
-          where: { followerId, followeeId: { notIn: safeIds } },
-        })
+        const removedEdges = await tx.$queryRaw<FollowEdge[]>`
+          DELETE FROM "Follow"
+          WHERE "followerId" = ${followerId} AND "followeeId" <> ALL(${safeIds}::text[])
+          RETURNING "followerId", "followeeId"
+        `
+        if (removedEdges.length > 0) {
+          await tx.followStateChange.createMany({
+            data: removedEdges.map((edge) => ({
+              ...edge,
+              changeType: 'unfollowed',
+              observedAt: now,
+            })),
+          })
+        }
       }
     },
     // `./labeling-follow-sample-repository` の同じコメントを参照。
@@ -70,22 +91,26 @@ export async function syncFollowers(
   result: FollowListResult,
 ): Promise<void> {
   const upsertedIds = await upsertFollowAuthors(prisma, result)
-  const safeIds = result.ids.filter((id) => upsertedIds.has(id))
+  const safeIds = [...new Set(result.ids.filter((id) => upsertedIds.has(id)))]
   const isCompleteObservation = result.ids.every((id) => upsertedIds.has(id))
   const now = new Date()
 
   await prisma.$transaction(
     async (tx) => {
       if (safeIds.length > 0) {
-        await tx.follow.createMany({
-          data: safeIds.map((followerId) => ({
-            followerId,
-            followeeId,
-            firstSeenAt: now,
-            lastSeenAt: now,
-          })),
-          skipDuplicates: true,
-        })
+        const newIds = safeIds.map(() => randomUUID())
+        const addedEdges = await tx.$queryRaw<FollowEdge[]>`
+          INSERT INTO "Follow" ("id", "followerId", "followeeId", "firstSeenAt", "lastSeenAt")
+          SELECT input."id", input."followerId", ${followeeId}, ${now}, ${now}
+          FROM UNNEST(${newIds}::text[], ${safeIds}::text[]) AS input("id", "followerId")
+          ON CONFLICT ("followerId", "followeeId") DO NOTHING
+          RETURNING "followerId", "followeeId"
+        `
+        if (addedEdges.length > 0) {
+          await tx.followStateChange.createMany({
+            data: addedEdges.map((edge) => ({ ...edge, changeType: 'followed', observedAt: now })),
+          })
+        }
         await tx.follow.updateMany({
           where: { followeeId, followerId: { in: safeIds } },
           data: { lastSeenAt: now },
@@ -94,9 +119,20 @@ export async function syncFollowers(
 
       // `syncFollowing` 側の同じコメントを参照。
       if (result.reachedEnd && safeIds.length > 0 && isCompleteObservation) {
-        await tx.follow.deleteMany({
-          where: { followeeId, followerId: { notIn: safeIds } },
-        })
+        const removedEdges = await tx.$queryRaw<FollowEdge[]>`
+          DELETE FROM "Follow"
+          WHERE "followeeId" = ${followeeId} AND "followerId" <> ALL(${safeIds}::text[])
+          RETURNING "followerId", "followeeId"
+        `
+        if (removedEdges.length > 0) {
+          await tx.followStateChange.createMany({
+            data: removedEdges.map((edge) => ({
+              ...edge,
+              changeType: 'unfollowed',
+              observedAt: now,
+            })),
+          })
+        }
       }
     },
     // `./labeling-follow-sample-repository` の同じコメントを参照。

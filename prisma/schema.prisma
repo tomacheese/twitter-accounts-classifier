@@ -54,6 +54,9 @@ model Account {
   latestLabels                   AccountLabelLatest[]
   followerEdges                  Follow[]               @relation("FollowerEdges")
   followeeEdges                  Follow[]               @relation("FolloweeEdges")
+  followStateChangesAsFollower  FollowStateChange[]    @relation("FollowStateChangeFollower")
+  followStateChangesAsFollowee  FollowStateChange[]    @relation("FollowStateChangeFollowee")
+  replyHijackEvidence            ReplyHijackEvidence[]
   labelingFollowSampleAsAccount  LabelingFollowSample[] @relation("LabelingFollowSampleAccount")
   labelingFollowSampleAsFollowee LabelingFollowSample[] @relation("LabelingFollowSampleFollowee")
   blockerEdges                   Block[]                @relation("BlockerEdges")
@@ -222,6 +225,35 @@ model Follow {
   @@unique([followerId, followeeId])
   @@index([followerId])
   @@index([followeeId])
+}
+
+model FollowStateChange {
+  id         String   @id @default(cuid())
+  followerId String
+  follower   Account  @relation("FollowStateChangeFollower", fields: [followerId], references: [id])
+  followeeId String
+  followee   Account  @relation("FollowStateChangeFollowee", fields: [followeeId], references: [id])
+  changeType String
+  observedAt DateTime @default(now())
+
+  @@index([followerId, observedAt(sort: Desc)])
+  @@index([followeeId, observedAt(sort: Desc)])
+}
+
+model ReplyHijackEvidence {
+  id                String   @id @default(cuid())
+  accountId         String
+  account           Account  @relation(fields: [accountId], references: [id])
+  targetTweetId     String
+  ruleVersion       String
+  observedAt        DateTime @updatedAt
+  swarmSize         Int
+  averageSimilarity Float
+  spanHours         Float
+  replyTweetIds     String[] @default([])
+
+  @@unique([accountId, targetTweetId, ruleVersion])
+  @@index([targetTweetId])
 }
 
 model LabelingFollowSample {
