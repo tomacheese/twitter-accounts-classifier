@@ -37,16 +37,56 @@ const ANTI_NSFW_PATTERNS = [
   ...JP_REJECT_OR_REDIRECT_PATTERNS,
 ]
 
+interface MatchSpan {
+  start: number
+  end: number
+}
+
+/**
+ * パターンに `g` フラグを付与した上で bio 全体に一致する箇所をすべて探し、その位置区間を返す。
+ * @param pattern - 検索する正規表現 (`g` フラグの有無は問わない)
+ * @param bio - 検索対象の bio 文字列
+ * @returns 一致箇所ごとの開始・終了位置の配列
+ */
+function findAllMatchSpans(pattern: RegExp, bio: string): MatchSpan[] {
+  const globalPattern = new RegExp(
+    pattern.source,
+    pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`,
+  )
+  return [...bio.matchAll(globalPattern)].map((match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+  }))
+}
+
+function overlaps(a: MatchSpan, b: MatchSpan): boolean {
+  return a.start < b.end && b.start < a.end
+}
+
 export const topicNsfwRule: LabelRule = {
   key: 'topic_nsfw',
   description: 'プロフィールでアダルト/NSFW コンテンツを投稿していることを自己申告している',
   // 性的指向に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.6.4',
+  version: '1.7.0',
   evaluate(bundle) {
     const { bio } = bundle.account
-    const optedOut = bio !== null && ANTI_NSFW_PATTERNS.some((pattern) => pattern.test(bio))
-    const keywordMatch = bio !== null && NSFW_PATTERN.test(bio) && !optedOut
+    if (bio === null) {
+      return {
+        value: false,
+        confidence: toConfidence(false, 0),
+        reason: 'bio nsfw-keyword match=false',
+      }
+    }
+
+    // bio に NSFW 語の出現が複数ある場合、抑制パターンは実際に一致した
+    // その出現箇所と重なる場合のみ働かせる。bio 全体を対象に抑制の有無だけを見ると、
+    // 無関係な箇所の拒否表現によって別の真正な自己申告まで抑制してしまうため。
+    const nsfwSpans = findAllMatchSpans(NSFW_PATTERN, bio)
+    const antiSpans = ANTI_NSFW_PATTERNS.flatMap((pattern) => findAllMatchSpans(pattern, bio))
+    const keywordMatch = nsfwSpans.some(
+      (span) => !antiSpans.some((antiSpan) => overlaps(span, antiSpan)),
+    )
     return {
       value: keywordMatch,
       confidence: toConfidence(keywordMatch, keywordMatch ? 0.8 : 0),
