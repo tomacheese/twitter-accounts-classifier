@@ -1,4 +1,5 @@
 import type { FollowGraphLabelSignal } from './follow-graph-label-index'
+import type { ReplyHijackEvidenceDetails } from '../db/reply-hijack-evidence-repository'
 
 export interface AccountFeatureBundle {
   account: {
@@ -106,6 +107,8 @@ export interface AccountFeatureBundle {
    * この点は `templatedReplyNetworkSize` と同じ。
    */
   replyHijackSwarmSize?: number
+  /** 陽性時に保存する、`replyHijackSwarmSize` を供給した target の監査証跡。 */
+  replyHijackEvidence?: ReplyHijackEvidenceDetails
   /**
    * このアカウントのフォロー先・フォロワーにおける、ラベルごとの既存付与状況。
    * ルールごとではなく実行ごとに共有インデックスから一度算出する（`buildFollowGraphLabelIndex` 参照）。

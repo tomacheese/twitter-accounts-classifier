@@ -28,6 +28,7 @@ export function buildAccountFeatureBundle(
   // 合計や平均ではなく最大値を最も強いシグナルとして採用する。
   let templatedReplyNetworkSize = 0
   let replyHijackSwarmSize = 0
+  let replyHijackEvidence: AccountFeatureBundle['replyHijackEvidence']
   for (const tweet of recentTweets) {
     if (!tweet.isReply) continue
     templatedReplyNetworkSize = Math.max(
@@ -35,10 +36,17 @@ export function buildAccountFeatureBundle(
       duplicateReplyIndex.countOtherAccounts(tweet.fullText, account.id),
     )
     if (tweet.inReplyToTweetId !== null) {
-      replyHijackSwarmSize = Math.max(
-        replyHijackSwarmSize,
-        replyHijackIndex.swarmSizeFor(account.id, tweet.inReplyToTweetId),
-      )
+      const evidence = replyHijackIndex.evidenceFor(account.id, tweet.inReplyToTweetId)
+      if (
+        evidence &&
+        (evidence.swarmSize > replyHijackSwarmSize ||
+          (evidence.swarmSize === replyHijackSwarmSize &&
+            (replyHijackEvidence === undefined ||
+              evidence.targetTweetId < replyHijackEvidence.targetTweetId)))
+      ) {
+        replyHijackSwarmSize = evidence.swarmSize
+        replyHijackEvidence = evidence
+      }
     }
   }
 
@@ -82,6 +90,7 @@ export function buildAccountFeatureBundle(
     })),
     templatedReplyNetworkSize,
     replyHijackSwarmSize,
+    replyHijackEvidence,
     followGraphLabelSignals: followGraphLabelIndex.signalsFor(account.id),
   }
 }

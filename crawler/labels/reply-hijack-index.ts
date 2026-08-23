@@ -1,4 +1,5 @@
 import { averagePairwiseSimilarity, normalizeForSimilarity } from './text-similarity'
+import type { ReplyHijackEvidenceDetails } from '../db/reply-hijack-evidence-repository'
 
 const MIN_DISTINCT_AUTHORS = 5
 const WINDOW_HOURS = 24
@@ -21,6 +22,7 @@ const SIMILARITY_THRESHOLD = 0.1
 const MIN_NORMALIZED_LENGTH = 20
 
 export interface ReplyHijackCorpusEntry {
+  tweetId: string
   accountId: string
   fullText: string
   inReplyToTweetId: string | null
@@ -41,6 +43,12 @@ export interface ReplyHijackIndex {
    * @returns このアカウント・対象ツイートの組が structural screening の条件 (`MIN_DISTINCT_AUTHORS` 等) を満たすか
    */
   isEligibleForScreening(accountId: string, tweetId: string): boolean
+  /**
+   * @param accountId - 検索対象のアカウント
+   * @param tweetId - このアカウントがリプライした対象ツイートの ID
+   * @returns 対象アカウントが属する swarm の監査証跡。属していない場合は `undefined`
+   */
+  evidenceFor(accountId: string, tweetId: string): ReplyHijackEvidenceDetails | undefined
 }
 
 /**
@@ -69,7 +77,7 @@ export function buildReplyHijackIndex(corpus: ReplyHijackCorpusEntry[]): ReplyHi
     firstReplyByAuthor.set(entry.inReplyToTweetId, byAuthor)
   }
 
-  const swarmSizeByTarget = new Map<string, number>()
+  const evidenceByTarget = new Map<string, ReplyHijackEvidenceDetails>()
   const memberAccountsByTarget = new Map<string, Set<string>>()
   for (const [targetTweetId, byAuthor] of firstReplyByAuthor) {
     const replies = [...byAuthor.values()]
@@ -82,7 +90,13 @@ export function buildReplyHijackIndex(corpus: ReplyHijackCorpusEntry[]): ReplyHi
     const similarity = averagePairwiseSimilarity(replies.map((r) => r.fullText))
     if (similarity < SIMILARITY_THRESHOLD) continue
 
-    swarmSizeByTarget.set(targetTweetId, replies.length)
+    evidenceByTarget.set(targetTweetId, {
+      targetTweetId,
+      swarmSize: replies.length,
+      averageSimilarity: similarity,
+      spanHours,
+      replyTweetIds: replies.map((reply) => reply.tweetId).toSorted(),
+    })
     memberAccountsByTarget.set(targetTweetId, new Set(replies.map((r) => r.accountId)))
   }
 
@@ -90,10 +104,14 @@ export function buildReplyHijackIndex(corpus: ReplyHijackCorpusEntry[]): ReplyHi
     swarmSizeFor(accountId, tweetId) {
       const members = memberAccountsByTarget.get(tweetId)
       if (!members?.has(accountId)) return 0
-      return swarmSizeByTarget.get(tweetId) ?? 0
+      return evidenceByTarget.get(tweetId)?.swarmSize ?? 0
     },
     isEligibleForScreening(accountId, tweetId) {
       return memberAccountsByTarget.get(tweetId)?.has(accountId) ?? false
+    },
+    evidenceFor(accountId, tweetId) {
+      if (!memberAccountsByTarget.get(tweetId)?.has(accountId)) return undefined
+      return evidenceByTarget.get(tweetId)
     },
   }
 }

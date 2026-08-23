@@ -14,10 +14,23 @@ export async function loadReplyCorpus(
   prisma: PrismaClient,
   watermark: Date,
 ): Promise<ReplyHijackCorpusEntry[]> {
-  return prisma.tweet.findMany({
-    where: { isReply: true, collectedAt: { lte: watermark } },
-    orderBy: [{ collectedAt: 'desc' }, { id: 'desc' }],
-    take: REPLY_CORPUS_LIMIT,
-    select: { accountId: true, fullText: true, inReplyToTweetId: true, createdAt: true },
-  })
+  return prisma.tweet
+    .findMany({
+      where: { isReply: true, collectedAt: { lte: watermark } },
+      orderBy: [{ collectedAt: 'desc' }, { id: 'desc' }],
+      take: REPLY_CORPUS_LIMIT,
+      select: {
+        id: true,
+        accountId: true,
+        fullText: true,
+        inReplyToTweetId: true,
+        createdAt: true,
+      },
+    })
+    .then((tweets) =>
+      tweets.map(({ id, ...tweet }) => ({
+        tweetId: id,
+        ...tweet,
+      })),
+    )
 }

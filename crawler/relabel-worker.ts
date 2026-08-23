@@ -21,6 +21,10 @@ import {
 } from './db/label-repository'
 import { CRAWL_LIMITS } from './config/crawl-limits'
 import { loadReplyCorpus } from './db/reply-corpus'
+import {
+  upsertReplyHijackEvidence,
+  type ReplyHijackEvidenceInput,
+} from './db/reply-hijack-evidence-repository'
 import { loadRecentTweetsForAccounts, findTweetTextsByIds } from './db/tweet-repository'
 import { buildDuplicateReplyIndex as buildDuplicateReplyIndexImpl } from './labels/duplicate-reply-index'
 import { buildReplyHijackIndex as buildReplyHijackIndexImpl } from './labels/reply-hijack-index'
@@ -164,6 +168,7 @@ async function evaluateAccountRelabelItemGroup(
   const accountById = new Map(accounts.map((account) => [account.id, account]))
 
   const labelsByAccountId = new Map<string, AccountLabelBulkInput[]>()
+  const replyHijackEvidenceByAccountId = new Map<string, ReplyHijackEvidenceInput>()
   const failedItemIds = new Set<string>()
   for (const item of group) {
     // account が既に削除されている場合、これ以上評価しようがないため succeeded 扱いで終端する。
@@ -180,7 +185,8 @@ async function evaluateAccountRelabelItemGroup(
         parentTweetTextById,
       )
       const labels: AccountLabelBulkInput[] = []
-      for (const { rule, result } of options.registry.applyAll(bundle)) {
+      const appliedRules = options.registry.applyAll(bundle)
+      for (const { rule, result } of appliedRules) {
         const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
         if (!labelDefinitionId) continue
         labels.push({
@@ -192,6 +198,16 @@ async function evaluateAccountRelabelItemGroup(
         })
       }
       labelsByAccountId.set(account.id, labels)
+      const positiveReplyHijackRule = appliedRules.find(
+        ({ rule, result }) => rule.key === 'reply_hijack_swarm' && result.value,
+      )
+      if (positiveReplyHijackRule && bundle.replyHijackEvidence) {
+        replyHijackEvidenceByAccountId.set(account.id, {
+          accountId: account.id,
+          ruleVersion: positiveReplyHijackRule.rule.version,
+          ...bundle.replyHijackEvidence,
+        })
+      }
     } catch (error) {
       logger.error(`Failed to relabel account ${item.triggerId}`, error as Error)
       captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
@@ -218,15 +234,24 @@ async function evaluateAccountRelabelItemGroup(
     )
     try {
       const subBatchLabels = subBatch.flatMap((item) => labelsByAccountId.get(item.triggerId) ?? [])
-      if (subBatchLabels.length > 0) {
-        await recordAccountLabelsBulkForAccounts(prisma, {
-          sourceKind: 'relabel',
-          labels: subBatchLabels,
+      const subBatchEvidence = subBatch.flatMap((item) => {
+        const evidence = replyHijackEvidenceByAccountId.get(item.triggerId)
+        return evidence ? [evidence] : []
+      })
+      const completions = await prisma.$transaction(async (tx) => {
+        if (subBatchLabels.length > 0) {
+          await recordAccountLabelsBulkForAccounts(tx, {
+            sourceKind: 'relabel',
+            labels: subBatchLabels,
+          })
+        }
+        for (const evidence of subBatchEvidence) {
+          await upsertReplyHijackEvidence(tx, evidence)
+        }
+        return completeAccountRelabelWorkItemsBulk(tx as unknown as PrismaClient, {
+          workItemIds: subBatch.map((item) => item.id),
+          leaseOwner: options.leaseOwner,
         })
-      }
-      const completions = await completeAccountRelabelWorkItemsBulk(prisma, {
-        workItemIds: subBatch.map((item) => item.id),
-        leaseOwner: options.leaseOwner,
       })
       succeeded += completions.length
     } catch (error) {
