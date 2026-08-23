@@ -18,7 +18,7 @@ function makeBundle(
       accountCreatedAt: new Date(),
       isBlueVerified: false,
       verifiedType: null,
-      ...(recentTweetsFetchStatus !== undefined ? { recentTweetsFetchStatus } : {}),
+      ...(recentTweetsFetchStatus === undefined ? {} : { recentTweetsFetchStatus }),
     },
     recentTweets,
   }
