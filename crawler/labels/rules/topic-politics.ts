@@ -25,14 +25,16 @@ const ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN =
 
 // 「元衆議院議員」「Former state senator」のように「元/former」を伴う bio は、
 // 現職ではなく過去の在職を述べているだけで、
-// description が要求する「現に公職者である」ことの自己申告にはならない。
+// 「非自民党党員」のように「非」を伴う bio は、
+// 所属の否定を述べているだけで、
+// いずれも description が要求する「現に公職者・党員である」ことの自己申告にはならない。
 // 一致箇所の直前だけを見れば足りるため、window は短くしている。
-const FORMER_PREFIX_WINDOW_LENGTH = 10
-const FORMER_PREFIX_PATTERN = /元\s*$|\bformer\s*$/i
+const NEGATION_PREFIX_WINDOW_LENGTH = 10
+const NEGATION_PREFIX_PATTERN = /元\s*$|非\s*$|\bformer\s*$/i
 
-function isFormerOfficeMention(bio: string, matchIndex: number): boolean {
-  const beforeMatch = bio.slice(Math.max(0, matchIndex - FORMER_PREFIX_WINDOW_LENGTH), matchIndex)
-  return FORMER_PREFIX_PATTERN.test(beforeMatch)
+function isNegatedOfficeMention(bio: string, matchIndex: number): boolean {
+  const beforeMatch = bio.slice(Math.max(0, matchIndex - NEGATION_PREFIX_WINDOW_LENGTH), matchIndex)
+  return NEGATION_PREFIX_PATTERN.test(beforeMatch)
 }
 
 // 「夢は政治家です」「将来なりたいのは市議会議員です」のような願望表現は、
@@ -52,7 +54,7 @@ function matchesCurrentOffice(bio: string, pattern: RegExp): boolean {
   const match = pattern.exec(bio)
   return (
     match !== null &&
-    !isFormerOfficeMention(bio, match.index) &&
+    !isNegatedOfficeMention(bio, match.index) &&
     !isAspirationMention(bio, match.index)
   )
 }
@@ -62,7 +64,7 @@ export const topicPoliticsRule: LabelRule = {
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.5.0',
+  version: '1.5.1',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =
