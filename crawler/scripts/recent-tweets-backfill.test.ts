@@ -3,8 +3,10 @@ import type { PrismaClient } from '../generated/prisma'
 import type { AccountProfileInput } from '../db/account-repository'
 import type { TweetInput } from '../db/tweet-repository'
 import {
+  createConfiguredAuthenticatedUserApi,
   parseOptions,
   runRecentTweetsBackfill,
+  type AuthenticatedUserApiFactoryDependencies,
   type RecentTweetsBackfillDependencies,
 } from './recent-tweets-backfill'
 
@@ -74,6 +76,12 @@ function makeDependencies(): RecentTweetsBackfillDependencies & {
     selectCandidates: vi.fn().mockResolvedValue({ accountIds: ['account-a'] }),
     loadConfig: vi.fn().mockReturnValue({
       accounts: [
+        {
+          email: 'synthetic-decoy@example.invalid',
+          username: 'decoy-account',
+          password: 'synthetic-decoy-password',
+          otpSecret: 'synthetic-decoy-otp',
+        },
         {
           email: 'synthetic@example.invalid',
           username: 'configured-account',
@@ -156,15 +164,68 @@ describe('runRecentTweetsBackfill', () => {
     )
 
     expect(deps.createAuthenticatedUserApi).toHaveBeenCalledWith(
-      expect.objectContaining({ username: 'configured-account' }),
+      {
+        email: 'synthetic@example.invalid',
+        username: 'configured-account',
+        password: 'synthetic-password',
+        otpSecret: null,
+      },
       60_000,
     )
     expect(deps.fetchRecentTweets).toHaveBeenCalledTimes(1)
     expect(deps.upsertTweets).toHaveBeenCalledWith(expect.anything(), [tweet])
     expect(deps.requestAccountRelabelBulk).toHaveBeenCalledWith(expect.anything(), ['account-a'])
     expect(deps.transaction).toHaveBeenCalledTimes(1)
+    expect(deps.accountUpdate).toHaveBeenCalledWith({
+      where: { id: 'account-a' },
+      data: {
+        lastRecentTweetsAttemptedAt: new Date('2026-08-24T00:00:00Z'),
+        lastRecentTweetsFetchedAt: new Date('2026-08-24T00:00:01Z'),
+        recentTweetsFetchStatus: 'success',
+      },
+    })
     expect(deps.authenticatedClose).toHaveBeenCalledTimes(1)
     expect(deps.disconnectPrisma).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes an OpenAPI context when adapting it fails', async () => {
+    const adapterError = new Error('synthetic adapter failure')
+    const context = {
+      client: {
+        getUserApi: vi.fn(() => {
+          throw adapterError
+        }),
+        getTweetApi: vi.fn(),
+      },
+    }
+    const closeContext = vi.fn().mockResolvedValue(undefined)
+    const factoryDependencies = {
+      getCookieIssuerBaseUrl: vi.fn().mockReturnValue('https://synthetic-issuer.invalid'),
+      createCookieIssuerClient: vi.fn().mockReturnValue({
+        issueCookiesWithRetry: vi.fn().mockResolvedValue({
+          ct0: 'synthetic-ct0',
+          authToken: 'synthetic-auth-token',
+        }),
+      }),
+      createOpenApiClient: vi.fn().mockResolvedValue(context),
+      closeOpenApiClient: closeContext,
+      createUserApiLike: vi.fn(),
+    } as unknown as AuthenticatedUserApiFactoryDependencies
+
+    await expect(
+      createConfiguredAuthenticatedUserApi(
+        {
+          email: 'synthetic@example.invalid',
+          username: 'configured-account',
+          password: 'synthetic-password',
+          otpSecret: null,
+        },
+        60_000,
+        factoryDependencies,
+      ),
+    ).rejects.toBe(adapterError)
+
+    expect(closeContext).toHaveBeenCalledWith(context)
   })
 
   it('persists fallback authors before merged tweets in the success transaction', async () => {

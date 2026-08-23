@@ -40,6 +40,76 @@ export interface AuthenticatedUserApi {
   close: () => Promise<void>
 }
 
+/**
+ * credential-bearing OpenAPI context を UserApiLike に変換し、変換途中の例外でも context を閉じる。
+ * @param context - close が必要な OpenAPI context
+ * @param adapt - context から UserApiLike を構築する処理
+ * @param closeContext - context の close 処理
+ * @returns 変換済み API と通常終了時の close 処理
+ */
+async function createAuthenticatedUserApiWithCleanup<TContext>(
+  context: TContext,
+  adapt: (context: TContext) => UserApiLike,
+  closeContext: (context: TContext) => Promise<void>,
+): Promise<AuthenticatedUserApi> {
+  try {
+    const userApi = adapt(context)
+    return { userApi, close: () => closeContext(context) }
+  } catch (error) {
+    await closeContext(context)
+    throw error
+  }
+}
+
+export interface AuthenticatedUserApiFactoryDependencies {
+  getCookieIssuerBaseUrl: typeof getCookieIssuerBaseUrl
+  createCookieIssuerClient: typeof createCookieIssuerClient
+  createOpenApiClient: typeof createOpenApiClient
+  closeOpenApiClient: typeof closeOpenApiClient
+  createUserApiLike: typeof createUserApiLike
+}
+
+const AUTHENTICATED_USER_API_FACTORY_DEPENDENCIES: AuthenticatedUserApiFactoryDependencies = {
+  getCookieIssuerBaseUrl,
+  createCookieIssuerClient,
+  createOpenApiClient,
+  closeOpenApiClient,
+  createUserApiLike,
+}
+
+/**
+ * 指定済み account の cookie と OpenAPI client を作り、backfill 用 UserApiLike に変換する。
+ * @param account - username で選択済みの設定 account
+ * @param requestTimeoutMs - OpenAPI request timeout
+ * @param deps - cookie/OpenAPI client 構築と cleanup の依存関係
+ * @returns 認証済み UserApiLike と close 処理
+ */
+export async function createConfiguredAuthenticatedUserApi(
+  account: TwitterAccountConfig,
+  requestTimeoutMs: number,
+  deps: AuthenticatedUserApiFactoryDependencies = AUTHENTICATED_USER_API_FACTORY_DEPENDENCIES,
+): Promise<AuthenticatedUserApi> {
+  const cookieIssuer = deps.createCookieIssuerClient({
+    baseUrl: deps.getCookieIssuerBaseUrl(),
+    clientName: 'crawler',
+  })
+  const cookies = await cookieIssuer.issueCookiesWithRetry({
+    username: account.username,
+    password: account.password,
+    otp_secret: account.otpSecret,
+  })
+  const context = await deps.createOpenApiClient(cookies, requestTimeoutMs)
+  return createAuthenticatedUserApiWithCleanup(
+    context,
+    (openApiContext) =>
+      deps.createUserApiLike(
+        openApiContext.client.getUserApi(),
+        openApiContext.client.getTweetApi(),
+      ),
+    deps.closeOpenApiClient,
+  )
+}
+
 export interface RecentTweetsBackfillDependencies {
   prisma: PrismaClient
   selectCandidates: (
@@ -268,22 +338,7 @@ function createDefaultDependencies(prisma: PrismaClient): RecentTweetsBackfillDe
     prisma,
     selectCandidates: selectRecentTweetsBackfillCandidates,
     loadConfig,
-    createAuthenticatedUserApi: async (account, requestTimeoutMs) => {
-      const cookieIssuer = createCookieIssuerClient({
-        baseUrl: getCookieIssuerBaseUrl(),
-        clientName: 'crawler',
-      })
-      const cookies = await cookieIssuer.issueCookiesWithRetry({
-        username: account.username,
-        password: account.password,
-        otp_secret: account.otpSecret,
-      })
-      const context = await createOpenApiClient(cookies, requestTimeoutMs)
-      return {
-        userApi: createUserApiLike(context.client.getUserApi(), context.client.getTweetApi()),
-        close: () => closeOpenApiClient(context),
-      }
-    },
+    createAuthenticatedUserApi: createConfiguredAuthenticatedUserApi,
     fetchAccountProfile,
     fetchRecentTweets,
     upsertAccount,
