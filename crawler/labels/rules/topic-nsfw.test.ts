@@ -179,4 +179,14 @@ describe('topicNsfwRule', () => {
       topicNsfwRule.evaluate(makeBundle({ bio: '愛用レンズはR1850です。散歩と写真が趣味' })).value,
     ).toBe(false)
   })
+
+  it('is true when a genuine self-declaration coexists with an unrelated rejection mention elsewhere in the bio', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({
+          bio: 'R18同人作家です。仕事の勧誘目的のアダルトDMは受け付けません。',
+        }),
+      ).value,
+    ).toBe(true)
+  })
 })

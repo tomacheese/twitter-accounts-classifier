@@ -77,4 +77,13 @@ describe('amazonAffiliateLinkRule', () => {
       ).value,
     ).toBe(false)
   })
+
+  it('recentTweets が未取得 (null) の場合、false のまま evaluable: false になる', () => {
+    const bundle = makeBundle([])
+    bundle.account.recentTweetsFetchStatus = null
+    const result = amazonAffiliateLinkRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBeCloseTo(0.5)
+  })
 })
