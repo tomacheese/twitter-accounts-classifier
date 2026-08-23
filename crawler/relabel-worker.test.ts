@@ -90,6 +90,10 @@ describe('evaluateAccountRelabelItems', () => {
 
     expect(result.succeeded).toBe(1)
     expect(transaction).toHaveBeenCalledTimes(1)
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 15_000,
+      timeout: 15_000,
+    })
     expect(recordLabelsSpy).toHaveBeenCalledWith(txClient, expect.anything())
     expect(evidenceSpy).toHaveBeenCalledWith(txClient, {
       accountId: 'account-1',

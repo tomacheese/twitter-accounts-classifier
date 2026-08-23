@@ -4,7 +4,7 @@ import { CRAWL_LIMITS, TWITTER_RETRY } from '../config/crawl-limits'
 import { getCookieIssuerBaseUrl, getTwitterRequestTimeoutMs } from '../config/env'
 import { getPrismaClient, disconnectPrisma } from '../db/client'
 import { upsertAccount, type AccountProfileInput } from '../db/account-repository'
-import { upsertTweets, type TweetInput } from '../db/tweet-repository'
+import { upsertTweet, type TweetInput } from '../db/tweet-repository'
 import { requestAccountRelabelBulk } from '../db/analysis-work-item-repository'
 import {
   selectRecentTweetsBackfillCandidates,
@@ -128,7 +128,7 @@ export interface RecentTweetsBackfillDependencies {
     limit: number,
   ) => Promise<RecentTweetsResult>
   upsertAccount: typeof upsertAccount
-  upsertTweets: typeof upsertTweets
+  upsertTweet: typeof upsertTweet
   requestAccountRelabelBulk: typeof requestAccountRelabelBulk
   getRequestTimeoutMs: () => number
   now: () => Date
@@ -215,6 +215,9 @@ async function fetchWithCrawlPolicy<T>(
   )
 }
 
+/** coverage の先行更新時に success transaction 全体を rollback するための内部エラー。 */
+class StaleRecentTweetsBackfillWriteError extends Error {}
+
 async function persistSuccessfulCandidate(
   deps: RecentTweetsBackfillDependencies,
   accountId: string,
@@ -228,24 +231,39 @@ async function persistSuccessfulCandidate(
   )
   const tweets: TweetInput[] = mergeTweetAdFlags(recentTweets.tweets)
 
-  await deps.prisma.$transaction(async (transaction) => {
-    const tx = transaction as unknown as PrismaClient
-    await deps.upsertAccount(tx, profile)
-    for (const fallbackAuthor of fallbackAuthors.values()) {
-      if (fallbackAuthor.id === profile.id) continue
-      await deps.upsertAccount(tx, fallbackAuthor)
-    }
-    await deps.upsertTweets(tx, tweets)
-    await tx.account.update({
-      where: { id: accountId },
-      data: {
-        lastRecentTweetsAttemptedAt: attemptedAt,
-        lastRecentTweetsFetchedAt: fetchedAt,
-        recentTweetsFetchStatus: 'success',
+  try {
+    await deps.prisma.$transaction(
+      async (transaction) => {
+        const tx = transaction as unknown as PrismaClient
+        await deps.upsertAccount(tx, profile)
+        for (const fallbackAuthor of fallbackAuthors.values()) {
+          if (fallbackAuthor.id === profile.id) continue
+          await deps.upsertAccount(tx, fallbackAuthor)
+        }
+        for (const tweet of tweets) {
+          await deps.upsertTweet(tx, tweet)
+        }
+        const coverage = await tx.account.updateMany({
+          where: { id: accountId, lastRecentTweetsAttemptedAt: null },
+          data: {
+            lastRecentTweetsAttemptedAt: attemptedAt,
+            lastRecentTweetsFetchedAt: fetchedAt,
+            recentTweetsFetchStatus: 'success',
+          },
+        })
+        if (coverage.count !== 1) {
+          throw new StaleRecentTweetsBackfillWriteError(
+            `Recent tweets backfill coverage is stale for ${accountId}`,
+          )
+        }
+        await deps.requestAccountRelabelBulk(tx, [accountId])
       },
-    })
-    await deps.requestAccountRelabelBulk(tx, [accountId])
-  })
+      { maxWait: 30_000, timeout: 30_000 },
+    )
+  } catch (error) {
+    if (error instanceof StaleRecentTweetsBackfillWriteError) return
+    throw error
+  }
 }
 
 async function recordFailedCandidate(
@@ -253,8 +271,8 @@ async function recordFailedCandidate(
   accountId: string,
   attemptedAt: Date,
 ): Promise<void> {
-  await deps.prisma.account.update({
-    where: { id: accountId },
+  await deps.prisma.account.updateMany({
+    where: { id: accountId, lastRecentTweetsAttemptedAt: null },
     data: {
       lastRecentTweetsAttemptedAt: attemptedAt,
       recentTweetsFetchStatus: 'failed',
@@ -342,7 +360,7 @@ function createDefaultDependencies(prisma: PrismaClient): RecentTweetsBackfillDe
     fetchAccountProfile,
     fetchRecentTweets,
     upsertAccount,
-    upsertTweets,
+    upsertTweet,
     requestAccountRelabelBulk,
     getRequestTimeoutMs: getTwitterRequestTimeoutMs,
     now: () => new Date(),

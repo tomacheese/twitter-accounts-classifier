@@ -238,21 +238,24 @@ async function evaluateAccountRelabelItemGroup(
         const evidence = replyHijackEvidenceByAccountId.get(item.triggerId)
         return evidence ? [evidence] : []
       })
-      const completions = await prisma.$transaction(async (tx) => {
-        if (subBatchLabels.length > 0) {
-          await recordAccountLabelsBulkForAccounts(tx, {
-            sourceKind: 'relabel',
-            labels: subBatchLabels,
+      const completions = await prisma.$transaction(
+        async (tx) => {
+          if (subBatchLabels.length > 0) {
+            await recordAccountLabelsBulkForAccounts(tx, {
+              sourceKind: 'relabel',
+              labels: subBatchLabels,
+            })
+          }
+          for (const evidence of subBatchEvidence) {
+            await upsertReplyHijackEvidence(tx, evidence)
+          }
+          return completeAccountRelabelWorkItemsBulk(tx as unknown as PrismaClient, {
+            workItemIds: subBatch.map((item) => item.id),
+            leaseOwner: options.leaseOwner,
           })
-        }
-        for (const evidence of subBatchEvidence) {
-          await upsertReplyHijackEvidence(tx, evidence)
-        }
-        return completeAccountRelabelWorkItemsBulk(tx as unknown as PrismaClient, {
-          workItemIds: subBatch.map((item) => item.id),
-          leaseOwner: options.leaseOwner,
-        })
-      })
+        },
+        { maxWait: 15_000, timeout: 15_000 },
+      )
       succeeded += completions.length
     } catch (error) {
       logger.error(

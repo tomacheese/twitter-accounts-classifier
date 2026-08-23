@@ -57,14 +57,19 @@ const tweet: TweetInput = {
 function makeDependencies(): RecentTweetsBackfillDependencies & {
   transaction: ReturnType<typeof vi.fn>
   accountUpdate: ReturnType<typeof vi.fn>
+  accountUpdateMany: ReturnType<typeof vi.fn>
   authenticatedClose: ReturnType<typeof vi.fn>
+  upsertTweet: ReturnType<typeof vi.fn>
 } {
   const accountUpdate = vi.fn().mockResolvedValue({})
-  const tx = { account: { update: accountUpdate } } as unknown as PrismaClient
+  const accountUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
+  const tx = {
+    account: { update: accountUpdate, updateMany: accountUpdateMany },
+  } as unknown as PrismaClient
   const transaction = vi.fn((fn: (transactionClient: PrismaClient) => Promise<unknown>) => fn(tx))
   const prisma = {
     $transaction: transaction,
-    account: { update: accountUpdate },
+    account: { update: accountUpdate, updateMany: accountUpdateMany },
   } as unknown as PrismaClient
   const authenticatedClose = vi.fn().mockResolvedValue(undefined)
 
@@ -72,6 +77,7 @@ function makeDependencies(): RecentTweetsBackfillDependencies & {
     prisma,
     transaction,
     accountUpdate,
+    accountUpdateMany,
     authenticatedClose,
     selectCandidates: vi.fn().mockResolvedValue({ accountIds: ['account-a'] }),
     loadConfig: vi.fn().mockReturnValue({
@@ -101,7 +107,7 @@ function makeDependencies(): RecentTweetsBackfillDependencies & {
     fetchAccountProfile: vi.fn().mockResolvedValue(profile),
     fetchRecentTweets: vi.fn().mockResolvedValue({ tweets: [tweet], authors: [profile] }),
     upsertAccount: vi.fn().mockResolvedValue({ account: profile, changed: false }),
-    upsertTweets: vi.fn().mockResolvedValue([]),
+    upsertTweet: vi.fn().mockResolvedValue({ tweet, changed: true }),
     requestAccountRelabelBulk: vi.fn().mockResolvedValue(undefined),
     getRequestTimeoutMs: vi.fn().mockReturnValue(60_000),
     now: vi
@@ -112,6 +118,41 @@ function makeDependencies(): RecentTweetsBackfillDependencies & {
     logError: vi.fn(),
     disconnectPrisma: vi.fn().mockResolvedValue(undefined),
   }
+}
+
+interface CoverageState {
+  lastRecentTweetsAttemptedAt: Date | null
+  lastRecentTweetsFetchedAt: Date | null
+  recentTweetsFetchStatus: string | null
+}
+
+function installCoverageStateFake(
+  deps: ReturnType<typeof makeDependencies>,
+  coverage: CoverageState,
+): void {
+  vi.mocked(deps.accountUpdate).mockImplementation(({ data }: { data: Partial<CoverageState> }) => {
+    Object.assign(coverage, data)
+    return Promise.resolve({} as never)
+  })
+  vi.mocked(deps.accountUpdateMany).mockImplementation(
+    ({
+      where,
+      data,
+    }: {
+      where: { lastRecentTweetsAttemptedAt: Date | null }
+      data: Partial<CoverageState>
+    }) => {
+      const expectedAttempt = where.lastRecentTweetsAttemptedAt
+      const currentAttempt = coverage.lastRecentTweetsAttemptedAt
+      const matches =
+        expectedAttempt === null
+          ? currentAttempt === null
+          : currentAttempt?.getTime() === expectedAttempt.getTime()
+      if (!matches) return Promise.resolve({ count: 0 })
+      Object.assign(coverage, data)
+      return Promise.resolve({ count: 1 })
+    },
+  )
 }
 
 describe('parseOptions', () => {
@@ -148,7 +189,7 @@ describe('runRecentTweetsBackfill', () => {
     expect(deps.loadConfig).not.toHaveBeenCalled()
     expect(deps.createAuthenticatedUserApi).not.toHaveBeenCalled()
     expect(deps.fetchRecentTweets).not.toHaveBeenCalled()
-    expect(deps.upsertTweets).not.toHaveBeenCalled()
+    expect(deps.upsertTweet).not.toHaveBeenCalled()
     expect(deps.transaction).not.toHaveBeenCalled()
     expect(deps.log).toHaveBeenCalledWith(
       JSON.stringify({ mode: 'dry-run', accountIds: ['account-a'] }),
@@ -173,11 +214,17 @@ describe('runRecentTweetsBackfill', () => {
       60_000,
     )
     expect(deps.fetchRecentTweets).toHaveBeenCalledTimes(1)
-    expect(deps.upsertTweets).toHaveBeenCalledWith(expect.anything(), [tweet])
+    expect(deps.upsertTweet).toHaveBeenCalledWith(expect.anything(), tweet)
     expect(deps.requestAccountRelabelBulk).toHaveBeenCalledWith(expect.anything(), ['account-a'])
-    expect(deps.transaction).toHaveBeenCalledTimes(1)
-    expect(deps.accountUpdate).toHaveBeenCalledWith({
-      where: { id: 'account-a' },
+    expect(deps.transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 30_000,
+      timeout: 30_000,
+    })
+    expect(deps.accountUpdateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'account-a',
+        lastRecentTweetsAttemptedAt: null,
+      },
       data: {
         lastRecentTweetsAttemptedAt: new Date('2026-08-24T00:00:00Z'),
         lastRecentTweetsFetchedAt: new Date('2026-08-24T00:00:01Z'),
@@ -252,7 +299,45 @@ describe('runRecentTweetsBackfill', () => {
 
     expect(deps.upsertAccount).toHaveBeenNthCalledWith(1, expect.anything(), profile)
     expect(deps.upsertAccount).toHaveBeenNthCalledWith(2, expect.anything(), fallbackAuthor)
-    expect(deps.upsertTweets).toHaveBeenCalledWith(expect.anything(), [promotedCopy])
+    expect(deps.upsertTweet).toHaveBeenCalledWith(expect.anything(), promotedCopy)
+  })
+
+  it('rolls back profile persistence and does not mark success or enqueue when one tweet fails', async () => {
+    const deps = makeDependencies()
+    let profileStaged = false
+    let profileCommitted = false
+    vi.mocked(deps.upsertAccount).mockImplementation(() => {
+      profileStaged = true
+      return Promise.resolve({ account: profile, changed: false } as never)
+    })
+    vi.mocked(deps.upsertTweet).mockRejectedValue(new Error('synthetic tweet persistence failure'))
+    vi.mocked(deps.transaction).mockImplementation(
+      async (fn: (transactionClient: PrismaClient) => Promise<unknown>) => {
+        try {
+          const result = await fn(deps.prisma)
+          profileCommitted = profileStaged
+          return result
+        } catch (error) {
+          profileStaged = false
+          throw error
+        }
+      },
+    )
+
+    await expect(
+      runRecentTweetsBackfill(
+        ['--limit', '1', '--execute', '--username', 'configured-account'],
+        deps,
+      ),
+    ).rejects.toThrow('synthetic tweet persistence failure')
+
+    expect(profileCommitted).toBe(false)
+    expect(deps.accountUpdateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ recentTweetsFetchStatus: 'success' }),
+      }),
+    )
+    expect(deps.requestAccountRelabelBulk).not.toHaveBeenCalled()
   })
 
   it('disconnects Prisma even when authenticated client cleanup fails', async () => {
@@ -321,8 +406,11 @@ describe('runRecentTweetsBackfill', () => {
         deps,
       )
 
-      expect(deps.accountUpdate).toHaveBeenCalledWith({
-        where: { id: 'account-a' },
+      expect(deps.accountUpdateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'account-a',
+          lastRecentTweetsAttemptedAt: null,
+        },
         data: {
           lastRecentTweetsAttemptedAt: new Date('2026-08-24T00:00:00Z'),
           recentTweetsFetchStatus: 'failed',
@@ -336,4 +424,59 @@ describe('runRecentTweetsBackfill', () => {
       expect(deps.requestAccountRelabelBulk).not.toHaveBeenCalled()
     },
   )
+
+  it('does not apply an older successful fetch after a newer normal-crawl success', async () => {
+    const deps = makeDependencies()
+    const coverage: CoverageState = {
+      lastRecentTweetsAttemptedAt: null,
+      lastRecentTweetsFetchedAt: null,
+      recentTweetsFetchStatus: null,
+    }
+    installCoverageStateFake(deps, coverage)
+    vi.mocked(deps.fetchRecentTweets).mockImplementation(() => {
+      coverage.lastRecentTweetsAttemptedAt = new Date('2026-08-24T00:00:02Z')
+      coverage.lastRecentTweetsFetchedAt = new Date('2026-08-24T00:00:03Z')
+      coverage.recentTweetsFetchStatus = 'success'
+      return Promise.resolve({ tweets: [tweet], authors: [profile] })
+    })
+
+    await runRecentTweetsBackfill(
+      ['--limit', '1', '--execute', '--username', 'configured-account'],
+      deps,
+    )
+
+    expect(coverage).toEqual({
+      lastRecentTweetsAttemptedAt: new Date('2026-08-24T00:00:02Z'),
+      lastRecentTweetsFetchedAt: new Date('2026-08-24T00:00:03Z'),
+      recentTweetsFetchStatus: 'success',
+    })
+    expect(deps.requestAccountRelabelBulk).not.toHaveBeenCalled()
+  })
+
+  it('does not downgrade a newer normal-crawl success after an older fetch failure', async () => {
+    const deps = makeDependencies()
+    const coverage: CoverageState = {
+      lastRecentTweetsAttemptedAt: null,
+      lastRecentTweetsFetchedAt: null,
+      recentTweetsFetchStatus: null,
+    }
+    installCoverageStateFake(deps, coverage)
+    vi.mocked(deps.fetchAccountProfile).mockImplementation(() => {
+      coverage.lastRecentTweetsAttemptedAt = new Date('2026-08-24T00:00:02Z')
+      coverage.lastRecentTweetsFetchedAt = new Date('2026-08-24T00:00:03Z')
+      coverage.recentTweetsFetchStatus = 'success'
+      return Promise.reject(new Error('synthetic profile failure'))
+    })
+
+    await runRecentTweetsBackfill(
+      ['--limit', '1', '--execute', '--username', 'configured-account'],
+      deps,
+    )
+
+    expect(coverage).toEqual({
+      lastRecentTweetsAttemptedAt: new Date('2026-08-24T00:00:02Z'),
+      lastRecentTweetsFetchedAt: new Date('2026-08-24T00:00:03Z'),
+      recentTweetsFetchStatus: 'success',
+    })
+  })
 })
