@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { tweetAiGeneratedMediaRule } from './tweet-ai-generated-media'
 import type { AccountFeatureBundle } from '../types'
 
-function makeBundle(recentTweets: AccountFeatureBundle['recentTweets']): AccountFeatureBundle {
+function makeBundle(
+  recentTweets: AccountFeatureBundle['recentTweets'],
+  recentTweetsFetchStatus?: AccountFeatureBundle['account']['recentTweetsFetchStatus'],
+): AccountFeatureBundle {
   return {
     account: {
       id: '1',
@@ -15,6 +18,7 @@ function makeBundle(recentTweets: AccountFeatureBundle['recentTweets']): Account
       accountCreatedAt: new Date(),
       isBlueVerified: false,
       verifiedType: null,
+      ...(recentTweetsFetchStatus !== undefined ? { recentTweetsFetchStatus } : {}),
     },
     recentTweets,
   }
@@ -47,6 +51,22 @@ describe('tweetAiGeneratedMediaRule', () => {
   it('is false for an account with no recent tweets', () => {
     const result = tweetAiGeneratedMediaRule.evaluate(makeBundle([]))
     expect(result.value).toBe(false)
+  })
+
+  it('is evaluable=false when recentTweets was never fetched', () => {
+    const result = tweetAiGeneratedMediaRule.evaluate(makeBundle([], null))
+    expect(result).toMatchObject({ value: false, confidence: 0.5, evaluable: false })
+  })
+
+  it('is evaluable=false when recentTweets fetch failed', () => {
+    const result = tweetAiGeneratedMediaRule.evaluate(makeBundle([], 'failed'))
+    expect(result).toMatchObject({ value: false, confidence: 0.5, evaluable: false })
+  })
+
+  it('is an evaluable negative when recentTweets fetch succeeded with no tweets', () => {
+    const result = tweetAiGeneratedMediaRule.evaluate(makeBundle([], 'success'))
+    expect(result).toMatchObject({ value: false, confidence: 0 })
+    expect(result.evaluable).not.toBe(false)
   })
 
   it('is true with high confidence when the detection source is C2paClient', () => {
