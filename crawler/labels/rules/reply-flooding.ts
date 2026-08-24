@@ -11,7 +11,7 @@ import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 // こちらは同一アカウントによる言い換えの繰り返しであるため。
 const MIN_REPLIES_TO_SAME_TARGET = 8
 const WINDOW_HOURS = 24
-const SIMILARITY_THRESHOLD = 0.03
+const SIMILARITY_THRESHOLD = 0.05
 
 // reason 文字列にハンドルを人が読める形で表示するためだけに使う。
 // グルーピング自体は `inReplyToTweetId` を基準に行う。
@@ -21,7 +21,7 @@ export const replyFloodingRule: LabelRule = {
   key: 'reply_flooding',
   description:
     '同一相手への返信を短時間のうちに大量投稿しており、その文面が言い換えや翻訳違いを含めて内容的に酷似している。1つのバズったツイートに大量の言い換えリプライを浴びせてインプレッションを稼ぐ「インプレゾンビ」の典型パターン',
-  version: '1.4.0',
+  version: '1.5.0',
   evaluate(bundle) {
     // 先頭の @メンション(会話相手)でグルーピングすると、
     // 通常の相互会話との区別ができない。一人との往復チャットや口論でも、
