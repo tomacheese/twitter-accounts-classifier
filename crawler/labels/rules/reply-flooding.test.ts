@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { replyFloodingRule } from './reply-flooding'
 import type { AccountFeatureBundle } from '../types'
+import * as textSimilarity from '../text-similarity'
 
 function makeBundle(
   tweets: {
@@ -66,6 +67,75 @@ describe('replyFloodingRule', () => {
 
     expect(result.value).toBe(true)
     expect(result.confidence).toBeGreaterThan(0)
+  })
+
+  it('is false for a genuine same-target exchange just below the calibrated similarity threshold', () => {
+    const bundle = makeBundle(
+      [
+        'まじでそう 駅前の新しいカフェ行ってみたよ',
+        'まじでそう 明日の予定どうする？',
+        'まじでそう そのアニメ全部見たわ',
+        'まじでそう 雨すごいね、傘持ってる？',
+        'バイト終わったら連絡するね',
+        'ケーキ焼いたら失敗した',
+        '来週のライブ楽しみすぎる',
+        '仕事が片付いて安心した',
+      ].map((text, i) => ({
+        fullText: `@target ${text}`,
+        isReply: true,
+        minutesAgo: i * 3,
+      })),
+    )
+
+    const result = replyFloodingRule.evaluate(bundle)
+
+    expect(result.value).toBe(false)
+  })
+
+  it('keeps an exchange at the calibrated similarity threshold positive', () => {
+    const similaritySpy = vi
+      .spyOn(textSimilarity, 'averagePairwiseSimilarity')
+      .mockReturnValue(0.05)
+
+    try {
+      const result = replyFloodingRule.evaluate(
+        makeBundle(
+          Array.from({ length: 8 }, (_, i) => ({
+            fullText: `@target 言い換えリプライ ${i}`,
+            isReply: true,
+            minutesAgo: i * 3,
+          })),
+        ),
+      )
+
+      expect(result.value).toBe(true)
+      expect(result.confidence).toBe(0.5)
+    } finally {
+      similaritySpy.mockRestore()
+    }
+  })
+
+  it('keeps an unrounded score below the threshold negative when its reason would round to 0.050', () => {
+    const similaritySpy = vi
+      .spyOn(textSimilarity, 'averagePairwiseSimilarity')
+      .mockReturnValue(0.0496)
+
+    try {
+      const result = replyFloodingRule.evaluate(
+        makeBundle(
+          Array.from({ length: 8 }, (_, i) => ({
+            fullText: `@target 類似度境界の返信 ${i}`,
+            isReply: true,
+            minutesAgo: i * 3,
+          })),
+        ),
+      )
+
+      expect(result.value).toBe(false)
+      expect(result.confidence).toBe(1)
+    } finally {
+      similaritySpy.mockRestore()
+    }
   })
 
   it('is false for a genuine extended chat where each reply is topically unrelated', () => {
