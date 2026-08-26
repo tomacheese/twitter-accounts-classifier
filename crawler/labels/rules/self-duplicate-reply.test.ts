@@ -9,6 +9,7 @@ function makeBundle(
     isRetweet?: boolean
     inReplyToTweetId?: string | null
   }[],
+  accountOverrides: Partial<AccountFeatureBundle['account']> = {},
 ): AccountFeatureBundle {
   return {
     account: {
@@ -22,6 +23,7 @@ function makeBundle(
       accountCreatedAt: new Date(),
       isBlueVerified: false,
       verifiedType: null,
+      ...accountOverrides,
     },
     recentTweets: tweets.map((t, i) => ({
       id: `t${i}`,
@@ -151,6 +153,19 @@ describe('selfDuplicateReplyRule', () => {
 
   it('is not evaluable when no tweets have ever been crawled for the account, rather than reporting full confidence on absent data', () => {
     const bundle = makeBundle([])
+
+    const result = selfDuplicateReplyRule.evaluate(bundle)
+
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBeCloseTo(0.5)
+  })
+
+  it('is not evaluable when the recent-tweets fetch failed and only a stray tweet landed, rather than reporting full confidence on a partial fetch', () => {
+    const bundle = makeBundle(
+      [{ fullText: 'これはとても素晴らしい情報ですね！ぜひ拡散をお願いします', isReply: false }],
+      { recentTweetsFetchStatus: null },
+    )
 
     const result = selfDuplicateReplyRule.evaluate(bundle)
 

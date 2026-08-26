@@ -76,6 +76,13 @@ describe('topicPetsRule', () => {
     ).toBe(false)
   })
 
+  it('is false for a VTuber bio describing itself as a reincarnated 飼い猫 persona, not a real owned pet', () => {
+    expect(
+      topicPetsRule.evaluate(makeBundle({ bio: 'セルフ受肉飼い猫VTuberです。配信は毎晩21時から' }))
+        .value,
+    ).toBe(false)
+  })
+
   it('is false for an unrelated bio', () => {
     expect(
       topicPetsRule.evaluate(makeBundle({ bio: '毎日ラーメンの写真を載せています' })).value,

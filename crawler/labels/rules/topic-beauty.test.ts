@@ -61,6 +61,21 @@ describe('topicBeautyRule', () => {
     ).toBe(false)
   })
 
+  it('is false for a bio using 美容 as an investment sector descriptor, not a personal interest', () => {
+    expect(
+      topicBeautyRule.evaluate(makeBundle({ bio: '美容系の優待株を中心に長期投資しています' }))
+        .value,
+    ).toBe(false)
+  })
+
+  it('is true when a genuine beauty keyword follows an earlier investment-sector 美容 mention', () => {
+    expect(
+      topicBeautyRule.evaluate(
+        makeBundle({ bio: '美容系の優待株が趣味、あとコスメ集めも好きです' }),
+      ).value,
+    ).toBe(true)
+  })
+
   it('is false for an unrelated bio', () => {
     expect(
       topicBeautyRule.evaluate(makeBundle({ bio: '毎日ラーメンの写真を載せています' })).value,
