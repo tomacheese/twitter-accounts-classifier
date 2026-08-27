@@ -1,11 +1,20 @@
 import { rampScore, toConfidence } from '../confidence'
-import { hasLinguisticContent } from '../text-similarity'
+import { stripUrlMentionAndRetweetPrefix } from '../text-similarity'
 import type { LabelRule } from '../types'
 
 // 完全な言語判定ではなく日本語スクリプト(ひらがな/カタカナ/漢字)の有無のみを判定する。
 // 既存のトピック系ルール群(topic_tech、topic_finance など)と同様、
 // このプロジェクトが対象とするのは日本語 Twitter であるため。
 const JAPANESE_SCRIPT_PATTERN = /[぀-ヿ一-鿿]/
+
+// 丸囲み文字や矢印・星などの装飾記号は Unicode 上も文字(Letter)ではなく記号(Symbol)に分類されるため、
+// 絵文字を多用するが実際の文字を含む正当な非日本語投稿とは Letter の有無で区別できる。
+const LETTER_PATTERN = /\p{L}/u
+
+// 装飾記号のみで構成される投稿は、日本語か否かに関わらず言語のシグナルを持たない空サンプルにすぎない。
+function hasScriptContent(text: string): boolean {
+  return LETTER_PATTERN.test(stripUrlMentionAndRetweetPrefix(text))
+}
 
 const MIN_SAMPLE_PER_SIDE = 3
 const SCRIPT_MISMATCH_THRESHOLD = 0.7
@@ -19,14 +28,14 @@ export const replyLanguageMismatchRule: LabelRule = {
   key: 'reply_language_mismatch',
   description:
     '自身のツイートは特定の言語体系にほぼ偏っているが、リプライ(自身のリプライを自己リツイートしているものを含む)では無関係な対象読者向けに突然言語が切り替わる。エンゲージメント稼ぎボットネットワークの特徴',
-  version: '1.3.0',
+  version: '1.4.0',
   evaluate(bundle) {
     const { screenName } = bundle.account
     // リンクのみの投稿はスクリプト比率が常に0になり、
     // 言語の「不一致」の根拠ではなく単に言語的内容を持たない空サンプルにすぎないため、
     // 比率の算出対象から除く。
     const ownPosts = bundle.recentTweets.filter(
-      (t) => !t.isReply && !t.isRetweet && hasLinguisticContent(t.fullText),
+      (t) => !t.isReply && !t.isRetweet && hasScriptContent(t.fullText),
     )
 
     // 自身のスクリーンネームが引用元として表示される「リツイート」は、
@@ -44,7 +53,7 @@ export const replyLanguageMismatchRule: LabelRule = {
     const replies = bundle.recentTweets.filter(
       (t) =>
         (t.isReply || (t.isRetweet && isSelfRetweetedReply(t.fullText))) &&
-        hasLinguisticContent(t.fullText),
+        hasScriptContent(t.fullText),
     )
 
     const hasEnoughSample =

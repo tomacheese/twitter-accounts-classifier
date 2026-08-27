@@ -118,6 +118,45 @@ describe('buildReplyHijackIndex', () => {
 
     expect(index.swarmSizeFor('unknown', 'target1')).toBe(0)
   })
+
+  it('is 0 for independent critical replies that only converge on shared criticism vocabulary', () => {
+    const corpus = [
+      entry(
+        'a1',
+        'これは元動画からの無断転用ですよね、権利者にクレジット表記すべきです',
+        'target1',
+        0,
+      ),
+      entry(
+        'a2',
+        '元ネタを無断転用しているのに、クレジット表記が一切ないのはおかしいと思う',
+        'target1',
+        1,
+      ),
+      entry(
+        'a3',
+        '無断転用元の作者へのクレジット表記なしで投稿するのは問題があります',
+        'target1',
+        2,
+      ),
+      entry(
+        'a4',
+        '無断転用だと気づきました。せめてクレジット表記くらいはしてほしいです',
+        'target1',
+        3,
+      ),
+      entry(
+        'a5',
+        '無断転用されている作品なので、クレジット表記を追加してほしいですね',
+        'target1',
+        4,
+      ),
+    ]
+
+    const index = buildReplyHijackIndex(corpus)
+
+    expect(index.swarmSizeFor('a1', 'target1')).toBe(0)
+  })
 })
 
 describe('ReplyHijackIndex.isEligibleForScreening', () => {

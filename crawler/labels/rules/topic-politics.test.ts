@@ -166,4 +166,11 @@ describe('topicPoliticsRule', () => {
       topicPoliticsRule.evaluate(makeBundle({ bio: '市議会議員/元県議の会合に出席' })).value,
     ).toBe(false)
   })
+
+  it('is true for a specific office title delimited by a full-width slash in a tag-listing bio', () => {
+    expect(
+      topicPoliticsRule.evaluate(makeBundle({ bio: '会社員／二児の父／○○市議会議員／広報担当' }))
+        .value,
+    ).toBe(true)
+  })
 })

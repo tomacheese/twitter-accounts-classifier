@@ -301,6 +301,37 @@ describe('crossTargetTemplatedReplyRule', () => {
     expect(result.confidence).toBe(0.5)
   })
 
+  it('is false for a benign administrative decline reply sent to 5+ distinct offer targets', () => {
+    const bundle = makeBundle(
+      Array.from({ length: 5 }, (_, i) => ({
+        fullText: 'ごめんなさい、もう決まりました。またの機会にぜひよろしくお願いします',
+        isReply: true,
+        hoursAgo: i,
+        inReplyToTweetId: `offer${i}`,
+      })),
+    )
+
+    const result = crossTargetTemplatedReplyRule.evaluate(bundle)
+
+    expect(result.value).toBe(false)
+  })
+
+  it('is still true when a decline-worded template also carries solicitation language', () => {
+    const bundle = makeBundle(
+      Array.from({ length: 5 }, (_, i) => ({
+        fullText:
+          'ごめんなさい、こちらは終了しました。よければプロフィールから他の企画もチェックしてね',
+        isReply: true,
+        hoursAgo: i,
+        inReplyToTweetId: `target${i}`,
+      })),
+    )
+
+    const result = crossTargetTemplatedReplyRule.evaluate(bundle)
+
+    expect(result.value).toBe(true)
+  })
+
   it('keeps a confident false when recentTweets were fetched successfully but no templated group exists', () => {
     const result = crossTargetTemplatedReplyRule.evaluate(
       makeBundle([], { recentTweetsFetchStatus: 'success' }),

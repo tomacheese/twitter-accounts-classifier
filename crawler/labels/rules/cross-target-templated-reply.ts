@@ -8,6 +8,22 @@ const MIN_DISTINCT_TARGETS = 5
 const WINDOW_HOURS = 24
 const TEXT_HASH_LENGTH = 16
 
+// 取引募集への応募・問い合わせ対応のような良性の定型的事務応答は、
+// このルールの description が対象とするパターンとは性質が異なる。
+// 両者を厳密に切り分ける一般的な基準は設計できないため、
+// 謝罪・お断り・完了通知の語彙を含み、賞賛・誘導語彙を伴わない場合に限り除外する。
+const ADMINISTRATIVE_DECLINE_PATTERN =
+  /ごめんなさい|申し訳(ございません|ありません|ない)|お断り(いたします|します)?|決まりました|終了(しました|いたしました)|締め切(りました|らせていただきました)|売約済み|完売(しました|いたしました)?/
+const PRAISE_OR_SOLICITATION_PATTERN =
+  /フォロー|拡散|いいね|プロフ(ィール)?(から|欄)|こちら(から|より)?|詳しくは|dm|相互|チェック/i
+
+function isBenignAdministrativeDecline(normalizedText: string): boolean {
+  return (
+    ADMINISTRATIVE_DECLINE_PATTERN.test(normalizedText) &&
+    !PRAISE_OR_SOLICITATION_PATTERN.test(normalizedText)
+  )
+}
+
 interface ReplyEntry {
   targetTweetId: string
   createdAt: Date
@@ -83,7 +99,7 @@ export const crossTargetTemplatedReplyRule: LabelRule = {
   key: 'cross_target_templated_reply',
   description:
     '同一または実質同一の定型リプライを、短時間のうちに複数の異なる親ツイートへ反復投稿している。インプレッション獲得目的のアカウントが異なるバズ投稿へ同じ賞賛文・誘導文を大量に返信する典型パターン',
-  version: '1.2.0',
+  version: '1.3.0',
   evaluate(bundle) {
     // 自分自身の過去ツイートへの返信はスレッド内の連投であり、
     // 異なる他者への反復投稿という本ルールの検出対象ではないため除外する
@@ -105,6 +121,7 @@ export const crossTargetTemplatedReplyRule: LabelRule = {
     for (const [normalizedText, entries] of groups) {
       const stats = computeGroupStats(normalizedText, entries)
       if (stats.targetCount < MIN_DISTINCT_TARGETS) continue
+      if (isBenignAdministrativeDecline(normalizedText)) continue
       if (best === null || isBetterGroup(stats, best)) {
         best = stats
       }

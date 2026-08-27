@@ -127,16 +127,24 @@ export function averagePairwiseSimilarity(
   return pairs === 0 ? 0 : total / pairs
 }
 
+/**
+ * URL・@mention・自己リツイートの接頭辞を除去する。
+ * @param text - ツイートの生本文
+ * @returns 除去後のテキスト
+ */
+export function stripUrlMentionAndRetweetPrefix(text: string): string {
+  return text
+    .replace(/^RT @\w+:\s*/i, '')
+    .replaceAll(/https?:\/\/\S+/gi, '')
+    .replaceAll(/@\w+/g, '')
+    .trim()
+}
+
 // リンクのみの投稿は、言語やトピックに関わらず内容比較上のシグナルを持たない空サンプルにすぎない。
 // URL・メンション・自己リツイートの接頭辞を除去し、
 // 実質的なテキストが残っている場合のみ「言語的内容を持つ」とみなす。
 // reply-language-mismatch と bare-link-spam の両方が、
 // この「実質空かどうか」の判定を同じ基準で必要とするため共有する。
 export function hasLinguisticContent(text: string): boolean {
-  const stripped = text
-    .replace(/^RT @\w+:\s*/i, '')
-    .replaceAll(/https?:\/\/\S+/gi, '')
-    .replaceAll(/@\w+/g, '')
-    .trim()
-  return stripped.length > 0
+  return stripUrlMentionAndRetweetPrefix(text).length > 0
 }

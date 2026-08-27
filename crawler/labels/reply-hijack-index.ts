@@ -1,6 +1,18 @@
 import { averagePairwiseSimilarity, normalizeForSimilarity } from './text-similarity'
 import type { ReplyHijackEvidenceDetails } from '../db/reply-hijack-evidence-repository'
 
+// 独立した批判・指摘の語彙的収束(例:複数アカウントが独立に無断転用を指摘する)を、
+// 定型追従型の reply-hijack swarm と区別するための判定。
+// テキスト類似度の閾値を上げる、または決まり文句を除去するだけでは対応できない。
+// 真の swarm も独立した批判も、語彙が収束する点では同型であり、
+// 類似度だけでは区別できないためである。
+// エンゲージメント稼ぎ目的の定型追従リプライは称賛・便乗が大半を占め、
+// 批判・指摘語彙が支配的になることは通常ない。
+// そのため、批判・指摘語彙の有無という意味内容ベースの軽量なシグナルで区別する。
+const CRITICISM_VOCAB_PATTERN =
+  /無断転用|無断使用|無断掲載|パクリ|盗用|剽窃|著作権侵害|クレジット表記|出典(を明記|明示)|引用元を明記/
+const MIN_CRITICISM_FRACTION = 0.6
+
 const MIN_DISTINCT_AUTHORS = 5
 const WINDOW_HOURS = 24
 // しきい値をより低く設定すると、お悔やみの返信や祝福の連投、
@@ -89,6 +101,9 @@ export function buildReplyHijackIndex(corpus: ReplyHijackCorpusEntry[]): ReplyHi
 
     const similarity = averagePairwiseSimilarity(replies.map((r) => r.fullText))
     if (similarity < SIMILARITY_THRESHOLD) continue
+
+    const criticismCount = replies.filter((r) => CRITICISM_VOCAB_PATTERN.test(r.fullText)).length
+    if (criticismCount / replies.length >= MIN_CRITICISM_FRACTION) continue
 
     evidenceByTarget.set(targetTweetId, {
       targetTweetId,

@@ -136,4 +136,45 @@ describe('adReplyHijackRule', () => {
     const result = adReplyHijackRule.evaluate(makeBundle([ownTweet, ...selfThreadReplies]))
     expect(result.value).toBe(false)
   })
+
+  it('is false for a brand account replying to its own giveaway campaign applicants, who mention it', () => {
+    const campaignReplyTweet = (i: number): AccountFeatureBundle['recentTweets'][number] => ({
+      id: `c${i}`,
+      fullText: `@applicant${i} この度のプレゼント企画は落選でした。またのご応募をお待ちしております`,
+      createdAt: new Date(),
+      retweetCount: 0,
+      likeCount: 0,
+      isReply: true,
+      isRetweet: false,
+      isPromoted: false,
+      isPaidPromotion: false,
+      parentTweetFullText: `@brand_official 応募します！このプレゼント企画当たるといいな`,
+    })
+    const tweets = [1, 2, 3, 4].map((i) => campaignReplyTweet(i))
+    const result = adReplyHijackRule.evaluate({
+      account: {
+        id: '1',
+        screenName: 'brand_official',
+        displayName: 'Brand',
+        bio: null,
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        isBlueVerified: false,
+        verifiedType: null,
+      },
+      recentTweets: tweets,
+    })
+    expect(result.evaluable).toBe(false)
+  })
+
+  it('is still true when the ad pitch targets tweets that never mention the replying account', () => {
+    const tweets = [1, 2, 3, 4].map((i) => ({
+      ...giveawayReplyTweet(i),
+      parentTweetFullText: `バズってるね #${i}`,
+    }))
+    const result = adReplyHijackRule.evaluate(makeBundle(tweets))
+    expect(result.value).toBe(true)
+  })
 })
