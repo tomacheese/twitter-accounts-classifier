@@ -37,10 +37,30 @@ const INSTITUTIONAL_CONTEXT_PATTERN =
 // 使われるが、「画像/イラスト/作品を紹介します」のように自身のコンテンツ名詞を目的語に取る場合は、
 // 「画像は」のような主題化(は)ではなく目的語化(を)であっても、実質的に自己申告と同じである。
 const PERSONAL_CONTENT_DECLARATION_PATTERN =
-  /画像は|イラストは|作品(です|を投稿)|ヘッダーは|アイコンは|投稿して(います|ます)|保管庫|ポートレート|(?:画像|イラスト|作品)を紹介(?:します|しています)|-generated (images?|art|content|portraits?)|images? are AI/i
+  /画像は|イラストは|作品(です|を投稿)|ヘッダーは|アイコンは|保管庫|ポートレート|(?:画像|イラスト|作品)を紹介(?:します|しています)|-generated (images?|art|content|portraits?)|images? are AI/i
+
+// 「投稿して(います|ます)」は画像/イラストなどのコンテンツ名詞を伴わない限り、
+// 単に何らかの記事を投稿している意味でしかなく、AI生成物の自己申告にはならない。
+// そのため直前に自身のコンテンツを指す名詞が無い場合は自己申告とみなさない。
+const CONTENT_NOUN_PATTERN = /画像|イラスト|作品|写真|アイコン|ヘッダー|ポートレート/
+const CONTENT_POST_DECLARATION_WINDOW_LENGTH = 15
+
+function isContentPostDeclaration(bio: string): boolean {
+  const match = /投稿して(?:います|ます)/.exec(bio)
+  if (match === null) return false
+  const beforeMatch = bio.slice(
+    Math.max(0, match.index - CONTENT_POST_DECLARATION_WINDOW_LENGTH),
+    match.index,
+  )
+  return CONTENT_NOUN_PATTERN.test(beforeMatch)
+}
+
+function isPersonalContentDeclaration(bio: string): boolean {
+  return PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio) || isContentPostDeclaration(bio)
+}
 
 function isInstitutionalMention(bio: string): boolean {
-  return INSTITUTIONAL_CONTEXT_PATTERN.test(bio) && !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
+  return INSTITUTIONAL_CONTEXT_PATTERN.test(bio) && !isPersonalContentDeclaration(bio)
 }
 
 // 職業的な文脈と同じ「AIは話題・関心事であり、
@@ -51,7 +71,7 @@ const TOPIC_INTEREST_CONTEXT_PATTERN =
   /情報収集|実?活用|遊び|勉強中|興味|関心|ウォッチ|ウォチ|先端技術|追って|学ぼう|学ぶ|半導体|銘柄|効率化|業務改善|著作権問題|オタク|マニア/i
 
 function isTopicInterestMention(bio: string): boolean {
-  return TOPIC_INTEREST_CONTEXT_PATTERN.test(bio) && !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
+  return TOPIC_INTEREST_CONTEXT_PATTERN.test(bio) && !isPersonalContentDeclaration(bio)
 }
 
 // 生成AIに反対するアカウント(アンチAI活動家や、
@@ -110,7 +130,7 @@ function isAccountRestrictionMention(bio: string): boolean {
 function isThirdPartyReference(bio: string): boolean {
   return (
     (THIRD_PARTY_REFERENCE_PATTERN.test(bio) || isAccountRestrictionMention(bio)) &&
-    !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
+    !isPersonalContentDeclaration(bio)
   )
 }
 
@@ -128,7 +148,7 @@ function isListEnumerationItem(bio: string): boolean {
   const after = bio.slice(match.index + match[0].length).trimStart()
   const beforeIsDelimiter = before.length === 0 || LIST_DELIMITER_CHARS.has(before.at(-1) ?? '')
   const afterIsDelimiter = after.length === 0 || LIST_DELIMITER_CHARS.has(after.at(0) ?? '')
-  return beforeIsDelimiter && afterIsDelimiter && !PERSONAL_CONTENT_DECLARATION_PATTERN.test(bio)
+  return beforeIsDelimiter && afterIsDelimiter && !isPersonalContentDeclaration(bio)
 }
 
 // AI_OPPOSITION_PATTERN は用語の直後に「反対」が続く定型文のみを対象としているため、
@@ -153,7 +173,7 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.9.7',
+  version: '1.9.8',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =

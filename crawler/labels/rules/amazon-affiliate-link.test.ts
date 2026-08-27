@@ -86,4 +86,13 @@ describe('amazonAffiliateLinkRule', () => {
     expect(result.evaluable).toBe(false)
     expect(result.confidence).toBeCloseTo(0.5)
   })
+
+  it('recentTweets の取得に失敗している場合も、false のまま evaluable: false になる', () => {
+    const bundle = makeBundle([])
+    bundle.account.recentTweetsFetchStatus = 'failed'
+    const result = amazonAffiliateLinkRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBeCloseTo(0.5)
+  })
 })
