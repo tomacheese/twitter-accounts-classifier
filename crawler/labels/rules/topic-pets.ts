@@ -5,15 +5,17 @@ import type { LabelRule } from '../types'
 // 「猫背」「猫舌」「負け犬」「犬猿の仲」のような、動物と無関係な慣用句を避けるため、
 // 単独の「猫」「犬」ではなく愛玩動物としての飼育・愛好を明示する複合語のみを対象とする。
 // 「わんこ」「にゃんこ」は単独では同名ゲームのキャラクター・コミュニティ文脈と区別できないため対象から外す。
+// 「飼い猫」「飼い犬」の直前の「受肉」は、VTuber が動物キャラクターへ転生した設定を示す語である。
+// 実在のペット飼育を意味しないため除外する。
 const PETS_PATTERN =
-  /愛猫|愛犬|飼い猫|飼い犬|保護猫|保護犬|猫好き|犬好き|ねこ好き|いぬ好き|多頭飼い|\bpet\s*(?:lover|parent)\b/i
+  /愛猫|愛犬|(?<!受肉)飼い猫|(?<!受肉)飼い犬|保護猫|保護犬|猫好き|犬好き|ねこ好き|いぬ好き|多頭飼い|\bpet\s*(?:lover|parent)\b/i
 
 const KEYWORD_SCORE = 0.8
 
 export const topicPetsRule: LabelRule = {
   key: 'topic_pets',
   description: 'プロフィールの直接証拠、またはフォロー関係からペットとの強い関連が示される',
-  version: '1.0.1',
+  version: '1.0.2',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
