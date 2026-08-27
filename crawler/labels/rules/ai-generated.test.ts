@@ -197,6 +197,15 @@ describe('aiGeneratedRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it('is false for an institutional AI-consultant bio that separately mentions posting unrelated blog notes', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({
+        bio: '生成AI導入支援を行うプロンプトエンジニアです。開発の記録をnoteに投稿してます。',
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
   it('is still true for an institutional-sounding bio that also explicitly declares its own posted images are AI-generated', () => {
     const result = aiGeneratedRule.evaluate(
       makeBundle({
