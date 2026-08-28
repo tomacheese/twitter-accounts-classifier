@@ -1,7 +1,7 @@
 import { Logger } from '@book000/node-utils'
 import { captureException, initMonitoring } from './monitoring/sentry'
 import { loadConfig } from './config/load-config'
-import { CRAWL_LIMITS } from './config/crawl-limits'
+import { CRAWL_LIMITS, SELF_REPLY_PROMO_CHAIN_LIMITS } from './config/crawl-limits'
 import { getCookieIssuerBaseUrl } from './config/env'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
@@ -15,13 +15,20 @@ import {
   mergeTweetAdFlags,
 } from 'twitter-client'
 import { createTweetApiLike, type TweetApiLike } from './twitter/timeline'
-import { createTweetDetailApiLike, type TweetDetailApiLike } from './twitter/engagement'
+import {
+  createTweetDetailApiLike,
+  fetchReplies,
+  type TweetDetailApiLike,
+} from './twitter/engagement'
 import {
   fetchAccountProfile,
   fetchRecentTweets,
   createUserApiLike,
   type UserApiLike,
 } from './twitter/profile'
+import { fetchSelfReplyChain } from './twitter/self-reply-chain'
+import { classifyXStatusUrl } from './labels/x-status-url'
+import { TweetDetailRateLimitBudget } from './twitter/tweet-detail-rate-limit-budget'
 
 const logger = Logger.configure('crawl-tweet')
 
@@ -35,6 +42,8 @@ export interface ManualTweetCrawlDependencies {
   persistAccount: (input: AccountProfileInput) => Promise<void>
   persistTweets: (inputs: TweetInput[]) => Promise<void>
   recentTweetsPerAccount: number
+  repliesPerTweet: number
+  tweetDetailRateLimitBudget: TweetDetailRateLimitBudget
 }
 
 export interface ManualTweetCrawlResult {
@@ -67,17 +76,36 @@ export async function runManualTweetCrawl(
     source: 'manual',
     viewerAccountId: focalRaw.user.restId,
   })
-  const replies = rawEntries
-    .filter((entry) => entry.legacy.inReplyToStatusIdStr === tweetId)
-    .map((entry) =>
-      toTweetInput(entry, { source: 'manual', viewerAccountId: focalRaw.user.restId }),
+
+  const { authorReplies, otherReplies, authors: replyAuthors } = await fetchReplies(
+    tweetApi,
+    parentTweet,
+    deps.repliesPerTweet,
+  )
+  const replies = [...authorReplies, ...otherReplies]
+  const persistedReplyTweets = [...replies]
+
+  // screenName を持たないためここでは自己リンク除外までは行わず、
+  // x.com/twitter.com のステータスへの誘導であれば深掘り対象とする。
+  // 自己リンクの厳密な除外は index 構築時 (self-reply-promo-index.ts) で行う。
+  for (const reply of authorReplies) {
+    const hasThirdPartyStatusLink = (reply.expandedUrls ?? []).some(
+      (url) => classifyXStatusUrl(url) !== null,
     )
+    if (!hasThirdPartyStatusLink) continue
+    const chainNodes = await fetchSelfReplyChain(tweetApi, deps.tweetDetailRateLimitBudget, reply, {
+      maxDepth: SELF_REPLY_PROMO_CHAIN_LIMITS.maxDepth,
+      maxNodesPerRoot: SELF_REPLY_PROMO_CHAIN_LIMITS.maxNodesPerRoot,
+    })
+    persistedReplyTweets.push(...chainNodes)
+  }
 
   // 専用のプロフィール取得だけに頼らない: 対象アカウントが凍結等で取得に失敗した場合に備え、
   // レスポンスに埋め込まれたプロフィールもフォールバックとして保持する。
   const extraAuthors = new Map<string, AccountProfileInput>()
   for (const entry of rawEntries)
     extraAuthors.set(entry.user.restId, toAccountProfileInput(entry.user))
+  for (const author of replyAuthors) extraAuthors.set(author.id, author)
 
   const replyAuthorIds = [...new Set(replies.map((reply) => reply.accountId))]
   const succeededAuthorIds = new Set<string>()
@@ -109,7 +137,9 @@ export async function runManualTweetCrawl(
     await deps.persistAccount(profile)
   }
 
-  await deps.persistTweets(mergeTweetAdFlags([parentTweet, ...replies, ...profileTweets]))
+  await deps.persistTweets(
+    mergeTweetAdFlags([parentTweet, ...persistedReplyTweets, ...profileTweets]),
+  )
 
   return { repliesFound: replies.length, accountsProcessed: succeededAuthorIds.size }
 }
@@ -157,6 +187,8 @@ async function main(): Promise<void> {
           await upsertTweets(prisma, inputs)
         },
         recentTweetsPerAccount: CRAWL_LIMITS.recentTweetsPerAccount,
+        repliesPerTweet: CRAWL_LIMITS.repliesPerTweet,
+        tweetDetailRateLimitBudget: new TweetDetailRateLimitBudget({ now: Date.now }),
       },
       tweetId,
     )
