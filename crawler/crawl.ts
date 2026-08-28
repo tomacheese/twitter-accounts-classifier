@@ -50,6 +50,7 @@ import {
   withTimeout,
   mergeTweetAdFlags,
   toAccountProfileInput,
+  toTweetInput,
   createOpenApiClient as createRealOpenApiClient,
   closeOpenApiClient as closeRealOpenApiClient,
   createTrendsScraper as createRealTrendsScraper,
@@ -851,6 +852,63 @@ export async function runAuthorUnitPhase(
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
       const authorOtherReplies = otherRepliesByAuthor.get(authorId) ?? []
 
+      // このサイクル内で self-reply promo 候補を 1 件でも観測したアカウントのみを深掘り対象にする。
+      // 全アカウントを無条件に深掘りしない。
+      const hasSelfReplyPromoCandidateThisCycle = recentTweets.some(
+        (tweet) =>
+          tweet.isAuthorReply &&
+          (tweet.expandedUrls ?? []).some((url) => classifyXStatusUrl(url) !== null),
+      )
+      const selfReplyPromoProbeTweets: TweetInput[] = []
+      if (hasSelfReplyPromoCandidateThisCycle) {
+        const tweetApi = client.getTweetApi()
+        const now = Date.now()
+        const minAgeMs = SELF_REPLY_PROMO_CHAIN_LIMITS.candidateMinAgeHours * 60 * 60 * 1000
+        const probeRoots = sortByEngagement(
+          recentTweets.filter(
+            (tweet) =>
+              !tweet.isReply &&
+              !tweet.isRetweet &&
+              now - tweet.createdAt.getTime() >= minAgeMs,
+          ),
+        ).slice(0, SELF_REPLY_PROMO_CHAIN_LIMITS.candidateProbeCount)
+
+        for (const root of probeRoots) {
+          const decision = tweetDetailRateLimitBudget.acquireOptionalFetch()
+          if (decision !== 'allowed') break
+          let probeResponse
+          try {
+            probeResponse = await tweetApi.getTweetDetail({ focalTweetId: root.id })
+            const captured = getLastResponseMatching('TweetDetail')
+            tweetDetailRateLimitBudget.recordSuccess({
+              rateLimitRemaining: captured?.rateLimitRemaining,
+              rateLimitReset: captured?.rateLimitReset,
+            })
+          } catch (error) {
+            const diagnostics = getResponseErrorDiagnostics(error)
+            if (diagnostics?.httpStatus === 429) tweetDetailRateLimitBudget.recordRateLimited(diagnostics)
+            continue
+          }
+          const selfReplyNode = probeResponse.data.data
+            .filter((raw) => raw.legacy.inReplyToStatusIdStr === root.id)
+            .map((raw) => toTweetInput(raw, { source: 'profile', viewerAccountId: authorId }))
+            .find((tweet) => tweet.isAuthorReply)
+          if (!selfReplyNode) continue
+
+          selfReplyPromoProbeTweets.push(selfReplyNode)
+          const chainNodes = await fetchSelfReplyChain(
+            tweetApi,
+            tweetDetailRateLimitBudget,
+            selfReplyNode,
+            {
+              maxDepth: SELF_REPLY_PROMO_CHAIN_LIMITS.maxDepth,
+              maxNodesPerRoot: SELF_REPLY_PROMO_CHAIN_LIMITS.maxNodesPerRoot,
+            },
+          )
+          selfReplyPromoProbeTweets.push(...chainNodes)
+        }
+      }
+
       const { observationId, labelsAppliedCount: appliedThisAuthor } =
         await deps.persistAuthorResultAtomic({
           crawlRunId,
@@ -859,7 +917,11 @@ export async function runAuthorUnitPhase(
           profile,
           recentTweets,
           recentTweetsFetchedAt,
-          additionalOwnTweets: [...authorTimelineTweets, ...authorOtherReplies],
+          additionalOwnTweets: [
+            ...authorTimelineTweets,
+            ...authorOtherReplies,
+            ...selfReplyPromoProbeTweets,
+          ],
           recentTweetsFallbackAuthors: fallbackAuthors,
           followSample,
           followSampleStatus,

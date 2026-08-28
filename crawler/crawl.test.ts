@@ -3567,3 +3567,110 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
     expect(restoreRateLimitSpy).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('runAuthorUnitPhase self-reply promo candidate probe', () => {
+  it('probes the top-engagement standalone recent tweet when a self-reply promo candidate was observed this cycle', async () => {
+    const author = rawUser('author1')
+    const oldStandaloneTweet = rawTweet('standalone1', author, null, {
+      fullText: '今日の作業まとめです',
+    })
+    // recentTweets 経由で候補判定に使う: 第三者 X status への self-reply。
+    const promoSelfReply = rawTweet('promoReply1', author, 'standalone1', {
+      fullText: 'こっちも見て',
+      expandedUrls: ['https://x.com/other_creator/status/777'],
+    })
+    const depth2SelfReply = rawTweet('promoReply1-child', author, 'promoReply1', {
+      fullText: 'これも見て',
+    })
+    const getTweetDetail = vi
+      .fn()
+      // candidate probe: standalone1 を focalTweetId とした呼び出し
+      .mockResolvedValueOnce({ data: { data: [promoSelfReply] } })
+      // fetchSelfReplyChain: promoReply1 を focalTweetId とした深掘り呼び出し
+      .mockResolvedValueOnce({ data: { data: [depth2SelfReply] } })
+      .mockResolvedValueOnce({ data: { data: [] } })
+    const findMissingTweetIds = vi.fn().mockResolvedValue([])
+    const persistAuthorResultAtomic = vi
+      .fn()
+      .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 0 })
+    const deps = makeDeps({ findMissingTweetIds, persistAuthorResultAtomic })
+    const client = buildParentFetchClient({
+      replyRaws: [oldStandaloneTweet, promoSelfReply],
+      getTweetDetail,
+    })
+    // recentTweets に候補となる self-reply を含める必要があるため userApi 経由の getUserTweetsAndReplies を差し替える。
+    const clientWithRecentTweets = {
+      ...client,
+      getUserApi: () => ({
+        getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+        getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+        getUserTweetsAndReplies: vi
+          .fn()
+          .mockResolvedValue({ data: { data: [oldStandaloneTweet, promoSelfReply] } }),
+      }),
+    } as unknown as CrawlOpenApiClient
+
+    await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
+      buildSelfReplyPromoIndex([], []),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      clientWithRecentTweets,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      new TweetDetailRateLimitBudget({ now: () => 0 }),
+      vi.fn(),
+    )
+
+    expect(getTweetDetail).toHaveBeenCalledWith({ focalTweetId: 'standalone1' })
+    const persistedCall = persistAuthorResultAtomic.mock.calls[0][0] as {
+      additionalOwnTweets: TweetInput[]
+    }
+    expect(persistedCall.additionalOwnTweets.some((t) => t.id === 'promoReply1-child')).toBe(true)
+  })
+
+  it('does not probe when no self-reply promo candidate was observed this cycle', async () => {
+    const author = rawUser('author1')
+    const oldStandaloneTweet = rawTweet('standalone1', author, null, { fullText: '通常の投稿です' })
+    const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [] } })
+    const findMissingTweetIds = vi.fn().mockResolvedValue([])
+    const deps = makeDeps({ findMissingTweetIds })
+    const client = buildParentFetchClient({ replyRaws: [oldStandaloneTweet], getTweetDetail })
+    const clientWithRecentTweets = {
+      ...client,
+      getUserApi: () => ({
+        getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+        getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+        getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [oldStandaloneTweet] } }),
+      }),
+    } as unknown as CrawlOpenApiClient
+
+    await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
+      buildSelfReplyPromoIndex([], []),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      clientWithRecentTweets,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      new TweetDetailRateLimitBudget({ now: () => 0 }),
+      vi.fn(),
+    )
+
+    expect(getTweetDetail).not.toHaveBeenCalled()
+  })
+})
