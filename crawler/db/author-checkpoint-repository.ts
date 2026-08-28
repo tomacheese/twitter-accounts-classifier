@@ -3,6 +3,7 @@ import { mergeTweetAdFlags } from 'twitter-client'
 import type { PrismaClient, Tweet } from '../generated/prisma'
 import type { LabelRuleRegistry } from '../labels/registry'
 import type { buildDuplicateReplyIndex } from '../labels/duplicate-reply-index'
+import type { buildBioDuplicateIndex } from '../labels/bio-duplicate-index'
 import type { buildReplyHijackIndex } from '../labels/reply-hijack-index'
 import type { FollowGraphLabelIndex } from '../labels/follow-graph-label-index'
 import { buildAccountFeatureBundle } from '../labels/build-account-feature-bundle'
@@ -52,6 +53,7 @@ export interface PersistAuthorResultAtomicParams {
   registry: LabelRuleRegistry
   labelDefinitionIds: Map<string, string>
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
+  bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
   followGraphLabelIndex: FollowGraphLabelIndex
   warnings: CrawlWarning[]
@@ -163,6 +165,7 @@ export async function persistAuthorResultAtomic(
         account,
         authorOwnTweets,
         params.duplicateReplyIndex,
+        params.bioDuplicateIndex,
         params.replyHijackIndex,
         params.followGraphLabelIndex,
         parentTweetTextById,

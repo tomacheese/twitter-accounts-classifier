@@ -415,4 +415,71 @@ describe('spamRule', () => {
     const result = spamRule.evaluate(bundle)
     expect(result.value).toBe(false)
   })
+
+  it('boosts confidence when low-effort signup signals accompany a positive spam judgment', () => {
+    const withoutSignals = spamRule.evaluate(
+      makeBundle({
+        bio: 'dm me for some fun ! 出会い活してます',
+        followersCount: 10,
+        followingCount: 800,
+      }),
+    )
+    const withSignals = spamRule.evaluate(
+      makeBundle({
+        bio: 'dm me for some fun ! 出会い活してます',
+        followersCount: 10,
+        followingCount: 800,
+        screenName: 'user12345678',
+        profileImageUrl:
+          'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png',
+      }),
+    )
+    expect(withoutSignals.value).toBe(true)
+    expect(withSignals.value).toBe(true)
+    expect(withSignals.confidence).toBeGreaterThanOrEqual(withoutSignals.confidence)
+  })
+
+  it('does not change confidence when only a single low-effort signup signal is present', () => {
+    const withoutSignals = spamRule.evaluate(
+      makeBundle({
+        bio: 'dm me for some fun ! 出会い活してます',
+        followersCount: 10,
+        followingCount: 800,
+      }),
+    )
+    const withOneSignal = spamRule.evaluate(
+      makeBundle({
+        bio: 'dm me for some fun ! 出会い活してます',
+        followersCount: 10,
+        followingCount: 800,
+        screenName: 'user12345678',
+      }),
+    )
+    expect(withoutSignals.value).toBe(true)
+    expect(withOneSignal.value).toBe(true)
+    expect(withOneSignal.confidence).toBe(withoutSignals.confidence)
+  })
+
+  it('does not change confidence for a value=false account regardless of low-effort signup signals', () => {
+    const withoutSignals = spamRule.evaluate(
+      makeBundle({
+        bio: null,
+        followersCount: 10,
+        followingCount: 800,
+      }),
+    )
+    const withSignals = spamRule.evaluate(
+      makeBundle({
+        bio: null,
+        followersCount: 10,
+        followingCount: 800,
+        screenName: 'user12345678',
+        profileImageUrl:
+          'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png',
+      }),
+    )
+    expect(withoutSignals.value).toBe(false)
+    expect(withSignals.value).toBe(false)
+    expect(withSignals.confidence).toBe(withoutSignals.confidence)
+  })
 })

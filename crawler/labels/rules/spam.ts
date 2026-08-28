@@ -1,5 +1,6 @@
 import { combineAlternatives, combineRequired, rampScore, toConfidence } from '../confidence'
 import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
+import { countLowEffortSignals, lowEffortSignatureScore } from '../low-effort-signup-signal'
 import type { LabelRule } from '../types'
 
 // 「フォロバ」「相互フォロー」「無言フォロー」「DMください」のような通常の礼儀表現は、
@@ -79,7 +80,7 @@ export const spamRule: LabelRule = {
   description:
     'プロフィールで出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある。' +
     'bio に勧誘文言が無くても、リツイート主体の釣り的タイムラインと大量フォロー傾向の両方が同時に強く出ている場合は、それ自体を独立したエンゲージメント水増しの証拠として扱う',
-  version: '1.11.1',
+  version: '1.12.0',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
     const hasSolicitation = bio !== null && hasGenuineSolicitation(bio)
@@ -140,10 +141,18 @@ export const spamRule: LabelRule = {
     ])
     const evidenceScore = combineAlternatives([bioGatedScore, strongInflationScore])
 
+    // 低労力アカウント登録シグネチャ(デフォルトアバター・機械的ユーザー名・空 bio)は、
+    // 単独では正当な低労力ユーザーとの誤検知リスクが高いため、value=false の判定には使わない。
+    // value=true が既に確定した場合にのみ、確信度を補強する二次シグナルとして合成する。
+    const lowEffortSignalCount = countLowEffortSignals(bundle.account)
+    const finalEvidenceScore = value
+      ? combineAlternatives([evidenceScore, lowEffortSignatureScore(lowEffortSignalCount)])
+      : evidenceScore
+
     return {
       value,
-      confidence: toConfidence(value, evidenceScore),
-      reason: `bio solicitation=${hasSolicitation}, tweetSolicitationCount=${tweetSolicitationCount}, retweetRatio=${retweetRatio.toFixed(2)} (n=${sampled.length}), followingCount=${followingCount}, followersCount=${followersCount}`,
+      confidence: toConfidence(value, finalEvidenceScore),
+      reason: `bio solicitation=${hasSolicitation}, tweetSolicitationCount=${tweetSolicitationCount}, retweetRatio=${retweetRatio.toFixed(2)} (n=${sampled.length}), followingCount=${followingCount}, followersCount=${followersCount}, lowEffortSignalCount=${lowEffortSignalCount}`,
     }
   },
 }

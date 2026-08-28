@@ -1,5 +1,6 @@
-import { combineRequired, rampScore, toConfidence } from '../confidence'
+import { combineAlternatives, combineRequired, rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
+import { countLowEffortSignals, lowEffortSignatureScore } from '../low-effort-signup-signal'
 
 const VELOCITY_THRESHOLD_PER_DAY = 150
 // 何年も前から稼働する大規模な認証済みビジネスアカウントは、
@@ -46,7 +47,7 @@ export const botRule: LabelRule = {
   key: 'bot',
   description:
     '投稿頻度が人間としてあり得ない速さであり、かつリプライ比率がほぼゼロで、投稿間隔が機械的なまでに規則的である',
-  version: '1.6.0',
+  version: '1.7.0',
   evaluate(bundle) {
     const { tweetCount, accountCreatedAt } = bundle.account
     const sampled = bundle.recentTweets
@@ -115,10 +116,18 @@ export const botRule: LabelRule = {
       originalPosts.length >= MIN_SAMPLE_FOR_TIMING_SIGNALS &&
       sampled.length >= MIN_SAMPLE_FOR_TIMING_SIGNALS
 
+    // 低労力アカウント登録シグネチャ(デフォルトアバター・機械的ユーザー名・空 bio)は、
+    // 単独では正当な低労力ユーザーとの誤検知リスクが高いため、value=false の判定には使わない。
+    // value=true が既に確定した場合にのみ、確信度を補強する二次シグナルとして合成する。
+    const lowEffortSignalCount = countLowEffortSignals(bundle.account)
+    const finalEvidenceScore = value
+      ? combineAlternatives([evidenceScore, lowEffortSignatureScore(lowEffortSignalCount)])
+      : evidenceScore
+
     return {
       value,
-      confidence: toConfidence(value, evidenceScore, evaluable),
-      reason: `tweetsPerDay=${tweetsPerDay.toFixed(1)}, recentTweetsPerDay=${recentTweetsPerDay.toFixed(1)}, replyRatio=${replyRatio.toFixed(2)} (originalPosts=${originalPosts.length}/${sampled.length}), intervalCoV=${Number.isFinite(cov) ? cov.toFixed(2) : 'n/a'}`,
+      confidence: toConfidence(value, finalEvidenceScore, evaluable),
+      reason: `tweetsPerDay=${tweetsPerDay.toFixed(1)}, recentTweetsPerDay=${recentTweetsPerDay.toFixed(1)}, replyRatio=${replyRatio.toFixed(2)} (originalPosts=${originalPosts.length}/${sampled.length}), intervalCoV=${Number.isFinite(cov) ? cov.toFixed(2) : 'n/a'}, lowEffortSignalCount=${lowEffortSignalCount}`,
       evaluable,
     }
   },

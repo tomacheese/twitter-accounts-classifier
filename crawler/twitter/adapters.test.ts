@@ -15,6 +15,7 @@ type RealTweet = TweetApiUtilsData['tweet']
 function makeRealUser(
   overrides: Partial<RealUser['legacy']> = {},
   verifiedType?: string,
+  avatar?: { imageUrl: string },
 ): RealUser {
   return {
     typename: 'User',
@@ -22,6 +23,7 @@ function makeRealUser(
     restId: 'u1',
     isBlueVerified: false,
     profileImageShape: 'Circle',
+    avatar,
     legacy: {
       screenName: 'someone',
       name: 'Someone',
@@ -71,6 +73,33 @@ describe('toRawUserResult', () => {
 
     const unverified = toRawUserResult(makeRealUser())
     expect(unverified.verifiedType).toBeNull()
+  })
+
+  it('prefers user.avatar.imageUrl over user.legacy.profileImageUrlHttps when both are present', () => {
+    const result = toRawUserResult(
+      makeRealUser(
+        { profileImageUrlHttps: 'https://pbs.twimg.com/legacy/example/avatar.jpg' },
+        undefined,
+        { imageUrl: 'https://pbs.twimg.com/avatar/example/avatar.jpg' },
+      ),
+    )
+    expect(result.legacy.profileImageUrlHttps).toBe(
+      'https://pbs.twimg.com/avatar/example/avatar.jpg',
+    )
+  })
+
+  it('falls back to user.legacy.profileImageUrlHttps when user.avatar is absent', () => {
+    const result = toRawUserResult(
+      makeRealUser({ profileImageUrlHttps: 'https://pbs.twimg.com/legacy/example/avatar.jpg' }),
+    )
+    expect(result.legacy.profileImageUrlHttps).toBe(
+      'https://pbs.twimg.com/legacy/example/avatar.jpg',
+    )
+  })
+
+  it('is null when both user.avatar and user.legacy.profileImageUrlHttps are absent', () => {
+    const result = toRawUserResult(makeRealUser())
+    expect(result.legacy.profileImageUrlHttps).toBeNull()
   })
 })
 

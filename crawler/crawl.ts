@@ -24,9 +24,11 @@ import {
   requestAccountRelabelBulk,
 } from './db/analysis-work-item-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
+import { loadBioCorpus } from './db/bio-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
+import { buildBioDuplicateIndex, type BioCorpusEntry } from './labels/bio-duplicate-index'
 import { buildReplyHijackIndex, type ReplyHijackCorpusEntry } from './labels/reply-hijack-index'
 import {
   buildFollowGraphLabelIndex,
@@ -156,6 +158,7 @@ export interface CrawlDependencies {
   persistTweets: (inputs: TweetInput[]) => Promise<void>
   ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
   loadReplyCorpus: (watermark: Date) => Promise<ReplyHijackCorpusEntry[]>
+  loadBioCorpus: (watermark: Date) => Promise<BioCorpusEntry[]>
   loadFollowGraphLabelIndex: (
     labelDefinitionIds: Map<string, string>,
     accountIds: string[],
@@ -540,6 +543,7 @@ export async function runAuthorUnitPhase(
   registry: LabelRuleRegistry,
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
+  bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
   replyCorpus: ReplyHijackCorpusEntry[],
   followGraphLabelDefinitionIds: Map<string, string>,
   account: AppConfig['accounts'][number],
@@ -846,6 +850,7 @@ export async function runAuthorUnitPhase(
           registry,
           labelDefinitionIds,
           duplicateReplyIndex,
+          bioDuplicateIndex,
           replyHijackIndex: buildEffectiveReplyHijackIndex(authorId),
           followGraphLabelIndex,
           warnings: authorWarnings,
@@ -1507,6 +1512,7 @@ async function runAccountCycle(
   registry: LabelRuleRegistry,
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
+  bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
   replyCorpus: ReplyHijackCorpusEntry[],
   followGraphLabelDefinitionIds: Map<string, string>,
   account: AppConfig['accounts'][number],
@@ -1685,6 +1691,7 @@ async function runAccountCycle(
                       registry,
                       labelDefinitionIds,
                       duplicateReplyIndex,
+                      bioDuplicateIndex,
                       replyCorpus,
                       followGraphLabelDefinitionIds,
                       account,
@@ -1890,6 +1897,8 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
     // アカウントごとではなくサイクルごとに 1 回だけ構築する。
     const replyCorpus = await deps.loadReplyCorpus(crawlRunStartedAt)
     const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
+    const bioCorpus = await deps.loadBioCorpus(crawlRunStartedAt)
+    const bioDuplicateIndex = buildBioDuplicateIndex(bioCorpus)
 
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
@@ -1932,6 +1941,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
           registry,
           labelDefinitionIds,
           duplicateReplyIndex,
+          bioDuplicateIndex,
           replyCorpus,
           followGraphLabelDefinitionIds,
           account,
@@ -2077,6 +2087,7 @@ async function main(): Promise<void> {
     persistTweets: createPersistTweetsFn(prisma),
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: (watermark) => loadReplyCorpus(prisma, watermark),
+    loadBioCorpus: (watermark) => loadBioCorpus(prisma, watermark),
     loadFollowGraphLabelIndex: (labelDefinitionIds, accountIds) =>
       buildFollowGraphLabelIndex(prisma, labelDefinitionIds, { accountIds }),
     persistAuthorResultAtomic: (params) => persistAuthorResultAtomicRecord(prisma, params),

@@ -39,6 +39,7 @@ import { topicVrchatRule } from './rules/topic-vrchat'
 import { topicPetsRule } from './rules/topic-pets'
 import { topicFitnessRule } from './rules/topic-fitness'
 import { templatedReplyNetworkRule } from './rules/templated-reply-network'
+import { bioDuplicateNetworkRule } from './rules/bio-duplicate-network'
 import { selfDuplicateReplyRule } from './rules/self-duplicate-reply'
 import { replyFarmingRule } from './rules/reply-farming'
 import { replyFloodingRule } from './rules/reply-flooding'
@@ -95,6 +96,7 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   topicPetsRule,
   topicFitnessRule,
   templatedReplyNetworkRule,
+  bioDuplicateNetworkRule,
   selfDuplicateReplyRule,
   replyFarmingRule,
   replyFloodingRule,

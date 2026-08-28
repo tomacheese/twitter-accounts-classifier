@@ -13,6 +13,7 @@ import type { CrawlAccountCheckpointParams } from './db/crawl-run-repository'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
+import { buildBioDuplicateIndex } from './labels/bio-duplicate-index'
 import { TweetDetailRateLimitBudget } from './twitter/tweet-detail-rate-limit-budget'
 import { FollowRateLimitBudget } from './twitter/follow-rate-limit-budget'
 import type { TweetInput } from './db/tweet-repository'
@@ -171,6 +172,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       .fn()
       .mockResolvedValue(new Map([['verified_blue_individual', 'ld1']])),
     loadReplyCorpus: vi.fn().mockResolvedValue([]),
+    loadBioCorpus: vi.fn().mockResolvedValue([]),
     loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
     persistAuthorResultAtomic: vi
       .fn()
@@ -3254,6 +3256,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new LabelRuleRegistry(),
       new Map(),
       buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
       [],
       new Map(),
       testAccount(),
@@ -3293,6 +3296,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new LabelRuleRegistry(),
       new Map(),
       buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
       [],
       new Map(),
       testAccount(),
@@ -3324,6 +3328,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new LabelRuleRegistry(),
       new Map(),
       buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
       [],
       new Map(),
       testAccount(),
@@ -3356,6 +3361,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new LabelRuleRegistry(),
       new Map(),
       buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
       [],
       new Map(),
       testAccount(),
@@ -3389,6 +3395,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new LabelRuleRegistry(),
       new Map(),
       buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
       [],
       new Map(),
       testAccount(),
@@ -3434,6 +3441,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new LabelRuleRegistry(),
       new Map(),
       buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
       [],
       new Map(),
       testAccount(),
@@ -3484,6 +3492,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new LabelRuleRegistry(),
       new Map(),
       buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
       [],
       new Map(),
       testAccount(),

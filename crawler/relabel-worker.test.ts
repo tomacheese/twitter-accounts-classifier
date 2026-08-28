@@ -7,6 +7,7 @@ import * as labelRepository from './db/label-repository'
 import * as tweetRepository from './db/tweet-repository'
 import * as followGraphIndexModule from './labels/follow-graph-label-index'
 import * as replyCorpusModule from './db/reply-corpus'
+import * as bioCorpusModule from './db/bio-corpus'
 import * as evidenceRepository from './db/reply-hijack-evidence-repository'
 import { replyHijackSwarmRule } from './labels/rules/reply-hijack-swarm'
 import {
@@ -71,6 +72,7 @@ describe('evaluateAccountRelabelItems', () => {
         registry,
         labelDefinitionIds: new Map([['reply_hijack_swarm', 'def-1']]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
+        bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
           swarmSizeFor: () => 5,
           isEligibleForScreening: () => true,
@@ -146,6 +148,7 @@ describe('evaluateAccountRelabelItems', () => {
       registry,
       labelDefinitionIds: new Map([['reply_hijack_swarm', 'def-1']]),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
+      bioDuplicateIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: {
         swarmSizeFor: () => 5,
         isEligibleForScreening: () => true,
@@ -221,6 +224,7 @@ describe('evaluateAccountRelabelItems', () => {
         registry,
         labelDefinitionIds: new Map([['reply_hijack_swarm', 'def-1']]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
+        bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
           swarmSizeFor: () => 5,
           isEligibleForScreening: () => true,
@@ -276,6 +280,7 @@ describe('evaluateAccountRelabelItems', () => {
         registry,
         labelDefinitionIds: new Map([['test_rule', 'def-1']]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
+        bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
           swarmSizeFor: () => 0,
           isEligibleForScreening: () => true,
@@ -351,6 +356,7 @@ describe('evaluateAccountRelabelItems', () => {
       registry,
       labelDefinitionIds: new Map([['capture_rule', 'def-1']]),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
+      bioDuplicateIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: {
         swarmSizeFor: () => 0,
         isEligibleForScreening: () => true,
@@ -381,6 +387,7 @@ describe('evaluateAccountRelabelItems', () => {
         registry: new LabelRuleRegistry(),
         labelDefinitionIds: new Map(),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
+        bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
           swarmSizeFor: () => 0,
           isEligibleForScreening: () => true,
@@ -430,6 +437,7 @@ describe('evaluateAccountRelabelItems', () => {
       registry: new LabelRuleRegistry(),
       labelDefinitionIds: new Map(),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
+      bioDuplicateIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: {
         swarmSizeFor: () => 0,
         isEligibleForScreening: () => true,
@@ -498,6 +506,7 @@ describe('evaluateAccountRelabelItems', () => {
         registry,
         labelDefinitionIds: new Map([['tweet_count_rule', 'def-1']]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
+        bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
           swarmSizeFor: () => 0,
           isEligibleForScreening: () => true,
@@ -569,6 +578,7 @@ describe('evaluateAccountRelabelItems', () => {
         registry,
         labelDefinitionIds: new Map([['throwing_rule', 'def-1']]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
+        bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
           swarmSizeFor: () => 0,
           isEligibleForScreening: () => true,
@@ -643,6 +653,7 @@ describe('evaluateAccountRelabelItems', () => {
       registry,
       labelDefinitionIds: new Map([['test_rule', 'def-1']]),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
+      bioDuplicateIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: {
         swarmSizeFor: () => 0,
         isEligibleForScreening: () => true,
@@ -695,6 +706,7 @@ describe('evaluateAccountRelabelItems', () => {
         registry,
         labelDefinitionIds: new Map([['test_rule', 'def-1']]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
+        bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
           swarmSizeFor: () => 0,
           isEligibleForScreening: () => true,
@@ -841,6 +853,7 @@ describe('runRelabelWorkerCycleOnce', () => {
       { id: 'wi-2', triggerId: 'bob' },
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
     vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
       signalsFor: () => ({}),
     })
@@ -867,6 +880,7 @@ describe('runRelabelWorkerCycleOnce', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: 'wi-1', triggerId: 'alice' }])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
     vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
       signalsFor: () => ({}),
     })
@@ -891,6 +905,7 @@ describe('runRelabelWorkerCycleOnce', () => {
     const claimSpy = vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds')
     const followGraphSpy = vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
     const replyCorpusSpy = vi.spyOn(replyCorpusModule, 'loadReplyCorpus')
+    const bioCorpusSpy = vi.spyOn(bioCorpusModule, 'loadBioCorpus')
     const prisma = makeCursorPrisma()
 
     await runRelabelWorkerCycleOnce(prisma)
@@ -899,6 +914,7 @@ describe('runRelabelWorkerCycleOnce', () => {
     expect(claimSpy).not.toHaveBeenCalled()
     expect(followGraphSpy).not.toHaveBeenCalled()
     expect(replyCorpusSpy).not.toHaveBeenCalled()
+    expect(bioCorpusSpy).not.toHaveBeenCalled()
   })
 
   it('buildFollowGraphLabelIndex には peek した全 accountId を1回だけ渡し、usesFollowGraphSignal を持つルールのラベルだけを渡す', async () => {
@@ -917,6 +933,7 @@ describe('runRelabelWorkerCycleOnce', () => {
       { id: 'wi-2', triggerId: 'bob' } as never,
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([])
     const followGraphSpy = vi
       .spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
@@ -961,6 +978,7 @@ describe('runRelabelWorkerCycleOnce', () => {
       { id: 'wi-3', triggerId: 'carol' },
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
     vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
       signalsFor: () => ({}),
     })
@@ -998,6 +1016,7 @@ describe('runRelabelWorkerCycleOnce', () => {
       { id: 'wi-2', triggerId: 'bob' },
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
     vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
       signalsFor: () => ({}),
     })
@@ -1031,6 +1050,7 @@ describe('runRelabelWorkerCycleOnce', () => {
       { id: 'wi-2', triggerId: 'bob' },
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
     const sharedIndex = { signalsFor: () => ({}) }
     const followGraphSpy = vi
       .spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
@@ -1063,6 +1083,7 @@ describe('runRelabelWorkerCycleOnce', () => {
       { id: 'wi-2', triggerId: 'bob' },
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
     vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
       signalsFor: () => ({}),
     })
