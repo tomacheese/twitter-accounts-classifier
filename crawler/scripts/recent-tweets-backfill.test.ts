@@ -107,6 +107,7 @@ function makeDependencies(): RecentTweetsBackfillDependencies & {
     fetchAccountProfile: vi.fn().mockResolvedValue(profile),
     fetchRecentTweets: vi.fn().mockResolvedValue({ tweets: [tweet], authors: [profile] }),
     upsertAccount: vi.fn().mockResolvedValue({ account: profile, changed: false }),
+    upsertFallbackAuthor: vi.fn().mockResolvedValue({ account: profile, changed: false }),
     upsertTweet: vi.fn().mockResolvedValue({ tweet, changed: true }),
     requestAccountRelabelBulk: vi.fn().mockResolvedValue(undefined),
     getRequestTimeoutMs: vi.fn().mockReturnValue(60_000),
@@ -297,9 +298,12 @@ describe('runRecentTweetsBackfill', () => {
       deps,
     )
 
-    expect(deps.upsertAccount).toHaveBeenNthCalledWith(1, expect.anything(), profile)
-    expect(deps.upsertAccount).toHaveBeenNthCalledWith(2, expect.anything(), fallbackAuthor)
+    expect(deps.upsertAccount).toHaveBeenCalledWith(expect.anything(), profile)
+    expect(deps.upsertFallbackAuthor).toHaveBeenCalledWith(expect.anything(), fallbackAuthor)
     expect(deps.upsertTweet).toHaveBeenCalledWith(expect.anything(), promotedCopy)
+    expect(vi.mocked(deps.upsertFallbackAuthor).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(deps.upsertTweet).mock.invocationCallOrder[0],
+    )
   })
 
   it('rolls back profile persistence and does not mark success or enqueue when one tweet fails', async () => {

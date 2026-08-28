@@ -10,10 +10,11 @@ import { replyHijackSwarmRule } from '../labels/rules/reply-hijack-swarm'
 import { ensureLabelDefinitionsForRules } from './label-repository'
 import * as labelRepository from './label-repository'
 import * as evidenceRepository from './reply-hijack-evidence-repository'
+import * as workItemRepository from './analysis-work-item-repository'
 import { getPrismaClient } from './client'
 import { persistAuthorResultAtomic } from './author-checkpoint-repository'
 
-function profile(id: string) {
+function profile(id: string, overrides: Partial<{ bio: string | null }> = {}) {
   return {
     id,
     screenName: `user_${id}`,
@@ -30,6 +31,7 @@ function profile(id: string) {
     verifiedType: null,
     professionalType: null,
     parodyCommentaryFanLabel: null,
+    ...overrides,
   }
 }
 
@@ -283,6 +285,7 @@ describe('persistAuthorResultAtomic', () => {
         update: vi.fn().mockResolvedValue({ id: 'author1' }),
       },
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
+      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
       $queryRaw: queryRaw,
     }
@@ -362,6 +365,7 @@ describe('persistAuthorResultAtomic', () => {
         update: vi.fn().mockResolvedValue({ id: 'author1' }),
       },
       tweet: { findUnique: vi.fn().mockResolvedValue(null), upsert: tweetUpsert },
+      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }
@@ -690,6 +694,7 @@ describe('persistAuthorResultAtomic', () => {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),
       },
+      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }
@@ -714,6 +719,59 @@ describe('persistAuthorResultAtomic', () => {
 
     // author1 (自分) 用に 1 回 + context1 用に 1 回のみ。重複したままだと 3 回目が呼ばれる。
     expect(accountUpsert).toHaveBeenCalledTimes(2)
+  })
+
+  it('fallback author のラベル評価に影響するフィールドが変化していて既存ラベルがあれば account_relabel を要求する', async () => {
+    const requestRelabelSpy = vi
+      .spyOn(workItemRepository, 'requestAccountRelabel')
+      .mockResolvedValue()
+    const txClient = {
+      account: {
+        upsert: vi.fn((args: { where: { id: string } }) => Promise.resolve({ id: args.where.id })),
+        // fallback author (context1) の変化検知用。bio 以外は入力と一致させ、
+        // bio の変化だけを検知させる。
+        findUnique: vi.fn().mockResolvedValue({
+          screenName: 'user_context1',
+          displayName: 'User context1',
+          bio: 'old bio',
+          followersCount: 0,
+          followingCount: 0,
+          tweetCount: 0,
+          isBlueVerified: false,
+          verifiedType: null,
+          professionalType: null,
+          parodyCommentaryFanLabel: null,
+        }),
+        update: vi.fn().mockResolvedValue({ id: 'author1' }),
+      },
+      tweet: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),
+      },
+      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([{ accountId: 'context1' }]) },
+      crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      $queryRaw: vi.fn().mockResolvedValue([]),
+    }
+    const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
+    const prisma = { $transaction: transaction } as unknown as PrismaClient
+
+    await persistAuthorResultAtomic(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      authorId: 'author1',
+      profile: profile('author1'),
+      recentTweets: [tweet('tweet1', 'context1')],
+      additionalOwnTweets: [],
+      recentTweetsFallbackAuthors: [profile('context1', { bio: 'freshly changed bio' })],
+      followSample: null,
+      ...emptyRegistryParams(),
+      warnings: [],
+      durationMs: 10,
+      retryWaitMs: 0,
+      appVersion: 'test',
+    })
+
+    expect(requestRelabelSpy).toHaveBeenCalledWith(txClient, 'context1')
   })
 })
 

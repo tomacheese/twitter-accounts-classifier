@@ -4,8 +4,10 @@ import type { LabelRule } from '../types'
 
 // 英単語は他の topic_* ルールとの表記統一のため単語境界で判定しており、
 // 日本語は単語境界の概念が同様には成り立たないため部分一致のままとしている。
+// 「ドラマ」だけは「ドラマチック」という無関係な頻出語の部分文字列になるため、
+// topic-nsfw.ts の「アダルト」除外と同様に否定先読みで個別に除外している。
 const MOVIE_PATTERN =
-  /\b(movie|movies|film|cinema|moviegoer|cinephile)\b|映画|ドラマ|洋画|邦画|映画館|映画鑑賞/i
+  /\b(movie|movies|film|cinema|moviegoer|cinephile)\b|映画|ドラマ(?!チック)|洋画|邦画|映画館|映画鑑賞/i
 
 const KEYWORD_SCORE = 0.8
 
@@ -52,7 +54,7 @@ function isVibeListItem(bio: string, match: RegExpExecArray): boolean {
 export const topicMovieRule: LabelRule = {
   key: 'topic_movie',
   description: 'プロフィールの直接証拠、またはフォロー関係から映画・ドラマとの強い関連が示される',
-  version: '1.3.0',
+  version: '1.4.0',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account

@@ -13,7 +13,9 @@ const STRONG_ROOTS = 5
 export const selfReplyPromoChainRule: LabelRule = {
   key: 'self_reply_promo_chain',
   description:
-    '独立した自分の投稿への self-reply で第三者の X 投稿へ誘導し、その self-reply からさらに誘導 self-reply を連結する反復的なプロモーションチェーンを運用している',
+    '独立した自分の投稿への self-reply で第三者の X 投稿へ誘導する動きが、' +
+    '同一誘導先への反復か、誘導 self-reply からさらに誘導 self-reply へ連結する多段チェーンか、' +
+    'いずれかの形で複数系統観測される',
   version: '1.0.0',
   evaluate(bundle) {
     const evidence = bundle.selfReplyPromoEvidence

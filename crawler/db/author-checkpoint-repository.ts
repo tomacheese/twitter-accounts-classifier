@@ -10,6 +10,7 @@ import type { buildSelfReplyPromoIndex } from '../labels/self-reply-promo-index'
 import { buildAccountFeatureBundle } from '../labels/build-account-feature-bundle'
 import type { FollowListResult } from '../twitter/follows'
 import { upsertAccount, type AccountProfileInput } from './account-repository'
+import { upsertAccountRequestingRelabelIfChanged } from './account-relabel-on-change'
 import { upsertTweet, findTweetTextsByIds, type TweetInput } from './tweet-repository'
 import {
   upsertFollowSampleAuthors,
@@ -126,9 +127,11 @@ export async function persistAuthorResultAtomic(
       })
       // `recentTweets` には他者に帰属する会話コンテキストの Tweet が混在するため、
       // Tweet.accountId の FK を満たすには対応する Account を先に用意しておく必要がある。
+      // この account 自身は今回の crawl 対象ではなく、このループでしか profile 更新を観測できないため、
+      // ラベル評価に影響する変化があれば relabel も併せて要求する。
       for (const fallbackAuthor of fallbackAuthorsById.values()) {
         if (fallbackAuthor.id === params.profile.id) continue
-        await upsertAccount(txClient, fallbackAuthor)
+        await upsertAccountRequestingRelabelIfChanged(txClient, fallbackAuthor)
       }
       // `upsertTweets` の 1 件ずつ握り潰すエラー処理は、Postgres の transaction 内では機能しない。
       // 1 文が失敗すると transaction 全体が abort 状態になり、後続の全文が意味不明なエラーで失敗するため、
