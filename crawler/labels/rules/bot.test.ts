@@ -240,4 +240,53 @@ describe('botRule', () => {
     expect(marginalResult.value).toBe(true)
     expect(marginalResult.confidence).toBeLessThan(strongResult.confidence)
   })
+
+  it('boosts confidence when low-effort signup signals accompany a positive bot judgment', () => {
+    const oneYearAgo = new Date('2025-01-01T00:00:00Z')
+    const withoutSignals = botRule.evaluate(
+      makeBundle({ tweetCount: 100_000, accountCreatedAt: oneYearAgo }, regularTweets(10, 60e3)),
+    )
+    const withSignals = botRule.evaluate(
+      makeBundle(
+        {
+          tweetCount: 100_000,
+          accountCreatedAt: oneYearAgo,
+          screenName: 'user12345678',
+          bio: null,
+          profileImageUrl:
+            'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png',
+        },
+        regularTweets(10, 60e3),
+      ),
+    )
+    expect(withoutSignals.value).toBe(true)
+    expect(withSignals.value).toBe(true)
+    expect(withSignals.confidence).toBeGreaterThanOrEqual(withoutSignals.confidence)
+  })
+
+  it('does not change confidence for a value=false account regardless of low-effort signup signals', () => {
+    const nineteenYearsAgo = new Date('2007-04-03T00:00:00Z')
+    const withoutSignals = botRule.evaluate(
+      makeBundle(
+        { tweetCount: 301_205, accountCreatedAt: nineteenYearsAgo },
+        regularTweets(10, 3.6e6),
+      ),
+    )
+    const withSignals = botRule.evaluate(
+      makeBundle(
+        {
+          tweetCount: 301_205,
+          accountCreatedAt: nineteenYearsAgo,
+          screenName: 'user12345678',
+          bio: null,
+          profileImageUrl:
+            'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png',
+        },
+        regularTweets(10, 3.6e6),
+      ),
+    )
+    expect(withoutSignals.value).toBe(false)
+    expect(withSignals.value).toBe(false)
+    expect(withSignals.confidence).toBe(withoutSignals.confidence)
+  })
 })
