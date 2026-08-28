@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, Tweet } from '../generated/prisma'
 import { buildDuplicateReplyIndex } from './duplicate-reply-index'
+import { buildBioDuplicateIndex } from './bio-duplicate-index'
 import { buildReplyHijackIndex } from './reply-hijack-index'
 import { buildAccountFeatureBundle } from './build-account-feature-bundle'
 
@@ -69,6 +70,7 @@ describe('buildAccountFeatureBundle', () => {
       makeAccount(),
       [makeTweet({ hasAiGeneratedMedia: true, aiGeneratedDetectionSource: 'C2paClient' })],
       buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
       new Map(),
@@ -83,6 +85,7 @@ describe('buildAccountFeatureBundle', () => {
       makeAccount({ isBlueVerified: true, professionalType: 'Creator' }),
       [],
       buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
       new Map(),
@@ -115,6 +118,7 @@ describe('buildAccountFeatureBundle', () => {
         }),
       ],
       duplicateReplyIndex,
+      buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
       new Map(),
@@ -128,6 +132,7 @@ describe('buildAccountFeatureBundle', () => {
       makeAccount(),
       [makeTweet({ isReply: true, inReplyToTweetId: 'parent-1' })],
       buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
       new Map([['parent-1', 'これが親ツイートの本文です']]),
@@ -141,11 +146,47 @@ describe('buildAccountFeatureBundle', () => {
       makeAccount(),
       [makeTweet({ isReply: true, inReplyToTweetId: 'unknown-parent' })],
       buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
       new Map(),
     )
 
     expect(bundle.recentTweets[0].parentTweetFullText).toBeNull()
+  })
+
+  it('bio の複製ネットワーク規模を bioDuplicateNetworkSize に反映する', () => {
+    const bio = '毎日投稿しています。仲良くしてください、DMは受け付けていません'
+    const bioDuplicateIndex = buildBioDuplicateIndex([
+      { accountId: 'other-1', bio },
+      { accountId: 'other-2', bio },
+    ])
+    const bundle = buildAccountFeatureBundle(
+      makeAccount({ bio }),
+      [],
+      buildDuplicateReplyIndex([]),
+      bioDuplicateIndex,
+      buildReplyHijackIndex([]),
+      emptyFollowGraphLabelIndex,
+      new Map(),
+    )
+
+    expect(bundle.bioDuplicateNetworkSize).toBe(2)
+  })
+
+  it('account.profileImageUrl をそのまま bundle に反映する', () => {
+    const bundle = buildAccountFeatureBundle(
+      makeAccount({ profileImageUrl: 'https://pbs.twimg.com/profile_images/example/avatar.jpg' }),
+      [],
+      buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
+      buildReplyHijackIndex([]),
+      emptyFollowGraphLabelIndex,
+      new Map(),
+    )
+
+    expect(bundle.account.profileImageUrl).toBe(
+      'https://pbs.twimg.com/profile_images/example/avatar.jpg',
+    )
   })
 })

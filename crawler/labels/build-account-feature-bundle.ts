@@ -1,6 +1,7 @@
 import type { Account, Tweet } from '../generated/prisma'
 import type { AccountFeatureBundle } from './types'
 import type { buildDuplicateReplyIndex } from './duplicate-reply-index'
+import type { buildBioDuplicateIndex } from './bio-duplicate-index'
 import type { buildReplyHijackIndex } from './reply-hijack-index'
 import type { FollowGraphLabelIndex } from './follow-graph-label-index'
 
@@ -11,6 +12,7 @@ import type { FollowGraphLabelIndex } from './follow-graph-label-index'
  * @param account - バンドルを組み立てる対象アカウントの DB 確定値
  * @param recentTweets - このアカウント自身の直近ツイートの DB 確定値
  * @param duplicateReplyIndex - アカウント横断で共有する重複返信インデックス
+ * @param bioDuplicateIndex - アカウント横断で共有する bio 複製インデックス
  * @param replyHijackIndex - アカウント横断で共有するリプライハイジャック群インデックス
  * @param followGraphLabelIndex - アカウント横断で共有するフォローグラフラベルインデックス
  * @param parentTweetTextById - リプライ先ツイート ID から本文を引くための共有マップ
@@ -20,6 +22,7 @@ export function buildAccountFeatureBundle(
   account: Account,
   recentTweets: Tweet[],
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
+  bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
   followGraphLabelIndex: FollowGraphLabelIndex,
   parentTweetTextById: Map<string, string>,
@@ -50,6 +53,9 @@ export function buildAccountFeatureBundle(
     }
   }
 
+  const bioDuplicateNetworkSize =
+    account.bio === null ? 0 : bioDuplicateIndex.countOtherAccounts(account.bio, account.id)
+
   return {
     account: {
       id: account.id,
@@ -65,6 +71,7 @@ export function buildAccountFeatureBundle(
       professionalType: account.professionalType,
       parodyCommentaryFanLabel: account.parodyCommentaryFanLabel,
       recentTweetsFetchStatus: account.recentTweetsFetchStatus,
+      profileImageUrl: account.profileImageUrl,
     },
     recentTweets: recentTweets.map((tweet) => ({
       id: tweet.id,
@@ -89,6 +96,7 @@ export function buildAccountFeatureBundle(
           : (parentTweetTextById.get(tweet.inReplyToTweetId) ?? null),
     })),
     templatedReplyNetworkSize,
+    bioDuplicateNetworkSize,
     replyHijackSwarmSize,
     replyHijackEvidence,
     followGraphLabelSignals: followGraphLabelIndex.signalsFor(account.id),
