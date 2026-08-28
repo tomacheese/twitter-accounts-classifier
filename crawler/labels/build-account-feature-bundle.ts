@@ -4,6 +4,7 @@ import type { buildDuplicateReplyIndex } from './duplicate-reply-index'
 import type { buildBioDuplicateIndex } from './bio-duplicate-index'
 import type { buildReplyHijackIndex } from './reply-hijack-index'
 import type { FollowGraphLabelIndex } from './follow-graph-label-index'
+import type { buildSelfReplyPromoIndex } from './self-reply-promo-index'
 
 /**
  * Account と Tweet の DB 確定値(merge 後の状態)から AccountFeatureBundle を組み立てる。
@@ -15,6 +16,7 @@ import type { FollowGraphLabelIndex } from './follow-graph-label-index'
  * @param bioDuplicateIndex - アカウント横断で共有する bio 複製インデックス
  * @param replyHijackIndex - アカウント横断で共有するリプライハイジャック群インデックス
  * @param followGraphLabelIndex - アカウント横断で共有するフォローグラフラベルインデックス
+ * @param selfReplyPromoIndex - アカウント横断で共有する self-reply promo chain インデックス
  * @param parentTweetTextById - リプライ先ツイート ID から本文を引くための共有マップ
  * @returns アカウントの feature bundle
  */
@@ -25,6 +27,7 @@ export function buildAccountFeatureBundle(
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
   followGraphLabelIndex: FollowGraphLabelIndex,
+  selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,
   parentTweetTextById: Map<string, string>,
 ): AccountFeatureBundle {
   // 複数の異なるテンプレ返信ネットワーク・リプライハイジャック群に属することがあるため、
@@ -100,5 +103,6 @@ export function buildAccountFeatureBundle(
     replyHijackSwarmSize,
     replyHijackEvidence,
     followGraphLabelSignals: followGraphLabelIndex.signalsFor(account.id),
+    selfReplyPromoEvidence: selfReplyPromoIndex.evidenceFor(account.id),
   }
 }

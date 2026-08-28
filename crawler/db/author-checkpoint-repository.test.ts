@@ -5,6 +5,7 @@ import { LabelRuleRegistry } from '../labels/registry'
 import { buildDuplicateReplyIndex } from '../labels/duplicate-reply-index'
 import { buildBioDuplicateIndex } from '../labels/bio-duplicate-index'
 import { buildReplyHijackIndex } from '../labels/reply-hijack-index'
+import { buildSelfReplyPromoIndex } from '../labels/self-reply-promo-index'
 import { replyHijackSwarmRule } from '../labels/rules/reply-hijack-swarm'
 import { ensureLabelDefinitionsForRules } from './label-repository'
 import * as labelRepository from './label-repository'
@@ -76,6 +77,7 @@ function emptyRegistryParams() {
     bioDuplicateIndex: buildBioDuplicateIndex([]),
     replyHijackIndex: buildReplyHijackIndex([]),
     followGraphLabelIndex: noFollowGraphSignals,
+    selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
   }
 }
 
@@ -158,6 +160,7 @@ describe('persistAuthorResultAtomic', () => {
           evidenceByTarget[targetTweetId as keyof typeof evidenceByTarget],
       },
       followGraphLabelIndex: noFollowGraphSignals,
+      selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
       warnings: [],
       durationMs: 10,
       retryWaitMs: 0,
@@ -249,6 +252,7 @@ describe('persistAuthorResultAtomic', () => {
         }),
       },
       followGraphLabelIndex: noFollowGraphSignals,
+      selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
       warnings: [],
       durationMs: 10,
       retryWaitMs: 0,
@@ -382,6 +386,7 @@ describe('persistAuthorResultAtomic', () => {
       bioDuplicateIndex: buildBioDuplicateIndex([]),
       replyHijackIndex: buildReplyHijackIndex([]),
       followGraphLabelIndex: noFollowGraphSignals,
+      selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
       warnings: [],
       durationMs: 10,
       retryWaitMs: 0,
@@ -449,6 +454,7 @@ describe('persistAuthorResultAtomic', () => {
       bioDuplicateIndex: buildBioDuplicateIndex([]),
       replyHijackIndex: buildReplyHijackIndex([]),
       followGraphLabelIndex: noFollowGraphSignals,
+      selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
       warnings: [],
       durationMs: 10,
       retryWaitMs: 0,
@@ -518,6 +524,7 @@ describe('persistAuthorResultAtomic', () => {
       bioDuplicateIndex: buildBioDuplicateIndex([]),
       replyHijackIndex: buildReplyHijackIndex([]),
       followGraphLabelIndex: noFollowGraphSignals,
+      selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
       warnings: [],
       durationMs: 10,
       retryWaitMs: 0,
@@ -771,6 +778,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         bioDuplicateIndex: buildBioDuplicateIndex([]),
         replyHijackIndex: buildReplyHijackIndex([]),
         followGraphLabelIndex: noFollowGraphSignals,
+        selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
         warnings: [],
         durationMs: 0,
         retryWaitMs: 0,
@@ -794,6 +802,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         bioDuplicateIndex: buildBioDuplicateIndex([]),
         replyHijackIndex: buildReplyHijackIndex([]),
         followGraphLabelIndex: noFollowGraphSignals,
+        selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
         warnings: [],
         durationMs: 0,
         retryWaitMs: 0,

@@ -1,7 +1,7 @@
 import { Logger } from '@book000/node-utils'
 import { captureException, captureMessage, initMonitoring } from './monitoring/sentry'
 import { loadConfig, type AppConfig } from './config/load-config'
-import { CRAWL_LIMITS, TWITTER_RETRY } from './config/crawl-limits'
+import { CRAWL_LIMITS, TWITTER_RETRY, SELF_REPLY_PROMO_CHAIN_LIMITS } from './config/crawl-limits'
 import {
   getCookieIssuerBaseUrl,
   getCrawlIntervalSeconds,
@@ -25,11 +25,14 @@ import {
 } from './db/analysis-work-item-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { loadBioCorpus } from './db/bio-corpus'
+import { loadSelfReplyPromoCorpus } from './db/self-reply-promo-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import { buildBioDuplicateIndex, type BioCorpusEntry } from './labels/bio-duplicate-index'
 import { buildReplyHijackIndex, type ReplyHijackCorpusEntry } from './labels/reply-hijack-index'
+import { buildSelfReplyPromoIndex } from './labels/self-reply-promo-index'
+import { fetchSelfReplyChain, hasThirdPartyStatusLink } from './twitter/self-reply-chain'
 import {
   buildFollowGraphLabelIndex,
   type FollowGraphLabelIndex,
@@ -46,6 +49,7 @@ import {
   withTimeout,
   mergeTweetAdFlags,
   toAccountProfileInput,
+  toTweetInput,
   createOpenApiClient as createRealOpenApiClient,
   closeOpenApiClient as closeRealOpenApiClient,
   createTrendsScraper as createRealTrendsScraper,
@@ -159,6 +163,7 @@ export interface CrawlDependencies {
   ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
   loadReplyCorpus: (watermark: Date) => Promise<ReplyHijackCorpusEntry[]>
   loadBioCorpus: (watermark: Date) => Promise<BioCorpusEntry[]>
+  loadSelfReplyPromoCorpus: (watermark: Date) => ReturnType<typeof loadSelfReplyPromoCorpus>
   loadFollowGraphLabelIndex: (
     labelDefinitionIds: Map<string, string>,
     accountIds: string[],
@@ -520,6 +525,14 @@ export async function runRepliesPhase(
     }
     const { authorReplies, otherReplies, authors } = repliesResult
     replyTweets.push(...authorReplies, ...otherReplies)
+    for (const reply of authorReplies) {
+      if (!hasThirdPartyStatusLink(reply.expandedUrls)) continue
+      const chainNodes = await fetchSelfReplyChain(tweetApi, tweetDetailRateLimitBudget, reply, {
+        maxDepth: SELF_REPLY_PROMO_CHAIN_LIMITS.maxDepth,
+        maxNodesPerRoot: SELF_REPLY_PROMO_CHAIN_LIMITS.maxNodesPerRoot,
+      })
+      replyTweets.push(...chainNodes)
+    }
     for (const reply of otherReplies) {
       replyHijackCandidateIds.add(reply.accountId)
       const existing = otherRepliesByAuthor.get(reply.accountId) ?? []
@@ -544,6 +557,7 @@ export async function runAuthorUnitPhase(
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
+  selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,
   replyCorpus: ReplyHijackCorpusEntry[],
   followGraphLabelDefinitionIds: Map<string, string>,
   account: AppConfig['accounts'][number],
@@ -829,6 +843,69 @@ export async function runAuthorUnitPhase(
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
       const authorOtherReplies = otherRepliesByAuthor.get(authorId) ?? []
 
+      // TweetDetail の追加呼び出しはレート制限予算を消費するため、候補が確認できたアカウントのみを深掘り対象にする。
+      const hasSelfReplyPromoCandidateThisCycle = recentTweets.some(
+        (tweet) => tweet.isAuthorReply && hasThirdPartyStatusLink(tweet.expandedUrls),
+      )
+      const selfReplyPromoProbeTweets: TweetInput[] = []
+      if (hasSelfReplyPromoCandidateThisCycle) {
+        const tweetApi = client.getTweetApi()
+        const now = Date.now()
+        const minAgeMs = SELF_REPLY_PROMO_CHAIN_LIMITS.candidateMinAgeHours * 60 * 60 * 1000
+        const probeRoots = sortByEngagement(
+          recentTweets.filter(
+            (tweet) =>
+              !tweet.isReply && !tweet.isRetweet && now - tweet.createdAt.getTime() >= minAgeMs,
+          ),
+        ).slice(0, SELF_REPLY_PROMO_CHAIN_LIMITS.candidateProbeCount)
+
+        for (const root of probeRoots) {
+          const decision = tweetDetailRateLimitBudget.acquireOptionalFetch()
+          if (decision !== 'allowed') break
+          let probeResponse
+          try {
+            probeResponse = await tweetApi.getTweetDetail({ focalTweetId: root.id })
+            const captured = getLastResponseMatching('TweetDetail')
+            tweetDetailRateLimitBudget.recordSuccess({
+              rateLimitRemaining: captured?.rateLimitRemaining,
+              rateLimitReset: captured?.rateLimitReset,
+            })
+          } catch (error) {
+            const diagnostics = getResponseErrorDiagnostics(error)
+            if (diagnostics?.httpStatus === 429) {
+              tweetDetailRateLimitBudget.recordRateLimited(diagnostics)
+            } else {
+              const message = diagnostics
+                ? `Failed to probe candidate root ${root.id} for author ${authorId}, continuing (${formatResponseErrorDiagnostics(diagnostics)})`
+                : `Failed to probe candidate root ${root.id} for author ${authorId}, continuing`
+              if (isResponseError(error)) {
+                logger.error(message, toSafeResponseErrorForLog(error))
+              } else {
+                logger.error(message, error as Error)
+              }
+            }
+            continue
+          }
+          const selfReplyNode = probeResponse.data.data
+            .filter((raw) => raw.legacy.inReplyToStatusIdStr === root.id)
+            .map((raw) => toTweetInput(raw, { source: 'profile', viewerAccountId: authorId }))
+            .find((tweet) => tweet.isAuthorReply)
+          if (!selfReplyNode) continue
+
+          selfReplyPromoProbeTweets.push(selfReplyNode)
+          const chainNodes = await fetchSelfReplyChain(
+            tweetApi,
+            tweetDetailRateLimitBudget,
+            selfReplyNode,
+            {
+              maxDepth: SELF_REPLY_PROMO_CHAIN_LIMITS.maxDepth,
+              maxNodesPerRoot: SELF_REPLY_PROMO_CHAIN_LIMITS.maxNodesPerRoot,
+            },
+          )
+          selfReplyPromoProbeTweets.push(...chainNodes)
+        }
+      }
+
       const { observationId, labelsAppliedCount: appliedThisAuthor } =
         await deps.persistAuthorResultAtomic({
           crawlRunId,
@@ -837,7 +914,11 @@ export async function runAuthorUnitPhase(
           profile,
           recentTweets,
           recentTweetsFetchedAt,
-          additionalOwnTweets: [...authorTimelineTweets, ...authorOtherReplies],
+          additionalOwnTweets: [
+            ...authorTimelineTweets,
+            ...authorOtherReplies,
+            ...selfReplyPromoProbeTweets,
+          ],
           recentTweetsFallbackAuthors: fallbackAuthors,
           followSample,
           followSampleStatus,
@@ -851,6 +932,7 @@ export async function runAuthorUnitPhase(
           labelDefinitionIds,
           duplicateReplyIndex,
           bioDuplicateIndex,
+          selfReplyPromoIndex,
           replyHijackIndex: buildEffectiveReplyHijackIndex(authorId),
           followGraphLabelIndex,
           warnings: authorWarnings,
@@ -1513,6 +1595,7 @@ async function runAccountCycle(
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
+  selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,
   replyCorpus: ReplyHijackCorpusEntry[],
   followGraphLabelDefinitionIds: Map<string, string>,
   account: AppConfig['accounts'][number],
@@ -1692,6 +1775,7 @@ async function runAccountCycle(
                       labelDefinitionIds,
                       duplicateReplyIndex,
                       bioDuplicateIndex,
+                      selfReplyPromoIndex,
                       replyCorpus,
                       followGraphLabelDefinitionIds,
                       account,
@@ -1899,6 +1983,11 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
     const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
     const bioCorpus = await deps.loadBioCorpus(crawlRunStartedAt)
     const bioDuplicateIndex = buildBioDuplicateIndex(bioCorpus)
+    const selfReplyPromoCorpus = await deps.loadSelfReplyPromoCorpus(crawlRunStartedAt)
+    const selfReplyPromoIndex = buildSelfReplyPromoIndex(
+      selfReplyPromoCorpus.selfReplyCorpus,
+      selfReplyPromoCorpus.rootCorpus,
+    )
 
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
@@ -1942,6 +2031,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
           labelDefinitionIds,
           duplicateReplyIndex,
           bioDuplicateIndex,
+          selfReplyPromoIndex,
           replyCorpus,
           followGraphLabelDefinitionIds,
           account,
@@ -2088,6 +2178,7 @@ async function main(): Promise<void> {
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: (watermark) => loadReplyCorpus(prisma, watermark),
     loadBioCorpus: (watermark) => loadBioCorpus(prisma, watermark),
+    loadSelfReplyPromoCorpus: (watermark) => loadSelfReplyPromoCorpus(prisma, watermark),
     loadFollowGraphLabelIndex: (labelDefinitionIds, accountIds) =>
       buildFollowGraphLabelIndex(prisma, labelDefinitionIds, { accountIds }),
     persistAuthorResultAtomic: (params) => persistAuthorResultAtomicRecord(prisma, params),

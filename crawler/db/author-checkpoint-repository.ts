@@ -6,6 +6,7 @@ import type { buildDuplicateReplyIndex } from '../labels/duplicate-reply-index'
 import type { buildBioDuplicateIndex } from '../labels/bio-duplicate-index'
 import type { buildReplyHijackIndex } from '../labels/reply-hijack-index'
 import type { FollowGraphLabelIndex } from '../labels/follow-graph-label-index'
+import type { buildSelfReplyPromoIndex } from '../labels/self-reply-promo-index'
 import { buildAccountFeatureBundle } from '../labels/build-account-feature-bundle'
 import type { FollowListResult } from '../twitter/follows'
 import { upsertAccount, type AccountProfileInput } from './account-repository'
@@ -56,6 +57,7 @@ export interface PersistAuthorResultAtomicParams {
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
   followGraphLabelIndex: FollowGraphLabelIndex
+  selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>
   warnings: CrawlWarning[]
   durationMs: number
   retryWaitMs: number
@@ -168,6 +170,7 @@ export async function persistAuthorResultAtomic(
         params.bioDuplicateIndex,
         params.replyHijackIndex,
         params.followGraphLabelIndex,
+        params.selfReplyPromoIndex,
         parentTweetTextById,
       )
       const appliedRules = params.registry.applyAll(bundle)

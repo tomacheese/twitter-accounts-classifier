@@ -28,3 +28,13 @@ export const TWITTER_RETRY = {
   maxAttempts: 3,
   delayMs: 1000,
 } as const
+
+export const SELF_REPLY_PROMO_CHAIN_LIMITS = {
+  // TweetDetail は focal tweet 直下の子ノードまでしか返さないため、
+  // depth 2 以降は self-reply 自身を focalTweetId として再帰的に呼び出す必要がある。
+  maxDepth: 6,
+  maxNodesPerRoot: 8,
+  // self-promo の追加反映が遅れて観測されることがあるため、余裕を持たせた初期値である。
+  candidateMinAgeHours: 24,
+  candidateProbeCount: 3,
+} as const

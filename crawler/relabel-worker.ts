@@ -22,6 +22,8 @@ import {
 import { CRAWL_LIMITS } from './config/crawl-limits'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { loadBioCorpus } from './db/bio-corpus'
+import { loadSelfReplyPromoCorpus } from './db/self-reply-promo-corpus'
+import { buildSelfReplyPromoIndex } from './labels/self-reply-promo-index'
 import {
   upsertReplyHijackEvidence,
   type ReplyHijackEvidenceInput,
@@ -94,6 +96,7 @@ export interface EvaluateAccountRelabelItemsOptions {
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
   followGraphLabelIndex: FollowGraphLabelIndex
+  selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>
   concurrency: number
   leaseOwner: string
 }
@@ -186,6 +189,7 @@ async function evaluateAccountRelabelItemGroup(
         options.bioDuplicateIndex,
         options.replyHijackIndex,
         options.followGraphLabelIndex,
+        options.selfReplyPromoIndex,
         parentTweetTextById,
       )
       const labels: AccountLabelBulkInput[] = []
@@ -448,6 +452,7 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
 
   let duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
   let bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>
+  let selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>
   let replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
   let followGraphLabelIndex: FollowGraphLabelIndex
   try {
@@ -457,6 +462,11 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
     replyHijackIndex = buildReplyHijackIndexImpl(replyCorpus)
     const bioCorpus = await loadBioCorpus(prisma, new Date())
     bioDuplicateIndex = buildBioDuplicateIndex(bioCorpus)
+    const selfReplyPromoCorpus = await loadSelfReplyPromoCorpus(prisma, new Date())
+    selfReplyPromoIndex = buildSelfReplyPromoIndex(
+      selfReplyPromoCorpus.selfReplyCorpus,
+      selfReplyPromoCorpus.rootCorpus,
+    )
     // follow-graph signal を使わないルールのラベルまで集計対象に含めると、
     // 対象 account 数が同じでも不要な JOIN 対象ラベルが増えてクエリコストが膨らむ。
     const followGraphLabelDefinitionIds = new Map(
@@ -500,6 +510,7 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
           labelDefinitionIds,
           duplicateReplyIndex,
           bioDuplicateIndex,
+          selfReplyPromoIndex,
           replyHijackIndex,
           followGraphLabelIndex,
           concurrency,

@@ -14,6 +14,7 @@ import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import { buildBioDuplicateIndex } from './labels/bio-duplicate-index'
+import { buildSelfReplyPromoIndex } from './labels/self-reply-promo-index'
 import { TweetDetailRateLimitBudget } from './twitter/tweet-detail-rate-limit-budget'
 import { FollowRateLimitBudget } from './twitter/follow-rate-limit-budget'
 import type { TweetInput } from './db/tweet-repository'
@@ -173,6 +174,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       .mockResolvedValue(new Map([['verified_blue_individual', 'ld1']])),
     loadReplyCorpus: vi.fn().mockResolvedValue([]),
     loadBioCorpus: vi.fn().mockResolvedValue([]),
+    loadSelfReplyPromoCorpus: vi.fn().mockResolvedValue({ selfReplyCorpus: [], rootCorpus: [] }),
     loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
     persistAuthorResultAtomic: vi
       .fn()
@@ -3201,6 +3203,59 @@ describe('runRepliesPhase', () => {
     expect(recordRateLimitedSpy).toHaveBeenCalledTimes(1)
     expect(recordSuccessSpy).not.toHaveBeenCalled()
   })
+
+  it('deepens a self-reply that links to a third-party X status via fetchSelfReplyChain', async () => {
+    const author = rawUser('author1')
+    const selfReply = rawTweet('reply1', author, 'tweet1', {
+      fullText: 'これマジで見て',
+      expandedUrls: ['https://x.com/other_creator/status/999'],
+    })
+    const depth2SelfReply = rawTweet('reply1-child', author, 'reply1', {
+      fullText: 'これも見て',
+    })
+    const getTweetDetail = vi
+      .fn()
+      // topTweet (tweet1) への返信一覧
+      .mockResolvedValueOnce({ data: { data: [selfReply] } })
+      // reply1 を focalTweetId とした深掘り呼び出し
+      .mockResolvedValueOnce({ data: { data: [depth2SelfReply] } })
+      // reply1-child を focalTweetId とした深掘り呼び出し (これ以上子なし)
+      .mockResolvedValueOnce({ data: { data: [] } })
+    const client = {
+      getTweetApi: () => ({ getTweetDetail }),
+    } as unknown as CrawlOpenApiClient
+    const budget = new TweetDetailRateLimitBudget({ now: () => 0 })
+    const deps = makeDeps()
+
+    const result = await runRepliesPhase(
+      deps,
+      singleTweetTimelineSnapshot(),
+      client,
+      budget,
+      vi.fn(),
+    )
+
+    expect(getTweetDetail).toHaveBeenCalledTimes(3)
+    expect(result.replyTweets.map((t) => t.id)).toEqual(
+      expect.arrayContaining(['reply1', 'reply1-child']),
+    )
+  })
+
+  it('does not deepen a self-reply with no third-party X status link', async () => {
+    const author = rawUser('author1')
+    const selfReply = rawTweet('reply1', author, 'tweet1', { fullText: '普通の返信です' })
+    const getTweetDetail = vi.fn().mockResolvedValueOnce({ data: { data: [selfReply] } })
+    const client = {
+      getTweetApi: () => ({ getTweetDetail }),
+    } as unknown as CrawlOpenApiClient
+    const budget = new TweetDetailRateLimitBudget({ now: () => 0 })
+    const deps = makeDeps()
+
+    await runRepliesPhase(deps, singleTweetTimelineSnapshot(), client, budget, vi.fn())
+
+    // topTweet 自体への 1 回だけで、深掘りの追加呼び出しは発生しない。
+    expect(getTweetDetail).toHaveBeenCalledTimes(1)
+  })
 })
 
 function testAccount() {
@@ -3257,6 +3312,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new Map(),
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
+      buildSelfReplyPromoIndex([], []),
       [],
       new Map(),
       testAccount(),
@@ -3297,6 +3353,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new Map(),
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
+      buildSelfReplyPromoIndex([], []),
       [],
       new Map(),
       testAccount(),
@@ -3329,6 +3386,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new Map(),
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
+      buildSelfReplyPromoIndex([], []),
       [],
       new Map(),
       testAccount(),
@@ -3362,6 +3420,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new Map(),
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
+      buildSelfReplyPromoIndex([], []),
       [],
       new Map(),
       testAccount(),
@@ -3396,6 +3455,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new Map(),
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
+      buildSelfReplyPromoIndex([], []),
       [],
       new Map(),
       testAccount(),
@@ -3442,6 +3502,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new Map(),
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
+      buildSelfReplyPromoIndex([], []),
       [],
       new Map(),
       testAccount(),
@@ -3493,6 +3554,7 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       new Map(),
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
+      buildSelfReplyPromoIndex([], []),
       [],
       new Map(),
       testAccount(),
@@ -3509,5 +3571,114 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
     // restore だけが観測できる純粋なシナリオになる。
     expect(restoreFetchCountSpy).toHaveBeenCalledWith(5)
     expect(restoreRateLimitSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('runAuthorUnitPhase self-reply promo candidate probe', () => {
+  it('probes the top-engagement standalone recent tweet when a self-reply promo candidate was observed this cycle', async () => {
+    const author = rawUser('author1')
+    const oldStandaloneTweet = rawTweet('standalone1', author, null, {
+      fullText: '今日の作業まとめです',
+    })
+    // recentTweets 経由で候補判定に使う: 第三者 X status への self-reply。
+    const promoSelfReply = rawTweet('promoReply1', author, 'standalone1', {
+      fullText: 'こっちも見て',
+      expandedUrls: ['https://x.com/other_creator/status/777'],
+    })
+    const depth2SelfReply = rawTweet('promoReply1-child', author, 'promoReply1', {
+      fullText: 'これも見て',
+    })
+    const getTweetDetail = vi
+      .fn()
+      // candidate probe: standalone1 を focalTweetId とした呼び出し
+      .mockResolvedValueOnce({ data: { data: [promoSelfReply] } })
+      // fetchSelfReplyChain: promoReply1 を focalTweetId とした深掘り呼び出し
+      .mockResolvedValueOnce({ data: { data: [depth2SelfReply] } })
+      .mockResolvedValueOnce({ data: { data: [] } })
+    const findMissingTweetIds = vi.fn().mockResolvedValue([])
+    const persistAuthorResultAtomic = vi
+      .fn()
+      .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 0 })
+    const deps = makeDeps({ findMissingTweetIds, persistAuthorResultAtomic })
+    const client = buildParentFetchClient({
+      replyRaws: [oldStandaloneTweet, promoSelfReply],
+      getTweetDetail,
+    })
+    // recentTweets に候補となる self-reply を含める必要があるため userApi 経由の getUserTweetsAndReplies を差し替える。
+    const clientWithRecentTweets = {
+      ...client,
+      getUserApi: () => ({
+        getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+        getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+        getUserTweetsAndReplies: vi
+          .fn()
+          .mockResolvedValue({ data: { data: [oldStandaloneTweet, promoSelfReply] } }),
+      }),
+    } as unknown as CrawlOpenApiClient
+
+    await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
+      buildSelfReplyPromoIndex([], []),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      clientWithRecentTweets,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      new TweetDetailRateLimitBudget({ now: () => 0 }),
+      vi.fn(),
+    )
+
+    expect(getTweetDetail).toHaveBeenCalledWith({ focalTweetId: 'standalone1' })
+    const persistedCall = persistAuthorResultAtomic.mock.calls[0][0] as {
+      additionalOwnTweets: TweetInput[]
+    }
+    expect(persistedCall.additionalOwnTweets.some((t) => t.id === 'promoReply1-child')).toBe(true)
+  })
+
+  it('does not probe when no self-reply promo candidate was observed this cycle', async () => {
+    const author = rawUser('author1')
+    const oldStandaloneTweet = rawTweet('standalone1', author, null, { fullText: '通常の投稿です' })
+    const getTweetDetail = vi.fn().mockResolvedValue({ data: { data: [] } })
+    const findMissingTweetIds = vi.fn().mockResolvedValue([])
+    const deps = makeDeps({ findMissingTweetIds })
+    const client = buildParentFetchClient({ replyRaws: [oldStandaloneTweet], getTweetDetail })
+    const clientWithRecentTweets = {
+      ...client,
+      getUserApi: () => ({
+        getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
+        getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+        getUserTweetsAndReplies: vi
+          .fn()
+          .mockResolvedValue({ data: { data: [oldStandaloneTweet] } }),
+      }),
+    } as unknown as CrawlOpenApiClient
+
+    await runAuthorUnitPhase(
+      deps,
+      new LabelRuleRegistry(),
+      new Map(),
+      buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
+      buildSelfReplyPromoIndex([], []),
+      [],
+      new Map(),
+      testAccount(),
+      'run1',
+      singleTweetTimelineSnapshot(),
+      emptyRepliesResult(),
+      clientWithRecentTweets,
+      new FollowRateLimitBudget({ now: () => 0 }),
+      new TweetDetailRateLimitBudget({ now: () => 0 }),
+      vi.fn(),
+    )
+
+    expect(getTweetDetail).not.toHaveBeenCalled()
   })
 })

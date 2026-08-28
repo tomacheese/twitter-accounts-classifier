@@ -8,6 +8,7 @@ import * as tweetRepository from './db/tweet-repository'
 import * as followGraphIndexModule from './labels/follow-graph-label-index'
 import * as replyCorpusModule from './db/reply-corpus'
 import * as bioCorpusModule from './db/bio-corpus'
+import * as selfReplyPromoCorpusModule from './db/self-reply-promo-corpus'
 import * as evidenceRepository from './db/reply-hijack-evidence-repository'
 import { replyHijackSwarmRule } from './labels/rules/reply-hijack-swarm'
 import {
@@ -85,6 +86,7 @@ describe('evaluateAccountRelabelItems', () => {
           }),
         },
         followGraphLabelIndex: { signalsFor: () => ({}) },
+        selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
       },
@@ -161,6 +163,7 @@ describe('evaluateAccountRelabelItems', () => {
         }),
       },
       followGraphLabelIndex: { signalsFor: () => ({}) },
+      selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 1,
       leaseOwner: 'test-worker',
     })
@@ -237,6 +240,7 @@ describe('evaluateAccountRelabelItems', () => {
           }),
         },
         followGraphLabelIndex: { signalsFor: () => ({}) },
+        selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
       },
@@ -287,6 +291,7 @@ describe('evaluateAccountRelabelItems', () => {
           evidenceFor: () => undefined,
         },
         followGraphLabelIndex: { signalsFor: () => ({}) },
+        selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
       },
@@ -363,6 +368,7 @@ describe('evaluateAccountRelabelItems', () => {
         evidenceFor: () => undefined,
       },
       followGraphLabelIndex: { signalsFor: () => ({}) },
+      selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 1,
       leaseOwner: 'test-worker',
     })
@@ -394,6 +400,7 @@ describe('evaluateAccountRelabelItems', () => {
           evidenceFor: () => undefined,
         },
         followGraphLabelIndex: { signalsFor: () => ({}) },
+        selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
       },
@@ -444,6 +451,7 @@ describe('evaluateAccountRelabelItems', () => {
         evidenceFor: () => undefined,
       },
       followGraphLabelIndex: { signalsFor: () => ({}) },
+      selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 2,
       leaseOwner: 'test-worker',
     })
@@ -513,6 +521,7 @@ describe('evaluateAccountRelabelItems', () => {
           evidenceFor: () => undefined,
         },
         followGraphLabelIndex: { signalsFor: () => ({}) },
+        selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
       },
@@ -585,6 +594,7 @@ describe('evaluateAccountRelabelItems', () => {
           evidenceFor: () => undefined,
         },
         followGraphLabelIndex: { signalsFor: () => ({}) },
+        selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
       },
@@ -660,6 +670,7 @@ describe('evaluateAccountRelabelItems', () => {
         evidenceFor: () => undefined,
       },
       followGraphLabelIndex: { signalsFor: () => ({}) },
+      selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 1,
       leaseOwner: 'test-worker',
     })
@@ -713,6 +724,7 @@ describe('evaluateAccountRelabelItems', () => {
           evidenceFor: () => undefined,
         },
         followGraphLabelIndex: { signalsFor: () => ({}) },
+        selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
       },
@@ -854,6 +866,10 @@ describe('runRelabelWorkerCycleOnce', () => {
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
+    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
+      selfReplyCorpus: [],
+      rootCorpus: [],
+    })
     vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
       signalsFor: () => ({}),
     })
@@ -881,6 +897,10 @@ describe('runRelabelWorkerCycleOnce', () => {
       .mockResolvedValueOnce([{ id: 'wi-1', triggerId: 'alice' }])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
+    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
+      selfReplyCorpus: [],
+      rootCorpus: [],
+    })
     vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
       signalsFor: () => ({}),
     })
@@ -934,6 +954,10 @@ describe('runRelabelWorkerCycleOnce', () => {
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
+    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
+      selfReplyCorpus: [],
+      rootCorpus: [],
+    })
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([])
     const followGraphSpy = vi
       .spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
@@ -979,6 +1003,10 @@ describe('runRelabelWorkerCycleOnce', () => {
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
+    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
+      selfReplyCorpus: [],
+      rootCorpus: [],
+    })
     vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
       signalsFor: () => ({}),
     })
@@ -1017,6 +1045,10 @@ describe('runRelabelWorkerCycleOnce', () => {
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
+    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
+      selfReplyCorpus: [],
+      rootCorpus: [],
+    })
     vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
       signalsFor: () => ({}),
     })
@@ -1051,6 +1083,10 @@ describe('runRelabelWorkerCycleOnce', () => {
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
+    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
+      selfReplyCorpus: [],
+      rootCorpus: [],
+    })
     const sharedIndex = { signalsFor: () => ({}) }
     const followGraphSpy = vi
       .spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
@@ -1084,6 +1120,10 @@ describe('runRelabelWorkerCycleOnce', () => {
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
+    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
+      selfReplyCorpus: [],
+      rootCorpus: [],
+    })
     vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
       signalsFor: () => ({}),
     })
