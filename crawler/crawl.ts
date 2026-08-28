@@ -25,11 +25,13 @@ import {
 } from './db/analysis-work-item-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { loadBioCorpus } from './db/bio-corpus'
+import { loadSelfReplyPromoCorpus } from './db/self-reply-promo-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import { buildBioDuplicateIndex, type BioCorpusEntry } from './labels/bio-duplicate-index'
 import { buildReplyHijackIndex, type ReplyHijackCorpusEntry } from './labels/reply-hijack-index'
+import { buildSelfReplyPromoIndex } from './labels/self-reply-promo-index'
 import {
   buildFollowGraphLabelIndex,
   type FollowGraphLabelIndex,
@@ -159,6 +161,9 @@ export interface CrawlDependencies {
   ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
   loadReplyCorpus: (watermark: Date) => Promise<ReplyHijackCorpusEntry[]>
   loadBioCorpus: (watermark: Date) => Promise<BioCorpusEntry[]>
+  loadSelfReplyPromoCorpus: (
+    watermark: Date,
+  ) => ReturnType<typeof loadSelfReplyPromoCorpus>
   loadFollowGraphLabelIndex: (
     labelDefinitionIds: Map<string, string>,
     accountIds: string[],
@@ -544,6 +549,7 @@ export async function runAuthorUnitPhase(
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
+  selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,
   replyCorpus: ReplyHijackCorpusEntry[],
   followGraphLabelDefinitionIds: Map<string, string>,
   account: AppConfig['accounts'][number],
@@ -851,6 +857,7 @@ export async function runAuthorUnitPhase(
           labelDefinitionIds,
           duplicateReplyIndex,
           bioDuplicateIndex,
+          selfReplyPromoIndex,
           replyHijackIndex: buildEffectiveReplyHijackIndex(authorId),
           followGraphLabelIndex,
           warnings: authorWarnings,
@@ -1513,6 +1520,7 @@ async function runAccountCycle(
   labelDefinitionIds: Map<string, string>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
+  selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,
   replyCorpus: ReplyHijackCorpusEntry[],
   followGraphLabelDefinitionIds: Map<string, string>,
   account: AppConfig['accounts'][number],
@@ -1692,6 +1700,7 @@ async function runAccountCycle(
                       labelDefinitionIds,
                       duplicateReplyIndex,
                       bioDuplicateIndex,
+                      selfReplyPromoIndex,
                       replyCorpus,
                       followGraphLabelDefinitionIds,
                       account,
@@ -1899,6 +1908,11 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
     const duplicateReplyIndex = buildDuplicateReplyIndex(replyCorpus)
     const bioCorpus = await deps.loadBioCorpus(crawlRunStartedAt)
     const bioDuplicateIndex = buildBioDuplicateIndex(bioCorpus)
+    const selfReplyPromoCorpus = await deps.loadSelfReplyPromoCorpus(crawlRunStartedAt)
+    const selfReplyPromoIndex = buildSelfReplyPromoIndex(
+      selfReplyPromoCorpus.selfReplyCorpus,
+      selfReplyPromoCorpus.rootCorpus,
+    )
 
     const accountStatuses: ('success' | 'partial' | 'failed')[] = []
 
@@ -1942,6 +1956,7 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
           labelDefinitionIds,
           duplicateReplyIndex,
           bioDuplicateIndex,
+          selfReplyPromoIndex,
           replyCorpus,
           followGraphLabelDefinitionIds,
           account,
@@ -2088,6 +2103,7 @@ async function main(): Promise<void> {
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: (watermark) => loadReplyCorpus(prisma, watermark),
     loadBioCorpus: (watermark) => loadBioCorpus(prisma, watermark),
+    loadSelfReplyPromoCorpus: (watermark) => loadSelfReplyPromoCorpus(prisma, watermark),
     loadFollowGraphLabelIndex: (labelDefinitionIds, accountIds) =>
       buildFollowGraphLabelIndex(prisma, labelDefinitionIds, { accountIds }),
     persistAuthorResultAtomic: (params) => persistAuthorResultAtomicRecord(prisma, params),

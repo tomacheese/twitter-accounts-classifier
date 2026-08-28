@@ -4,6 +4,7 @@ import { buildDuplicateReplyIndex } from './duplicate-reply-index'
 import { buildBioDuplicateIndex } from './bio-duplicate-index'
 import { buildReplyHijackIndex } from './reply-hijack-index'
 import { buildAccountFeatureBundle } from './build-account-feature-bundle'
+import { buildSelfReplyPromoIndex } from './self-reply-promo-index'
 
 const emptyFollowGraphLabelIndex = { signalsFor: () => ({}) }
 
@@ -73,6 +74,7 @@ describe('buildAccountFeatureBundle', () => {
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
+      buildSelfReplyPromoIndex([], []),
       new Map(),
     )
 
@@ -88,6 +90,7 @@ describe('buildAccountFeatureBundle', () => {
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
+      buildSelfReplyPromoIndex([], []),
       new Map(),
     )
 
@@ -121,6 +124,7 @@ describe('buildAccountFeatureBundle', () => {
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
+      buildSelfReplyPromoIndex([], []),
       new Map(),
     )
 
@@ -135,6 +139,7 @@ describe('buildAccountFeatureBundle', () => {
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
+      buildSelfReplyPromoIndex([], []),
       new Map([['parent-1', 'これが親ツイートの本文です']]),
     )
 
@@ -149,6 +154,7 @@ describe('buildAccountFeatureBundle', () => {
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
+      buildSelfReplyPromoIndex([], []),
       new Map(),
     )
 
@@ -168,6 +174,7 @@ describe('buildAccountFeatureBundle', () => {
       bioDuplicateIndex,
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
+      buildSelfReplyPromoIndex([], []),
       new Map(),
     )
 
@@ -182,11 +189,64 @@ describe('buildAccountFeatureBundle', () => {
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
       emptyFollowGraphLabelIndex,
+      buildSelfReplyPromoIndex([], []),
       new Map(),
     )
 
     expect(bundle.account.profileImageUrl).toBe(
       'https://pbs.twimg.com/profile_images/example/avatar.jpg',
     )
+  })
+
+  it('self-reply promo chain の証拠を selfReplyPromoEvidence に反映する', () => {
+    const selfReplyPromoIndex = buildSelfReplyPromoIndex(
+      [
+        {
+          id: 'r1',
+          accountId: 'acct-1',
+          inReplyToTweetId: 'root1',
+          fullText: 'これマジで見て',
+          expandedUrls: ['https://x.com/other_creator/status/999'],
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+          authorScreenName: 'test_user',
+        },
+        {
+          id: 'r2',
+          accountId: 'acct-1',
+          inReplyToTweetId: 'root2',
+          fullText: 'これマジで見て',
+          expandedUrls: ['https://x.com/other_creator/status/999'],
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+          authorScreenName: 'test_user',
+        },
+        {
+          id: 'r3',
+          accountId: 'acct-1',
+          inReplyToTweetId: 'root3',
+          fullText: 'これマジで見て',
+          expandedUrls: ['https://x.com/other_creator/status/999'],
+          createdAt: new Date('2026-01-01T00:00:00Z'),
+          authorScreenName: 'test_user',
+        },
+      ],
+      [
+        { id: 'root1', accountId: 'acct-1', isReply: false, isRetweet: false },
+        { id: 'root2', accountId: 'acct-1', isReply: false, isRetweet: false },
+        { id: 'root3', accountId: 'acct-1', isReply: false, isRetweet: false },
+      ],
+    )
+
+    const bundle = buildAccountFeatureBundle(
+      makeAccount(),
+      [],
+      buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
+      buildReplyHijackIndex([]),
+      emptyFollowGraphLabelIndex,
+      selfReplyPromoIndex,
+      new Map(),
+    )
+
+    expect(bundle.selfReplyPromoEvidence?.exactDestinationRoots).toBe(3)
   })
 })

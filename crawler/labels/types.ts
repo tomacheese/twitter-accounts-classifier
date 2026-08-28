@@ -1,5 +1,6 @@
 import type { FollowGraphLabelSignal } from './follow-graph-label-index'
 import type { ReplyHijackEvidenceDetails } from '../db/reply-hijack-evidence-repository'
+import type { SelfReplyPromoEvidence } from './self-reply-promo-index'
 
 export interface AccountFeatureBundle {
   account: {
@@ -122,6 +123,12 @@ export interface AccountFeatureBundle {
   replyHijackSwarmSize?: number
   /** 陽性時に保存する、`replyHijackSwarmSize` を供給した target の監査証跡。 */
   replyHijackEvidence?: ReplyHijackEvidenceDetails
+  /**
+   * このアカウントが運用する self-reply promo chain の証拠。該当なしの場合は undefined。
+   * ルールごとではなく実行ごとに共有コーパスから一度算出する（`buildSelfReplyPromoIndex` 参照）。
+   * この値を持たない bundle（多くのルール単体テストなど）では undefined として扱う。
+   */
+  selfReplyPromoEvidence?: SelfReplyPromoEvidence
   /**
    * このアカウントのフォロー先・フォロワーにおける、ラベルごとの既存付与状況。
    * ルールごとではなく実行ごとに共有インデックスから一度算出する（`buildFollowGraphLabelIndex` 参照）。
