@@ -4,6 +4,7 @@ import { CRAWL_LIMITS, TWITTER_RETRY } from '../config/crawl-limits'
 import { getCookieIssuerBaseUrl, getTwitterRequestTimeoutMs } from '../config/env'
 import { getPrismaClient, disconnectPrisma } from '../db/client'
 import { upsertAccount, type AccountProfileInput } from '../db/account-repository'
+import { upsertAccountRequestingRelabelIfChanged } from '../db/account-relabel-on-change'
 import { upsertTweet, type TweetInput } from '../db/tweet-repository'
 import { requestAccountRelabelBulk } from '../db/analysis-work-item-repository'
 import {
@@ -128,6 +129,13 @@ export interface RecentTweetsBackfillDependencies {
     limit: number,
   ) => Promise<RecentTweetsResult>
   upsertAccount: typeof upsertAccount
+  /**
+   * context tweet の author (backfill 対象本人ではない fallback author) の永続化用。
+   * この account はここでしか profile 更新を観測できないため、
+   * plain な {@link upsertAccount} ではなく変化検知つきで upsert し、
+   * ラベル評価に影響する変化があれば relabel も併せて要求する。
+   */
+  upsertFallbackAuthor: typeof upsertAccountRequestingRelabelIfChanged
   upsertTweet: typeof upsertTweet
   requestAccountRelabelBulk: typeof requestAccountRelabelBulk
   getRequestTimeoutMs: () => number
@@ -238,7 +246,7 @@ async function persistSuccessfulCandidate(
         await deps.upsertAccount(tx, profile)
         for (const fallbackAuthor of fallbackAuthors.values()) {
           if (fallbackAuthor.id === profile.id) continue
-          await deps.upsertAccount(tx, fallbackAuthor)
+          await deps.upsertFallbackAuthor(tx, fallbackAuthor)
         }
         for (const tweet of tweets) {
           await deps.upsertTweet(tx, tweet)
@@ -360,6 +368,7 @@ function createDefaultDependencies(prisma: PrismaClient): RecentTweetsBackfillDe
     fetchAccountProfile,
     fetchRecentTweets,
     upsertAccount,
+    upsertFallbackAuthor: upsertAccountRequestingRelabelIfChanged,
     upsertTweet,
     requestAccountRelabelBulk,
     getRequestTimeoutMs: getTwitterRequestTimeoutMs,
