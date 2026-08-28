@@ -1,7 +1,7 @@
 import { Logger } from '@book000/node-utils'
 import { captureException, captureMessage, initMonitoring } from './monitoring/sentry'
 import { loadConfig, type AppConfig } from './config/load-config'
-import { CRAWL_LIMITS, TWITTER_RETRY } from './config/crawl-limits'
+import { CRAWL_LIMITS, TWITTER_RETRY, SELF_REPLY_PROMO_CHAIN_LIMITS } from './config/crawl-limits'
 import {
   getCookieIssuerBaseUrl,
   getCrawlIntervalSeconds,
@@ -32,6 +32,8 @@ import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import { buildBioDuplicateIndex, type BioCorpusEntry } from './labels/bio-duplicate-index'
 import { buildReplyHijackIndex, type ReplyHijackCorpusEntry } from './labels/reply-hijack-index'
 import { buildSelfReplyPromoIndex } from './labels/self-reply-promo-index'
+import { classifyXStatusUrl } from './labels/x-status-url'
+import { fetchSelfReplyChain } from './twitter/self-reply-chain'
 import {
   buildFollowGraphLabelIndex,
   type FollowGraphLabelIndex,
@@ -525,6 +527,20 @@ export async function runRepliesPhase(
     }
     const { authorReplies, otherReplies, authors } = repliesResult
     replyTweets.push(...authorReplies, ...otherReplies)
+    // screenName を持たないためここでは自己リンク除外までは行わず、
+    // x.com/twitter.com のステータスへの誘導であれば深掘り対象とする。
+    // 自己リンクの厳密な除外は index 構築時 (self-reply-promo-index.ts) で行う。
+    for (const reply of authorReplies) {
+      const hasThirdPartyStatusLink = (reply.expandedUrls ?? []).some(
+        (url) => classifyXStatusUrl(url) !== null,
+      )
+      if (!hasThirdPartyStatusLink) continue
+      const chainNodes = await fetchSelfReplyChain(tweetApi, tweetDetailRateLimitBudget, reply, {
+        maxDepth: SELF_REPLY_PROMO_CHAIN_LIMITS.maxDepth,
+        maxNodesPerRoot: SELF_REPLY_PROMO_CHAIN_LIMITS.maxNodesPerRoot,
+      })
+      replyTweets.push(...chainNodes)
+    }
     for (const reply of otherReplies) {
       replyHijackCandidateIds.add(reply.accountId)
       const existing = otherRepliesByAuthor.get(reply.accountId) ?? []

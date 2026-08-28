@@ -3203,6 +3203,53 @@ describe('runRepliesPhase', () => {
     expect(recordRateLimitedSpy).toHaveBeenCalledTimes(1)
     expect(recordSuccessSpy).not.toHaveBeenCalled()
   })
+
+  it('deepens a self-reply that links to a third-party X status via fetchSelfReplyChain', async () => {
+    const author = rawUser('author1')
+    const selfReply = rawTweet('reply1', author, 'tweet1', {
+      fullText: 'これマジで見て',
+      expandedUrls: ['https://x.com/other_creator/status/999'],
+    })
+    const depth2SelfReply = rawTweet('reply1-child', author, 'reply1', {
+      fullText: 'これも見て',
+    })
+    const getTweetDetail = vi
+      .fn()
+      // topTweet (tweet1) への返信一覧
+      .mockResolvedValueOnce({ data: { data: [selfReply] } })
+      // reply1 を focalTweetId とした深掘り呼び出し
+      .mockResolvedValueOnce({ data: { data: [depth2SelfReply] } })
+      // reply1-child を focalTweetId とした深掘り呼び出し (これ以上子なし)
+      .mockResolvedValueOnce({ data: { data: [] } })
+    const client = {
+      getTweetApi: () => ({ getTweetDetail }),
+    } as unknown as CrawlOpenApiClient
+    const budget = new TweetDetailRateLimitBudget({ now: () => 0 })
+    const deps = makeDeps()
+
+    const result = await runRepliesPhase(deps, singleTweetTimelineSnapshot(), client, budget, vi.fn())
+
+    expect(getTweetDetail).toHaveBeenCalledTimes(3)
+    expect(result.replyTweets.map((t) => t.id)).toEqual(
+      expect.arrayContaining(['reply1', 'reply1-child']),
+    )
+  })
+
+  it('does not deepen a self-reply with no third-party X status link', async () => {
+    const author = rawUser('author1')
+    const selfReply = rawTweet('reply1', author, 'tweet1', { fullText: '普通の返信です' })
+    const getTweetDetail = vi.fn().mockResolvedValueOnce({ data: { data: [selfReply] } })
+    const client = {
+      getTweetApi: () => ({ getTweetDetail }),
+    } as unknown as CrawlOpenApiClient
+    const budget = new TweetDetailRateLimitBudget({ now: () => 0 })
+    const deps = makeDeps()
+
+    await runRepliesPhase(deps, singleTweetTimelineSnapshot(), client, budget, vi.fn())
+
+    // topTweet 自体への 1 回だけで、深掘りの追加呼び出しは発生しない。
+    expect(getTweetDetail).toHaveBeenCalledTimes(1)
+  })
 })
 
 function testAccount() {
