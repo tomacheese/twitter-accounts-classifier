@@ -1,7 +1,6 @@
 #!/bin/bash
 set -u
 COMPOSE_DIR=${BACKFILL_COMPOSE_DIR:-/mnt/hdd/nuts/twitter-accounts-classifier}
-cd "$COMPOSE_DIR" || exit 2
 FAST_WORKERS=${BACKFILL_FAST_WORKERS:-4}
 SLOW_WORKER_INDEX=${BACKFILL_SLOW_WORKER_INDEX:-4}
 ITEMS_PER_CHUNK=${BACKFILL_ITEMS_PER_CHUNK:-20}
@@ -98,6 +97,8 @@ if [ "${1:-}" = '--self-test' ]; then
   echo 'FASTSLOW_SELF_TEST_OK fast_chunks=2 slow_chunks=3 total=52 unique=52'
   exit 0
 fi
+
+cd "$COMPOSE_DIR" || exit 2
 
 mapfile -t usernames < <(jq -r '.accounts[].username // empty' data/config.json)
 if ! [[ "$FAST_WORKERS" =~ ^[1-9][0-9]*$ ]] || ! [[ "$SLOW_WORKER_INDEX" =~ ^[0-9]+$ ]] || \

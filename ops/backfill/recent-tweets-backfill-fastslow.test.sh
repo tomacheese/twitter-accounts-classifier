@@ -64,4 +64,8 @@ fi
 grep -q '^RUNTIME_FAULT ' "$TMP_DIR/runner.out" || fail 'runtime fault was not reported'
 grep -q 'exec -T postgres ' "$DOCKER_LOG" || fail 'in-flight work was not checked before exit cleanup'
 
+SELF_TEST_OUTPUT="$("$RUNNER" --self-test 2>&1)" || fail 'self-test requires the production compose directory'
+grep -qx 'FASTSLOW_SELF_TEST_OK fast_chunks=2 slow_chunks=3 total=52 unique=52' <<<"$SELF_TEST_OUTPUT" || \
+  fail 'self-test did not report the expected queue invariants'
+
 echo '[recent-tweets-backfill-fastslow.test] ok'
