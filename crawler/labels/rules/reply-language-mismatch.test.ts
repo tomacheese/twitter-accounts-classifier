@@ -141,4 +141,35 @@ describe('replyLanguageMismatchRule', () => {
     expect(result.evaluable).toBe(false)
     expect(result.confidence).toBeCloseTo(0.5)
   })
+
+  it('excludes own posts made only of decorative symbols (no letters) from the ratio', () => {
+    const result = replyLanguageMismatchRule.evaluate(
+      makeBundle({ screenName: 'x' }, [
+        tweet({ fullText: '★☆★☆★' }),
+        tweet({ fullText: '♪♪♪' }),
+        tweet({ fullText: '①②③' }),
+        tweet({ fullText: '今日はいい天気ですね' }),
+        tweet({ fullText: '@a おはようございます！', isReply: true }),
+        tweet({ fullText: '@b よろしくお願いします', isReply: true }),
+        tweet({ fullText: '@c ありがとうございます', isReply: true }),
+      ]),
+    )
+    // 装飾記号のみの3件が ownPosts から除外され、実質的な own post は1件しか残らないため評価不能になる。
+    expect(result.evaluable).toBe(false)
+  })
+
+  it('still counts a legitimate non-Japanese post that is heavy on emoji but carries real letters', () => {
+    const result = replyLanguageMismatchRule.evaluate(
+      makeBundle({ screenName: 'x' }, [
+        tweet({ fullText: 'Good night 🌙✨' }),
+        tweet({ fullText: 'Sweet dreams 💤💤' }),
+        tweet({ fullText: 'See you tomorrow ☀️🌸' }),
+        tweet({ fullText: '@a おはようございます！', isReply: true }),
+        tweet({ fullText: '@b よろしくお願いします', isReply: true }),
+        tweet({ fullText: '@c ありがとうございます', isReply: true }),
+      ]),
+    )
+    expect(result.evaluable).toBe(true)
+    expect(result.value).toBe(true)
+  })
 })

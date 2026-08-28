@@ -37,7 +37,7 @@ export const replyHijackSwarmRule: LabelRule = {
   key: 'reply_hijack_swarm',
   description:
     '別々のアカウントが1件ずつ、似た言い回しの低努力リプライを1つの高エンゲージメントツイートに乗せてインプレッションを稼ぐ「一斉提灯リプライ」ネットワークの一員であり、かつ自身のアカウントもオリジナル投稿がほぼない低努力アカウントである',
-  version: '1.5.0',
+  version: '1.6.0',
   evaluate(bundle) {
     const size = bundle.replyHijackSwarmSize ?? 0
     const isSwarmMember = size >= MIN_DISTINCT_AUTHORS

@@ -123,6 +123,18 @@ describe('topicMovieRule', () => {
     expect(result.confidence).toBeCloseTo(0.5)
   })
 
+  it('is false for a comma-separated vibe-list bio where "Cinema" is a mood label, not a hobby', () => {
+    expect(
+      topicMovieRule.evaluate(makeBundle({ bio: 'Cinema脳、Travel党、Coffeeハート' })).value,
+    ).toBe(false)
+  })
+
+  it('is true for a single "映画脳" mention with no other vibe-suffix items, since one occurrence could be a genuine hobby phrasing', () => {
+    expect(topicMovieRule.evaluate(makeBundle({ bio: '映画脳、コーヒーが好きです' })).value).toBe(
+      true,
+    )
+  })
+
   it('bio があればフォローグラフのサンプルが不足していても evaluable: true になる', () => {
     const result = topicMovieRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
