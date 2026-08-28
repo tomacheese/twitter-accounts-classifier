@@ -185,7 +185,7 @@ export function toRawUserResult(user: TweetApiUtilsData['user']): RawUserResult 
       friendsCount: user.legacy.friendsCount,
       statusesCount: user.legacy.statusesCount,
       createdAt: user.core?.createdAt ?? user.legacy.createdAt ?? '',
-      profileImageUrlHttps: user.legacy.profileImageUrlHttps ?? null,
+      profileImageUrlHttps: user.avatar?.imageUrl ?? user.legacy.profileImageUrlHttps ?? null,
       location: user.legacy.location ?? null,
       url: user.legacy.url ?? null,
     },
