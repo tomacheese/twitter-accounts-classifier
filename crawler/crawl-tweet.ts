@@ -26,8 +26,7 @@ import {
   createUserApiLike,
   type UserApiLike,
 } from './twitter/profile'
-import { fetchSelfReplyChain } from './twitter/self-reply-chain'
-import { classifyXStatusUrl } from './labels/x-status-url'
+import { fetchSelfReplyChain, hasThirdPartyStatusLink } from './twitter/self-reply-chain'
 import { TweetDetailRateLimitBudget } from './twitter/tweet-detail-rate-limit-budget'
 
 const logger = Logger.configure('crawl-tweet')
@@ -85,14 +84,8 @@ export async function runManualTweetCrawl(
   const replies = [...authorReplies, ...otherReplies]
   const persistedReplyTweets = [...replies]
 
-  // screenName を持たないためここでは自己リンク除外までは行わず、
-  // x.com/twitter.com のステータスへの誘導であれば深掘り対象とする。
-  // 自己リンクの厳密な除外は index 構築時 (self-reply-promo-index.ts) で行う。
   for (const reply of authorReplies) {
-    const hasThirdPartyStatusLink = (reply.expandedUrls ?? []).some(
-      (url) => classifyXStatusUrl(url) !== null,
-    )
-    if (!hasThirdPartyStatusLink) continue
+    if (!hasThirdPartyStatusLink(reply.expandedUrls)) continue
     const chainNodes = await fetchSelfReplyChain(tweetApi, deps.tweetDetailRateLimitBudget, reply, {
       maxDepth: SELF_REPLY_PROMO_CHAIN_LIMITS.maxDepth,
       maxNodesPerRoot: SELF_REPLY_PROMO_CHAIN_LIMITS.maxNodesPerRoot,

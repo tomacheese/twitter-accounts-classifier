@@ -32,8 +32,7 @@ import { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import { buildBioDuplicateIndex, type BioCorpusEntry } from './labels/bio-duplicate-index'
 import { buildReplyHijackIndex, type ReplyHijackCorpusEntry } from './labels/reply-hijack-index'
 import { buildSelfReplyPromoIndex } from './labels/self-reply-promo-index'
-import { classifyXStatusUrl } from './labels/x-status-url'
-import { fetchSelfReplyChain } from './twitter/self-reply-chain'
+import { fetchSelfReplyChain, hasThirdPartyStatusLink } from './twitter/self-reply-chain'
 import {
   buildFollowGraphLabelIndex,
   type FollowGraphLabelIndex,
@@ -526,14 +525,8 @@ export async function runRepliesPhase(
     }
     const { authorReplies, otherReplies, authors } = repliesResult
     replyTweets.push(...authorReplies, ...otherReplies)
-    // screenName を持たないためここでは自己リンク除外までは行わず、
-    // x.com/twitter.com のステータスへの誘導であれば深掘り対象とする。
-    // 自己リンクの厳密な除外は index 構築時 (self-reply-promo-index.ts) で行う。
     for (const reply of authorReplies) {
-      const hasThirdPartyStatusLink = (reply.expandedUrls ?? []).some(
-        (url) => classifyXStatusUrl(url) !== null,
-      )
-      if (!hasThirdPartyStatusLink) continue
+      if (!hasThirdPartyStatusLink(reply.expandedUrls)) continue
       const chainNodes = await fetchSelfReplyChain(tweetApi, tweetDetailRateLimitBudget, reply, {
         maxDepth: SELF_REPLY_PROMO_CHAIN_LIMITS.maxDepth,
         maxNodesPerRoot: SELF_REPLY_PROMO_CHAIN_LIMITS.maxNodesPerRoot,
@@ -850,12 +843,9 @@ export async function runAuthorUnitPhase(
       const authorTimelineTweets = allTweets.filter((t) => t.accountId === authorId)
       const authorOtherReplies = otherRepliesByAuthor.get(authorId) ?? []
 
-      // このサイクル内で self-reply promo 候補を 1 件でも観測したアカウントのみを深掘り対象にする。
-      // 全アカウントを無条件に深掘りしない。
+      // TweetDetail の追加呼び出しはレート制限予算を消費するため、候補が確認できたアカウントのみを深掘り対象にする。
       const hasSelfReplyPromoCandidateThisCycle = recentTweets.some(
-        (tweet) =>
-          tweet.isAuthorReply &&
-          (tweet.expandedUrls ?? []).some((url) => classifyXStatusUrl(url) !== null),
+        (tweet) => tweet.isAuthorReply && hasThirdPartyStatusLink(tweet.expandedUrls),
       )
       const selfReplyPromoProbeTweets: TweetInput[] = []
       if (hasSelfReplyPromoCandidateThisCycle) {
@@ -882,8 +872,18 @@ export async function runAuthorUnitPhase(
             })
           } catch (error) {
             const diagnostics = getResponseErrorDiagnostics(error)
-            if (diagnostics?.httpStatus === 429)
+            if (diagnostics?.httpStatus === 429) {
               tweetDetailRateLimitBudget.recordRateLimited(diagnostics)
+            } else {
+              const message = diagnostics
+                ? `Failed to probe candidate root ${root.id} for author ${authorId}, continuing (${formatResponseErrorDiagnostics(diagnostics)})`
+                : `Failed to probe candidate root ${root.id} for author ${authorId}, continuing`
+              if (isResponseError(error)) {
+                logger.error(message, toSafeResponseErrorForLog(error))
+              } else {
+                logger.error(message, error as Error)
+              }
+            }
             continue
           }
           const selfReplyNode = probeResponse.data.data

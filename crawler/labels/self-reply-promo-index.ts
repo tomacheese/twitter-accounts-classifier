@@ -40,33 +40,47 @@ export function buildSelfReplyPromoIndex(
     rootCorpus.filter((root) => !root.isReply && !root.isRetweet).map((root) => root.id),
   )
 
+  interface AncestorResolution {
+    rootId: string | null
+    depth: number
+  }
+  const ancestorResolutionCache = new Map<string, AncestorResolution>()
+  // 複数の entry / URL が同じ祖先チェーンを共有するため、解決済みの root と depth をキャッシュして再走査を避ける。
+  function resolveAncestor(ancestorId: string): AncestorResolution {
+    const cached = ancestorResolutionCache.get(ancestorId)
+    if (cached) return cached
+
+    let result: AncestorResolution
+    if (qualifyingRootIds.has(ancestorId)) {
+      result = { rootId: ancestorId, depth: 1 }
+    } else {
+      const ancestor = selfReplyById.get(ancestorId)
+      if (ancestor && ancestor.inReplyToTweetId !== null) {
+        const parent = resolveAncestor(ancestor.inReplyToTweetId)
+        result = { rootId: parent.rootId, depth: parent.depth + 1 }
+      } else {
+        result = { rootId: null, depth: 1 }
+      }
+    }
+    ancestorResolutionCache.set(ancestorId, result)
+    return result
+  }
+
   const edgesByAccount = new Map<string, QualifyingEdge[]>()
   for (const entry of selfReplyCorpus) {
     for (const url of entry.expandedUrls) {
       const status = classifyXStatusUrl(url)
       if (!status) continue
       if (status.screenName.toLowerCase() === entry.authorScreenName.toLowerCase()) continue
+      if (entry.inReplyToTweetId === null) continue
 
-      // root まで遡って depth を数える。他人の reply を挟む、または root に到達できない場合は除外する。
-      let depth = 1
-      let ancestorId: string | null = entry.inReplyToTweetId
-      let reachedQualifyingRoot = false
-      while (ancestorId !== null) {
-        if (qualifyingRootIds.has(ancestorId)) {
-          reachedQualifyingRoot = true
-          break
-        }
-        const ancestor = selfReplyById.get(ancestorId)
-        if (!ancestor) break
-        depth += 1
-        ancestorId = ancestor.inReplyToTweetId
-      }
-      if (!reachedQualifyingRoot || ancestorId === null) continue
+      const resolution = resolveAncestor(entry.inReplyToTweetId)
+      if (resolution.rootId === null) continue
 
       const edges = edgesByAccount.get(entry.accountId) ?? []
       edges.push({
-        rootId: ancestorId,
-        depth,
+        rootId: resolution.rootId,
+        depth: resolution.depth,
         canonicalXStatusId: status.canonical,
         targetHandle: status.screenName.toLowerCase(),
         normalizedText: normalizeSelfReplyPromoText(entry.fullText),

@@ -2,10 +2,21 @@ import { getLastResponseMatching, getResponseErrorDiagnostics, toTweetInput } fr
 import type { TweetDetailApiLike } from './engagement'
 import type { TweetDetailRateLimitBudget } from './tweet-detail-rate-limit-budget'
 import type { TweetInput } from '../db/tweet-repository'
+import { classifyXStatusUrl } from '../labels/x-status-url'
 
 export interface FetchSelfReplyChainOptions {
   maxDepth: number
   maxNodesPerRoot: number
+}
+
+// screenName を保持していないため、自己リンクの厳密な除外は行わず index 構築時に行う。
+/**
+ * self-reply が第三者の X status へ誘導しているかどうかを判定する。
+ * @param expandedUrls - 判定対象の self-reply が含む展開済み URL の一覧
+ * @returns 第三者の X status へのリンクを含む場合 true
+ */
+export function hasThirdPartyStatusLink(expandedUrls: string[] | undefined): boolean {
+  return (expandedUrls ?? []).some((url) => classifyXStatusUrl(url) !== null)
 }
 
 /**
@@ -42,7 +53,8 @@ export async function fetchSelfReplyChain(
         response = await client.getTweetDetail({ focalTweetId: node.id })
       } catch (error) {
         const diagnostics = getResponseErrorDiagnostics(error)
-        if (diagnostics?.httpStatus === 429) budget.recordRateLimited(diagnostics)
+        if (diagnostics?.httpStatus !== 429) throw error
+        budget.recordRateLimited(diagnostics)
         return collected
       }
       const captured = getLastResponseMatching('TweetDetail')

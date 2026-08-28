@@ -32,7 +32,6 @@ export const TWITTER_RETRY = {
 export const SELF_REPLY_PROMO_CHAIN_LIMITS = {
   // TweetDetail は focal tweet 直下の子ノードまでしか返さないため、
   // depth 2 以降は self-reply 自身を focalTweetId として再帰的に呼び出す必要がある。
-  // この深さ・件数の上限は初期値であり、backtest 結果を見て調整する想定の設定値である。
   maxDepth: 6,
   maxNodesPerRoot: 8,
   // self-promo の追加反映が遅れて観測されることがあるため、余裕を持たせた初期値である。

@@ -51,11 +51,21 @@ export async function loadSelfReplyPromoCorpus(
 
   const byId = new Map(selfReplyCorpus.map((entry) => [entry.id, entry]))
   const rootCandidateIds = new Set<string>()
+  // 複数の entry が同じ祖先チェーンを共有するため、解決済みの終端をキャッシュして再走査を避ける。
+  const terminalIdCache = new Map<string, string | null>()
   for (const entry of selfReplyCorpus) {
     let parentId = entry.inReplyToTweetId
+    const visitedPath: string[] = []
     while (parentId !== null && byId.has(parentId)) {
+      const cached = terminalIdCache.get(parentId)
+      if (cached !== undefined) {
+        parentId = cached
+        break
+      }
+      visitedPath.push(parentId)
       parentId = byId.get(parentId)?.inReplyToTweetId ?? null
     }
+    for (const id of visitedPath) terminalIdCache.set(id, parentId)
     if (parentId !== null) rootCandidateIds.add(parentId)
   }
 

@@ -7,10 +7,6 @@ const MIN_ROOTS_FOR_POSITIVE = 3
 const STRONG_ROOTS = 5
 
 /**
- * 独立した自分の投稿への self-reply で第三者の X 投稿へ誘導し、
- * その self-reply にさらに誘導 self-reply を連結する反復的なプロモーションチェーンを検出する。
- * `AccountFeatureBundle.selfReplyPromoEvidence` によって判定され、
- * これはクロール・再ラベリングごとに共有コーパスから一括計算される (`buildSelfReplyPromoIndex` 参照)。
  * chain の深さ自体は誘導手口の巧妙さを示すだけで反復性の証拠にはならないため、
  * confidence の算出には使わず reason 文字列にのみ含める。
  */

@@ -12,15 +12,6 @@ const BACKTEST_ACCOUNT_LIMIT = Number(process.env.BACKTEST_ACCOUNT_LIMIT ?? 500)
 
 const emptyFollowGraphLabelIndex = { signalsFor: () => ({}) }
 
-/**
- * self-reply promo chain の候補があるアカウント (index に evidence を持つアカウント) の id 一覧。
- * @param selfReplyPromoAccountIds - コーパスから抽出した候補アカウント id
- * @returns 該当アカウント id (最大 `BACKTEST_ACCOUNT_LIMIT` 件)
- */
-function loadCandidateAccountIds(selfReplyPromoAccountIds: string[]): string[] {
-  return selfReplyPromoAccountIds.slice(0, BACKTEST_ACCOUNT_LIMIT)
-}
-
 async function main(): Promise<void> {
   const prisma = new PrismaClient()
   try {
@@ -30,7 +21,7 @@ async function main(): Promise<void> {
     const selfReplyPromoIndex = buildSelfReplyPromoIndex(selfReplyCorpus, rootCorpus)
 
     const selfReplyPromoAccountIds = [...new Set(selfReplyCorpus.map((entry) => entry.accountId))]
-    const candidateAccountIds = loadCandidateAccountIds(selfReplyPromoAccountIds)
+    const candidateAccountIds = selfReplyPromoAccountIds.slice(0, BACKTEST_ACCOUNT_LIMIT)
     console.log(`Evaluating ${candidateAccountIds.length} candidate accounts...`)
 
     const accounts = await prisma.account.findMany({ where: { id: { in: candidateAccountIds } } })
