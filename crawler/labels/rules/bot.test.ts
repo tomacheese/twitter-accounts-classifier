@@ -264,6 +264,25 @@ describe('botRule', () => {
     expect(withSignals.confidence).toBeGreaterThanOrEqual(withoutSignals.confidence)
   })
 
+  it('does not change confidence when only a single low-effort signup signal is present', () => {
+    const oneYearAgo = new Date('2025-01-01T00:00:00Z')
+    const baseAccountOverrides = {
+      tweetCount: 100_000,
+      accountCreatedAt: oneYearAgo,
+      bio: '毎日投稿しています',
+      profileImageUrl: 'https://pbs.twimg.com/profile_images/example/avatar.jpg',
+    }
+    const withoutSignals = botRule.evaluate(
+      makeBundle(baseAccountOverrides, regularTweets(10, 60e3)),
+    )
+    const withOneSignal = botRule.evaluate(
+      makeBundle({ ...baseAccountOverrides, screenName: 'user12345678' }, regularTweets(10, 60e3)),
+    )
+    expect(withoutSignals.value).toBe(true)
+    expect(withOneSignal.value).toBe(true)
+    expect(withOneSignal.confidence).toBe(withoutSignals.confidence)
+  })
+
   it('does not change confidence for a value=false account regardless of low-effort signup signals', () => {
     const nineteenYearsAgo = new Date('2007-04-03T00:00:00Z')
     const withoutSignals = botRule.evaluate(

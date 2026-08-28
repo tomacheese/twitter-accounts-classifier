@@ -13,6 +13,15 @@ describe('normalizeBioText', () => {
   it('returns an empty string for text shorter than the minimum meaningful length', () => {
     expect(normalizeBioText('よろしく')).toBe('')
   })
+
+  it('returns an empty string when normalized length is exactly one below the minimum', () => {
+    expect(normalizeBioText('あ'.repeat(19))).toBe('')
+  })
+
+  it('returns the normalized text when length is exactly at the minimum', () => {
+    const text = 'あ'.repeat(20)
+    expect(normalizeBioText(text)).toBe(text)
+  })
 })
 
 describe('buildBioDuplicateIndex', () => {
@@ -61,5 +70,15 @@ describe('buildBioDuplicateIndex', () => {
     ])
 
     expect(index.countOtherAccounts('よろしく', 'a1')).toBe(0)
+  })
+
+  it('counts a match when bio length is exactly at the minimum meaningful length', () => {
+    const bio = 'あ'.repeat(20)
+    const index = buildBioDuplicateIndex([
+      { accountId: 'a1', bio },
+      { accountId: 'a2', bio },
+    ])
+
+    expect(index.countOtherAccounts(bio, 'a1')).toBe(1)
   })
 })

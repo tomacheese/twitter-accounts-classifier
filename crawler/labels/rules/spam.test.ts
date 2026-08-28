@@ -439,6 +439,27 @@ describe('spamRule', () => {
     expect(withSignals.confidence).toBeGreaterThanOrEqual(withoutSignals.confidence)
   })
 
+  it('does not change confidence when only a single low-effort signup signal is present', () => {
+    const withoutSignals = spamRule.evaluate(
+      makeBundle({
+        bio: 'dm me for some fun ! 出会い活してます',
+        followersCount: 10,
+        followingCount: 800,
+      }),
+    )
+    const withOneSignal = spamRule.evaluate(
+      makeBundle({
+        bio: 'dm me for some fun ! 出会い活してます',
+        followersCount: 10,
+        followingCount: 800,
+        screenName: 'user12345678',
+      }),
+    )
+    expect(withoutSignals.value).toBe(true)
+    expect(withOneSignal.value).toBe(true)
+    expect(withOneSignal.confidence).toBe(withoutSignals.confidence)
+  })
+
   it('does not change confidence for a value=false account regardless of low-effort signup signals', () => {
     const withoutSignals = spamRule.evaluate(
       makeBundle({

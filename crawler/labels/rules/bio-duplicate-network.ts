@@ -8,7 +8,7 @@ export const bioDuplicateNetworkRule: LabelRule = {
   key: 'bio_duplicate_network',
   description:
     'プロフィール bio(URL/メンションを除去した上で比較)が、他の複数の別アカウントと一字一句同一である。' +
-    '複製した bio を使い回す fake persona ネットワークの特徴',
+    '複製した bio を使い回す偽装アカウントネットワークの特徴',
   version: '1.0.0',
   evaluate(bundle) {
     const networkSize = bundle.bioDuplicateNetworkSize ?? 0

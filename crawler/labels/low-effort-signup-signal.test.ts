@@ -74,6 +74,16 @@ describe('countLowEffortSignals', () => {
       }),
     ).toBe(0)
   })
+
+  it('counts exactly one signal when only the username is mechanical', () => {
+    expect(
+      countLowEffortSignals({
+        screenName: 'example_user1234',
+        bio: '毎日投稿しています',
+        profileImageUrl: 'https://pbs.twimg.com/profile_images/example/avatar.jpg',
+      }),
+    ).toBe(1)
+  })
 })
 
 describe('lowEffortSignatureScore', () => {
@@ -83,5 +93,9 @@ describe('lowEffortSignatureScore', () => {
 
   it('is 0 when no signal matches', () => {
     expect(lowEffortSignatureScore(0)).toBe(0)
+  })
+
+  it('is 0 for exactly one matching signal, so it alone must not move confidence', () => {
+    expect(lowEffortSignatureScore(1)).toBe(0)
   })
 })
