@@ -32,6 +32,12 @@ export interface AccountFeatureBundle {
      * 任意項目にし、省略時は取得済みとして扱う (`professionalType` と同じ理由)。
      */
     recentTweetsFetchStatus?: string | null
+    /**
+     * `Account.profileImageUrl` の値。X の現行レスポンスでは `user.avatar.imageUrl` から取得する。
+     * この項目が存在する前に作られたルール単体テストの bundle も無修正でコンパイルが通るよう、
+     * 任意項目にする。
+     */
+    profileImageUrl?: string | null
   }
   recentTweets: {
     id: string
@@ -99,6 +105,13 @@ export interface AccountFeatureBundle {
    * この値を持たない bundle（多くのルール単体テストなど）では 0 として扱う。
    */
   templatedReplyNetworkSize?: number
+  /**
+   * URL・メンション除去後、この投稿者自身の bio と正規化形で完全一致する bio を持つ、
+   * 他アカウントの最大観測数。同一テンプレート bio を使い回す複製ネットワークの特徴を示す。
+   * ルールごとではなく実行ごとに共有コーパスから一度算出する（`buildBioDuplicateIndex` 参照）。
+   * この値を持たない bundle（多くのルール単体テストなど）では 0 として扱う。
+   */
+  bioDuplicateNetworkSize?: number
   /**
    * このアカウントが参加した「リプライハイジャック集団」の最大規模。
    * 5アカウント以上（本人含む）が24時間以内に同一対象へ言い換えつつ類似リプライを1件だけ投稿し、
