@@ -20,7 +20,7 @@ function makeSelfReplyRow(overrides: {
 }
 
 describe('loadSelfReplyPromoCorpus', () => {
-  it('queries self-authored replies and resolves the un-corpus\'d root ancestor for each chain', async () => {
+  it("queries self-authored replies and resolves the un-corpus'd root ancestor for each chain", async () => {
     // alice の自己返信チェーン: root1(非対象) <- reply1 <- reply2
     const findMany = vi
       .fn()
@@ -28,7 +28,9 @@ describe('loadSelfReplyPromoCorpus', () => {
         makeSelfReplyRow({ id: 'reply2', accountId: 'alice1', inReplyToTweetId: 'reply1' }),
         makeSelfReplyRow({ id: 'reply1', accountId: 'alice1', inReplyToTweetId: 'root1' }),
       ])
-      .mockResolvedValueOnce([{ id: 'root1', accountId: 'alice1', isReply: false, isRetweet: false }])
+      .mockResolvedValueOnce([
+        { id: 'root1', accountId: 'alice1', isReply: false, isRetweet: false },
+      ])
     const prisma = { tweet: { findMany } } as unknown as PrismaClient
 
     const result = await loadSelfReplyPromoCorpus(prisma, new Date('2026-01-02T00:00:00Z'))

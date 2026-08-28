@@ -81,10 +81,7 @@ describe('fetchSelfReplyChain', () => {
       // depth1 の直下: 自分の self-reply (depth2) と他人の返信 (辿らない)
       .mockResolvedValueOnce({
         data: {
-          data: [
-            rawTweet('depth2', alice, 'depth1'),
-            rawTweet('otherReply', bob, 'depth1'),
-          ],
+          data: [rawTweet('depth2', alice, 'depth1'), rawTweet('otherReply', bob, 'depth1')],
         },
       })
       // depth2 の直下: 自分の self-reply (depth3)

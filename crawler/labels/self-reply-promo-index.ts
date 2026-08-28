@@ -97,16 +97,19 @@ export function buildSelfReplyPromoIndex(
     }
 
     const destinationRootCounts = [...rootsByDestination.values()].map((roots) => roots.size)
-    const exactDestinationRoots = destinationRootCounts.length > 0 ? Math.max(...destinationRootCounts) : 0
+    const exactDestinationRoots =
+      destinationRootCounts.length > 0 ? Math.max(...destinationRootCounts) : 0
     const campaignRootCounts = [...rootsByCampaign.values()].map((roots) => roots.size)
     const multiHopRoots = campaignRootCounts.length > 0 ? Math.max(...campaignRootCounts) : 0
 
     const positiveRootIds = new Set<string>()
     if (exactDestinationRoots >= MIN_ROOTS_FOR_CAMPAIGN) {
-      for (const roots of rootsByDestination.values()) for (const rootId of roots) positiveRootIds.add(rootId)
+      for (const roots of rootsByDestination.values())
+        for (const rootId of roots) positiveRootIds.add(rootId)
     }
     if (multiHopRoots >= MIN_ROOTS_FOR_CAMPAIGN) {
-      for (const roots of rootsByCampaign.values()) for (const rootId of roots) positiveRootIds.add(rootId)
+      for (const roots of rootsByCampaign.values())
+        for (const rootId of roots) positiveRootIds.add(rootId)
     }
     if (positiveRootIds.size === 0) continue
 

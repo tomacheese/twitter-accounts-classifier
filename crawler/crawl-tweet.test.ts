@@ -170,7 +170,9 @@ describe('runManualTweetCrawl', () => {
         quoteCount: 0,
         inReplyToStatusIdStr: 'tweet1',
         retweetedStatusIdStr: null,
-        entities: { urls: [{ url: 'https://t.co/a', expandedUrl: 'https://x.com/other_creator/status/1' }] },
+        entities: {
+          urls: [{ url: 'https://t.co/a', expandedUrl: 'https://x.com/other_creator/status/1' }],
+        },
       },
       user: parentUser,
     }

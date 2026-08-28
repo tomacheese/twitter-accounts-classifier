@@ -3227,7 +3227,13 @@ describe('runRepliesPhase', () => {
     const budget = new TweetDetailRateLimitBudget({ now: () => 0 })
     const deps = makeDeps()
 
-    const result = await runRepliesPhase(deps, singleTweetTimelineSnapshot(), client, budget, vi.fn())
+    const result = await runRepliesPhase(
+      deps,
+      singleTweetTimelineSnapshot(),
+      client,
+      budget,
+      vi.fn(),
+    )
 
     expect(getTweetDetail).toHaveBeenCalledTimes(3)
     expect(result.replyTweets.map((t) => t.id)).toEqual(
@@ -3648,7 +3654,9 @@ describe('runAuthorUnitPhase self-reply promo candidate probe', () => {
       getUserApi: () => ({
         getUserByRestId: vi.fn().mockResolvedValue({ data: rawUser('author1') }),
         getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
-        getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [oldStandaloneTweet] } }),
+        getUserTweetsAndReplies: vi
+          .fn()
+          .mockResolvedValue({ data: { data: [oldStandaloneTweet] } }),
       }),
     } as unknown as CrawlOpenApiClient
 

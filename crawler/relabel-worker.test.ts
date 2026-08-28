@@ -163,7 +163,7 @@ describe('evaluateAccountRelabelItems', () => {
         }),
       },
       followGraphLabelIndex: { signalsFor: () => ({}) },
-        selfReplyPromoIndex: { evidenceFor: () => undefined },
+      selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 1,
       leaseOwner: 'test-worker',
     })
@@ -368,7 +368,7 @@ describe('evaluateAccountRelabelItems', () => {
         evidenceFor: () => undefined,
       },
       followGraphLabelIndex: { signalsFor: () => ({}) },
-        selfReplyPromoIndex: { evidenceFor: () => undefined },
+      selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 1,
       leaseOwner: 'test-worker',
     })
@@ -451,7 +451,7 @@ describe('evaluateAccountRelabelItems', () => {
         evidenceFor: () => undefined,
       },
       followGraphLabelIndex: { signalsFor: () => ({}) },
-        selfReplyPromoIndex: { evidenceFor: () => undefined },
+      selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 2,
       leaseOwner: 'test-worker',
     })
@@ -670,7 +670,7 @@ describe('evaluateAccountRelabelItems', () => {
         evidenceFor: () => undefined,
       },
       followGraphLabelIndex: { signalsFor: () => ({}) },
-        selfReplyPromoIndex: { evidenceFor: () => undefined },
+      selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 1,
       leaseOwner: 'test-worker',
     })

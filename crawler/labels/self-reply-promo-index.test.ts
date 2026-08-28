@@ -27,7 +27,11 @@ function qualifyingRoot(id: string, accountId: string): RootCandidateEntry {
 
 describe('buildSelfReplyPromoIndex', () => {
   it('counts distinct roots that reuse the same destination status as exactDestinationRoots', () => {
-    const roots = [qualifyingRoot('root1', 'alice1'), qualifyingRoot('root2', 'alice1'), qualifyingRoot('root3', 'alice1')]
+    const roots = [
+      qualifyingRoot('root1', 'alice1'),
+      qualifyingRoot('root2', 'alice1'),
+      qualifyingRoot('root3', 'alice1'),
+    ]
     const corpus = [
       selfReply({ id: 'r1', accountId: 'alice1', inReplyToTweetId: 'root1' }),
       selfReply({ id: 'r2', accountId: 'alice1', inReplyToTweetId: 'root2' }),
@@ -42,7 +46,11 @@ describe('buildSelfReplyPromoIndex', () => {
   })
 
   it('counts repeated depth>=2 campaigns as multiHopRoots even when the destination status differs', () => {
-    const roots = [qualifyingRoot('root1', 'alice1'), qualifyingRoot('root2', 'alice1'), qualifyingRoot('root3', 'alice1')]
+    const roots = [
+      qualifyingRoot('root1', 'alice1'),
+      qualifyingRoot('root2', 'alice1'),
+      qualifyingRoot('root3', 'alice1'),
+    ]
     // 各 root から 2 hop 目でランダムに変わる status id へ誘導するが、文面・誘導先ハンドルは共通させる。
     const corpus = [
       selfReply({ id: 'r1a', accountId: 'alice1', inReplyToTweetId: 'root1', expandedUrls: [] }),

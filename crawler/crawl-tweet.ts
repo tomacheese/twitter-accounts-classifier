@@ -77,11 +77,11 @@ export async function runManualTweetCrawl(
     viewerAccountId: focalRaw.user.restId,
   })
 
-  const { authorReplies, otherReplies, authors: replyAuthors } = await fetchReplies(
-    tweetApi,
-    parentTweet,
-    deps.repliesPerTweet,
-  )
+  const {
+    authorReplies,
+    otherReplies,
+    authors: replyAuthors,
+  } = await fetchReplies(tweetApi, parentTweet, deps.repliesPerTweet)
   const replies = [...authorReplies, ...otherReplies]
   const persistedReplyTweets = [...replies]
 

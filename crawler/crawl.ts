@@ -164,9 +164,7 @@ export interface CrawlDependencies {
   ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
   loadReplyCorpus: (watermark: Date) => Promise<ReplyHijackCorpusEntry[]>
   loadBioCorpus: (watermark: Date) => Promise<BioCorpusEntry[]>
-  loadSelfReplyPromoCorpus: (
-    watermark: Date,
-  ) => ReturnType<typeof loadSelfReplyPromoCorpus>
+  loadSelfReplyPromoCorpus: (watermark: Date) => ReturnType<typeof loadSelfReplyPromoCorpus>
   loadFollowGraphLabelIndex: (
     labelDefinitionIds: Map<string, string>,
     accountIds: string[],
@@ -867,9 +865,7 @@ export async function runAuthorUnitPhase(
         const probeRoots = sortByEngagement(
           recentTweets.filter(
             (tweet) =>
-              !tweet.isReply &&
-              !tweet.isRetweet &&
-              now - tweet.createdAt.getTime() >= minAgeMs,
+              !tweet.isReply && !tweet.isRetweet && now - tweet.createdAt.getTime() >= minAgeMs,
           ),
         ).slice(0, SELF_REPLY_PROMO_CHAIN_LIMITS.candidateProbeCount)
 
@@ -886,7 +882,8 @@ export async function runAuthorUnitPhase(
             })
           } catch (error) {
             const diagnostics = getResponseErrorDiagnostics(error)
-            if (diagnostics?.httpStatus === 429) tweetDetailRateLimitBudget.recordRateLimited(diagnostics)
+            if (diagnostics?.httpStatus === 429)
+              tweetDetailRateLimitBudget.recordRateLimited(diagnostics)
             continue
           }
           const selfReplyNode = probeResponse.data.data

@@ -83,8 +83,6 @@ describe('selfReplyPromoChainRule', () => {
       makeBundle({ promoRoots: 4, exactDestinationRoots: 4, multiHopRoots: 1, maxChainDepth: 3 }),
     )
 
-    expect(result.reason).toBe(
-      'promoRoots=4, exactDestinationRoots=4, multiHopRoots=1, maxDepth=3',
-    )
+    expect(result.reason).toBe('promoRoots=4, exactDestinationRoots=4, multiHopRoots=1, maxDepth=3')
   })
 })
