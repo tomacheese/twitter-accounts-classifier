@@ -3,6 +3,7 @@ import type { PrismaClient } from '../generated/prisma'
 import type { AccountFeatureBundle, LabelRule } from '../labels/types'
 import { LabelRuleRegistry } from '../labels/registry'
 import { buildDuplicateReplyIndex } from '../labels/duplicate-reply-index'
+import { buildBioDuplicateIndex } from '../labels/bio-duplicate-index'
 import { buildReplyHijackIndex } from '../labels/reply-hijack-index'
 import { replyHijackSwarmRule } from '../labels/rules/reply-hijack-swarm'
 import { ensureLabelDefinitionsForRules } from './label-repository'
@@ -72,6 +73,7 @@ function emptyRegistryParams() {
     registry: new LabelRuleRegistry(),
     labelDefinitionIds: new Map<string, string>(),
     duplicateReplyIndex: buildDuplicateReplyIndex([]),
+    bioDuplicateIndex: buildBioDuplicateIndex([]),
     replyHijackIndex: buildReplyHijackIndex([]),
     followGraphLabelIndex: noFollowGraphSignals,
   }
@@ -148,6 +150,7 @@ describe('persistAuthorResultAtomic', () => {
       registry,
       labelDefinitionIds: new Map([['reply_hijack_swarm', 'def-1']]),
       duplicateReplyIndex: buildDuplicateReplyIndex([]),
+      bioDuplicateIndex: buildBioDuplicateIndex([]),
       replyHijackIndex: {
         swarmSizeFor: () => 5,
         isEligibleForScreening: () => true,
@@ -233,6 +236,7 @@ describe('persistAuthorResultAtomic', () => {
       registry,
       labelDefinitionIds: new Map([['reply_hijack_swarm', 'def-1']]),
       duplicateReplyIndex: buildDuplicateReplyIndex([]),
+      bioDuplicateIndex: buildBioDuplicateIndex([]),
       replyHijackIndex: {
         swarmSizeFor: () => 5,
         isEligibleForScreening: () => true,
@@ -375,6 +379,7 @@ describe('persistAuthorResultAtomic', () => {
       registry,
       labelDefinitionIds: new Map([['capture_rule', 'def-1']]),
       duplicateReplyIndex: buildDuplicateReplyIndex([]),
+      bioDuplicateIndex: buildBioDuplicateIndex([]),
       replyHijackIndex: buildReplyHijackIndex([]),
       followGraphLabelIndex: noFollowGraphSignals,
       warnings: [],
@@ -441,6 +446,7 @@ describe('persistAuthorResultAtomic', () => {
       registry,
       labelDefinitionIds: new Map([['capture_rule', 'def-1']]),
       duplicateReplyIndex: buildDuplicateReplyIndex([]),
+      bioDuplicateIndex: buildBioDuplicateIndex([]),
       replyHijackIndex: buildReplyHijackIndex([]),
       followGraphLabelIndex: noFollowGraphSignals,
       warnings: [],
@@ -509,6 +515,7 @@ describe('persistAuthorResultAtomic', () => {
       registry,
       labelDefinitionIds: new Map([['capture_rule', 'def-1']]),
       duplicateReplyIndex: buildDuplicateReplyIndex([]),
+      bioDuplicateIndex: buildBioDuplicateIndex([]),
       replyHijackIndex: buildReplyHijackIndex([]),
       followGraphLabelIndex: noFollowGraphSignals,
       warnings: [],
@@ -761,6 +768,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         registry,
         labelDefinitionIds,
         duplicateReplyIndex: buildDuplicateReplyIndex([]),
+        bioDuplicateIndex: buildBioDuplicateIndex([]),
         replyHijackIndex: buildReplyHijackIndex([]),
         followGraphLabelIndex: noFollowGraphSignals,
         warnings: [],
@@ -783,6 +791,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         registry,
         labelDefinitionIds,
         duplicateReplyIndex: buildDuplicateReplyIndex([]),
+        bioDuplicateIndex: buildBioDuplicateIndex([]),
         replyHijackIndex: buildReplyHijackIndex([]),
         followGraphLabelIndex: noFollowGraphSignals,
         warnings: [],

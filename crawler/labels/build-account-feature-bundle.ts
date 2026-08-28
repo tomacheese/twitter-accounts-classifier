@@ -54,7 +54,7 @@ export function buildAccountFeatureBundle(
   }
 
   const bioDuplicateNetworkSize =
-    account.bio === null ? 0 : bioDuplicateIndex.countOtherAccounts(account.bio, account.id)
+    account.bio == null ? 0 : bioDuplicateIndex.countOtherAccounts(account.bio, account.id)
 
   return {
     account: {
