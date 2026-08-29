@@ -2892,7 +2892,10 @@ describe('runCrawlCycle', () => {
     const persistAuthorResultAtomic = vi.fn().mockResolvedValue({ observationId: 'observation1' })
     const getUserTweetsAndReplies = vi.fn().mockResolvedValue({
       data: {
-        data: [rawTweet('context-tweet1', rawUser('context-author1'), null)],
+        data: [
+          rawTweet('own-tweet1', rawUser('author1')),
+          rawTweet('context-tweet1', rawUser('context-author1'), null),
+        ],
       },
     })
     const deps = makeDeps({

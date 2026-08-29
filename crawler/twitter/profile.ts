@@ -45,6 +45,17 @@ export async function fetchRecentTweets(
   limit: number,
 ): Promise<RecentTweetsResult> {
   const response = await client.getUserTweetsAndReplies({ userId, count: limit })
+  // レスポンスが非空にもかかわらず requested user 本人の tweet/reply が 1 件も解釈できない場合は、
+  // reply-thread context tweet だけで埋まった誤取得の疑いが強く、
+  // 空の recent timeline (本来の 0 件) と区別せず success 扱いにすると誤った状態が DB に確定してしまう。
+  if (
+    response.data.data.length > 0 &&
+    !response.data.data.some((raw) => raw.user.restId === userId)
+  ) {
+    throw new Error(
+      `fetchRecentTweets: getUserTweetsAndReplies returned ${response.data.data.length} tweet(s) for user ${userId} but none authored by the requested user`,
+    )
+  }
   return {
     tweets: response.data.data.map((raw) =>
       toTweetInput(raw, { source: 'profile', viewerAccountId: userId }),
