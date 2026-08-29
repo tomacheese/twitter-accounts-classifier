@@ -58,6 +58,50 @@ describe('selectBlockCandidates', () => {
     expect(values).toEqual(expect.arrayContaining([['spam', 'bot'], [0.9, 0.5], 10]))
   })
 
+  it('filters non-blocking reply-farming labels out of the SQL parameters', async () => {
+    const prisma = fakePrismaReturning([])
+
+    await selectBlockCandidates(
+      prisma as never,
+      'blocker-1',
+      {
+        targetLabels: [
+          { label: 'spam', confidenceThreshold: 0.8 },
+          { label: 'reply_farming', confidenceThreshold: 0.5 },
+          { label: 'generic_reply_farming', confidenceThreshold: 0.5 },
+        ],
+      },
+      50,
+      3,
+      21_600,
+    )
+
+    const [, ...values] = prisma.$queryRaw.mock.calls[0]
+    expect(values).toEqual(expect.arrayContaining([['spam'], [0.8]]))
+    expect(values).not.toContainEqual(['reply_farming', 'generic_reply_farming'])
+  })
+
+  it('returns without querying when every configured target label is non-blocking', async () => {
+    const prisma = fakePrismaReturning([])
+
+    const result = await selectBlockCandidates(
+      prisma as never,
+      'blocker-1',
+      {
+        targetLabels: [
+          { label: 'reply_farming', confidenceThreshold: 0.5 },
+          { label: 'generic_reply_farming', confidenceThreshold: 0.5 },
+        ],
+      },
+      50,
+      3,
+      21_600,
+    )
+
+    expect(result).toEqual([])
+    expect(prisma.$queryRaw).not.toHaveBeenCalled()
+  })
+
   it('returns an empty array when no row satisfies the rule', async () => {
     const prisma = fakePrismaReturning([])
 
