@@ -240,3 +240,23 @@ export async function findTweetTextsByIds(
   })
   return new Map(rows.map((row) => [row.id, row.fullText]))
 }
+
+export interface TweetContext {
+  fullText: string
+  accountId: string
+}
+
+/**
+ * parent reply classification 用に本文と投稿者を1回の問い合わせで取得する。
+ */
+export async function findTweetContextsByIds(
+  prisma: PrismaClient,
+  ids: string[],
+): Promise<Map<string, TweetContext>> {
+  if (ids.length === 0) return new Map()
+  const rows = await prisma.tweet.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, fullText: true, accountId: true },
+  })
+  return new Map(rows.map((row) => [row.id, { fullText: row.fullText, accountId: row.accountId }]))
+}

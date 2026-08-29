@@ -284,6 +284,32 @@ export async function convertTimelineResponse(
 }
 
 /**
+ * `getUserTweetsAndReplies` は返信スレッドの文脈として親ツイートを module 化して返し、
+ * module の代表エントリ (`data`) には親ツイートの投稿者が入り、
+ * 本人の実際の返信は `data.replies` に格納される。
+ * `convertTimelineResponse` は `replies` を読まないため、
+ * その代表エントリだけを使うと本人の返信が欠落し、
+ * 逆に foreign context tweet だけが件数上限を占有してしまう。
+ * ここで module 1 段分だけ展開してから同じ変換に渡すことで、
+ * 本人の返信も既存仕様の context tweet も両方保持する。
+ * @param response - 保留中の API レスポンス
+ * @returns 変換後のページ。本人の返信と reply-thread context tweet が両方フラット化される
+ */
+export async function convertUserTweetsAndRepliesResponse(
+  response: Promise<TwitterApiUtilsResponse<TimelineApiUtilsResponse<TweetApiUtilsData>>>,
+): Promise<TimelinePage> {
+  const result = await response
+  const flattened = result.data.data.flatMap((entry) => [entry, ...entry.replies])
+  return {
+    data: {
+      data: toRawTweetResults(flattened),
+      cursor: result.data.cursor.bottom?.value,
+      rawCount: result.data.data.length,
+    },
+  }
+}
+
+/**
  * @param tweetApi - 実際のツイート API (例: `TwitterOpenApiClient.getTweetApi()`)
  * @returns 各 timeline 取得関数 (Recommended/Following/Trending) が共通して使う `TweetApiLike`
  */

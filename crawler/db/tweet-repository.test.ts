@@ -389,3 +389,28 @@ describe('findTweetTextsByIds', () => {
     expect(findMany).not.toHaveBeenCalled()
   })
 })
+
+describe('findTweetContextsByIds', () => {
+  it('returns parent text and author id in one query', async () => {
+    const repository = await import('./tweet-repository')
+    expect(repository).toHaveProperty('findTweetContextsByIds')
+    const findTweetContextsByIds = (repository as Record<string, unknown>)
+      .findTweetContextsByIds as (
+      prisma: PrismaClient,
+      ids: string[],
+    ) => Promise<Map<string, { fullText: string; accountId: string }>>
+    const findMany = vi
+      .fn()
+      .mockResolvedValue([{ id: 't1', fullText: '本文1', accountId: 'author-1' }])
+    const prisma = { tweet: { findMany } } as unknown as PrismaClient
+
+    const result = await findTweetContextsByIds(prisma, ['t1', 'missing'])
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['t1', 'missing'] } },
+      select: { id: true, fullText: true, accountId: true },
+    })
+    expect(result.get('t1')).toEqual({ fullText: '本文1', accountId: 'author-1' })
+    expect(result.has('missing')).toBe(false)
+  })
+})

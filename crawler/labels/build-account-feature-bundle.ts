@@ -29,6 +29,7 @@ export function buildAccountFeatureBundle(
   followGraphLabelIndex: FollowGraphLabelIndex,
   selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,
   parentTweetTextById: Map<string, string>,
+  parentTweetAuthorIdById = new Map<string, string>(),
 ): AccountFeatureBundle {
   // 複数の異なるテンプレ返信ネットワーク・リプライハイジャック群に属することがあるため、
   // 合計や平均ではなく最大値を最も強いシグナルとして採用する。
@@ -97,6 +98,10 @@ export function buildAccountFeatureBundle(
         tweet.inReplyToTweetId === null
           ? null
           : (parentTweetTextById.get(tweet.inReplyToTweetId) ?? null),
+      parentTweetAuthorId:
+        tweet.inReplyToTweetId === null
+          ? null
+          : (parentTweetAuthorIdById.get(tweet.inReplyToTweetId) ?? null),
     })),
     templatedReplyNetworkSize,
     bioDuplicateNetworkSize,

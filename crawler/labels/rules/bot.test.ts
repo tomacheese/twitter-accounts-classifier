@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { botRule } from './bot'
 import type { AccountFeatureBundle } from '../types'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 function makeBundle(
   accountOverrides: Partial<AccountFeatureBundle['account']>,
@@ -265,6 +269,7 @@ describe('botRule', () => {
   })
 
   it('does not change confidence when only a single low-effort signup signal is present', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-08-30T00:00:00Z'))
     const oneYearAgo = new Date('2025-01-01T00:00:00Z')
     const baseAccountOverrides = {
       tweetCount: 100_000,
@@ -284,6 +289,7 @@ describe('botRule', () => {
   })
 
   it('does not change confidence for a value=false account regardless of low-effort signup signals', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-08-30T00:00:00Z'))
     const nineteenYearsAgo = new Date('2007-04-03T00:00:00Z')
     const withoutSignals = botRule.evaluate(
       makeBundle(

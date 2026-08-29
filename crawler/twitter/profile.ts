@@ -4,7 +4,7 @@ import type {
   UserApiUtils,
   UserApiUtilsData,
 } from 'twitter-openapi-typescript'
-import { convertTimelineResponse, toRawUserResult } from './timeline'
+import { convertUserTweetsAndRepliesResponse, toRawUserResult } from './timeline'
 import type { AccountProfileInput } from '../db/account-repository'
 import type { TweetInput } from '../db/tweet-repository'
 import {
@@ -45,6 +45,17 @@ export async function fetchRecentTweets(
   limit: number,
 ): Promise<RecentTweetsResult> {
   const response = await client.getUserTweetsAndReplies({ userId, count: limit })
+  // レスポンスが非空にもかかわらず requested user 本人の tweet/reply が 1 件も解釈できない場合は、
+  // reply-thread context tweet だけで埋まった誤取得の疑いが強く、
+  // 空の recent timeline (本来の 0 件) と区別せず success 扱いにすると誤った状態が DB に確定してしまう。
+  if (
+    response.data.data.length > 0 &&
+    !response.data.data.some((raw) => raw.user.restId === userId)
+  ) {
+    throw new Error(
+      `fetchRecentTweets: getUserTweetsAndReplies returned ${response.data.data.length} tweet(s) for user ${userId} but none authored by the requested user`,
+    )
+  }
   return {
     tweets: response.data.data.map((raw) =>
       toTweetInput(raw, { source: 'profile', viewerAccountId: userId }),
@@ -78,8 +89,9 @@ async function convertUserResponse(
  * `getUserByRestId` は `TwitterApiUtilsResponse<UserApiUtilsData>` を返すため、
  * {@link convertUserResponse} で変換する。
  * `getUserTweetsAndReplies` は timeline・tweet-detail 系エンドポイントと同じ、
- * `TwitterApiUtilsResponse<TimelineApiUtilsResponse<TweetApiUtilsData>>` 形状を返すため、
- * 専用の変換処理を新設せず `./timeline` の `convertTimelineResponse` を再利用する。
+ * `TwitterApiUtilsResponse<TimelineApiUtilsResponse<TweetApiUtilsData>>` 形状を返すが、
+ * 返信スレッドの文脈として親ツイートを module 化し、本人の実際の返信を `replies` に格納するため、
+ * `./timeline` の `convertUserTweetsAndRepliesResponse` で `replies` も展開してから変換する。
  * @param userApi - 実際のユーザー API (例: `TwitterOpenApiClient.getUserApi()`)
  * @param tweetApi - 実際のツイート API (例: `TwitterOpenApiClient.getTweetApi()`)
  * @returns {@link fetchAccountProfile}・{@link fetchRecentTweets} で使う `UserApiLike`
@@ -89,6 +101,6 @@ export function createUserApiLike(userApi: UserApiUtils, tweetApi: TweetApiUtils
     getUserByRestId: (param) => convertUserResponse(userApi.getUserByRestId(param)),
     getUserByScreenName: (param) => convertUserResponse(userApi.getUserByScreenName(param)),
     getUserTweetsAndReplies: (param) =>
-      convertTimelineResponse(tweetApi.getUserTweetsAndReplies(param)),
+      convertUserTweetsAndRepliesResponse(tweetApi.getUserTweetsAndReplies(param)),
   }
 }

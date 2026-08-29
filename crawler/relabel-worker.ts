@@ -28,7 +28,7 @@ import {
   upsertReplyHijackEvidence,
   type ReplyHijackEvidenceInput,
 } from './db/reply-hijack-evidence-repository'
-import { loadRecentTweetsForAccounts, findTweetTextsByIds } from './db/tweet-repository'
+import { loadRecentTweetsForAccounts, findTweetContextsByIds } from './db/tweet-repository'
 import { buildDuplicateReplyIndex as buildDuplicateReplyIndexImpl } from './labels/duplicate-reply-index'
 import { buildBioDuplicateIndex } from './labels/bio-duplicate-index'
 import { buildReplyHijackIndex as buildReplyHijackIndexImpl } from './labels/reply-hijack-index'
@@ -133,6 +133,7 @@ async function evaluateAccountRelabelItemGroup(
   let accounts: Account[]
   let tweetsByAccountId: Map<string, Tweet[]>
   let parentTweetTextById: Map<string, string>
+  let parentTweetAuthorIdById: Map<string, string>
   try {
     ;[accounts, tweetsByAccountId] = await Promise.all([
       prisma.account.findMany({ where: { id: { in: accountIds } } }),
@@ -154,10 +155,14 @@ async function evaluateAccountRelabelItemGroup(
     // 大規模グループで1回の IN 句に数千件の id を渡さないようにする。
     const lookupChunkSize = getRelabelerLabelLookupChunkSize()
     parentTweetTextById = new Map()
+    parentTweetAuthorIdById = new Map()
     for (let i = 0; i < replyParentIds.length; i += lookupChunkSize) {
       const chunk = replyParentIds.slice(i, i + lookupChunkSize)
-      const chunkResult = await findTweetTextsByIds(prisma, chunk)
-      for (const [id, text] of chunkResult) parentTweetTextById.set(id, text)
+      const chunkResult = await findTweetContextsByIds(prisma, chunk)
+      for (const [id, context] of chunkResult) {
+        parentTweetTextById.set(id, context.fullText)
+        parentTweetAuthorIdById.set(id, context.accountId)
+      }
     }
   } catch (error) {
     logger.error(
@@ -191,6 +196,7 @@ async function evaluateAccountRelabelItemGroup(
         options.followGraphLabelIndex,
         options.selfReplyPromoIndex,
         parentTweetTextById,
+        parentTweetAuthorIdById,
       )
       const labels: AccountLabelBulkInput[] = []
       const appliedRules = options.registry.applyAll(bundle)
