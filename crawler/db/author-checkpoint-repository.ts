@@ -11,7 +11,7 @@ import { buildAccountFeatureBundle } from '../labels/build-account-feature-bundl
 import type { FollowListResult } from '../twitter/follows'
 import { upsertAccount, type AccountProfileInput } from './account-repository'
 import { upsertAccountRequestingRelabelIfChanged } from './account-relabel-on-change'
-import { upsertTweet, findTweetTextsByIds, type TweetInput } from './tweet-repository'
+import { upsertTweet, findTweetContextsByIds, type TweetInput } from './tweet-repository'
 import {
   upsertFollowSampleAuthors,
   replaceLabelingFollowSampleWithinTx,
@@ -146,6 +146,11 @@ export async function persistAuthorResultAtomic(
         await replaceLabelingFollowSampleWithinTx(txClient, params.authorId, followeeIds)
       }
 
+      const parentTweetAuthorIdById = new Map(
+        upsertedTweets
+          .filter((tweet) => tweet.accountId !== params.authorId)
+          .map((tweet) => [tweet.id, tweet.accountId]),
+      )
       const parentTweetTextById = new Map(
         upsertedTweets
           .filter((tweet) => tweet.accountId !== params.authorId)
@@ -163,8 +168,11 @@ export async function persistAuthorResultAtomic(
         ),
       ]
       if (missingParentIds.length > 0) {
-        const dbParentTweetTextById = await findTweetTextsByIds(txClient, missingParentIds)
-        for (const [id, text] of dbParentTweetTextById) parentTweetTextById.set(id, text)
+        const dbParentTweetContextById = await findTweetContextsByIds(txClient, missingParentIds)
+        for (const [id, context] of dbParentTweetContextById) {
+          parentTweetTextById.set(id, context.fullText)
+          parentTweetAuthorIdById.set(id, context.accountId)
+        }
       }
       const bundle = buildAccountFeatureBundle(
         account,
@@ -175,6 +183,7 @@ export async function persistAuthorResultAtomic(
         params.followGraphLabelIndex,
         params.selfReplyPromoIndex,
         parentTweetTextById,
+        parentTweetAuthorIdById,
       )
       const appliedRules = params.registry.applyAll(bundle)
       const ruleResults = appliedRules.flatMap(({ rule, result }) => {

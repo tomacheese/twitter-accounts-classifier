@@ -95,6 +95,7 @@ export interface AccountFeatureBundle {
      * 任意項目にする理由は `inReplyToTweetId` と同じ。
      */
     parentTweetFullText?: string | null
+    parentTweetAuthorId?: string | null
   }[]
   /**
    * URL・メンション除去後、この投稿者自身のいずれかのリプライ本文と完全一致するリプライを投稿した、

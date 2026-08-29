@@ -879,3 +879,79 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
   },
 )
+
+it('crawl-time label evaluation receives the resolved parent author id', async () => {
+  let observedParentAuthorId: string | null | undefined
+  const probeRule: LabelRule = {
+    key: 'parent_author_probe',
+    version: '1.0.0',
+    description: 'test probe',
+    evaluate(bundle: AccountFeatureBundle) {
+      observedParentAuthorId = bundle.recentTweets[0]?.parentTweetAuthorId
+      return { value: false, confidence: 1, reason: 'probe' }
+    },
+  }
+  const registry = new LabelRuleRegistry()
+  registry.register(probeRule)
+  vi.spyOn(labelRepository, 'recordCrawlAccountLabelsAtomicWithinTx').mockResolvedValue(
+    'observation-1',
+  )
+  const authorProfile = profile('author1')
+  const upsertedReply = {
+    ...tweet('reply-1', 'author1', { isReply: true, inReplyToTweetId: 'parent-1' }),
+    expandedUrls: [],
+    foreignVideoSourceCount: null,
+    collectedAt: new Date('2026-08-29T00:00:00Z'),
+  }
+  const findMany = vi.fn(({ select }: { select?: Record<string, boolean> }) => {
+    if (select?.accountId) {
+      return Promise.resolve([
+        { id: 'parent-1', fullText: 'parent text', accountId: 'parent-author' },
+      ])
+    }
+    return Promise.resolve([{ id: 'parent-1', fullText: 'parent text' }])
+  })
+  const txClient = {
+    account: {
+      upsert: vi.fn().mockResolvedValue(authorProfile),
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn().mockResolvedValue({ ...authorProfile, recentTweetsFetchStatus: 'success' }),
+    },
+    tweet: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany,
+      upsert: vi.fn().mockResolvedValue(upsertedReply),
+    },
+    crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+  }
+  const prisma = {
+    $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient)),
+  } as unknown as PrismaClient
+  await persistAuthorResultAtomic(prisma, {
+    crawlRunId: 'run1',
+    username: 'tester',
+    authorId: 'author1',
+    profile: authorProfile,
+    recentTweets: [tweet('reply-1', 'author1', { isReply: true, inReplyToTweetId: 'parent-1' })],
+    additionalOwnTweets: [],
+    recentTweetsFallbackAuthors: [],
+    followSample: null,
+    registry,
+    labelDefinitionIds: new Map([[probeRule.key, 'def-1']]),
+    duplicateReplyIndex: buildDuplicateReplyIndex([]),
+    bioDuplicateIndex: buildBioDuplicateIndex([]),
+    replyHijackIndex: buildReplyHijackIndex([]),
+    followGraphLabelIndex: noFollowGraphSignals,
+    selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
+    warnings: [],
+    durationMs: 0,
+    retryWaitMs: 0,
+    appVersion: 'test',
+  })
+
+  expect(observedParentAuthorId).toBe('parent-author')
+  expect(findMany).toHaveBeenCalledWith({
+    where: { id: { in: ['parent-1'] } },
+    select: { id: true, fullText: true, accountId: true },
+  })
+})

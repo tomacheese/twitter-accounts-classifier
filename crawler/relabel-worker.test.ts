@@ -55,7 +55,7 @@ describe('evaluateAccountRelabelItems', () => {
         ],
       ]),
     )
-    vi.spyOn(tweetRepository, 'findTweetTextsByIds').mockResolvedValue(new Map())
+    vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
     const recordLabelsSpy = vi
       .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
       .mockResolvedValue([])
@@ -137,7 +137,7 @@ describe('evaluateAccountRelabelItems', () => {
         ],
       ]),
     )
-    vi.spyOn(tweetRepository, 'findTweetTextsByIds').mockResolvedValue(new Map())
+    vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
     vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts').mockResolvedValue([])
     const evidenceSpy = vi
       .spyOn(evidenceRepository, 'upsertReplyHijackEvidence')
@@ -209,7 +209,7 @@ describe('evaluateAccountRelabelItems', () => {
         ],
       ]),
     )
-    vi.spyOn(tweetRepository, 'findTweetTextsByIds').mockResolvedValue(new Map())
+    vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
     vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts').mockImplementation((client) => {
       expect(client).toBe(txClient)
       labelsStaged = true
@@ -349,8 +349,8 @@ describe('evaluateAccountRelabelItems', () => {
         ],
       ]),
     )
-    vi.spyOn(tweetRepository, 'findTweetTextsByIds').mockResolvedValue(
-      new Map([['parent1', '親ツイートの本文です']]),
+    vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(
+      new Map([['parent1', { fullText: '親ツイートの本文です', accountId: 'parent-author' }]]),
     )
 
     const prisma = makeTransactionalPrisma({
