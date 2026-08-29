@@ -179,4 +179,41 @@ describe('createUserApiLike (real-shape adapter)', () => {
 
     await expect(adapter.getUserByRestId({ userId: 'u1' })).rejects.toThrow('User not found')
   })
+
+  it('surfaces the requested user reply nested in a reply-thread module, not just the foreign context tweet', async () => {
+    const stranger = makeRealUser({ screenName: 'stranger' })
+    stranger.restId = 'stranger1'
+    stranger.id = 'stranger1'
+
+    // getUserTweetsAndReplies は返信スレッドの文脈として親ツイートを module の代表エントリにするため、
+    // module 直下の tweet/user は要求ユーザー本人とは限らず、本人の実際の返信は replies に入る。
+    const ownReply = makeRealTweet({
+      tweet: {
+        restId: 'own-reply1',
+        legacy: { ...makeRealTweet().tweet.legacy, fullText: 'own reply' },
+      } as RealTweet,
+    })
+    const foreignParentTweet = makeRealTweet({
+      tweet: {
+        restId: 'parent1',
+        legacy: { ...makeRealTweet().tweet.legacy, fullText: 'parent' },
+      } as RealTweet,
+      user: stranger,
+      replies: [ownReply],
+    })
+
+    const getUserTweetsAndReplies = vi
+      .fn()
+      .mockReturnValue(makeTimelineResponse([foreignParentTweet]))
+    const userApi: UserApiUtils = {} as unknown as UserApiUtils
+    const tweetApi: TweetApiUtils = { getUserTweetsAndReplies } as unknown as TweetApiUtils
+
+    const adapter = createUserApiLike(userApi, tweetApi)
+    const result = await adapter.getUserTweetsAndReplies({ userId: 'u1', count: 20 })
+
+    expect(result.data.data.map((t) => t.restId)).toEqual(
+      expect.arrayContaining(['own-reply1', 'parent1']),
+    )
+    expect(result.data.data.find((t) => t.restId === 'own-reply1')?.user.restId).toBe('u1')
+  })
 })

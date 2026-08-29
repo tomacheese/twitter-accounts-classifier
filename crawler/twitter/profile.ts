@@ -4,7 +4,7 @@ import type {
   UserApiUtils,
   UserApiUtilsData,
 } from 'twitter-openapi-typescript'
-import { convertTimelineResponse, toRawUserResult } from './timeline'
+import { convertUserTweetsAndRepliesResponse, toRawUserResult } from './timeline'
 import type { AccountProfileInput } from '../db/account-repository'
 import type { TweetInput } from '../db/tweet-repository'
 import {
@@ -78,8 +78,9 @@ async function convertUserResponse(
  * `getUserByRestId` は `TwitterApiUtilsResponse<UserApiUtilsData>` を返すため、
  * {@link convertUserResponse} で変換する。
  * `getUserTweetsAndReplies` は timeline・tweet-detail 系エンドポイントと同じ、
- * `TwitterApiUtilsResponse<TimelineApiUtilsResponse<TweetApiUtilsData>>` 形状を返すため、
- * 専用の変換処理を新設せず `./timeline` の `convertTimelineResponse` を再利用する。
+ * `TwitterApiUtilsResponse<TimelineApiUtilsResponse<TweetApiUtilsData>>` 形状を返すが、
+ * 返信スレッドの文脈として親ツイートを module 化し、本人の実際の返信を `replies` に格納するため、
+ * `./timeline` の `convertUserTweetsAndRepliesResponse` で `replies` も展開してから変換する。
  * @param userApi - 実際のユーザー API (例: `TwitterOpenApiClient.getUserApi()`)
  * @param tweetApi - 実際のツイート API (例: `TwitterOpenApiClient.getTweetApi()`)
  * @returns {@link fetchAccountProfile}・{@link fetchRecentTweets} で使う `UserApiLike`
@@ -89,6 +90,6 @@ export function createUserApiLike(userApi: UserApiUtils, tweetApi: TweetApiUtils
     getUserByRestId: (param) => convertUserResponse(userApi.getUserByRestId(param)),
     getUserByScreenName: (param) => convertUserResponse(userApi.getUserByScreenName(param)),
     getUserTweetsAndReplies: (param) =>
-      convertTimelineResponse(tweetApi.getUserTweetsAndReplies(param)),
+      convertUserTweetsAndRepliesResponse(tweetApi.getUserTweetsAndReplies(param)),
   }
 }
