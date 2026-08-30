@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { PrismaClient, type Prisma } from '../generated/prisma'
+import { Prisma, PrismaClient } from '../generated/prisma'
 import { selectRecentTweetsBackfillCandidates } from './recent-tweets-backfill-repository'
 
 const prisma = new PrismaClient()
@@ -24,10 +24,25 @@ describe('recent tweets backfill 部分index migration', () => {
     expect(sql).toMatch(/\("labelDefinitionId", "accountId"\)/)
     expect(sql).toMatch(/WHERE "evaluable" = false/)
   })
+
+  it('Account_recent_tweets_unattempted_idx を期待する列・述語で定義する', () => {
+    // eslint-disable-next-line unicorn/prefer-module
+    const migrationsDir = path.join(__dirname, '../../prisma/migrations')
+    const dirs = readdirSync(migrationsDir).filter((d) =>
+      d.includes('add_account_recent_tweets_unattempted_index'),
+    )
+    expect(dirs.length).toBe(1)
+    const sql = readFileSync(path.join(migrationsDir, dirs[0], 'migration.sql'), 'utf8')
+    expect(sql).toMatch(
+      /CREATE INDEX CONCURRENTLY IF NOT EXISTS "Account_recent_tweets_unattempted_idx"/,
+    )
+    expect(sql).toMatch(/ON "Account" \("id"\)/)
+    expect(sql).toMatch(/WHERE "lastRecentTweetsAttemptedAt" IS NULL/)
+  })
 })
 
 describe('selectRecentTweetsBackfillCandidates query shape', () => {
-  it('対象ラベルごとに Account への JOIN・未試行条件・cursor を branch 内の LIMIT より前に適用してから UNION する', async () => {
+  it('Account を起点に LATERAL fence 付き EXISTS 相当で対象ラベルの有無を probe する', async () => {
     const queryRaw = vi
       .fn()
       .mockResolvedValueOnce([{ id: 'ld-bot' }, { id: 'ld-rf' }, { id: 'ld-rh' }, { id: 'ld-ai' }])
@@ -43,14 +58,17 @@ describe('selectRecentTweetsBackfillCandidates query shape', () => {
     expect(definitionLookupSql).toContain('"key" IN')
 
     const candidateSql = (queryRaw.mock.calls[1][0] as { strings: string[] }).strings.join('')
-    expect(candidateSql).toContain('UNION')
-    expect(candidateSql).toContain('"labelDefinitionId" =')
+    // 起点は AccountLabelLatest ではなく Account でなければ、
+    // backfill 進行に伴う試行済み prefix の skip 量増加という残課題が再発する。
+    expect(candidateSql).toContain('FROM "Account" AS a')
+    expect(candidateSql).toContain('CROSS JOIN LATERAL')
+    expect(candidateSql).toContain('"labelDefinitionId" IN')
     expect(candidateSql).toContain('"evaluable" = false')
-    expect(candidateSql).toContain('INNER JOIN "Account" AS a ON a."id" = latest."accountId"')
-    expect(candidateSql).toContain('a."lastRecentTweetsAttemptedAt" IS NULL')
-    // branch 4本分 + 最終sentinel分で LIMIT が計5箇所必要 (branch内が先、外側の再sentinelが最後)。
-    expect(candidateSql.match(/LIMIT/g)).toHaveLength(5)
-    expect(candidateSql).not.toContain('CROSS JOIN LATERAL')
+    expect(candidateSql).toContain('WHERE a."lastRecentTweetsAttemptedAt" IS NULL')
+    // LATERAL 内の LIMIT 1 が optimizer による semi-join への平坦化を防ぐ fence、
+    // 外側の LIMIT が limit+1 sentinel。
+    expect(candidateSql.match(/LIMIT/g)).toHaveLength(2)
+    expect(candidateSql).not.toContain('UNION')
   })
 
   it('対象ラベルが1件も存在しない場合は Account への問い合わせを行わずに空ページを返す', async () => {
@@ -187,3 +205,88 @@ describe.skipIf(!process.env.DATABASE_URL)('selectRecentTweetsBackfillCandidates
     expect(assertionsCompleted).toBe(true)
   })
 })
+
+describe.skipIf(!process.env.DATABASE_URL)(
+  'selectRecentTweetsBackfillCandidates EXPLAIN 契約',
+  () => {
+    it('試行済み prefix が伸びても Account 側は未試行分の部分 index からのみ読む', async () => {
+      let assertionsCompleted = false
+      try {
+        await prisma.$transaction(async (tx) => {
+          const runId = randomUUID().replaceAll('-', '')
+          const botDefinitionId = `synthetic_definition_${runId}_bot`
+          await tx.$executeRaw`
+          INSERT INTO "LabelDefinition" ("id", "key", "description")
+          VALUES (${botDefinitionId}, ${'bot'}, ${'synthetic'})
+        `
+          // 低密度の evaluable=false 付き account を大量に試行済みとして敷き、
+          // production の「進行済み prefix」を再現する。
+          await tx.$executeRaw`
+          INSERT INTO "Account" (
+            "id", "screenName", "displayName", "followersCount", "followingCount", "tweetCount",
+            "accountCreatedAt", "updatedAt", "lastRecentTweetsAttemptedAt"
+          )
+          SELECT
+            'synthetic_recent_backfill_' || ${runId} || '_attempted_' || lpad(g::text, 6, '0'),
+            'synthetic_user_' || g, 'Synthetic User ' || g, 0, 0, 0, now(), now(), now()
+          FROM generate_series(1, 2000) AS g
+        `
+          await tx.$executeRaw`
+          INSERT INTO "AccountLabelLatest" (
+            "accountId", "labelDefinitionId", "value", "confidence", "reason", "method",
+            "ruleVersion", "evaluable", "labeledAt"
+          )
+          SELECT
+            'synthetic_recent_backfill_' || ${runId} || '_attempted_' || lpad(g::text, 6, '0'),
+            ${botDefinitionId}, false, 0, 'synthetic', 'synthetic', 'v1', false, now()
+          FROM generate_series(1, 2000) AS g
+          WHERE g % 10 = 0
+        `
+          const candidateId = `synthetic_recent_backfill_${runId}_zzz_candidate`
+          await tx.$executeRaw`
+          INSERT INTO "Account" (
+            "id", "screenName", "displayName", "followersCount", "followingCount", "tweetCount",
+            "accountCreatedAt", "updatedAt", "lastRecentTweetsAttemptedAt"
+          )
+          VALUES (${candidateId}, 'synthetic_candidate', 'Synthetic Candidate', 0, 0, 0, now(), now(), NULL)
+        `
+          await tx.$executeRaw`
+          INSERT INTO "AccountLabelLatest" (
+            "accountId", "labelDefinitionId", "value", "confidence", "reason", "method",
+            "ruleVersion", "evaluable", "labeledAt"
+          )
+          VALUES (${candidateId}, ${botDefinitionId}, false, 0, 'synthetic', 'synthetic', 'v1', false, now())
+        `
+
+          let capturedCandidateSql: Prisma.Sql | undefined
+          const capturingClient = {
+            $queryRaw: async (sql: Prisma.Sql) => {
+              if (sql.strings.join('').includes('FROM "Account" AS a')) capturedCandidateSql = sql
+              return (tx as unknown as PrismaClient).$queryRaw(sql)
+            },
+          } as unknown as PrismaClient
+
+          await expect(
+            selectRecentTweetsBackfillCandidates(capturingClient, { limit: 5 }),
+          ).resolves.toEqual({ accountIds: [candidateId] })
+          if (capturedCandidateSql === undefined) throw new Error('candidate SQL was not captured')
+
+          const explainRows = await tx.$queryRaw<{ 'QUERY PLAN': unknown[] }[]>(
+            Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${capturedCandidateSql}`,
+          )
+          const plan = JSON.stringify(explainRows[0]['QUERY PLAN'])
+          // Account 側が Account_recent_tweets_unattempted_idx からの Index Scan であれば、
+          // 未試行分のみを読み、試行済み prefix の長さに比例した skip は発生しない。
+          expect(plan).toContain('Account_recent_tweets_unattempted_idx')
+          expect(plan).not.toContain('Account_pkey')
+
+          assertionsCompleted = true
+          throw new RollbackFixture()
+        })
+      } catch (error) {
+        if (!(error instanceof RollbackFixture)) throw error
+      }
+      expect(assertionsCompleted).toBe(true)
+    })
+  },
+)

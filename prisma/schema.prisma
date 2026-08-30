@@ -71,6 +71,9 @@ model Account {
   @@index([followersCount])
   @@index([tweetCount])
   @@index([lastCrawledAt])
+  // recent tweets backfill 候補 selector 用の (id) WHERE lastRecentTweetsAttemptedAt IS NULL
+  // 部分 index は、Prisma の schema DSL では WHERE 句を表現できないため、
+  // migration 20260830190000_add_account_recent_tweets_unattempted_index の raw SQL で管理する。
 }
 
 model Tweet {

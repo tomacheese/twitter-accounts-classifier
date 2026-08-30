@@ -27,10 +27,13 @@ interface DefinitionIdRow {
 
 /**
  * recent tweets が未取得で、対象ラベルを評価できなかった account を keyset pagination で返す。
- * 未試行 account 側から対象ラベルの有無を probe する設計は、候補密度が低い production では
- * statement_timeout を超過した。対象ラベルごとに絞り込んだ branch を先に作り UNION する。
- * branch 内で Account への JOIN・未試行条件・cursor を LIMIT より前に適用しないと、
- * そのラベルの上位 limit+1 件が試行済みだった場合に本来の候補を取りこぼす。
+ * AccountLabelLatest 側の evaluable=false 行を起点に Account を probe する設計は、
+ * backfill 進行に対して skip 量が非有界だった。
+ * Account 側の未試行行 (lastRecentTweetsAttemptedAt IS NULL) を起点にすると、
+ * 試行済みになった行は部分 index から消えるため、スキャン量が未試行件数だけに比例する。
+ * ただし相関 EXISTS のままだと optimizer が semi-join として平坦化し、
+ * 結局 AccountLabelLatest 側の全体 scan に戻ってしまうため、
+ * LATERAL と LIMIT 1 で平坦化を防ぐ fence にする。
  * @param prisma - Prisma クライアント
  * @param options - strict cursor とページ件数
  * @returns account ID と、後続ページが存在する場合のみ次の cursor
@@ -48,26 +51,21 @@ export async function selectRecentTweetsBackfillCandidates(
 
   const cursorCondition =
     options.afterId === undefined ? Prisma.empty : Prisma.sql`AND a."id" > ${options.afterId}`
-  const labelBranches = Prisma.join(
-    definitions.map(
-      (definition) => Prisma.sql`(
-        SELECT a."id" AS "accountId"
-        FROM "AccountLabelLatest" AS latest
-        INNER JOIN "Account" AS a ON a."id" = latest."accountId"
-        WHERE latest."labelDefinitionId" = ${definition.id}
-          AND latest."evaluable" = false
-          AND a."lastRecentTweetsAttemptedAt" IS NULL
-          ${cursorCondition}
-        ORDER BY a."id" ASC
-        LIMIT ${options.limit + 1}
-      )`,
-    ),
-    ' UNION ',
-  )
+  const definitionIds = Prisma.join(definitions.map((definition) => definition.id))
   const rows = await prisma.$queryRaw<CandidateRow[]>(Prisma.sql`
-    SELECT "accountId"
-    FROM (${labelBranches}) AS "candidate"
-    ORDER BY "accountId" ASC
+    SELECT a."id" AS "accountId"
+    FROM "Account" AS a
+    CROSS JOIN LATERAL (
+      SELECT 1
+      FROM "AccountLabelLatest" AS latest
+      WHERE latest."accountId" = a."id"
+        AND latest."labelDefinitionId" IN (${definitionIds})
+        AND latest."evaluable" = false
+      LIMIT 1
+    ) AS "match"
+    WHERE a."lastRecentTweetsAttemptedAt" IS NULL
+      ${cursorCondition}
+    ORDER BY a."id" ASC
     LIMIT ${options.limit + 1}
   `)
 
