@@ -188,6 +188,9 @@ model AccountLabelLatest {
   // recent tweets backfill 候補 selector 用の (labelDefinitionId, accountId) WHERE evaluable = false
   // 部分 index は、Prisma の schema DSL では WHERE 句を表現できないため、
   // migration 20260830180000_add_recent_tweets_backfill_label_evaluable_index の raw SQL で管理する。
+  // block candidate selector 用の (labelDefinitionId, ruleVersion, confidence DESC, accountId)
+  // WHERE value = true 部分 index も同様の理由で
+  // migration 20260830185000_add_account_label_latest_block_candidate_index の raw SQL で管理する。
 }
 
 model WeeklyAnalysisRun {
