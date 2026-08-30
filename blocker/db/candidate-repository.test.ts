@@ -1,5 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { readdirSync, readFileSync } from 'node:fs'
+import path from 'node:path'
 import { selectBlockCandidates } from './candidate-repository'
 import { getPrismaClient } from './client'
 
@@ -215,12 +217,39 @@ describe('selectBlockCandidates SQL shape', () => {
   })
 })
 
+describe('AccountLabelLatest_block_candidate_idx migration', () => {
+  // tsconfig の module は CommonJS のため import.meta は使えない。
+  // eslint-disable-next-line unicorn/prefer-module
+  const migrationsDir = path.join(__dirname, '../../prisma/migrations')
+  const dirs = readdirSync(migrationsDir).filter((d) =>
+    d.includes('add_account_label_latest_block_candidate_index'),
+  )
+  const sql = readFileSync(path.join(migrationsDir, dirs[0], 'migration.sql'), 'utf8')
+
+  it('該当 migration がちょうど1件存在する', () => {
+    expect(dirs.length).toBe(1)
+  })
+
+  it('CREATE INDEX CONCURRENTLY で非トランザクション実行できる形にする', () => {
+    expect(sql).toContain('CREATE INDEX CONCURRENTLY IF NOT EXISTS')
+  })
+
+  it('label ごとの confidence 降順 Index Cond を成立させる列順にする', () => {
+    expect(sql).toContain('("labelDefinitionId", "ruleVersion", "confidence" DESC, "accountId")')
+  })
+
+  it('value = true の部分 index にする', () => {
+    expect(sql).toContain('WHERE "value" = true')
+  })
+})
+
 describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integration)', () => {
   const prisma = getPrismaClient()
 
   beforeEach(async () => {
     await prisma.blockOutboxEntry.deleteMany()
     await prisma.blockAction.deleteMany()
+    await prisma.block.deleteMany()
     await prisma.blockAccountRun.deleteMany()
     await prisma.blockRun.deleteMany()
     await prisma.accountLabelLatest.deleteMany()
@@ -618,5 +647,75 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
     )
 
     expect(candidates.map((candidate) => candidate.accountId)).toContain(blockedId)
+  })
+
+  it('confidence 上位側が Block 済みで除外されても、maxCount まで下位の適格候補で補充する', async () => {
+    const blockerId = `blocker-${randomUUID()}`
+    await prisma.account.create({
+      data: {
+        id: blockerId,
+        screenName: 'alice',
+        displayName: 'Alice',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersion: 'v1' },
+    })
+
+    // confidence 降順に 5 件の適格候補を用意し、上位 2 件 (最も confidence が高い) を
+    // Block 済みにする。per-label 固定 LIMIT で先頭側だけを取得する実装だと、
+    // Block 済みの 2 件が枠を占有したまま補充されず false negative になる。
+    const confidences = [0.95, 0.93, 0.91, 0.89, 0.87]
+    const targetIds = confidences.map((_, index) => `target-${index}-${randomUUID()}`)
+    for (const [index, confidence] of confidences.entries()) {
+      await prisma.account.create({
+        data: {
+          id: targetIds[index],
+          screenName: `target${index}`,
+          displayName: `Target ${index}`,
+          followersCount: 0,
+          followingCount: 0,
+          tweetCount: 0,
+          accountCreatedAt: new Date(),
+        },
+      })
+      await prisma.accountLabelLatest.create({
+        data: {
+          accountId: targetIds[index],
+          labelDefinitionId: labelDefinition.id,
+          value: true,
+          confidence,
+          reason: 'test',
+          method: 'rule',
+          ruleVersion: 'v1',
+          labeledAt: new Date(),
+        },
+      })
+    }
+    await prisma.block.create({
+      data: { blockerId, blockedId: targetIds[0] },
+    })
+    await prisma.block.create({
+      data: { blockerId, blockedId: targetIds[1] },
+    })
+
+    const candidates = await selectBlockCandidates(
+      prisma,
+      blockerId,
+      { targetLabels: [{ label: 'spam', confidenceThreshold: 0.8 }] },
+      3,
+      3,
+      21_600,
+    )
+
+    expect(candidates.map((candidate) => candidate.accountId)).toEqual([
+      targetIds[2],
+      targetIds[3],
+      targetIds[4],
+    ])
   })
 })
