@@ -1,9 +1,68 @@
 import { randomUUID } from 'node:crypto'
-import { afterAll, describe, expect, it } from 'vitest'
+import { readdirSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { PrismaClient, type Prisma } from '../generated/prisma'
 import { selectRecentTweetsBackfillCandidates } from './recent-tweets-backfill-repository'
 
 const prisma = new PrismaClient()
+
+describe('recent tweets backfill 部分index migration', () => {
+  it('AccountLabelLatest_backfill_label_evaluable_idx を期待する列順・述語で定義する', () => {
+    // tsconfig の module は CommonJS のため import.meta は使えない。
+    // eslint-disable-next-line unicorn/prefer-module
+    const migrationsDir = path.join(__dirname, '../../prisma/migrations')
+    const dirs = readdirSync(migrationsDir).filter((d) =>
+      d.includes('add_recent_tweets_backfill_label_evaluable_index'),
+    )
+    expect(dirs.length).toBe(1)
+    const sql = readFileSync(path.join(migrationsDir, dirs[0], 'migration.sql'), 'utf8')
+    expect(sql).toMatch(
+      /CREATE INDEX CONCURRENTLY IF NOT EXISTS "AccountLabelLatest_backfill_label_evaluable_idx"/,
+    )
+    expect(sql).toMatch(/ON "AccountLabelLatest"/)
+    expect(sql).toMatch(/\("labelDefinitionId", "accountId"\)/)
+    expect(sql).toMatch(/WHERE "evaluable" = false/)
+  })
+})
+
+describe('selectRecentTweetsBackfillCandidates query shape', () => {
+  it('対象ラベルごとに Account への JOIN・未試行条件・cursor を branch 内の LIMIT より前に適用してから UNION する', async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 'ld-bot' }, { id: 'ld-rf' }, { id: 'ld-rh' }, { id: 'ld-ai' }])
+      .mockResolvedValueOnce([])
+    const mockPrisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await selectRecentTweetsBackfillCandidates(mockPrisma, { limit: 2 })
+
+    const definitionLookupSql = (queryRaw.mock.calls[0][0] as { strings: string[] }).strings.join(
+      '',
+    )
+    expect(definitionLookupSql).toContain('FROM "LabelDefinition"')
+    expect(definitionLookupSql).toContain('"key" IN')
+
+    const candidateSql = (queryRaw.mock.calls[1][0] as { strings: string[] }).strings.join('')
+    expect(candidateSql).toContain('UNION')
+    expect(candidateSql).toContain('"labelDefinitionId" =')
+    expect(candidateSql).toContain('"evaluable" = false')
+    expect(candidateSql).toContain('INNER JOIN "Account" AS a ON a."id" = latest."accountId"')
+    expect(candidateSql).toContain('a."lastRecentTweetsAttemptedAt" IS NULL')
+    // branch 4本分 + 最終sentinel分で LIMIT が計5箇所必要 (branch内が先、外側の再sentinelが最後)。
+    expect(candidateSql.match(/LIMIT/g)).toHaveLength(5)
+    expect(candidateSql).not.toContain('CROSS JOIN LATERAL')
+  })
+
+  it('対象ラベルが1件も存在しない場合は Account への問い合わせを行わずに空ページを返す', async () => {
+    const queryRaw = vi.fn().mockResolvedValueOnce([])
+    const mockPrisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await expect(selectRecentTweetsBackfillCandidates(mockPrisma, { limit: 2 })).resolves.toEqual({
+      accountIds: [],
+    })
+    expect(queryRaw).toHaveBeenCalledTimes(1)
+  })
+})
 
 class RollbackFixture extends Error {}
 
@@ -63,7 +122,7 @@ afterAll(async () => {
 })
 
 describe.skipIf(!process.env.DATABASE_URL)('selectRecentTweetsBackfillCandidates', () => {
-  it('executes DISTINCT joins, filters, strict cursor, and sentinel pagination against synthetic rows', async () => {
+  it('executes joins, filters, strict cursor, and sentinel pagination against synthetic rows without duplicates', async () => {
     let assertionsCompleted = false
     try {
       await prisma.$transaction(async (tx) => {
