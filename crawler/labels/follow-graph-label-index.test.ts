@@ -151,13 +151,11 @@ describe('buildFollowGraphLabelIndex label filtering', () => {
     expect(queryRaw).toHaveBeenCalledTimes(2)
     for (const call of queryRaw.mock.calls) {
       const sql = (call[0] as unknown[]).join('')
-      expect(sql).toContain('"labelDefinitionId" IN')
-      const joinedIds = call
-        .slice(1)
-        .find((v) => !Array.isArray(v) && (v as { values?: unknown[] }).values) as {
-        values: unknown[]
-      }
-      expect(joinedIds.values).toEqual(['ld-anime'])
+      expect(sql).toContain('unnest(')
+      expect(sql).toContain('target."labelDefinitionId"')
+      const targetIds = call.slice(1).find((v) => Array.isArray(v) && v[0] === 'ld-anime') as
+        string[] | undefined
+      expect(targetIds).toEqual(['ld-anime'])
     }
   })
 
@@ -186,7 +184,7 @@ describe('buildFollowGraphLabelIndex label filtering', () => {
     }
   })
 
-  it('フォロー先方向のクエリは accountId 絞り込みを AccountLabelLatest への JOIN より前 (edges 内) に書く', async () => {
+  it('フォロー先方向のクエリは accountId 絞り込みを AccountLabelLatest への参照より前 (edges 内) に書く', async () => {
     const queryRaw = vi.fn().mockResolvedValue([])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
@@ -203,6 +201,46 @@ describe('buildFollowGraphLabelIndex label filtering', () => {
     expect(followeeQuerySql.indexOf('JOIN "AccountLabelLatest"')).toBeGreaterThan(
       followeeQuerySql.indexOf(') edges'),
     )
+  })
+
+  it('フォロー先方向のクエリは AccountLabelLatest 参照を unnest した labelDefinitionId との等価 JOIN にし、PK 2列とも Index Cond に使わせる形へ LATERAL/OFFSET 0 で固定する', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await buildFollowGraphLabelIndex(prisma, new Map([['topic_food', 'ld-food']]), {
+      accountIds: ['alice', 'bob'],
+    })
+
+    const followeeQuerySql = (queryRaw.mock.calls[0][0] as unknown[]).join('')
+    expect(followeeQuerySql).toContain('CROSS JOIN LATERAL')
+    expect(followeeQuerySql).toContain('FROM unnest(')
+    expect(followeeQuerySql).toContain('AS target("labelDefinitionId")')
+    expect(followeeQuerySql).toContain('all_latest."accountId" = edges."followeeId"')
+    expect(followeeQuerySql).toContain(
+      'all_latest."labelDefinitionId" = target."labelDefinitionId"',
+    )
+    expect(followeeQuerySql).toContain('OFFSET 0')
+    expect(followeeQuerySql).not.toContain('"labelDefinitionId" IN')
+  })
+
+  it('フォロワー方向のクエリも AccountLabelLatest 参照を unnest した labelDefinitionId との等価 JOIN にし、PK 2列とも Index Cond に使わせる形へ LATERAL/OFFSET 0 で固定する', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await buildFollowGraphLabelIndex(prisma, new Map([['topic_food', 'ld-food']]), {
+      accountIds: ['alice', 'bob'],
+    })
+
+    const followerQuerySql = (queryRaw.mock.calls[1][0] as unknown[]).join('')
+    expect(followerQuerySql).toContain('CROSS JOIN LATERAL')
+    expect(followerQuerySql).toContain('FROM unnest(')
+    expect(followerQuerySql).toContain('AS target("labelDefinitionId")')
+    expect(followerQuerySql).toContain('all_latest."accountId" = f."followerId"')
+    expect(followerQuerySql).toContain(
+      'all_latest."labelDefinitionId" = target."labelDefinitionId"',
+    )
+    expect(followerQuerySql).toContain('OFFSET 0')
+    expect(followerQuerySql).not.toContain('"labelDefinitionId" IN')
   })
 
   it('does not filter by accountIds when the option is omitted', async () => {
