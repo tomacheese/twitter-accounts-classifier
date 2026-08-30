@@ -289,12 +289,14 @@ export interface CompleteAccountRelabelWorkItemsBulkInput {
 /**
  * account_relabel の完了処理を複数 item まとめて 1 ラウンドトリップで行う。
  * 対象の全 item が同じ lease owner (同一 worker の同一グループ claim) を持つため、item ごとに往復する必要がない。
- * @param prisma - Prisma クライアント
+ * `claimStillLeasedWorkItemIdsForUpdate` と同じトランザクション内で呼び、
+ * そちらが保持した行ロックの上でラベル・evidence 書き込みと合わせて完了させることを想定する。
+ * @param prisma - Prisma クライアントまたはトランザクションクライアント
  * @param input - 対象 WorkItem の id 一覧と claim 時の lease owner
  * @returns lease を保持できていた item の id と、その完了ステータス
  */
 export async function completeAccountRelabelWorkItemsBulk(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   input: CompleteAccountRelabelWorkItemsBulkInput,
 ): Promise<{ id: string; status: 'succeeded' | 'requeued' }[]> {
   if (input.workItemIds.length === 0) return []
@@ -315,4 +317,42 @@ export async function completeAccountRelabelWorkItemsBulk(
     id: row.id,
     status: row.status === 'queued' ? ('requeued' as const) : ('succeeded' as const),
   }))
+}
+
+export interface ClaimStillLeasedWorkItemIdsForUpdateInput {
+  workItemIds: string[]
+  leaseOwner: string
+}
+
+/**
+ * 渡した id のうち、現時点でまだ leaseOwner が一致し lease が失効していない行を
+ * `FOR UPDATE SKIP LOCKED` で行ロックしたうえで返す。単発の SELECT による生存確認では、
+ * 確認直後に lease が失効し別 worker が再 claim・再評価・先に書き込みを終えてから、
+ * この worker の古い評価結果が遅れて書き込まれると新しい結果を上書きしてしまう
+ * (AccountLabelLatest の upsert guard は labeledAt の前後関係しか見ないため)。
+ * この関数を呼び出したトランザクションが commit するまで行ロックを保持し続けることで、
+ * 他 worker の再 claim (同じく FOR UPDATE SKIP LOCKED で行う) がこの行をロック中とみなして
+ * スキップするようになり、生存確認からラベル・evidence 書き込み・work item 完了までの
+ * 一連の処理を、再 claim に対して排他的にする。呼び出し元は必ず `prisma.$transaction` の
+ * コールバック内で `tx` を渡し、返った id に対する後続の書き込みも同じ `tx` で行うこと。
+ * 単独の SELECT として呼んでもロックは文の終了と同時に解放され、排他効果を持たない。
+ * @param tx - トランザクションクライアント
+ * @param input - 確認対象の id 一覧と claim 時の lease owner
+ * @returns まだ lease を保持しておりロックを取得できた id の一覧
+ */
+export async function claimStillLeasedWorkItemIdsForUpdate(
+  tx: Prisma.TransactionClient,
+  input: ClaimStillLeasedWorkItemIdsForUpdateInput,
+): Promise<string[]> {
+  if (input.workItemIds.length === 0) return []
+
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT "id"
+    FROM "AnalysisWorkItem"
+    WHERE "id" = ANY(${input.workItemIds})
+      AND "leaseOwner" = ${input.leaseOwner}
+      AND "leaseExpiresAt" > now()
+    FOR UPDATE SKIP LOCKED
+  `
+  return rows.map((row) => row.id)
 }

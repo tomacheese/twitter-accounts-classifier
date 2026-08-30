@@ -8,6 +8,7 @@ import type { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import type { buildReplyHijackIndex } from './labels/reply-hijack-index'
 import type { FollowGraphLabelIndex } from './labels/follow-graph-label-index'
 import {
+  claimStillLeasedWorkItemIdsForUpdate,
   claimWorkItemBatchByIds,
   completeAccountRelabelWorkItemsBulk,
   peekWorkItemCandidates,
@@ -109,8 +110,19 @@ export interface EvaluateAccountRelabelItemsResult {
  * `evaluateAccountRelabelItemGroup` がラベル永続化・work item 完了を分割する account 数。
  * グループ全体を 1 回で永続化・完了すると、その 1 回の失敗で maxAttempts を使い切った account が二度と claim も再 enqueue もされず取り残される。
  * 失敗時に失われる範囲をこのサブバッチ単位に留める。
+ * ルール数 (`ALL_LABEL_RULES.length`、現状 49) との積が `recordAccountLabelsBulkForAccounts` の
+ * サブチャンク上限 2000 行に収まるようこの値を選んでおり、1 サブバッチが常に 1 回の UNNEST
+ * UPSERT で書けるようにしている。将来ルールが増えても 80 個までは 2000 行以内に収まる。
  */
-const ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE = 100
+const ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE = 25
+
+/**
+ * サブバッチ単位のラベル永続化・work item 完了を包む interactive transaction の上限 (ms)。
+ * lease (5分) より十分短く保つことで、transaction 自体が原因で lease を失うことなく、
+ * 失敗時は速やかに諦めて次の claim サイクルに委ねられるようにする。
+ */
+const SUB_BATCH_TRANSACTION_TIMEOUT_MS = 20_000
+const SUB_BATCH_TRANSACTION_MAX_WAIT_MS = 10_000
 
 /**
  * claim 済みの account_relabel work item のうち、1 グループ分 (account 複数件) を評価する。
@@ -247,13 +259,35 @@ async function evaluateAccountRelabelItemGroup(
       offset + ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE,
     )
     try {
-      const subBatchLabels = subBatch.flatMap((item) => labelsByAccountId.get(item.triggerId) ?? [])
-      const subBatchEvidence = subBatch.flatMap((item) => {
-        const evidence = replyHijackEvidenceByAccountId.get(item.triggerId)
-        return evidence ? [evidence] : []
-      })
+      // recordAccountLabelsBulkForAccounts の UPSERT は leaseOwner を条件にしない。
+      // 生存確認とラベル書き込みを別々の呼び出しにすると、確認直後に lease が失効し
+      // 別 worker が再 claim・再評価・先に書き込みを終えたあとで、この worker が
+      // 古い評価結果を遅れて書いて新しい結果を上書きしてしまいうる (AccountLabelLatest の
+      // upsert guard は labeledAt の前後関係しか見ないため、単に「遅れて書いた」だけの
+      // 古いデータでも通ってしまう)。生存確認から work item 完了までを 1 本の
+      // interactive transaction にまとめ、確認を FOR UPDATE SKIP LOCKED で行うことで、
+      // この transaction が commit するまで対象行のロックを保持し続ける。他 worker の
+      // 再 claim も同じ FOR UPDATE SKIP LOCKED で行うためロック中の行をスキップし、
+      // 生存確認から書き込み完了までの間に割り込めなくなる。単なる事前 SELECT では
+      // 確認と書き込みの間に再 claim が割り込む窓が残るため採用しない。
+      // サブバッチを小さく (25 account) 保つことで、この transaction 自体は
+      // lease (5分) より十分短い timeout で完了できる規模に留めている。
       const completions = await prisma.$transaction(
         async (tx) => {
+          const stillLeasedIds = new Set(
+            await claimStillLeasedWorkItemIdsForUpdate(tx, {
+              workItemIds: subBatch.map((item) => item.id),
+              leaseOwner: options.leaseOwner,
+            }),
+          )
+          const leasedSubBatch = subBatch.filter((item) => stillLeasedIds.has(item.id))
+          const subBatchLabels = leasedSubBatch.flatMap(
+            (item) => labelsByAccountId.get(item.triggerId) ?? [],
+          )
+          const subBatchEvidence = leasedSubBatch.flatMap((item) => {
+            const evidence = replyHijackEvidenceByAccountId.get(item.triggerId)
+            return evidence ? [evidence] : []
+          })
           if (subBatchLabels.length > 0) {
             await recordAccountLabelsBulkForAccounts(tx, {
               sourceKind: 'relabel',
@@ -263,12 +297,15 @@ async function evaluateAccountRelabelItemGroup(
           for (const evidence of subBatchEvidence) {
             await upsertReplyHijackEvidence(tx, evidence)
           }
-          return completeAccountRelabelWorkItemsBulk(tx as unknown as PrismaClient, {
-            workItemIds: subBatch.map((item) => item.id),
+          return completeAccountRelabelWorkItemsBulk(tx, {
+            workItemIds: leasedSubBatch.map((item) => item.id),
             leaseOwner: options.leaseOwner,
           })
         },
-        { maxWait: 15_000, timeout: 15_000 },
+        {
+          maxWait: SUB_BATCH_TRANSACTION_MAX_WAIT_MS,
+          timeout: SUB_BATCH_TRANSACTION_TIMEOUT_MS,
+        },
       )
       succeeded += completions.length
     } catch (error) {
@@ -381,22 +418,29 @@ export async function scanForStaleAccounts(
 
   if (targets.length === 0) return { scanned: 0, requested: 0, wrapped: false }
 
+  // excludeFromStaleScan なルールは、version 変更だけで account を stale 扱いにしない。
+  // crawl 時・account 変更時の通常評価はこの絞り込みと無関係にこのルールも含めて評価される。
+  const rules = options.registry.getAll().filter((rule) => !rule.excludeFromStaleScan)
   const accountIds = targets.map((account) => account.id)
-  const targetLabelDefinitionIds = [...options.labelDefinitionIds.values()]
+  const targetLabelDefinitionIds = rules
+    .map((rule) => options.labelDefinitionIds.get(rule.key))
+    .filter((id): id is string => id !== undefined)
   const lookupChunkSize = getRelabelerLabelLookupChunkSize()
   const latestRows: { accountId: string; labelDefinitionId: string; ruleVersion: string }[] = []
-  for (let i = 0; i < accountIds.length; i += lookupChunkSize) {
-    const chunk = accountIds.slice(i, i + lookupChunkSize)
-    const rows = await prisma.accountLabelLatest.findMany({
-      where: { accountId: { in: chunk }, labelDefinitionId: { in: targetLabelDefinitionIds } },
-      select: { accountId: true, labelDefinitionId: true, ruleVersion: true },
-    })
-    for (const row of rows) latestRows.push(row)
+  // stale 判定対象のルールが 1 つも無ければ、どの account も stale になり得ないため lookup 自体を省略する。
+  if (rules.length > 0) {
+    for (let i = 0; i < accountIds.length; i += lookupChunkSize) {
+      const chunk = accountIds.slice(i, i + lookupChunkSize)
+      const rows = await prisma.accountLabelLatest.findMany({
+        where: { accountId: { in: chunk }, labelDefinitionId: { in: targetLabelDefinitionIds } },
+        select: { accountId: true, labelDefinitionId: true, ruleVersion: true },
+      })
+      for (const row of rows) latestRows.push(row)
+    }
   }
   const latestByKey = new Map(
     latestRows.map((row) => [`${row.accountId}:${row.labelDefinitionId}`, row.ruleVersion]),
   )
-  const rules = options.registry.getAll()
 
   const staleAccountIds: string[] = []
   for (const account of targets) {
@@ -480,8 +524,13 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
         registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
       ),
     )
+    // candidates を follow-graph ルールの ruleVersion 一致だけで絞り込むことはしない。
+    // account_relabel は stale scan だけでなく account/follow データの変更でも要求され、
+    // その場合 follow-graph ルールの ruleVersion は最新のままでも follow グラフ自体は
+    // 変化しているため、ruleVersion 一致を「follow-graph 再評価不要」の根拠にはできない。
+    // accountIds を全 candidate に対して cycle 開始時点で1回だけ構築するのは、
     // ある chunk の評価による AccountLabelLatest 更新を、同じ cycle の後続 chunk の
-    // follow-graph signal が参照してしまう自己フィードバックを避けるための構築である。
+    // follow-graph signal が参照してしまう自己フィードバックを避けるためでもある。
     followGraphLabelIndex = await buildFollowGraphLabelIndex(
       prisma,
       followGraphLabelDefinitionIds,

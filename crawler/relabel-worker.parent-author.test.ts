@@ -70,6 +70,7 @@ it('relabel evaluation receives the resolved parent author id', async () => {
   vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
     { id: 'wi-1', status: 'succeeded' },
   ])
+  vi.spyOn(workItemRepository, 'claimStillLeasedWorkItemIdsForUpdate').mockResolvedValue(['wi-1'])
 
   await evaluateAccountRelabelItems(prisma, [{ id: 'wi-1', triggerId: 'account-1' } as never], {
     registry,
