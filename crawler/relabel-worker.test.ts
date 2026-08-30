@@ -968,6 +968,84 @@ describe('runRelabelWorkerCycleOnce', () => {
     vi.unstubAllEnvs()
   })
 
+  it('recoverExhaustedExpiredWorkItems を peekWorkItemCandidates より先に呼ぶ', async () => {
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
+    const callOrder: string[] = []
+    vi.spyOn(workItemRepository, 'recoverExhaustedExpiredWorkItems').mockImplementation(() => {
+      callOrder.push('recover')
+      return Promise.resolve({ reArmed: 0, parkedAsFailed: 0 })
+    })
+    vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockImplementation(() => {
+      callOrder.push('peek')
+      return Promise.resolve([])
+    })
+    const prisma = makeCursorPrisma()
+
+    await runRelabelWorkerCycleOnce(prisma)
+
+    // stale scan 経由で peek が複数回呼ばれる場合もあるため、recover が最初であることだけを見る。
+    expect(callOrder[0]).toBe('recover')
+    expect(callOrder.slice(1).every((call) => call === 'peek')).toBe(true)
+  })
+
+  it('recover で re-arm した item は同じ cycle の peek 結果に含めて処理できる', async () => {
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
+    vi.spyOn(workItemRepository, 'recoverExhaustedExpiredWorkItems').mockResolvedValue({
+      reArmed: 1,
+      parkedAsFailed: 0,
+    })
+    // recover が re-arm した item を peek がそのまま返せることを想定する
+    // (実体は analysis-work-item-repository.test.ts の DB テストで検証する)。
+    const peekSpy = vi
+      .spyOn(workItemRepository, 'peekWorkItemCandidates')
+      .mockResolvedValue([{ id: 'wi-recovered', triggerId: 'alice' }])
+    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
+    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
+      selfReplyCorpus: [],
+      rootCorpus: [],
+    })
+    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
+      signalsFor: () => ({}),
+    })
+    const claimSpy = vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([])
+    const prisma = makeCursorPrisma()
+
+    await runRelabelWorkerCycleOnce(prisma)
+
+    expect(peekSpy).toHaveBeenCalled()
+    expect(claimSpy).toHaveBeenCalledWith(
+      prisma,
+      expect.objectContaining({ ids: ['wi-recovered'] }),
+    )
+  })
+
+  it('recoverExhaustedExpiredWorkItems が失敗しても通常の claimable drain は継続する (fail-open)', async () => {
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
+    vi.spyOn(workItemRepository, 'recoverExhaustedExpiredWorkItems').mockRejectedValue(
+      new Error('recovery query timeout'),
+    )
+    const peekSpy = vi
+      .spyOn(workItemRepository, 'peekWorkItemCandidates')
+      .mockResolvedValue([{ id: 'wi-1', triggerId: 'alice' }])
+    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
+    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
+    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
+      selfReplyCorpus: [],
+      rootCorpus: [],
+    })
+    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
+      signalsFor: () => ({}),
+    })
+    const claimSpy = vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([])
+    const prisma = makeCursorPrisma()
+
+    await runRelabelWorkerCycleOnce(prisma)
+
+    expect(peekSpy).toHaveBeenCalled()
+    expect(claimSpy).toHaveBeenCalled()
+  })
+
   it('drain backlog が worker 上限に達している間は stale scan と cursor 更新を行わない', async () => {
     vi.stubEnv('RELABELER_WORKER_BATCH_SIZE', '2')
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())

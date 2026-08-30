@@ -55,8 +55,7 @@ export async function requestAccountRelabel(
     "status" = ANY(${TERMINAL_STATUSES})
     OR (
       "status" = 'leased'
-      AND "leaseExpiresAt" IS NOT NULL
-      AND "leaseExpiresAt" <= now()
+      AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < now())
       AND "attemptCount" >= "maxAttempts"
     )
   )`
@@ -117,8 +116,10 @@ export async function requestAccountRelabelBulk(
     "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES})
     OR (
       "AnalysisWorkItem"."status" = 'leased'
-      AND "AnalysisWorkItem"."leaseExpiresAt" IS NOT NULL
-      AND "AnalysisWorkItem"."leaseExpiresAt" <= now()
+      AND (
+        "AnalysisWorkItem"."leaseExpiresAt" IS NULL
+        OR "AnalysisWorkItem"."leaseExpiresAt" < now()
+      )
       AND "AnalysisWorkItem"."attemptCount" >= "AnalysisWorkItem"."maxAttempts"
     )
   )`
@@ -419,10 +420,12 @@ export async function recoverExhaustedExpiredWorkItems(
       FROM "AnalysisWorkItem"
       WHERE "kind" = ${input.kind}
         AND "status" = 'leased'
-        AND "leaseExpiresAt" IS NOT NULL
-        AND "leaseExpiresAt" <= now()
+        AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < now())
         AND "attemptCount" >= "maxAttempts"
-      ORDER BY "leaseExpiresAt" ASC
+      -- leaseExpiresAt に対応する index が無くフルソートになるため、
+      -- 既存の (status, availableAt, priority) index を活かせる availableAt でソートする。
+      -- 回収順序自体は正しさに影響しないため、コストの低い並びを優先してよい。
+      ORDER BY "availableAt" ASC
       LIMIT ${input.batchSize}
       FOR UPDATE SKIP LOCKED
     )

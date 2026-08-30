@@ -481,14 +481,21 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
 
   // lease 失効後に complete も新しい request も来ず取り残された行を、claim 候補を確定する前に回収する。
   // ここで queued に戻った行は同じ cycle の peek からすぐ拾える。
-  const recovered = await recoverExhaustedExpiredWorkItems(prisma, {
-    kind: ACCOUNT_RELABEL_KIND,
-    batchSize: getRelabelerOrphanRecoveryBatchSize(),
-  })
-  if (recovered.reArmed > 0 || recovered.parkedAsFailed > 0) {
-    logger.info(
-      `Relabel orphan recovery: ${recovered.reArmed} re-armed, ${recovered.parkedAsFailed} parked as failed`,
-    )
+  // あくまで補助的な self-heal であり、この処理固有の失敗 (SQL timeout 等) で
+  // 通常の claimable drain まで止めないよう、例外は握りつぶして続行する。
+  try {
+    const recovered = await recoverExhaustedExpiredWorkItems(prisma, {
+      kind: ACCOUNT_RELABEL_KIND,
+      batchSize: getRelabelerOrphanRecoveryBatchSize(),
+    })
+    if (recovered.reArmed > 0 || recovered.parkedAsFailed > 0) {
+      logger.info(
+        `Relabel orphan recovery: ${recovered.reArmed} re-armed, ${recovered.parkedAsFailed} parked as failed`,
+      )
+    }
+  } catch (error) {
+    logger.error('Relabel orphan recovery failed, continuing with normal drain', error as Error)
+    captureException(error, { source: 'relabel-worker.recoverExhaustedExpiredWorkItems' })
   }
 
   let candidates = await peekAccountRelabelCandidates(prisma, { limit: totalLimit })
