@@ -10,6 +10,7 @@ import {
   completeAccountRelabelWorkItem,
   completeAccountRelabelWorkItemsBulk,
   peekWorkItemCandidates,
+  recoverExhaustedExpiredWorkItems,
 } from './analysis-work-item-repository'
 
 describe.skipIf(!process.env.DATABASE_URL)('enqueueWorkItem (crawler)', () => {
@@ -178,6 +179,360 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
   },
 )
+
+describe.skipIf(!process.env.DATABASE_URL)(
+  'requestAccountRelabel / requestAccountRelabelBulk: 期限切れ + attemptCount 使い切りの回収 (DB)',
+  () => {
+    const prisma = getPrismaClient()
+
+    beforeEach(async () => {
+      await prisma.analysisWorkItem.deleteMany()
+    })
+
+    it('期限切れかつ attemptCount 使い切りの leased 行は request で queued に全リセットされる', async () => {
+      await requestAccountRelabel(prisma, 'acct-1')
+      const existing = await prisma.analysisWorkItem.findFirstOrThrow({
+        where: { kind: 'account_relabel', triggerType: 'account', triggerId: 'acct-1' },
+      })
+      await prisma.analysisWorkItem.update({
+        where: { id: existing.id },
+        data: {
+          status: 'leased',
+          leaseOwner: 'dead-worker',
+          leaseExpiresAt: new Date(Date.now() - 1000),
+          attemptCount: 5,
+          maxAttempts: 5,
+        },
+      })
+
+      await requestAccountRelabel(prisma, 'acct-1')
+
+      const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
+      expect(item.status).toBe('queued')
+      expect(item.attemptCount).toBe(0)
+      expect(item.leaseOwner).toBeNull()
+      expect(item.leaseExpiresAt).toBeNull()
+      expect(item.staleRequestedAt).toBeNull()
+    })
+
+    it('bulk でも期限切れかつ attemptCount 使い切りの leased 行は queued に全リセットされる', async () => {
+      await requestAccountRelabel(prisma, 'acct-1')
+      const existing = await prisma.analysisWorkItem.findFirstOrThrow({
+        where: { kind: 'account_relabel', triggerType: 'account', triggerId: 'acct-1' },
+      })
+      await prisma.analysisWorkItem.update({
+        where: { id: existing.id },
+        data: {
+          status: 'leased',
+          leaseOwner: 'dead-worker',
+          leaseExpiresAt: new Date(Date.now() - 1000),
+          attemptCount: 5,
+          maxAttempts: 5,
+        },
+      })
+
+      await requestAccountRelabelBulk(prisma, ['acct-1'])
+
+      const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
+      expect(item.status).toBe('queued')
+      expect(item.attemptCount).toBe(0)
+      expect(item.leaseOwner).toBeNull()
+    })
+
+    it('lease がまだ有効な leased 行は request で従来通り staleRequestedAt を立てるだけにする (回帰)', async () => {
+      await requestAccountRelabel(prisma, 'acct-1')
+      const existing = await prisma.analysisWorkItem.findFirstOrThrow({
+        where: { kind: 'account_relabel', triggerType: 'account', triggerId: 'acct-1' },
+      })
+      await prisma.analysisWorkItem.update({
+        where: { id: existing.id },
+        data: {
+          status: 'leased',
+          leaseOwner: 'live-worker',
+          leaseExpiresAt: new Date(Date.now() + 60_000),
+          attemptCount: 5,
+          maxAttempts: 5,
+        },
+      })
+
+      await requestAccountRelabel(prisma, 'acct-1')
+
+      const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
+      expect(item.status).toBe('leased')
+      expect(item.leaseOwner).toBe('live-worker')
+      expect(item.attemptCount).toBe(5)
+      expect(item.staleRequestedAt).not.toBeNull()
+    })
+
+    it('leaseExpiresAt が NULL かつ attemptCount 使い切りの leased 行も claim 述語同様に失効扱いで queued に全リセットされる', async () => {
+      await requestAccountRelabel(prisma, 'acct-1')
+      const existing = await prisma.analysisWorkItem.findFirstOrThrow({
+        where: { kind: 'account_relabel', triggerType: 'account', triggerId: 'acct-1' },
+      })
+      await prisma.analysisWorkItem.update({
+        where: { id: existing.id },
+        data: {
+          status: 'leased',
+          leaseOwner: 'dead-worker',
+          leaseExpiresAt: null,
+          attemptCount: 5,
+          maxAttempts: 5,
+        },
+      })
+
+      await requestAccountRelabel(prisma, 'acct-1')
+
+      const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
+      expect(item.status).toBe('queued')
+      expect(item.attemptCount).toBe(0)
+      expect(item.staleRequestedAt).toBeNull()
+    })
+
+    it('bulk でも leaseExpiresAt が NULL かつ attemptCount 使い切りの leased 行は queued に全リセットされる', async () => {
+      await requestAccountRelabel(prisma, 'acct-1')
+      const existing = await prisma.analysisWorkItem.findFirstOrThrow({
+        where: { kind: 'account_relabel', triggerType: 'account', triggerId: 'acct-1' },
+      })
+      await prisma.analysisWorkItem.update({
+        where: { id: existing.id },
+        data: {
+          status: 'leased',
+          leaseOwner: 'dead-worker',
+          leaseExpiresAt: null,
+          attemptCount: 5,
+          maxAttempts: 5,
+        },
+      })
+
+      await requestAccountRelabelBulk(prisma, ['acct-1'])
+
+      const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
+      expect(item.status).toBe('queued')
+      expect(item.attemptCount).toBe(0)
+    })
+
+    it('期限切れでも attemptCount が残っている leased 行は request で従来通り staleRequestedAt を立てるだけにする', async () => {
+      await requestAccountRelabel(prisma, 'acct-1')
+      const existing = await prisma.analysisWorkItem.findFirstOrThrow({
+        where: { kind: 'account_relabel', triggerType: 'account', triggerId: 'acct-1' },
+      })
+      await prisma.analysisWorkItem.update({
+        where: { id: existing.id },
+        data: {
+          status: 'leased',
+          leaseOwner: 'dead-worker',
+          leaseExpiresAt: new Date(Date.now() - 1000),
+          attemptCount: 2,
+          maxAttempts: 5,
+        },
+      })
+
+      await requestAccountRelabel(prisma, 'acct-1')
+
+      const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
+      expect(item.status).toBe('leased')
+      expect(item.attemptCount).toBe(2)
+      expect(item.staleRequestedAt).not.toBeNull()
+    })
+  },
+)
+
+describe.skipIf(!process.env.DATABASE_URL)('recoverExhaustedExpiredWorkItems (DB)', () => {
+  const prisma = getPrismaClient()
+
+  beforeEach(async () => {
+    await prisma.analysisWorkItem.deleteMany()
+  })
+
+  it('staleRequestedAt が立っている orphan は queued に戻す', async () => {
+    await requestAccountRelabel(prisma, 'acct-1')
+    const existing = await prisma.analysisWorkItem.findFirstOrThrow({
+      where: { triggerId: 'acct-1' },
+    })
+    await prisma.analysisWorkItem.update({
+      where: { id: existing.id },
+      data: {
+        status: 'leased',
+        leaseOwner: 'dead-worker',
+        leaseExpiresAt: new Date(Date.now() - 1000),
+        attemptCount: 5,
+        maxAttempts: 5,
+        staleRequestedAt: new Date(),
+      },
+    })
+
+    const result = await recoverExhaustedExpiredWorkItems(prisma, {
+      kind: 'account_relabel',
+      batchSize: 10,
+    })
+
+    expect(result).toEqual({ reArmed: 1, parkedAsFailed: 0 })
+    const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
+    expect(item.status).toBe('queued')
+    expect(item.attemptCount).toBe(0)
+    expect(item.leaseOwner).toBeNull()
+    expect(item.staleRequestedAt).toBeNull()
+  })
+
+  it('leaseExpiresAt が NULL の orphan も claim 述語同様に失効扱いで回収する', async () => {
+    await requestAccountRelabel(prisma, 'acct-1')
+    const existing = await prisma.analysisWorkItem.findFirstOrThrow({
+      where: { triggerId: 'acct-1' },
+    })
+    await prisma.analysisWorkItem.update({
+      where: { id: existing.id },
+      data: {
+        status: 'leased',
+        leaseOwner: 'dead-worker',
+        leaseExpiresAt: null,
+        attemptCount: 5,
+        maxAttempts: 5,
+      },
+    })
+
+    const result = await recoverExhaustedExpiredWorkItems(prisma, {
+      kind: 'account_relabel',
+      batchSize: 10,
+    })
+
+    expect(result).toEqual({ reArmed: 0, parkedAsFailed: 1 })
+    const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
+    expect(item.status).toBe('failed')
+    expect(item.leaseOwner).toBeNull()
+  })
+
+  it('staleRequestedAt が立っていない orphan は無限 retry させず failed に park する', async () => {
+    await requestAccountRelabel(prisma, 'acct-1')
+    const existing = await prisma.analysisWorkItem.findFirstOrThrow({
+      where: { triggerId: 'acct-1' },
+    })
+    await prisma.analysisWorkItem.update({
+      where: { id: existing.id },
+      data: {
+        status: 'leased',
+        leaseOwner: 'dead-worker',
+        leaseExpiresAt: new Date(Date.now() - 1000),
+        attemptCount: 5,
+        maxAttempts: 5,
+      },
+    })
+
+    const result = await recoverExhaustedExpiredWorkItems(prisma, {
+      kind: 'account_relabel',
+      batchSize: 10,
+    })
+
+    expect(result).toEqual({ reArmed: 0, parkedAsFailed: 1 })
+    const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
+    expect(item.status).toBe('failed')
+    expect(item.leaseOwner).toBeNull()
+    expect(item.leaseExpiresAt).toBeNull()
+
+    // failed に park された行は、後続の正当な request で改めて queued に再 arm できる。
+    await requestAccountRelabel(prisma, 'acct-1')
+    const rearmed = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
+    expect(rearmed.status).toBe('queued')
+    expect(rearmed.attemptCount).toBe(0)
+  })
+
+  it('lease がまだ有効な行や attemptCount が残っている行には触れない', async () => {
+    await requestAccountRelabel(prisma, 'acct-1')
+    const active = await prisma.analysisWorkItem.findFirstOrThrow({
+      where: { triggerId: 'acct-1' },
+    })
+    await prisma.analysisWorkItem.update({
+      where: { id: active.id },
+      data: {
+        status: 'leased',
+        leaseOwner: 'live-worker',
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+        attemptCount: 5,
+        maxAttempts: 5,
+      },
+    })
+
+    await requestAccountRelabel(prisma, 'acct-2')
+    const notExhausted = await prisma.analysisWorkItem.findFirstOrThrow({
+      where: { triggerId: 'acct-2' },
+    })
+    await prisma.analysisWorkItem.update({
+      where: { id: notExhausted.id },
+      data: {
+        status: 'leased',
+        leaseOwner: 'dead-worker',
+        leaseExpiresAt: new Date(Date.now() - 1000),
+        attemptCount: 2,
+        maxAttempts: 5,
+      },
+    })
+
+    const result = await recoverExhaustedExpiredWorkItems(prisma, {
+      kind: 'account_relabel',
+      batchSize: 10,
+    })
+
+    expect(result).toEqual({ reArmed: 0, parkedAsFailed: 0 })
+  })
+
+  it('batchSize を超える対象は 1 回で処理しきらず次回以降に持ち越す', async () => {
+    await requestAccountRelabelBulk(prisma, ['acct-1', 'acct-2', 'acct-3'])
+    const items = await prisma.analysisWorkItem.findMany({ where: { triggerType: 'account' } })
+    for (const item of items) {
+      await prisma.analysisWorkItem.update({
+        where: { id: item.id },
+        data: {
+          status: 'leased',
+          leaseOwner: 'dead-worker',
+          leaseExpiresAt: new Date(Date.now() - 1000),
+          attemptCount: 5,
+          maxAttempts: 5,
+        },
+      })
+    }
+
+    const firstBatch = await recoverExhaustedExpiredWorkItems(prisma, {
+      kind: 'account_relabel',
+      batchSize: 2,
+    })
+    expect(firstBatch.reArmed + firstBatch.parkedAsFailed).toBe(2)
+
+    const secondBatch = await recoverExhaustedExpiredWorkItems(prisma, {
+      kind: 'account_relabel',
+      batchSize: 2,
+    })
+    expect(secondBatch.reArmed + secondBatch.parkedAsFailed).toBe(1)
+  })
+
+  it('re-arm した item は同じ cycle 内の peekWorkItemCandidates ですぐ拾える', async () => {
+    await requestAccountRelabel(prisma, 'acct-1')
+    const existing = await prisma.analysisWorkItem.findFirstOrThrow({
+      where: { triggerId: 'acct-1' },
+    })
+    await prisma.analysisWorkItem.update({
+      where: { id: existing.id },
+      data: {
+        status: 'leased',
+        leaseOwner: 'dead-worker',
+        leaseExpiresAt: new Date(Date.now() - 1000),
+        attemptCount: 5,
+        maxAttempts: 5,
+        staleRequestedAt: new Date(),
+      },
+    })
+
+    const recovered = await recoverExhaustedExpiredWorkItems(prisma, {
+      kind: 'account_relabel',
+      batchSize: 10,
+    })
+    expect(recovered.reArmed).toBe(1)
+
+    const candidates = await peekWorkItemCandidates(prisma, {
+      kinds: ['account_relabel'],
+      limit: 10,
+    })
+    expect(candidates.map((c) => c.id)).toEqual([existing.id])
+  })
+})
 
 describe('peekWorkItemCandidates (mock)', () => {
   it('limit <= 0 の場合は DB へ問い合わせず空配列を返す', async () => {

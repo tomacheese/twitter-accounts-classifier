@@ -173,5 +173,13 @@ export interface LabelRule {
    * `buildFollowGraphLabelIndex()` の呼び出し元がこのフラグで対象ラベルを絞り込む。
    */
   usesFollowGraphSignal?: boolean
+  /**
+   * true の場合、この rule の version 変更だけを理由に `scanForStaleAccounts` が
+   * account を stale 扱いにしない。crawl 時・account 変更時の通常評価では
+   * このフラグに関わらず他のルールと同様に評価される。
+   * shadow ラベルや直近データに判定結果が左右されやすいラベルを追加した際、
+   * version 導入だけで既存アカウント全件が stale 化し backfill が走ることを避けるためのフラグである。
+   */
+  excludeFromStaleScan?: boolean
   evaluate(bundle: AccountFeatureBundle): LabelRuleResult
 }

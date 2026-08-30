@@ -66,6 +66,7 @@ export const genericReplyFarmingRule: LabelRule = {
   description:
     '多数の異なる外部投稿へ、汎用的な評価・共感や抽象的な関心の締めを高頻度に繰り返す行動を検出する shadow ラベル。AI/LLM 利用そのものは推定しない',
   version: '0.1.0',
+  excludeFromStaleScan: true,
   evaluate(bundle) {
     const sampled = bundle.recentTweets
     const replyTweets = sampled.filter((tweet) => tweet.isReply)

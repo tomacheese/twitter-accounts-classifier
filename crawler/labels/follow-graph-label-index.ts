@@ -66,6 +66,11 @@ export async function buildFollowGraphLabelIndex(
   // Prisma.sql/Prisma.empty による条件付き SQL 合成は $queryRaw モックの呼び出し引数に断片が反映されず、
   // テストで WHERE 句の有無を検証できない。そのため ids の有無で完全に別クエリに分岐させている。
   async function fetchFolloweeRows(ids?: string[]): Promise<AggregateRow[]> {
+    // accountId 絞り込みを UNION ALL の各枝の中、AccountLabelLatest への JOIN より前に書く。
+    // 外側の WHERE に置いてオプティマイザのプッシュダウンに委ねると、
+    // LabelingFollowSample(accountId)・Follow(followerId) の各 index を使わず
+    // AccountLabelLatest 側から先に評価するプランを選ばれる余地が生まれるため、
+    // 各枝を明示的に絞り込んで両テーブルの index が確実に使われるようにする。
     return ids
       ? prisma.$queryRaw<AggregateRow[]>`
         SELECT
@@ -76,19 +81,20 @@ export async function buildFollowGraphLabelIndex(
         FROM (
           SELECT sample."accountId", sample."followeeId"
           FROM "LabelingFollowSample" sample
+          WHERE sample."accountId" = ANY(${ids})
           UNION ALL
           SELECT f."followerId" AS "accountId", f."followeeId"
           FROM "Follow" f
-          WHERE NOT EXISTS (
-            SELECT 1
-            FROM "LabelingFollowSample" sample
-            WHERE sample."accountId" = f."followerId"
-              AND sample."followeeId" = f."followeeId"
-          )
+          WHERE f."followerId" = ANY(${ids})
+            AND NOT EXISTS (
+              SELECT 1
+              FROM "LabelingFollowSample" sample
+              WHERE sample."accountId" = f."followerId"
+                AND sample."followeeId" = f."followeeId"
+            )
         ) edges
         JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
         WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
-          AND edges."accountId" = ANY(${ids})
         GROUP BY edges."accountId", all_latest."labelDefinitionId"
       `
       : prisma.$queryRaw<AggregateRow[]>`

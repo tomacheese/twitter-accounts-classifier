@@ -140,3 +140,13 @@ export function getRelabelerWorkerChunkSize(): number {
 export function getRelabelerLabelLookupChunkSize(): number {
   return parsePositiveIntEnv('RELABELER_LABEL_LOOKUP_CHUNK_SIZE', 1000)
 }
+
+/**
+ * lease 失効 + attemptCount 使い切りで取り残された account_relabel 行を、
+ * 1 cycle あたりにどれだけ回収するかの上限。大量の取り残しが溜まっていても
+ * 1 回の UPDATE が長時間化しないよう小さい値に抑える。
+ * @returns orphan recovery の batch size
+ */
+export function getRelabelerOrphanRecoveryBatchSize(): number {
+  return parsePositiveIntEnv('RELABELER_ORPHAN_RECOVERY_BATCH_SIZE', 1000)
+}
