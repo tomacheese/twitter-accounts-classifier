@@ -957,6 +957,11 @@ describe('runRelabelWorkerCycleOnce', () => {
     vi.spyOn(workItemRepository, 'claimStillLeasedWorkItemIdsForUpdate').mockImplementation(
       (_tx, input) => Promise.resolve(input.workItemIds),
     )
+    // 個別のテストで上書きしない限り、回収対象の orphan は無い前提にする。
+    vi.spyOn(workItemRepository, 'recoverExhaustedExpiredWorkItems').mockResolvedValue({
+      reArmed: 0,
+      parkedAsFailed: 0,
+    })
   })
 
   afterEach(() => {

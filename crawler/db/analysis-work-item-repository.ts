@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { AnalysisWorkItem, Prisma, PrismaClient } from '../generated/prisma'
+import { Prisma } from '../generated/prisma'
+import type { AnalysisWorkItem, PrismaClient } from '../generated/prisma'
 
 export interface EnqueueWorkItemInput {
   kind: string
@@ -38,6 +39,9 @@ const TERMINAL_STATUSES = ['succeeded', 'failed', 'dead']
  * account_relabel の再 arm 可能な enqueue。
  * 通常の enqueueWorkItem と異なり、succeeded/failed/dead だった行も queued に戻し、
  * leased 中は dirty marker (staleRequestedAt) を立てるだけに留める。
+ * ただし lease が既に失効し attemptCount も使い切った行は、保持していた worker が
+ * 二度と complete しないため dirty marker では再 arm できず永久に取り残される。
+ * この場合は terminal 行と同様に queued へ全リセットする。
  * 既存行の status 確認と書き込みを 1 回の UPDATE 文にまとめ、
  * 他の呼び出しが割り込むレースを避ける。
  * @param prisma - Prisma クライアント
@@ -47,15 +51,28 @@ export async function requestAccountRelabel(
   prisma: Prisma.TransactionClient | PrismaClient,
   accountId: string,
 ): Promise<void> {
+  const resetCondition = Prisma.sql`(
+    "status" = ANY(${TERMINAL_STATUSES})
+    OR (
+      "status" = 'leased'
+      AND "leaseExpiresAt" IS NOT NULL
+      AND "leaseExpiresAt" <= now()
+      AND "attemptCount" >= "maxAttempts"
+    )
+  )`
   const updated = await prisma.$executeRaw`
     UPDATE "AnalysisWorkItem"
     SET
-      "status" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN 'queued' ELSE "status" END,
-      "availableAt" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN now() ELSE "availableAt" END,
-      "staleRequestedAt" = CASE WHEN "status" = 'leased' THEN now() ELSE "staleRequestedAt" END,
-      "leaseOwner" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "leaseOwner" END,
-      "leaseExpiresAt" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "leaseExpiresAt" END,
-      "attemptCount" = CASE WHEN "status" = ANY(${TERMINAL_STATUSES}) THEN 0 ELSE "attemptCount" END
+      "status" = CASE WHEN ${resetCondition} THEN 'queued' ELSE "status" END,
+      "availableAt" = CASE WHEN ${resetCondition} THEN now() ELSE "availableAt" END,
+      "staleRequestedAt" = CASE
+        WHEN ${resetCondition} THEN NULL
+        WHEN "status" = 'leased' THEN now()
+        ELSE "staleRequestedAt"
+      END,
+      "leaseOwner" = CASE WHEN ${resetCondition} THEN NULL ELSE "leaseOwner" END,
+      "leaseExpiresAt" = CASE WHEN ${resetCondition} THEN NULL ELSE "leaseExpiresAt" END,
+      "attemptCount" = CASE WHEN ${resetCondition} THEN 0 ELSE "attemptCount" END
     WHERE "kind" = ${ACCOUNT_RELABEL_KIND}
       AND "triggerType" = ${ACCOUNT_RELABEL_TRIGGER_TYPE}
       AND "triggerId" = ${accountId}
@@ -96,18 +113,31 @@ export async function requestAccountRelabelBulk(
   if (accountIds.length === 0) return
 
   const ids = accountIds.map(() => randomUUID())
+  const resetCondition = Prisma.sql`(
+    "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES})
+    OR (
+      "AnalysisWorkItem"."status" = 'leased'
+      AND "AnalysisWorkItem"."leaseExpiresAt" IS NOT NULL
+      AND "AnalysisWorkItem"."leaseExpiresAt" <= now()
+      AND "AnalysisWorkItem"."attemptCount" >= "AnalysisWorkItem"."maxAttempts"
+    )
+  )`
   await prisma.$executeRaw`
     INSERT INTO "AnalysisWorkItem" ("id", "kind", "triggerType", "triggerId", "updatedAt")
     SELECT u."id", ${ACCOUNT_RELABEL_KIND}, ${ACCOUNT_RELABEL_TRIGGER_TYPE}, u."triggerId", now()
     FROM UNNEST(${ids}::text[], ${accountIds}::text[]) AS u("id", "triggerId")
     ON CONFLICT ("kind", "triggerType", "triggerId") DO UPDATE
     SET
-      "status" = CASE WHEN "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES}) THEN 'queued' ELSE "AnalysisWorkItem"."status" END,
-      "availableAt" = CASE WHEN "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES}) THEN now() ELSE "AnalysisWorkItem"."availableAt" END,
-      "staleRequestedAt" = CASE WHEN "AnalysisWorkItem"."status" = 'leased' THEN now() ELSE "AnalysisWorkItem"."staleRequestedAt" END,
-      "leaseOwner" = CASE WHEN "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "AnalysisWorkItem"."leaseOwner" END,
-      "leaseExpiresAt" = CASE WHEN "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES}) THEN NULL ELSE "AnalysisWorkItem"."leaseExpiresAt" END,
-      "attemptCount" = CASE WHEN "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES}) THEN 0 ELSE "AnalysisWorkItem"."attemptCount" END
+      "status" = CASE WHEN ${resetCondition} THEN 'queued' ELSE "AnalysisWorkItem"."status" END,
+      "availableAt" = CASE WHEN ${resetCondition} THEN now() ELSE "AnalysisWorkItem"."availableAt" END,
+      "staleRequestedAt" = CASE
+        WHEN ${resetCondition} THEN NULL
+        WHEN "AnalysisWorkItem"."status" = 'leased' THEN now()
+        ELSE "AnalysisWorkItem"."staleRequestedAt"
+      END,
+      "leaseOwner" = CASE WHEN ${resetCondition} THEN NULL ELSE "AnalysisWorkItem"."leaseOwner" END,
+      "leaseExpiresAt" = CASE WHEN ${resetCondition} THEN NULL ELSE "AnalysisWorkItem"."leaseExpiresAt" END,
+      "attemptCount" = CASE WHEN ${resetCondition} THEN 0 ELSE "AnalysisWorkItem"."attemptCount" END
   `
 }
 
@@ -355,4 +385,69 @@ export async function claimStillLeasedWorkItemIdsForUpdate(
     FOR UPDATE SKIP LOCKED
   `
   return rows.map((row) => row.id)
+}
+
+export interface RecoverExhaustedExpiredWorkItemsInput {
+  kind: string
+  batchSize: number
+}
+
+export interface RecoverExhaustedExpiredWorkItemsResult {
+  reArmed: number
+  parkedAsFailed: number
+}
+
+/**
+ * lease が失効し attemptCount も使い切ったまま status='leased' で取り残された行を回収する。
+ * requestAccountRelabel(Bulk) は新しい request を受けた行しか救えないため、
+ * 二度と request が来ない account の行は対象外になり、放置すると永久に leased のままになる。
+ * staleRequestedAt が立っている行は既に変更要求があるので queued に戻し、
+ * 立っていない行は maxAttempts の意味を保つため無限 retry させず failed に park し、
+ * 後続の request/stale scan による再 arm を待つ。1 回あたりの対象件数を絞ることで、
+ * 大量の取り残し行が溜まっていても 1 回の呼び出しが長時間の UPDATE にならないようにする。
+ * @param prisma - Prisma クライアント
+ * @param input - 対象 kind と 1 回あたりの回収件数上限
+ * @returns 再 arm (queued へ復帰) した件数と failed に park した件数
+ */
+export async function recoverExhaustedExpiredWorkItems(
+  prisma: PrismaClient,
+  input: RecoverExhaustedExpiredWorkItemsInput,
+): Promise<RecoverExhaustedExpiredWorkItemsResult> {
+  const rows = await prisma.$queryRaw<{ status: string }[]>`
+    WITH target AS (
+      SELECT "id"
+      FROM "AnalysisWorkItem"
+      WHERE "kind" = ${input.kind}
+        AND "status" = 'leased'
+        AND "leaseExpiresAt" IS NOT NULL
+        AND "leaseExpiresAt" <= now()
+        AND "attemptCount" >= "maxAttempts"
+      ORDER BY "leaseExpiresAt" ASC
+      LIMIT ${input.batchSize}
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE "AnalysisWorkItem" AS item
+    SET
+      "status" = CASE WHEN item."staleRequestedAt" IS NOT NULL THEN 'queued' ELSE 'failed' END,
+      "availableAt" = CASE WHEN item."staleRequestedAt" IS NOT NULL THEN now() ELSE item."availableAt" END,
+      "attemptCount" = CASE WHEN item."staleRequestedAt" IS NOT NULL THEN 0 ELSE item."attemptCount" END,
+      "staleRequestedAt" = NULL,
+      "leaseOwner" = NULL,
+      "leaseExpiresAt" = NULL,
+      "lastErrorSummary" = CASE
+        WHEN item."staleRequestedAt" IS NULL THEN 'lease expired after exhausting maxAttempts'
+        ELSE item."lastErrorSummary"
+      END,
+      "updatedAt" = now()
+    FROM target
+    WHERE item."id" = target."id"
+    RETURNING item."status"
+  `
+  let reArmed = 0
+  let parkedAsFailed = 0
+  for (const row of rows) {
+    if (row.status === 'queued') reArmed++
+    else parkedAsFailed++
+  }
+  return { reArmed, parkedAsFailed }
 }

@@ -12,6 +12,7 @@ import {
   claimWorkItemBatchByIds,
   completeAccountRelabelWorkItemsBulk,
   peekWorkItemCandidates,
+  recoverExhaustedExpiredWorkItems,
   requestAccountRelabelBulk,
   type WorkItemCandidate,
 } from './db/analysis-work-item-repository'
@@ -39,6 +40,7 @@ import { getPrismaClient, disconnectPrisma } from './db/client'
 import { initMonitoring, captureException } from './monitoring/sentry'
 import {
   getRelabelerLabelLookupChunkSize,
+  getRelabelerOrphanRecoveryBatchSize,
   getRelabelerProducerBatchSize,
   getRelabelerWorkerBatchSize,
   getRelabelerWorkerChunkSize,
@@ -476,6 +478,18 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
   const leaseOwner = `${hostname()}-${process.pid}-${randomUUID()}`
   const concurrency = getRelabelerWorkerConcurrency()
   const totalLimit = getRelabelerWorkerBatchSize() * concurrency
+
+  // lease 失効後に complete も新しい request も来ず取り残された行を、claim 候補を確定する前に回収する。
+  // ここで queued に戻った行は同じ cycle の peek からすぐ拾える。
+  const recovered = await recoverExhaustedExpiredWorkItems(prisma, {
+    kind: ACCOUNT_RELABEL_KIND,
+    batchSize: getRelabelerOrphanRecoveryBatchSize(),
+  })
+  if (recovered.reArmed > 0 || recovered.parkedAsFailed > 0) {
+    logger.info(
+      `Relabel orphan recovery: ${recovered.reArmed} re-armed, ${recovered.parkedAsFailed} parked as failed`,
+    )
+  }
 
   let candidates = await peekAccountRelabelCandidates(prisma, { limit: totalLimit })
   if (candidates.length < totalLimit) {
