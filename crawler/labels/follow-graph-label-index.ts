@@ -71,6 +71,15 @@ export async function buildFollowGraphLabelIndex(
     // LabelingFollowSample(accountId)・Follow(followerId) の各 index を使わず
     // AccountLabelLatest 側から先に評価するプランを選ばれる余地が生まれるため、
     // 各枝を明示的に絞り込んで両テーブルの index が確実に使われるようにする。
+    // AccountLabelLatest には (accountId, labelDefinitionId) の PK がある。
+    // edges 側の accountId 1件ごとに、PK の2列とも Index Cond に使う Nested Loop が最適になる。
+    // edges を素の JOIN で結ぶと、optimizer が通常の結合として平坦化できてしまう。
+    // すると labelDefinitionId 側の index を先に評価するプランも選ばれ得る。
+    // edges の行数が少なくても、labelDefinitionId 側の巨大な走査が起こりうる。
+    // 対象 labelDefinitionId を unnest() で展開し、AccountLabelLatest と等価結合する。
+    // これにより PK の (accountId, labelDefinitionId) 両列を Index Cond に使わせやすくなる。
+    // CROSS JOIN LATERAL (... OFFSET 0) は内側クエリの最適化フェンスとして必要になる。
+    // これを外すと edges との通常結合に平坦化され、PK 前方一致以外のプランへ戻りうる。
     return ids
       ? prisma.$queryRaw<AggregateRow[]>`
         SELECT
@@ -93,8 +102,14 @@ export async function buildFollowGraphLabelIndex(
                 AND sample."followeeId" = f."followeeId"
             )
         ) edges
-        JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = edges."followeeId"
-        WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
+        CROSS JOIN LATERAL (
+          SELECT all_latest."labelDefinitionId", all_latest."value"
+          FROM unnest(${targetDefinitionIds}) AS target("labelDefinitionId")
+          JOIN "AccountLabelLatest" all_latest
+            ON all_latest."accountId" = edges."followeeId"
+            AND all_latest."labelDefinitionId" = target."labelDefinitionId"
+          OFFSET 0
+        ) all_latest
         GROUP BY edges."accountId", all_latest."labelDefinitionId"
       `
       : prisma.$queryRaw<AggregateRow[]>`
@@ -123,6 +138,8 @@ export async function buildFollowGraphLabelIndex(
   }
 
   async function fetchFollowerRows(ids?: string[]): Promise<AggregateRow[]> {
+    // fetchFolloweeRows と同じ理由で、AccountLabelLatest 参照を unnest + LATERAL + OFFSET 0 で固定する。
+    // followerId 1件ごとに PK の2列とも Index Cond に使わせるための最適化フェンスであり、外さない。
     return ids
       ? prisma.$queryRaw<AggregateRow[]>`
         SELECT
@@ -131,9 +148,15 @@ export async function buildFollowGraphLabelIndex(
           COUNT(*) FILTER (WHERE all_latest."value")::int AS "labeledCount",
           COUNT(*)::int AS "totalCount"
         FROM "Follow" f
-        JOIN "AccountLabelLatest" all_latest ON all_latest."accountId" = f."followerId"
-        WHERE all_latest."labelDefinitionId" IN (${Prisma.join(targetDefinitionIds)})
-          AND f."followeeId" = ANY(${ids})
+        CROSS JOIN LATERAL (
+          SELECT all_latest."labelDefinitionId", all_latest."value"
+          FROM unnest(${targetDefinitionIds}) AS target("labelDefinitionId")
+          JOIN "AccountLabelLatest" all_latest
+            ON all_latest."accountId" = f."followerId"
+            AND all_latest."labelDefinitionId" = target."labelDefinitionId"
+          OFFSET 0
+        ) all_latest
+        WHERE f."followeeId" = ANY(${ids})
         GROUP BY f."followeeId", all_latest."labelDefinitionId"
       `
       : prisma.$queryRaw<AggregateRow[]>`
