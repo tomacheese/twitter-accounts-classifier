@@ -549,6 +549,61 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     expect(state?.sourceWatermarkAt?.toISOString()).toBe(observedAt.toISOString())
   })
 
+  it('propagates label.evaluable/label.labeledAt as-is into AccountClassificationLatest', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_refresh_evaluable',
+        screenName: 'henry',
+        displayName: 'Henry',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'label_evaluable_refresh', description: 'テスト用ラベル' },
+    })
+    const labeledAt = new Date('2026-01-02T00:00:00Z')
+    await prisma.accountLabel.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelDefinition.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'r',
+        method: 'rule',
+        ruleVersion: 'v1',
+        evaluable: false,
+        labeledAt,
+      },
+    })
+    const observation = await prisma.accountClassificationObservation.create({
+      data: { accountId: account.id, observedAt: labeledAt, labelCount: 1 },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+        triggerId: observation.id,
+      },
+    })
+
+    await processAccountSummaryRefresh(prisma, workItem)
+
+    const row = await prisma.accountClassificationLatest.findUnique({
+      where: {
+        accountId_labelDefinitionId: {
+          accountId: account.id,
+          labelDefinitionId: labelDefinition.id,
+        },
+      },
+    })
+    expect(row?.evaluable).toBe(false)
+    expect(row?.labeledAt?.toISOString()).toBe(labeledAt.toISOString())
+  })
+
   it('leaves classificationObservedAt unset when the watermark has no AccountLabel rows, keeping it in sync with AccountClassificationLatest having no rows', async () => {
     const account = await prisma.account.create({
       data: {
