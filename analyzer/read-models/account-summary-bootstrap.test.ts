@@ -108,7 +108,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 10 })
 
     const bootstrap = await prisma.readModelBootstrap.findUnique({
-      where: { modelKey: 'account_summary' },
+      where: { modelKey: 'account_summary_v2' },
     })
     expect(bootstrap?.status).toBe('completed')
     const summary = await prisma.accountSummaryLatest.findUnique({
@@ -312,7 +312,8 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
         labeledAt: new Date('2026-01-01T00:00:00Z'),
       },
     })
-    // live crawler が先に新しい値を書き込んでいる状態を再現する。
+    // live crawler が、bootstrap の baseline (labeledAt=2026-01-01) より新しい
+    // labeledAt (2026-01-02) の値を先に書き込んでいる状態を再現する。
     await prisma.accountClassificationLatest.create({
       data: {
         accountId: account.id,
@@ -323,6 +324,8 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
         method: 'rule',
         ruleVersion: 'v2',
         observedAt: new Date('2026-01-02T00:00:00Z'),
+        evaluable: true,
+        labeledAt: new Date('2026-01-02T00:00:00Z'),
       },
     })
     const workItem = await prisma.analysisWorkItem.create({
@@ -345,6 +348,82 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     })
     expect(classification?.value).toBe(true)
     expect(classification?.reason).toBe('new reason')
+  })
+
+  it('propagates AccountLabelLatest.evaluable/labeledAt as-is into AccountClassificationLatest', async () => {
+    const labeledAt = new Date('2026-01-01T00:00:00Z')
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_bootstrap_evaluable',
+        screenName: 'judy',
+        displayName: 'Judy',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: labeledAt,
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'test_bootstrap_evaluable_label', description: 'テスト用ラベル' },
+    })
+    await prisma.accountLabelLatest.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelDefinition.id,
+        value: true,
+        confidence: 0.8,
+        reason: 'test reason',
+        method: 'rule',
+        ruleVersion: 'v1',
+        evaluable: false,
+        labeledAt,
+      },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_bootstrap',
+        triggerType: 'account_summary_bootstrap_chunk',
+        triggerId: randomUUID(),
+      },
+    })
+
+    await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 10 })
+
+    const classification = await prisma.accountClassificationLatest.findUnique({
+      where: {
+        accountId_labelDefinitionId: {
+          accountId: account.id,
+          labelDefinitionId: labelDefinition.id,
+        },
+      },
+    })
+    expect(classification?.evaluable).toBe(false)
+    expect(classification?.labeledAt?.toISOString()).toBe(labeledAt.toISOString())
+    // 不変条件: bootstrap は observedAt に wall-clock now ではなく label.labeledAt を使う。
+    expect(classification?.observedAt.toISOString()).toBe(labeledAt.toISOString())
+  })
+
+  it('最終 chunk 完了時に ReadModelState.account_summary_latest.schemaVersion を 2 に更新する', async () => {
+    // Account が 0 件でも accounts.length (0) < chunkSize となり即座に isDone になる。
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_bootstrap',
+        triggerType: 'account_summary_bootstrap_chunk',
+        triggerId: randomUUID(),
+      },
+    })
+
+    await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 10 })
+
+    const bootstrap = await prisma.readModelBootstrap.findUnique({
+      where: { modelKey: 'account_summary_v2' },
+    })
+    expect(bootstrap?.status).toBe('completed')
+    const readModelState = await prisma.readModelState.findUnique({
+      where: { modelKey: 'account_summary_latest' },
+    })
+    expect(readModelState?.schemaVersion).toBe(2)
   })
 
   it('advances cursor/processedCount exactly once per row when two work items race on the same chunk', async () => {
@@ -388,7 +467,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     // acct_concurrent_0/1 のチャンクと acct_concurrent_2/3 のチャンクへ
     // 直列に (どちらが先でも) 一意に振り分けられ、二重処理は起きない。
     const bootstrap = await prisma.readModelBootstrap.findUnique({
-      where: { modelKey: 'account_summary' },
+      where: { modelKey: 'account_summary_v2' },
     })
     expect(bootstrap?.processedCount).toBe(4)
     expect(bootstrap?.cursor).toBe('acct_concurrent_3')
@@ -424,7 +503,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
 
   it('does nothing when ReadModelBootstrap is already completed', async () => {
     await prisma.readModelBootstrap.create({
-      data: { modelKey: 'account_summary', status: 'completed' },
+      data: { modelKey: 'account_summary_v2', status: 'completed' },
     })
     await enqueueAccountSummaryBootstrapIfNeeded(prisma)
     const workItems = await prisma.analysisWorkItem.findMany({
@@ -435,7 +514,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
 
   it('self-heals an orphaned pending bootstrap with no progressable work item', async () => {
     await prisma.readModelBootstrap.create({
-      data: { modelKey: 'account_summary', status: 'pending' },
+      data: { modelKey: 'account_summary_v2', status: 'pending' },
     })
     // 進行可能な (queued/leased/failed) WorkItem が 1 件も無い状態を再現する。
     // dead まで進んだ WorkItem を残しておくことで、self-heal がそれを
@@ -459,7 +538,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
 
   it('does not double-enqueue when a progressable work item already exists for a running bootstrap', async () => {
     await prisma.readModelBootstrap.create({
-      data: { modelKey: 'account_summary', status: 'running', cursor: 'acct_1' },
+      data: { modelKey: 'account_summary_v2', status: 'running', cursor: 'acct_1' },
     })
     await prisma.analysisWorkItem.create({
       data: {

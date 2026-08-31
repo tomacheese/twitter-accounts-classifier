@@ -11,6 +11,7 @@ describe.skipIf(!process.env.DATABASE_URL)('findLabelsAtWatermarkForAccount', ()
   beforeEach(async () => {
     await prisma.accountLabel.deleteMany()
     await prisma.labelDefinition.deleteMany()
+    await prisma.block.deleteMany()
     await prisma.account.deleteMany()
   })
 

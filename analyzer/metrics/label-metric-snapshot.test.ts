@@ -460,6 +460,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
       {
         accountId: 'acct_trig_2',
@@ -471,6 +473,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
     ])
     // acct_trig_1 を false へ更新する (value のトリガー decrement/increment を経由させる)。
@@ -485,6 +489,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v2',
         observedAt: new Date('2026-08-13T00:01:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:01:00Z'),
       },
     ])
 
@@ -527,6 +533,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
       {
         accountId: 'acct_trig_del_2',
@@ -538,6 +546,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
     ])
 
@@ -613,6 +623,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
     ])
     await upsertAccountClassificationLatest(prisma, [
@@ -626,6 +638,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
     ])
 
@@ -673,6 +687,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:10Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:00:10Z'),
       },
     ])
     // 同一分内で observedAt だけが微増する再クロールを模す。value/confidence/
@@ -688,6 +704,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:40Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:00:40Z'),
       },
     ])
 
@@ -742,6 +760,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-17T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-17T00:00:00Z'),
       },
     ])
     await upsertAccountClassificationLatest(prisma, [
@@ -755,6 +775,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-17T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-17T00:00:00Z'),
       },
     ])
 
@@ -796,6 +818,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-17T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-17T00:00:00Z'),
       },
     ])
     const afterInsertFalse = await prisma.accountClassificationReasonCount.findUnique({
@@ -816,6 +840,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-17T00:01:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-17T00:01:00Z'),
       },
     ])
     const afterTrue = await prisma.accountClassificationReasonCount.findUniqueOrThrow({
@@ -834,6 +860,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-17T00:02:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-17T00:02:00Z'),
       },
     ])
     const afterFalseAgain = await prisma.accountClassificationReasonCount.findUnique({
@@ -875,6 +903,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
     ])
 
@@ -1033,6 +1063,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: justUnder7Days,
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: justUnder7Days,
       },
       {
         accountId: 'acct_boundary_stale',
@@ -1044,6 +1076,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: justOver7Days,
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: justOver7Days,
       },
     ])
 
@@ -1087,6 +1121,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: freshAt,
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: freshAt,
       },
     ])
     const literalBucket = new Date(freshAt)
@@ -1140,6 +1176,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: staleAt,
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: staleAt,
       },
     ])
 
@@ -1161,6 +1199,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000),
       },
     ])
 
@@ -1203,6 +1243,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: freshAt,
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: freshAt,
       },
     ])
     const literalBucket = new Date(freshAt)
@@ -1244,6 +1286,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v2',
         observedAt: new Date(),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date(),
       },
     ])
 
@@ -1309,6 +1353,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: freshAt,
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: freshAt,
       },
     ])
     const literalBucket = new Date(freshAt)
@@ -1333,6 +1379,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v1',
         observedAt: agedBucket,
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: agedBucket,
       },
     ])
 
@@ -1368,6 +1416,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         ruleVersion: 'v2',
         observedAt: new Date(),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date(),
       },
     ])
     const bucketAfterDecrement =
@@ -1423,6 +1473,8 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
       ruleVersion: 'v1',
       observedAt: now,
       sourceObservationId: null,
+      evaluable: true,
+      labeledAt: now,
     })
     await upsertAccountClassificationLatest(prisma, [
       baseRow('acct_deadlock_1', labelX.id, true),
