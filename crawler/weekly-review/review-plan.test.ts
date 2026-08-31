@@ -42,6 +42,19 @@ function candidate(
 }
 
 describe('buildWeeklyReviewPlan', () => {
+  it('strategyVersion は risk-stratified/3 を返す', () => {
+    const plan = buildWeeklyReviewPlan({
+      seed: 'run-123',
+      budget: 4,
+      targetFrom,
+      targetTo,
+      labels: [],
+      candidates: [],
+    })
+
+    expect(plan.strategyVersion).toBe('risk-stratified/3')
+  })
+
   it('同じ seed と入力なら sample 順序まで同一になる', () => {
     const labels = [label({ id: 'l1', key: 'topic_alpha' })]
     const candidates = [

@@ -46,7 +46,7 @@ export function computeBucketReadCount(
  * @param parts - rank キーを構成する要素
  * @returns SHA-256 の hex digest
  */
-function stableRank(...parts: string[]): string {
+export function stableRank(...parts: string[]): string {
   return createHash('sha256').update(parts.join('\0')).digest('hex')
 }
 

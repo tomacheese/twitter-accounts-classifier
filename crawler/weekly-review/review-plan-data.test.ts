@@ -102,6 +102,8 @@ describe('assemblePlanningData', () => {
 
   it('data source の各 read を同じ対象期間で集約する', async () => {
     const calls: string[] = []
+    const targetFrom = new Date('2026-08-01T00:00:00Z')
+    const targetTo = new Date('2026-08-08T00:00:00Z')
     const emptyRows: PlanningDataRows = {
       definitions: [],
       snapshots: [],
@@ -128,23 +130,27 @@ describe('assemblePlanningData', () => {
         calls.push(`change-counts:${targetFrom.toISOString()}:${targetTo.toISOString()}`)
         return Promise.resolve(emptyRows.recentChangeCounts)
       },
-      listRecentCandidates(targetFrom, targetTo, poolSize, seed) {
-        calls.push(
-          `candidates:${targetFrom.toISOString()}:${targetTo.toISOString()}:${poolSize}:${seed}`,
-        )
+      listBaselineCandidates(poolSize, seed) {
+        calls.push(`candidates:${poolSize}:${seed}`)
         return Promise.resolve(emptyRows.candidates)
       },
       listChangeCandidates(targetFrom, targetTo, limit) {
         calls.push(`changes:${targetFrom.toISOString()}:${targetTo.toISOString()}:${limit}`)
         return Promise.resolve(emptyRows.changeCandidates)
       },
-      listPopulationCounts(targetFrom, targetTo) {
-        calls.push(`population-counts:${targetFrom.toISOString()}:${targetTo.toISOString()}`)
+      listPopulationCounts() {
+        calls.push('population-counts')
         return Promise.resolve(emptyRows.populationCounts)
       },
+      assertSamplingReady() {
+        calls.push('assert-sampling-ready')
+        return Promise.resolve()
+      },
+      readSnapshotAt() {
+        calls.push('read-snapshot-at')
+        return Promise.resolve(targetTo)
+      },
     }
-    const targetFrom = new Date('2026-08-01T00:00:00Z')
-    const targetTo = new Date('2026-08-08T00:00:00Z')
 
     await loadWeeklyReviewPlanningData(source, {
       targetFrom,
@@ -158,9 +164,9 @@ describe('assemblePlanningData', () => {
       'findings',
       `snapshots:${targetTo.toISOString()}`,
       `change-counts:${targetFrom.toISOString()}:${targetTo.toISOString()}`,
-      `candidates:${targetFrom.toISOString()}:${targetTo.toISOString()}:600:run-seed`,
+      'candidates:600:run-seed',
       `changes:${targetFrom.toISOString()}:${targetTo.toISOString()}:600`,
-      `population-counts:${targetFrom.toISOString()}:${targetTo.toISOString()}`,
+      'population-counts',
     ])
   })
 })

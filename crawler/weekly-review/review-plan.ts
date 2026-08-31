@@ -69,8 +69,8 @@ export interface WeeklyReviewSample {
   selectionSignals: WeeklyReviewSelectionSignal[]
   /**
    * random_positive/random_negative サンプルにのみ設定する (targeted サンプルは持たない)。
-   * candidate-pool inclusion probability (poolSize / populationCount) の分母であり、
-   * 最終的な selection probability (ハッシュ層化抽出・budget にも依存する) とは異なる。
+   * 近似値であり、`M=4096`(全 bucket 読み込み)の縮退分岐でのみ厳密に一致し、
+   * それ以外は oversample factor に依存する精度の近似となる。
    */
   populationCount?: number
 }
@@ -85,7 +85,7 @@ export interface WeeklyReviewPlanLabel {
 
 export interface WeeklyReviewPlan {
   schemaVersion: 1
-  strategyVersion: 'risk-stratified/2'
+  strategyVersion: 'risk-stratified/3'
   seed: string
   budget: number
   targetFrom: string
@@ -317,7 +317,7 @@ export function buildWeeklyReviewPlan(input: BuildWeeklyReviewPlanInput): Weekly
 
   return {
     schemaVersion: 1,
-    strategyVersion: 'risk-stratified/2',
+    strategyVersion: 'risk-stratified/3',
     seed: input.seed,
     budget: input.budget,
     targetFrom: input.targetFrom.toISOString(),

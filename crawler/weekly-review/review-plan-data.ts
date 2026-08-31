@@ -106,25 +106,26 @@ export interface WeeklyReviewPlanningDataSource {
   listSnapshots(targetTo: Date): Promise<PlanningSnapshotRow[]>
   listActiveFindingCounts(): Promise<PlanningCountRow[]>
   listRecentChangeCounts(targetFrom: Date, targetTo: Date): Promise<PlanningCountRow[]>
-  listRecentCandidates(
-    targetFrom: Date,
-    targetTo: Date,
-    poolSize: number,
-    seed: string,
-  ): Promise<PlanningCandidateRow[]>
+  listBaselineCandidates(poolSize: number, seed: string): Promise<PlanningCandidateRow[]>
   listChangeCandidates(
     targetFrom: Date,
     targetTo: Date,
     limit: number,
   ): Promise<PlanningCandidateRow[]>
   /**
-   * `targetFrom`〜`targetTo` の期間内に labeled された、当該ラベル×value のアカウント数
-   * (relabel 履歴の行数ではない) を返す。`listRecentCandidates` と同じく
-   * targetTo 時点の各 accountId × labelDefinitionId の最新1件を sampling unit とするため、
-   * 無作為抽出プールの inclusion probability (`poolSize / populationCount`) を
-   * 近似する母集団件数として使える (population frame が sample frame と一致する)。
+   * `WeeklyReviewSampleBucketCount` を集計した、ラベル×value ごとの current/evaluable
+   * 母集団件数を返す。近似値であり、`M=4096`(全 bucket 読み込み)の縮退分岐でのみ
+   * `poolSize / populationCount` が厳密な inclusion probability と一致する。
    */
-  listPopulationCounts(targetFrom: Date, targetTo: Date): Promise<PlanningPopulationCountRow[]>
+  listPopulationCounts(): Promise<PlanningPopulationCountRow[]>
+  /**
+   * sampling frame として使う read model (`AccountClassificationLatest` /
+   * `WeeklyReviewSampleBucketCount`) が準備完了しているか検証する。
+   * 未完了なら reject し、呼び出し元は plan 生成を中断する。
+   */
+  assertSamplingReady(): Promise<void>
+  /** REPEATABLE READ transaction 冒頭の DB 時刻を snapshotAt として返す。 */
+  readSnapshotAt(): Promise<Date>
 }
 
 export interface LoadWeeklyReviewPlanningDataOptions {
@@ -151,14 +152,9 @@ export async function loadWeeklyReviewPlanningData(
     source.listActiveFindingCounts(),
     source.listSnapshots(options.targetTo),
     source.listRecentChangeCounts(options.targetFrom, options.targetTo),
-    source.listRecentCandidates(
-      options.targetFrom,
-      options.targetTo,
-      options.candidatePoolSize,
-      options.seed,
-    ),
+    source.listBaselineCandidates(options.candidatePoolSize, options.seed),
     source.listChangeCandidates(options.targetFrom, options.targetTo, options.candidatePoolSize),
-    source.listPopulationCounts(options.targetFrom, options.targetTo),
+    source.listPopulationCounts(),
   ])
 
   return assemblePlanningData({

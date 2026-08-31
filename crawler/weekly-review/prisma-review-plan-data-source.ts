@@ -1,5 +1,12 @@
 import { Prisma, type PrismaClient } from '../generated/prisma'
 import { runWithConcurrencyLimit } from '../utils/concurrency-limit'
+import {
+  BUCKET_COUNT,
+  OVERSAMPLE_FACTOR,
+  computeBucketReadCount,
+  selectBuckets,
+  stableRank,
+} from './sample-bucket'
 import type {
   PlanningCandidateRow,
   PlanningCountRow,
@@ -9,17 +16,29 @@ import type {
   WeeklyReviewPlanningDataSource,
 } from './review-plan-data'
 
-const RECENT_CANDIDATE_QUERY_CONCURRENCY = 2
-const POPULATION_COUNT_QUERY_CONCURRENCY = 2
+const BASELINE_CANDIDATE_QUERY_CONCURRENCY = 2
 
-type RecentCandidateByValueRow = Omit<
+/** bootstrap の schema key。readiness gate はこの bootstrap の完了を要求する。 */
+const ACCOUNT_SUMMARY_BOOTSTRAP_MODEL_KEY = 'account_summary_v2'
+/** `AccountClassificationLatest` read model の schema key。 */
+const ACCOUNT_SUMMARY_LATEST_MODEL_KEY = 'account_summary_latest'
+/** readiness gate が要求する最小 schemaVersion。 */
+const ACCOUNT_SUMMARY_LATEST_MIN_SCHEMA_VERSION = 2
+
+type BaselineCandidateByValueRow = Omit<
   PlanningCandidateRow,
   'labelDefinitionId' | 'labelKey' | 'changeType'
 >
-type PopulationCountByValueRow = Pick<PlanningPopulationCountRow, 'value' | 'count'>
+
+interface BaselineCandidateTask {
+  definitionId: string
+  labelKey: string
+  value: boolean
+  populationCount: number
+}
 
 export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlanningDataSource {
-  public constructor(private readonly prisma: PrismaClient) {}
+  public constructor(private readonly prisma: PrismaClient | Prisma.TransactionClient) {}
 
   public async listDefinitions(): Promise<PlanningDefinitionRow[]> {
     return this.prisma.labelDefinition.findMany({
@@ -82,147 +101,130 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
     return rows.map((row) => ({ labelDefinitionId: row.labelDefinitionId, count: row._count._all }))
   }
 
-  public async listRecentCandidates(
-    targetFrom: Date,
-    targetTo: Date,
+  public async listPopulationCounts(): Promise<PlanningPopulationCountRow[]> {
+    const rows = await this.prisma.weeklyReviewSampleBucketCount.groupBy({
+      by: ['labelDefinitionId', 'value'],
+      _sum: { count: true },
+    })
+    return rows.map((row) => ({
+      labelDefinitionId: row.labelDefinitionId,
+      value: row.value,
+      count: row._sum.count ?? 0,
+    }))
+  }
+
+  public async listBaselineCandidates(
     poolSize: number,
     seed: string,
   ): Promise<PlanningCandidateRow[]> {
-    const definitions = await this.prisma.labelDefinition.findMany({
-      select: { id: true, key: true },
-      orderBy: { id: 'asc' },
-    })
-    const rowsByDefinition: PlanningCandidateRow[][] = Array.from(
-      { length: definitions.length },
-      () => [],
+    const [definitions, populationCounts] = await Promise.all([
+      this.prisma.labelDefinition.findMany({
+        select: { id: true, key: true },
+        orderBy: { id: 'asc' },
+      }),
+      this.listPopulationCounts(),
+    ])
+    const populationByKey = new Map(
+      populationCounts.map((row) => [`${row.labelDefinitionId}:${row.value}`, row.count]),
     )
 
+    const tasks: BaselineCandidateTask[] = []
+    for (const definition of definitions) {
+      for (const value of [true, false]) {
+        const populationCount = populationByKey.get(`${definition.id}:${value}`) ?? 0
+        if (populationCount <= 0) continue
+        tasks.push({
+          definitionId: definition.id,
+          labelKey: definition.key,
+          value,
+          populationCount,
+        })
+      }
+    }
+
+    const rowsByTask: PlanningCandidateRow[][] = Array.from({ length: tasks.length }, () => [])
+
     await runWithConcurrencyLimit(
-      definitions,
-      RECENT_CANDIDATE_QUERY_CONCURRENCY,
-      async (definition, index) => {
-        const rows = await this.prisma.$queryRaw<RecentCandidateByValueRow[]>(Prisma.sql`
-          WITH windowed AS MATERIALIZED (
-            SELECT
-              label.id,
-              label."accountId",
-              label.value,
-              label."labeledAt"
-            FROM "AccountLabel" label
-            WHERE label."labelDefinitionId" = ${definition.id}
-              AND label."labeledAt" >= ${targetFrom}
-              AND label."labeledAt" <= ${targetTo}
-            ORDER BY label."labeledAt" DESC, label.id DESC
-          ),
-          deduped AS MATERIALIZED (
-            SELECT DISTINCT ON (windowed."accountId")
-              windowed.id,
-              windowed."accountId",
-              windowed.value,
-              windowed."labeledAt"
-            FROM windowed
-            ORDER BY windowed."accountId", windowed."labeledAt" DESC, windowed.id DESC
-          ),
-          sampled AS (
-            (
-              SELECT deduped.id, deduped."accountId", deduped.value
-              FROM deduped
-              WHERE deduped.value = true
-              ORDER BY md5(deduped."accountId" || ':' || ${definition.id} || ':' || ${seed})
-              LIMIT ${poolSize}
-            )
-            UNION ALL
-            (
-              SELECT deduped.id, deduped."accountId", deduped.value
-              FROM deduped
-              WHERE deduped.value = false
-              ORDER BY md5(deduped."accountId" || ':' || ${definition.id} || ':' || ${seed})
-              LIMIT ${poolSize}
-            )
-          )
+      tasks,
+      BASELINE_CANDIDATE_QUERY_CONCURRENCY,
+      async (task, index) => {
+        const bucketReadCount = computeBucketReadCount(
+          task.populationCount,
+          poolSize,
+          OVERSAMPLE_FACTOR,
+        )
+        const buckets =
+          bucketReadCount >= BUCKET_COUNT
+            ? undefined
+            : selectBuckets(seed, task.definitionId, task.value, bucketReadCount)
+        const rows = await this.prisma.$queryRaw<BaselineCandidateByValueRow[]>(Prisma.sql`
           SELECT
-            sampled."accountId",
-            sampled.value,
-            label.confidence,
-            label.reason,
-            label."ruleVersion",
-            label."labeledAt",
-            label.evaluable,
+            classification."accountId",
+            classification.value,
+            classification.confidence,
+            classification.reason,
+            classification."ruleVersion",
+            classification."labeledAt",
+            classification.evaluable,
             account."recentTweetsFetchStatus",
             account."lastRecentTweetsAttemptedAt",
             account."lastRecentTweetsFetchedAt"
-          FROM sampled
-          JOIN "AccountLabel" label ON label.id = sampled.id
-          JOIN "Account" account ON account.id = sampled."accountId"
+          FROM "AccountClassificationLatest" classification
+          JOIN "Account" account ON account.id = classification."accountId"
+          WHERE classification."labelDefinitionId" = ${task.definitionId}
+            AND classification.value = ${task.value}
+            AND classification.evaluable = true
+            AND classification."labeledAt" IS NOT NULL
+            ${
+              buckets === undefined
+                ? Prisma.empty
+                : Prisma.sql`AND weekly_review_sample_bucket(classification."accountId") = ANY(${buckets}::int[])`
+            }
         `)
-        rowsByDefinition[index] = rows.map((row) => ({
+        const ranked = rows.toSorted((a, b) =>
+          stableRank(seed, task.definitionId, String(task.value), a.accountId).localeCompare(
+            stableRank(seed, task.definitionId, String(task.value), b.accountId),
+          ),
+        )
+        rowsByTask[index] = ranked.slice(0, poolSize).map((row) => ({
           ...row,
-          labelDefinitionId: definition.id,
-          labelKey: definition.key,
+          labelDefinitionId: task.definitionId,
+          labelKey: task.labelKey,
         }))
       },
     )
 
-    return rowsByDefinition.flat()
+    return rowsByTask.flat()
   }
 
-  /**
-   * `targetFrom`〜`targetTo` の期間内に labeled された、ラベル×value ごとのアカウント数
-   * (relabel 履歴の行数ではなく account 単位の重複排除後) を返す。
-   * `listRecentCandidates` と同じ targetTo 時点の最新1件を母集団とし、`evaluable` でも絞り込む。
-   * ラベル単位に分割したうえで期間 window を先に materialize し、その小さい集合だけを
-   * account 単位に重複排除する。time-first partial covering index は raw migration で管理する。
-   */
-  public async listPopulationCounts(
-    targetFrom: Date,
-    targetTo: Date,
-  ): Promise<PlanningPopulationCountRow[]> {
-    const definitions = await this.prisma.labelDefinition.findMany({
-      select: { id: true },
-      orderBy: { id: 'asc' },
-    })
-    const rowsByDefinition: PlanningPopulationCountRow[][] = Array.from(
-      { length: definitions.length },
-      () => [],
-    )
+  public async assertSamplingReady(): Promise<void> {
+    const [bootstrap, state] = await Promise.all([
+      this.prisma.readModelBootstrap.findUnique({
+        where: { modelKey: ACCOUNT_SUMMARY_BOOTSTRAP_MODEL_KEY },
+      }),
+      this.prisma.readModelState.findUnique({
+        where: { modelKey: ACCOUNT_SUMMARY_LATEST_MODEL_KEY },
+      }),
+    ])
+    if (bootstrap?.status !== 'completed') {
+      throw new Error(
+        `weekly review sampling is not ready: ${ACCOUNT_SUMMARY_BOOTSTRAP_MODEL_KEY} bootstrap is not completed`,
+      )
+    }
+    if (
+      !state ||
+      state.schemaVersion < ACCOUNT_SUMMARY_LATEST_MIN_SCHEMA_VERSION ||
+      state.status !== 'healthy'
+    ) {
+      throw new Error(
+        `weekly review sampling is not ready: ${ACCOUNT_SUMMARY_LATEST_MODEL_KEY} read model is not healthy`,
+      )
+    }
+  }
 
-    await runWithConcurrencyLimit(
-      definitions,
-      POPULATION_COUNT_QUERY_CONCURRENCY,
-      async (definition, index) => {
-        const rows = await this.prisma.$queryRaw<PopulationCountByValueRow[]>(Prisma.sql`
-          WITH windowed AS MATERIALIZED (
-            SELECT
-              label."accountId",
-              label.value,
-              label."labeledAt",
-              label.id
-            FROM "AccountLabel" label
-            WHERE label."labelDefinitionId" = ${definition.id}
-              AND label."labeledAt" >= ${targetFrom}
-              AND label."labeledAt" <= ${targetTo}
-              AND label.evaluable
-            ORDER BY label."labeledAt" DESC, label.id DESC
-          )
-          SELECT deduped.value, COUNT(*)::int AS count
-          FROM (
-            SELECT DISTINCT ON (windowed."accountId")
-              windowed."accountId",
-              windowed.value
-            FROM windowed
-            ORDER BY windowed."accountId", windowed."labeledAt" DESC, windowed.id DESC
-          ) deduped
-          GROUP BY deduped.value
-        `)
-        rowsByDefinition[index] = rows.map((row) => ({
-          labelDefinitionId: definition.id,
-          value: row.value,
-          count: row.count,
-        }))
-      },
-    )
-
-    return rowsByDefinition.flat()
+  public async readSnapshotAt(): Promise<Date> {
+    const [row] = await this.prisma.$queryRaw<{ now: Date }[]>(Prisma.sql`SELECT now()`)
+    return row.now
   }
 
   public async listChangeCandidates(

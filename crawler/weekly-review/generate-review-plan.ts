@@ -26,7 +26,11 @@ export interface GenerateWeeklyReviewPlanInput {
 
 export interface GenerateWeeklyReviewPlanDependencies {
   store: WeeklyReviewRunPlanStore
-  source: WeeklyReviewPlanningDataSource
+  /**
+   * plan 用 rows を単一 transaction (REPEATABLE READ) 内で読むためのコールバック実行器。
+   * 本番実装は `prisma.$transaction` で包み、単体テストは即時実行版を渡せる。
+   */
+  runPlanningQuery: <T>(fn: (source: WeeklyReviewPlanningDataSource) => Promise<T>) => Promise<T>
 }
 
 export async function generateWeeklyReviewPlan(
@@ -36,21 +40,24 @@ export async function generateWeeklyReviewPlan(
   const run = await dependencies.store.getRun(input.runId)
   if (!run) throw new Error(`WeeklyAnalysisRun not found: ${input.runId}`)
 
-  const { targetFrom, targetTo } = buildReviewTargetWindow(run.startedAt)
-  const planningData = await loadWeeklyReviewPlanningData(dependencies.source, {
-    targetFrom,
-    targetTo,
-    candidatePoolSize: input.candidatePoolSize,
-    seed: run.id,
-  })
-  const plan = buildWeeklyReviewPlan({
-    seed: run.id,
-    budget: input.budget,
-    targetFrom,
-    targetTo,
-    labels: planningData.labels,
-    candidates: planningData.candidates,
-    populationCounts: planningData.populationCounts,
+  const { plan, targetFrom, targetTo } = await dependencies.runPlanningQuery(async (source) => {
+    await source.assertSamplingReady()
+    const snapshotAt = await source.readSnapshotAt()
+    const window = buildReviewTargetWindow(snapshotAt)
+    const planningData = await loadWeeklyReviewPlanningData(source, {
+      ...window,
+      candidatePoolSize: input.candidatePoolSize,
+      seed: run.id,
+    })
+    const plan = buildWeeklyReviewPlan({
+      seed: run.id,
+      budget: input.budget,
+      ...window,
+      labels: planningData.labels,
+      candidates: planningData.candidates,
+      populationCounts: planningData.populationCounts,
+    })
+    return { plan, ...window }
   })
 
   await dependencies.store.recordPlanMetadata(run.id, {
