@@ -13,6 +13,7 @@ import {
   type RawUserResult,
   type TrendsScraperLike,
 } from 'twitter-client'
+import { extractCardDestinationUrls } from './card-destination-urls'
 
 /**
  * `rawCount` を `data.data` とは別に持つのは、
@@ -212,6 +213,8 @@ export function toRawUserResult(user: TweetApiUtilsData['user']): RawUserResult 
 function toRawTweetResult(data: TweetApiUtilsData): RawTweetResult | null {
   if (!data.tweet.legacy) return null
 
+  const cardDestinationUrls = extractCardDestinationUrls(data.tweet.card)
+
   return {
     restId: data.tweet.restId,
     legacy: {
@@ -253,6 +256,8 @@ function toRawTweetResult(data: TweetApiUtilsData): RawTweetResult | null {
         data.tweet.contentDisclosure?.aiGeneratedDisclosure?.hasAiGeneratedMedia ?? null,
       aiGeneratedDetectionSource:
         data.tweet.contentDisclosure?.aiGeneratedDisclosure?.aiGeneratedDetectionSource ?? null,
+      cardDestinationUrls: cardDestinationUrls.urls,
+      cardDestinationUrlsEvaluated: cardDestinationUrls.evaluated,
     },
     user: toRawUserResult(data.user),
   }

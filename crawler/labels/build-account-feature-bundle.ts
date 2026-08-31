@@ -88,6 +88,8 @@ export function buildAccountFeatureBundle(
       isPromoted: tweet.isPromoted,
       isPaidPromotion: tweet.isPaidPromotion,
       expandedUrls: tweet.expandedUrls,
+      cardDestinationUrls: tweet.cardDestinationUrls,
+      cardDestinationUrlsEvaluated: tweet.cardDestinationUrlsEvaluated,
       hasAiGeneratedMedia: tweet.hasAiGeneratedMedia,
       aiGeneratedDetectionSource: tweet.aiGeneratedDetectionSource,
       foreignVideoSourceCount: tweet.foreignVideoSourceCount,

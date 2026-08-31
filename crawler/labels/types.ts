@@ -53,6 +53,16 @@ export interface AccountFeatureBundle {
     /** X URL entity から正規化した展開先 URL。旧 fixture 互換のため任意。 */
     expandedUrls?: string[]
     /**
+     * X の unified Card から抽出した遷移先 URL (`browser` タイプのみ)。旧 fixture 互換のため任意。
+     */
+    cardDestinationUrls?: string[]
+    /**
+     * Card の評価が正常に完了したか。Card が存在しない場合も true になるため、
+     * 「Card URL が無い」ことと「まだ評価されていない」ことを区別できる。
+     * 旧 fixture 互換のため任意。
+     */
+    cardDestinationUrlsEvaluated?: boolean
+    /**
      * このツイートが直接リプライしている先のツイート ID。リプライでない場合、
      * または親ツイート ID が不明な場合は `null`/未設定にする。
      * 任意項目にする理由は `professionalType` と同じ。

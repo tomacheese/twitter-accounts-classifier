@@ -53,6 +53,8 @@ function makeTweet(overrides: Partial<Tweet> = {}): Tweet {
     isPromoted: false,
     isPaidPromotion: false,
     expandedUrls: [],
+    cardDestinationUrls: [],
+    cardDestinationUrlsEvaluated: false,
     hasAiGeneratedMedia: null,
     aiGeneratedDetectionSource: null,
     quotedTweetId: null,
@@ -80,6 +82,29 @@ describe('buildAccountFeatureBundle', () => {
 
     expect(bundle.recentTweets[0].hasAiGeneratedMedia).toBe(true)
     expect(bundle.recentTweets[0].aiGeneratedDetectionSource).toBe('C2paClient')
+  })
+
+  it('Card destination URL 関連フィールドを bundle に含める', () => {
+    const bundle = buildAccountFeatureBundle(
+      makeAccount(),
+      [
+        makeTweet({
+          cardDestinationUrls: ['https://example-shop.test/item/FICTIONAL'],
+          cardDestinationUrlsEvaluated: true,
+        }),
+      ],
+      buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
+      buildReplyHijackIndex([]),
+      emptyFollowGraphLabelIndex,
+      buildSelfReplyPromoIndex([], []),
+      new Map(),
+    )
+
+    expect(bundle.recentTweets[0].cardDestinationUrls).toEqual([
+      'https://example-shop.test/item/FICTIONAL',
+    ])
+    expect(bundle.recentTweets[0].cardDestinationUrlsEvaluated).toBe(true)
   })
 
   it('account の classification-relevant フィールドをそのまま反映する', () => {

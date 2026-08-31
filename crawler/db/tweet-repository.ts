@@ -26,6 +26,8 @@ interface ExistingTweetSnapshot {
   isPromoted: boolean
   isPaidPromotion: boolean
   expandedUrls: string[]
+  cardDestinationUrls: string[]
+  cardDestinationUrlsEvaluated: boolean
   hasAiGeneratedMedia: boolean | null
   aiGeneratedDetectionSource: string | null
   foreignVideoSourceCount: number | null
@@ -67,6 +69,8 @@ function hasBundleRelevantChange(
     existing.isPromoted !== merged.isPromoted ||
     existing.isPaidPromotion !== merged.isPaidPromotion ||
     hasArrayChange(existing.expandedUrls, merged.expandedUrls) ||
+    hasArrayChange(existing.cardDestinationUrls, merged.cardDestinationUrls) ||
+    existing.cardDestinationUrlsEvaluated !== merged.cardDestinationUrlsEvaluated ||
     existing.hasAiGeneratedMedia !== merged.hasAiGeneratedMedia ||
     existing.aiGeneratedDetectionSource !== merged.aiGeneratedDetectionSource ||
     existing.foreignVideoSourceCount !== merged.foreignVideoSourceCount ||
@@ -105,6 +109,8 @@ export async function upsertTweet(
       isPromoted: true,
       isPaidPromotion: true,
       expandedUrls: true,
+      cardDestinationUrls: true,
+      cardDestinationUrlsEvaluated: true,
       hasAiGeneratedMedia: true,
       aiGeneratedDetectionSource: true,
       foreignVideoSourceCount: true,
@@ -127,6 +133,12 @@ export async function upsertTweet(
     isPromoted: input.isPromoted || (existing?.isPromoted ?? false),
     isPaidPromotion: input.isPaidPromotion || (existing?.isPaidPromotion ?? false),
     expandedUrls: [...new Set([...(input.expandedUrls ?? []), ...(existing?.expandedUrls ?? [])])],
+    cardDestinationUrls: [
+      ...new Set([...(input.cardDestinationUrls ?? []), ...(existing?.cardDestinationUrls ?? [])]),
+    ],
+    cardDestinationUrlsEvaluated:
+      (input.cardDestinationUrlsEvaluated ?? false) ||
+      (existing?.cardDestinationUrlsEvaluated ?? false),
     hasAiGeneratedMedia: input.hasAiGeneratedMedia ?? existing?.hasAiGeneratedMedia ?? null,
     aiGeneratedDetectionSource:
       input.aiGeneratedDetectionSource ?? existing?.aiGeneratedDetectionSource ?? null,

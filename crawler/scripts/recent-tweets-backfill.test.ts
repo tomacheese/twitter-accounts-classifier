@@ -45,6 +45,8 @@ const tweet: TweetInput = {
   isPromoted: false,
   isPaidPromotion: false,
   expandedUrls: [],
+  cardDestinationUrls: [],
+  cardDestinationUrlsEvaluated: false,
   hasAiGeneratedMedia: null,
   aiGeneratedDetectionSource: null,
   quotedTweetId: null,

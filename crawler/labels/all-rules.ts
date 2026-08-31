@@ -12,6 +12,7 @@ import { adPromotedRule } from './rules/ad-promoted'
 import { adPrHashtagRule } from './rules/ad-pr-hashtag'
 import { amazonAffiliateLinkRule } from './rules/amazon-affiliate-link'
 import { amazonAffiliatePromotedRule } from './rules/amazon-affiliate-promoted'
+import { amazonAffiliatePrSpamRule } from './rules/amazon-affiliate-pr-spam'
 import { adReplyHijackRule } from './rules/ad-reply-hijack'
 import { replyLanguageMismatchRule } from './rules/reply-language-mismatch'
 import { botRule } from './rules/bot'
@@ -106,4 +107,5 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   replyHijackSwarmRule,
   scamLinkDomainRule,
   bareLinkSpamRule,
+  amazonAffiliatePrSpamRule,
 ]

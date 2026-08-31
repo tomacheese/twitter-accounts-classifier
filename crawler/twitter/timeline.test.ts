@@ -112,6 +112,125 @@ describe('convertTimelineResponse', () => {
       },
     ])
   })
+
+  it('extracts unified_card browser destination URLs onto the raw tweet', async () => {
+    const result = await convertTimelineResponse(
+      Promise.resolve({
+        data: {
+          data: [
+            {
+              raw: {},
+              replies: [],
+              tweet: {
+                restId: 't-card',
+                legacy: {
+                  fullText: 'card 付き投稿',
+                  createdAt: 'Wed Jan 01 00:00:00 +0000 2020',
+                  retweetCount: 0,
+                  favoriteCount: 0,
+                  replyCount: 0,
+                  quoteCount: 0,
+                },
+                contentDisclosure: {},
+                card: {
+                  legacy: {
+                    bindingValues: [
+                      {
+                        key: 'unified_card',
+                        value: {
+                          stringValue: JSON.stringify({
+                            destination_objects: {
+                              browser_1: {
+                                type: 'browser',
+                                data: {
+                                  url_data: {
+                                    url: 'https://www.amazon.co.jp/dp/FICTIONAL?tag=fictional-card-22',
+                                  },
+                                },
+                              },
+                            },
+                          }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+              user: {
+                restId: 'u-card',
+                legacy: {
+                  screenName: 'fictional_user',
+                  name: 'Fictional User',
+                  description: null,
+                  followersCount: 0,
+                  friendsCount: 0,
+                  statusesCount: 1,
+                  createdAt: 'Wed Jan 01 00:00:00 +0000 2020',
+                  profileImageUrlHttps: null,
+                  location: null,
+                  url: null,
+                },
+                isBlueVerified: false,
+              },
+            },
+          ],
+          cursor: {},
+        },
+      } as never),
+    )
+
+    expect(result.data.data[0]?.legacy.cardDestinationUrls).toEqual([
+      'https://www.amazon.co.jp/dp/FICTIONAL?tag=fictional-card-22',
+    ])
+    expect(result.data.data[0]?.legacy.cardDestinationUrlsEvaluated).toBe(true)
+  })
+
+  it('marks cardDestinationUrlsEvaluated=true when the tweet has no card', async () => {
+    const result = await convertTimelineResponse(
+      Promise.resolve({
+        data: {
+          data: [
+            {
+              raw: {},
+              replies: [],
+              tweet: {
+                restId: 't-no-card',
+                legacy: {
+                  fullText: 'card なし投稿',
+                  createdAt: 'Wed Jan 01 00:00:00 +0000 2020',
+                  retweetCount: 0,
+                  favoriteCount: 0,
+                  replyCount: 0,
+                  quoteCount: 0,
+                },
+                contentDisclosure: {},
+              },
+              user: {
+                restId: 'u-no-card',
+                legacy: {
+                  screenName: 'fictional_user2',
+                  name: 'Fictional User 2',
+                  description: null,
+                  followersCount: 0,
+                  friendsCount: 0,
+                  statusesCount: 1,
+                  createdAt: 'Wed Jan 01 00:00:00 +0000 2020',
+                  profileImageUrlHttps: null,
+                  location: null,
+                  url: null,
+                },
+                isBlueVerified: false,
+              },
+            },
+          ],
+          cursor: {},
+        },
+      } as never),
+    )
+
+    expect(result.data.data[0]?.legacy.cardDestinationUrls).toEqual([])
+    expect(result.data.data[0]?.legacy.cardDestinationUrlsEvaluated).toBe(true)
+  })
 })
 
 describe('fetchRecommendedTimeline', () => {
