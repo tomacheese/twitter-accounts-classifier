@@ -464,9 +464,23 @@ model AccountClassificationLatest {
   ruleVersion         String
   observedAt          DateTime
   sourceObservationId String?
+  evaluable           Boolean   @default(false)
+  labeledAt           DateTime?
 
   @@id([accountId, labelDefinitionId])
   @@index([labelDefinitionId, value, accountId])
+}
+
+// weekly review の random baseline sampling 用に、labelDefinitionId/value/bucket
+// 単位で eligible (evaluable=true AND labeledAt IS NOT NULL) な行数を集計する。
+// 詳細な維持方法は該当 migration のトリガー定義コメントを参照。
+model WeeklyReviewSampleBucketCount {
+  labelDefinitionId String
+  value             Boolean
+  bucket            Int
+  count             Int    @default(0)
+
+  @@id([labelDefinitionId, value, bucket])
 }
 
 model AccountClassificationValueCount {
