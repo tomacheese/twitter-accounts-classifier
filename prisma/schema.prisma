@@ -94,6 +94,10 @@ model Tweet {
   isPromoted                 Boolean  @default(false)
   isPaidPromotion            Boolean  @default(false)
   expandedUrls               String[] @default([])
+  cardDestinationUrls        String[] @default([])
+  // この列が存在する前に収集された行は Card 自体を評価していないため、
+  // デフォルトを true ではなく false にして未評価の状態と実際の評価結果を区別している。
+  cardDestinationUrlsEvaluated Boolean  @default(false)
   // この列が存在する前に収集された行は判定自体が行われていないため、
   // デフォルトを false ではなく null にして未評価の状態と実際の判定結果を区別している。
   hasAiGeneratedMedia        Boolean?

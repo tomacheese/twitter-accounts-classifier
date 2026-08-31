@@ -88,6 +88,8 @@ describe('toTweetInput', () => {
       isPromoted: false,
       isPaidPromotion: false,
       expandedUrls: [],
+      cardDestinationUrls: [],
+      cardDestinationUrlsEvaluated: false,
       hasAiGeneratedMedia: null,
       aiGeneratedDetectionSource: null,
       foreignVideoSourceCount: null,
@@ -158,6 +160,32 @@ describe('toTweetInput', () => {
     expect(input).toMatchObject({
       expandedUrls: ['https://www.amazon.co.jp/dp/TEST?tag=sample-22', 'https://t.co/c'],
     })
+  })
+
+  it('passes Card destination URLs and their evaluated flag through when present in legacy', () => {
+    const cardTweet: RawTweetResult = {
+      ...rawTweet,
+      legacy: {
+        ...rawTweet.legacy,
+        cardDestinationUrls: ['https://www.example-shop.test/item/FICTIONAL'],
+        cardDestinationUrlsEvaluated: true,
+      },
+    }
+
+    const input = toTweetInput(cardTweet, {
+      source: 'recommended',
+      viewerAccountId: 'someone-else',
+    })
+
+    expect(input.cardDestinationUrls).toEqual(['https://www.example-shop.test/item/FICTIONAL'])
+    expect(input.cardDestinationUrlsEvaluated).toBe(true)
+  })
+
+  it('defaults Card fields to [] / false when absent from legacy', () => {
+    const input = toTweetInput(rawTweet, { source: 'recommended', viewerAccountId: 'someone-else' })
+
+    expect(input.cardDestinationUrls).toEqual([])
+    expect(input.cardDestinationUrlsEvaluated).toBe(false)
   })
 
   it('marks isAuthorReply true when the reply author matches the viewer account', () => {
@@ -354,5 +382,25 @@ describe('mergeTweetAdFlags', () => {
     ])
 
     expect(merged[0]).toMatchObject({ foreignVideoSourceCount: 1 })
+  })
+
+  it('unions Card destination URLs and OR-merges their evaluated flag across duplicate tweet ids', () => {
+    const first = {
+      ...tweetInput({ id: 't1' }),
+      cardDestinationUrls: ['https://example-shop.test/a'],
+      cardDestinationUrlsEvaluated: true,
+    } as NormalizedTweet
+    const second = {
+      ...tweetInput({ id: 't1' }),
+      cardDestinationUrls: ['https://example-shop.test/b'],
+      cardDestinationUrlsEvaluated: false,
+    } as NormalizedTweet
+
+    const merged = mergeTweetAdFlags([first, second])
+
+    expect(merged[0]).toMatchObject({
+      cardDestinationUrls: ['https://example-shop.test/b', 'https://example-shop.test/a'],
+      cardDestinationUrlsEvaluated: true,
+    })
   })
 })

@@ -33,6 +33,8 @@ export interface RawTweetResult {
     isPaidPromotion?: boolean
     hasAiGeneratedMedia?: boolean | null
     aiGeneratedDetectionSource?: string | null
+    cardDestinationUrls?: string[]
+    cardDestinationUrlsEvaluated?: boolean
     entities?: {
       urls?: { url: string; expandedUrl?: string }[]
     }
@@ -94,6 +96,8 @@ export interface NormalizedTweet {
   isPromoted: boolean
   isPaidPromotion: boolean
   expandedUrls?: string[]
+  cardDestinationUrls?: string[]
+  cardDestinationUrlsEvaluated?: boolean
   hasAiGeneratedMedia: boolean | null
   aiGeneratedDetectionSource: string | null
   foreignVideoSourceCount?: number | null
@@ -162,6 +166,13 @@ export function mergeTweetAdFlags(tweets: NormalizedTweet[]): NormalizedTweet[] 
       isPromoted: tweet.isPromoted || (existing?.isPromoted ?? false),
       isPaidPromotion: tweet.isPaidPromotion || (existing?.isPaidPromotion ?? false),
       expandedUrls: mergeUniqueStrings(tweet.expandedUrls, existing?.expandedUrls),
+      cardDestinationUrls: mergeUniqueStrings(
+        tweet.cardDestinationUrls,
+        existing?.cardDestinationUrls,
+      ),
+      cardDestinationUrlsEvaluated:
+        (tweet.cardDestinationUrlsEvaluated ?? false) ||
+        (existing?.cardDestinationUrlsEvaluated ?? false),
       foreignVideoSourceCount: mergeForeignVideoSourceCount(
         tweet.foreignVideoSourceCount,
         existing?.foreignVideoSourceCount,
@@ -220,6 +231,8 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
     isPromoted: raw.legacy.isPromoted ?? false,
     isPaidPromotion: raw.legacy.isPaidPromotion ?? false,
     expandedUrls,
+    cardDestinationUrls: raw.legacy.cardDestinationUrls ?? [],
+    cardDestinationUrlsEvaluated: raw.legacy.cardDestinationUrlsEvaluated ?? false,
     hasAiGeneratedMedia: raw.legacy.hasAiGeneratedMedia ?? null,
     aiGeneratedDetectionSource: raw.legacy.aiGeneratedDetectionSource ?? null,
     foreignVideoSourceCount,

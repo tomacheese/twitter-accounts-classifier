@@ -97,6 +97,8 @@ describe('upsertTweet bundle-relevant change detection', () => {
       isPromoted: false,
       isPaidPromotion: false,
       expandedUrls: [],
+      cardDestinationUrls: [],
+      cardDestinationUrlsEvaluated: false,
       hasAiGeneratedMedia: false,
       aiGeneratedDetectionSource: null,
       foreignVideoSourceCount: null,
@@ -125,6 +127,8 @@ describe('upsertTweet bundle-relevant change detection', () => {
       isPromoted: false,
       isPaidPromotion: true,
       expandedUrls: [],
+      cardDestinationUrls: [],
+      cardDestinationUrlsEvaluated: false,
       hasAiGeneratedMedia: null,
       aiGeneratedDetectionSource: null,
       foreignVideoSourceCount: null,
@@ -193,6 +197,95 @@ describe('upsertTweet expanded URLs', () => {
     expect(call.update).toMatchObject({
       expandedUrls: ['https://example.com/new', 'https://example.com/old'],
     })
+  })
+})
+
+describe('upsertTweet Card destination URLs', () => {
+  it('passes Card destination URLs and their evaluated flag through to create', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
+    const findUnique = vi.fn().mockResolvedValue(null)
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    await upsertTweet(prisma, {
+      ...sampleTweet,
+      cardDestinationUrls: ['https://example-shop.test/item/FICTIONAL'],
+      cardDestinationUrlsEvaluated: true,
+    })
+
+    const call = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(call.create).toMatchObject({
+      cardDestinationUrls: ['https://example-shop.test/item/FICTIONAL'],
+      cardDestinationUrlsEvaluated: true,
+    })
+  })
+
+  it('unions previously observed Card destination URLs with newly observed ones', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
+    const findUnique = vi.fn().mockResolvedValue({
+      cardDestinationUrls: ['https://example-shop.test/old'],
+      cardDestinationUrlsEvaluated: true,
+    })
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    await upsertTweet(prisma, {
+      ...sampleTweet,
+      cardDestinationUrls: ['https://example-shop.test/new'],
+      cardDestinationUrlsEvaluated: true,
+    })
+
+    const call = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(call.update).toMatchObject({
+      cardDestinationUrls: ['https://example-shop.test/new', 'https://example-shop.test/old'],
+    })
+  })
+
+  it('does not let a re-crawl that fails to evaluate the Card flip a previously-true evaluated flag back to false', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
+    const findUnique = vi.fn().mockResolvedValue({
+      cardDestinationUrls: [],
+      cardDestinationUrlsEvaluated: true,
+    })
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    await upsertTweet(prisma, { ...sampleTweet, cardDestinationUrlsEvaluated: false })
+
+    const call = upsert.mock.calls[0][0] as Record<string, unknown>
+    expect(call.update).toMatchObject({ cardDestinationUrlsEvaluated: true })
+  })
+
+  it('returns changed: true when only the Card destination URLs change', async () => {
+    const existing = {
+      isPromoted: false,
+      isPaidPromotion: false,
+      expandedUrls: [],
+      cardDestinationUrls: [],
+      cardDestinationUrlsEvaluated: false,
+      hasAiGeneratedMedia: false,
+      aiGeneratedDetectionSource: null,
+      foreignVideoSourceCount: null,
+      quotedTweetId: null,
+      quotedTweetAuthorId: null,
+      quotedTweetHasVideo: null,
+      fullText: sampleTweet.fullText,
+      createdAt: sampleTweet.createdAt,
+      retweetCount: sampleTweet.retweetCount,
+      likeCount: sampleTweet.likeCount,
+      isReply: sampleTweet.isReply,
+      isRetweet: sampleTweet.isRetweet,
+      inReplyToTweetId: sampleTweet.inReplyToTweetId,
+    }
+    const findUnique = vi.fn().mockResolvedValue(existing)
+    const upsert = vi.fn().mockResolvedValue({ id: sampleTweet.id, ...existing })
+    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+
+    const { changed } = await upsertTweet(prisma, {
+      ...sampleTweet,
+      hasAiGeneratedMedia: null,
+      cardDestinationUrls: ['https://example-shop.test/new'],
+      cardDestinationUrlsEvaluated: true,
+    })
+
+    expect(changed).toBe(true)
   })
 })
 
