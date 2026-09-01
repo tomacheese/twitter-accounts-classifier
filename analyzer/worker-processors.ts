@@ -285,6 +285,8 @@ export async function processAccountSummaryRefresh(
           ruleVersion: label.ruleVersion,
           observedAt: observation.observedAt,
           sourceObservationId: observation.id,
+          evaluable: label.evaluable,
+          labeledAt: label.labeledAt,
         })),
       )
 

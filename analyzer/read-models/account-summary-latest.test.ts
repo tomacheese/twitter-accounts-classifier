@@ -140,7 +140,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
     await prisma.account.deleteMany()
   })
 
-  it('rejects a row whose observedAt is older than the existing row', async () => {
+  it('rejects a semantic update whose labeledAt is older than the existing row', async () => {
     const account = await prisma.account.create({
       data: {
         id: 'acct_class',
@@ -169,6 +169,8 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
         ruleVersion: 'v1',
         observedAt: newer,
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: newer,
       },
     ])
     await upsertAccountClassificationLatest(prisma, [
@@ -180,8 +182,10 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
         reason: 'older reason',
         method: 'rule',
         ruleVersion: 'v1',
-        observedAt: older,
+        observedAt: newer,
         sourceObservationId: null,
+        evaluable: false,
+        labeledAt: older,
       },
     ])
 
@@ -194,6 +198,152 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
       },
     })
     expect(row?.value).toBe(true)
+    expect(row?.evaluable).toBe(true)
+    expect(row?.labeledAt?.toISOString()).toBe(newer.toISOString())
+  })
+
+  it('反例固定: 新しい observedAt だが古い labeledAt の live refresh の後に、より新しい labeledAt の bootstrap が来ても value/evaluable/labeledAt は同一の bootstrap 由来行に揃い、observedAt/sourceObservationId は独立して最新の観測を維持する', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_interleave',
+        screenName: 'dave',
+        displayName: 'Dave',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'test_label_interleave', description: 'テスト用ラベル' },
+    })
+    const t10 = new Date('2026-01-01T00:00:00Z')
+    const t15 = new Date('2026-01-01T00:00:05Z')
+    const t20 = new Date('2026-01-01T00:00:10Z')
+
+    // live refresh: observation t20 の時点で labeledAt=t10 の label row を読んで書き込む。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: account.id,
+        labelDefinitionId: labelDefinition.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'live refresh reason (t10 由来)',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: t20,
+        sourceObservationId: 'observation_live',
+        evaluable: true,
+        labeledAt: t10,
+      },
+    ])
+    // bootstrap: より新しい labeledAt=t15 の AccountLabelLatest 行を読んで書き込む。
+    // 不変条件どおり observedAt := labeledAt を使う。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: account.id,
+        labelDefinitionId: labelDefinition.id,
+        value: false,
+        confidence: 0.2,
+        reason: 'bootstrap reason (t15 由来)',
+        method: 'rule',
+        ruleVersion: 'v2',
+        observedAt: t15,
+        sourceObservationId: 'observation_bootstrap',
+        evaluable: false,
+        labeledAt: t15,
+      },
+    ])
+
+    const row = await prisma.accountClassificationLatest.findUnique({
+      where: {
+        accountId_labelDefinitionId: {
+          accountId: account.id,
+          labelDefinitionId: labelDefinition.id,
+        },
+      },
+    })
+    // semantic 系は labeledAt=t15 (bootstrap) 側に揃う。value だけ t10 由来のまま
+    // 取り残されてはならない。
+    expect(row?.value).toBe(false)
+    expect(row?.confidence).toBe(0.2)
+    expect(row?.reason).toBe('bootstrap reason (t15 由来)')
+    expect(row?.ruleVersion).toBe('v2')
+    expect(row?.evaluable).toBe(false)
+    expect(row?.labeledAt?.toISOString()).toBe(t15.toISOString())
+    // observedAt/sourceObservationId は semantic 系の勝敗と独立に、
+    // observedAt が大きい live refresh (t20) 側のまま維持される。
+    expect(row?.observedAt.toISOString()).toBe(t20.toISOString())
+    expect(row?.sourceObservationId).toBe('observation_live')
+  })
+
+  it('反例の逆順 commit でも同一の labeledAt 由来の semantic 行に収束する', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_interleave_reverse',
+        screenName: 'erin',
+        displayName: 'Erin',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'test_label_interleave_reverse', description: 'テスト用ラベル' },
+    })
+    const t10 = new Date('2026-01-01T00:00:00Z')
+    const t15 = new Date('2026-01-01T00:00:05Z')
+    const t20 = new Date('2026-01-01T00:00:10Z')
+
+    // bootstrap (labeledAt=t15) が先に commit する。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: account.id,
+        labelDefinitionId: labelDefinition.id,
+        value: false,
+        confidence: 0.2,
+        reason: 'bootstrap reason (t15 由来)',
+        method: 'rule',
+        ruleVersion: 'v2',
+        observedAt: t15,
+        sourceObservationId: 'observation_bootstrap',
+        evaluable: false,
+        labeledAt: t15,
+      },
+    ])
+    // live refresh (observation t20、labeledAt=t10) が後に commit する。
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: account.id,
+        labelDefinitionId: labelDefinition.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'live refresh reason (t10 由来)',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: t20,
+        sourceObservationId: 'observation_live',
+        evaluable: true,
+        labeledAt: t10,
+      },
+    ])
+
+    const row = await prisma.accountClassificationLatest.findUnique({
+      where: {
+        accountId_labelDefinitionId: {
+          accountId: account.id,
+          labelDefinitionId: labelDefinition.id,
+        },
+      },
+    })
+    // commit 順序を逆にしても、semantic 系は labeledAt=t15 (bootstrap) 側に収束する。
+    expect(row?.value).toBe(false)
+    expect(row?.evaluable).toBe(false)
+    expect(row?.labeledAt?.toISOString()).toBe(t15.toISOString())
+    // observedAt/sourceObservationId は独立して observedAt=t20 (live refresh) のまま。
+    expect(row?.observedAt.toISOString()).toBe(t20.toISOString())
+    expect(row?.sourceObservationId).toBe('observation_live')
   })
 })
 
@@ -213,6 +363,8 @@ describe('upsertAccountClassificationLatest row ordering', () => {
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
       {
         accountId: 'acct_1',
@@ -224,6 +376,8 @@ describe('upsertAccountClassificationLatest row ordering', () => {
         ruleVersion: 'v1',
         observedAt: new Date('2026-08-13T00:00:00Z'),
         sourceObservationId: null,
+        evaluable: true,
+        labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
     ])
 

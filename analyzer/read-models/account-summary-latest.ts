@@ -103,12 +103,21 @@ export interface AccountClassificationLatestRow {
   ruleVersion: string
   observedAt: Date
   sourceObservationId: string | null
+  evaluable: boolean
+  labeledAt: Date
 }
 
 /**
- * `(accountId, labelDefinitionId)` 単位で `observedAt` の単調性を課して upsert する。
- * bootstrap (古い baseline) と通常 Crawler (新しい観測) が並行しても、
- * 後から commit した古い観測が新しい観測を巻き戻さない。
+ * `(accountId, labelDefinitionId)` 単位で 2 系統の watermark を独立に比較して upsert する。
+ * `value`/`confidence`/`reason`/`method`/`ruleVersion`/`evaluable`/`labeledAt` (label の
+ * 意味的な中身一式) は `labeledAt` を watermark に同一 row 単位・原子的に更新し、
+ * `observedAt`/`sourceObservationId` (この行を最後に書いた analyzer observation を指す
+ * メタデータ) は `observedAt` を watermark に独立更新する。
+ * これらを同じ watermark で一括更新しない (`value` 等だけ `observedAt` 基準にする)
+ * 分割は避ける。bootstrap がより新しい `labeledAt` の label row を読んで書き込んだ後に
+ * live refresh がより古い `labeledAt` (だが新しい `observedAt`) の書き込みで再上書きしても、
+ * `value` が新しい `labeledAt` 由来のまま `labeledAt` だけ古い書き込み由来になる、
+ * といった由来の異なる label の混在を避けるためである。
  * @param prisma - Prisma クライアント
  * @param rows - 対象アカウントの classification 行一覧
  */
@@ -131,7 +140,7 @@ export async function upsertAccountClassificationLatest(
   await prisma.$executeRaw`
     INSERT INTO "AccountClassificationLatest" (
       "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion",
-      "observedAt", "sourceObservationId"
+      "observedAt", "sourceObservationId", "evaluable", "labeledAt"
     )
     SELECT * FROM UNNEST(
       ${sortedRows.map((row) => row.accountId)}::text[],
@@ -142,16 +151,43 @@ export async function upsertAccountClassificationLatest(
       ${sortedRows.map((row) => row.method)}::text[],
       ${sortedRows.map((row) => row.ruleVersion)}::text[],
       ${sortedRows.map((row) => row.observedAt)}::timestamp[],
-      ${sortedRows.map((row) => row.sourceObservationId)}::text[]
+      ${sortedRows.map((row) => row.sourceObservationId)}::text[],
+      ${sortedRows.map((row) => row.evaluable)}::boolean[],
+      ${sortedRows.map((row) => row.labeledAt)}::timestamp[]
     ) AS u(
       "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion",
-      "observedAt", "sourceObservationId"
+      "observedAt", "sourceObservationId", "evaluable", "labeledAt"
     )
     ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE SET
-      "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
-      "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "observedAt" = EXCLUDED."observedAt",
-      "sourceObservationId" = EXCLUDED."sourceObservationId"
-    WHERE "AccountClassificationLatest"."observedAt" <= EXCLUDED."observedAt"
+      "value" = CASE
+        WHEN "AccountClassificationLatest"."labeledAt" IS NULL
+          OR EXCLUDED."labeledAt" >= "AccountClassificationLatest"."labeledAt"
+        THEN EXCLUDED."value" ELSE "AccountClassificationLatest"."value" END,
+      "confidence" = CASE
+        WHEN "AccountClassificationLatest"."labeledAt" IS NULL
+          OR EXCLUDED."labeledAt" >= "AccountClassificationLatest"."labeledAt"
+        THEN EXCLUDED."confidence" ELSE "AccountClassificationLatest"."confidence" END,
+      "reason" = CASE
+        WHEN "AccountClassificationLatest"."labeledAt" IS NULL
+          OR EXCLUDED."labeledAt" >= "AccountClassificationLatest"."labeledAt"
+        THEN EXCLUDED."reason" ELSE "AccountClassificationLatest"."reason" END,
+      "method" = CASE
+        WHEN "AccountClassificationLatest"."labeledAt" IS NULL
+          OR EXCLUDED."labeledAt" >= "AccountClassificationLatest"."labeledAt"
+        THEN EXCLUDED."method" ELSE "AccountClassificationLatest"."method" END,
+      "ruleVersion" = CASE
+        WHEN "AccountClassificationLatest"."labeledAt" IS NULL
+          OR EXCLUDED."labeledAt" >= "AccountClassificationLatest"."labeledAt"
+        THEN EXCLUDED."ruleVersion" ELSE "AccountClassificationLatest"."ruleVersion" END,
+      "evaluable" = CASE
+        WHEN "AccountClassificationLatest"."labeledAt" IS NULL
+          OR EXCLUDED."labeledAt" >= "AccountClassificationLatest"."labeledAt"
+        THEN EXCLUDED."evaluable" ELSE "AccountClassificationLatest"."evaluable" END,
+      "labeledAt" = GREATEST(EXCLUDED."labeledAt", "AccountClassificationLatest"."labeledAt"),
+      "sourceObservationId" = CASE
+        WHEN EXCLUDED."observedAt" >= "AccountClassificationLatest"."observedAt"
+        THEN EXCLUDED."sourceObservationId" ELSE "AccountClassificationLatest"."sourceObservationId" END,
+      "observedAt" = GREATEST(EXCLUDED."observedAt", "AccountClassificationLatest"."observedAt")
   `
 }
 

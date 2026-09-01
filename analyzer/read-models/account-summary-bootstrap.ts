@@ -12,7 +12,8 @@ import {
 
 const logger = Logger.configure('analyzer:account-summary-bootstrap')
 
-const MODEL_KEY = 'account_summary'
+const MODEL_KEY = 'account_summary_v2'
+const ACCOUNT_SUMMARY_LATEST_SCHEMA_VERSION = 2
 const DEFAULT_CHUNK_SIZE = 2000
 const BOOTSTRAP_TRANSACTION_TIMEOUT_MS = 60_000
 
@@ -296,6 +297,8 @@ export async function processAccountSummaryBootstrap(
                 ruleVersion: label.ruleVersion,
                 observedAt: label.labeledAt,
                 sourceObservationId: null,
+                evaluable: label.evaluable,
+                labeledAt: label.labeledAt,
               })
             }
           }
@@ -314,9 +317,14 @@ export async function processAccountSummaryBootstrap(
           },
         })
 
-        // 分岐先の await 呼び出しがそれぞれ複数行のため、三項演算子にすると可読性が落ちる。
-        // eslint-disable-next-line unicorn/prefer-ternary
         if (isDone) {
+          // 行が無い場合に備えて INSERT ... ON CONFLICT にする。既存行があれば
+          // schemaVersion だけを更新し、status 等の他フィールドには触れない。
+          await tx.$executeRaw`
+            INSERT INTO "ReadModelState" ("modelKey", "schemaVersion", "status")
+            VALUES ('account_summary_latest', ${ACCOUNT_SUMMARY_LATEST_SCHEMA_VERSION}, 'healthy')
+            ON CONFLICT ("modelKey") DO UPDATE SET "schemaVersion" = ${ACCOUNT_SUMMARY_LATEST_SCHEMA_VERSION}
+          `
           await tx.analysisWorkItem.upsert({
             where: {
               kind_triggerType_triggerId: {

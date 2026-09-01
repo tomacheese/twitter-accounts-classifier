@@ -10,6 +10,7 @@ export interface LabelAtWatermark {
   method: string
   ruleVersion: string
   labeledAt: Date
+  evaluable: boolean
 }
 
 /**
@@ -28,7 +29,8 @@ export async function findLabelsAtWatermarkForAccount(
 ): Promise<LabelAtWatermark[]> {
   return prisma.$queryRaw<LabelAtWatermark[]>`
     SELECT DISTINCT ON ("labelDefinitionId")
-      "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt"
+      "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt",
+      "evaluable"
     FROM "AccountLabel"
     WHERE "accountId" = ${accountId} AND "labeledAt" <= ${sourceWatermarkAt}
     ORDER BY "labelDefinitionId", "labeledAt" DESC, "id" DESC
@@ -50,9 +52,11 @@ export async function findPreviousLabelAtWatermarkForAccount(
   sourceWatermarkAt: Date,
 ): Promise<LabelAtWatermark[]> {
   return prisma.$queryRaw<LabelAtWatermark[]>`
-    SELECT "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt"
+    SELECT "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt",
+      "evaluable"
     FROM (
       SELECT "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt",
+        "evaluable",
         ROW_NUMBER() OVER (
           PARTITION BY "labelDefinitionId"
           ORDER BY "labeledAt" DESC, "id" DESC

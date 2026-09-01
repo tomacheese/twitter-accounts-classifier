@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
 import { PrismaWeeklyReviewPlanningDataSource } from './prisma-review-plan-data-source'
@@ -27,47 +29,35 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
     expect(sql).not.toContain('row_number()')
   })
 
-  it('population counts は label ごとに query を分割し期間 window を先に materialize する', async () => {
-    const queries: { strings: readonly string[]; values: readonly unknown[] }[] = []
+  it('population counts は WeeklyReviewSampleBucketCount を label×value 単位で合計する', async () => {
     const prisma = {
-      labelDefinition: {
-        findMany: vi.fn().mockResolvedValue([{ id: 'label-a' }, { id: 'label-b' }]),
+      weeklyReviewSampleBucketCount: {
+        groupBy: vi.fn().mockResolvedValue([
+          { labelDefinitionId: 'label-a', value: true, _sum: { count: 42 } },
+          { labelDefinitionId: 'label-a', value: false, _sum: { count: 7 } },
+        ]),
       },
-      $queryRaw: vi.fn((query: { strings: readonly string[]; values: readonly unknown[] }) => {
-        queries.push(query)
-        return Promise.resolve([])
-      }),
     } as unknown as PrismaClient
     const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
 
-    await source.listPopulationCounts(
-      new Date('2026-08-01T00:00:00Z'),
-      new Date('2026-08-08T00:00:00Z'),
-    )
+    const rows = await source.listPopulationCounts()
 
-    expect(queries).toHaveLength(2)
-    expect(queries.map((query) => query.values[0])).toEqual(['label-a', 'label-b'])
-    for (const query of queries) {
-      const sql = query.strings.join('?')
-      expect(sql).toContain('WITH windowed AS MATERIALIZED')
-      expect(sql).toContain('WHERE label."labelDefinitionId" = ?')
-      expect(sql).toContain('ORDER BY label."labeledAt" DESC, label.id DESC')
-      expect(sql).toContain('FROM windowed')
-      expect(sql).toContain('DISTINCT ON (windowed."accountId")')
-      expect(sql).toContain(
-        'ORDER BY windowed."accountId", windowed."labeledAt" DESC, windowed.id DESC',
-      )
-      expect(sql).toContain('AND label.evaluable')
-    }
+    expect(rows).toEqual([
+      { labelDefinitionId: 'label-a', value: true, count: 42 },
+      { labelDefinitionId: 'label-a', value: false, count: 7 },
+    ])
   })
 
-  it('recent candidates は label ごとに履歴 window を読み id DESC で dedupe 後に sample する', async () => {
+  it('baseline candidates は AccountLabel/AccountLabelLatest を一切クエリしない', async () => {
     const queries: { strings: readonly string[] }[] = []
     const prisma = {
       labelDefinition: {
-        findMany: vi.fn().mockResolvedValue([
-          { id: 'label-a', key: 'alpha' },
-          { id: 'label-b', key: 'beta' },
+        findMany: vi.fn().mockResolvedValue([{ id: 'label-a', key: 'alpha' }]),
+      },
+      weeklyReviewSampleBucketCount: {
+        groupBy: vi.fn().mockResolvedValue([
+          { labelDefinitionId: 'label-a', value: true, _sum: { count: 100 } },
+          { labelDefinitionId: 'label-a', value: false, _sum: { count: 100 } },
         ]),
       },
       $queryRaw: vi.fn((query: { strings: readonly string[] }) => {
@@ -77,27 +67,52 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
     } as unknown as PrismaClient
     const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
 
-    await source.listRecentCandidates(
-      new Date('2026-08-01T00:00:00Z'),
-      new Date('2026-08-08T00:00:00Z'),
-      80,
-      'stable-seed',
-    )
+    await source.listBaselineCandidates(10, 'stable-seed')
 
     expect(queries).toHaveLength(2)
     for (const query of queries) {
       const sql = query.strings.join('?')
-      expect(sql).toContain('WITH windowed AS MATERIALIZED')
-      expect(sql).toContain('FROM "AccountLabel" label')
-      expect(sql).toContain('DISTINCT ON (windowed."accountId")')
-      expect(sql).toContain(
-        'ORDER BY windowed."accountId", windowed."labeledAt" DESC, windowed.id DESC',
-      )
-      expect(sql.match(/ORDER BY md5/g)).toHaveLength(2)
-      expect(sql.match(/LIMIT \?/g)).toHaveLength(2)
-      expect(sql).toContain('JOIN "AccountLabel" label ON label.id = sampled.id')
-      expect(sql).not.toContain('AccountLabelLatest')
-      expect(sql).not.toContain('row_number()')
+      expect(sql).not.toContain('AccountLabel')
+      expect(sql).toContain('FROM "AccountClassificationLatest"')
+      expect(sql).toContain('weekly_review_sample_bucket')
+      expect(sql).toContain('evaluable')
+      expect(sql).toContain('"labeledAt" IS NOT NULL')
     }
+  })
+
+  it('母集団件数が 0 の stratum は query しない', async () => {
+    const queries: unknown[] = []
+    const prisma = {
+      labelDefinition: {
+        findMany: vi.fn().mockResolvedValue([{ id: 'label-a', key: 'alpha' }]),
+      },
+      weeklyReviewSampleBucketCount: {
+        groupBy: vi
+          .fn()
+          .mockResolvedValue([{ labelDefinitionId: 'label-a', value: true, _sum: { count: 100 } }]),
+      },
+      $queryRaw: vi.fn((query: unknown) => {
+        queries.push(query)
+        return Promise.resolve([])
+      }),
+    } as unknown as PrismaClient
+    const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
+
+    await source.listBaselineCandidates(10, 'stable-seed')
+
+    expect(queries).toHaveLength(1)
+  })
+
+  it('listChangeCandidates を除く全メソッドが AccountLabel/AccountLabelLatest を参照しない', () => {
+    // tsconfig の module は CommonJS のため import.meta は使えない。
+    // eslint-disable-next-line unicorn/prefer-module
+    const sourcePath = path.join(__dirname, 'prisma-review-plan-data-source.ts')
+    const source = readFileSync(sourcePath, 'utf8')
+    const changeCandidatesStart = source.indexOf('public async listChangeCandidates')
+    expect(changeCandidatesStart).toBeGreaterThan(0)
+
+    const withoutChangeCandidates = source.slice(0, changeCandidatesStart)
+
+    expect(withoutChangeCandidates).not.toContain('AccountLabel')
   })
 })
