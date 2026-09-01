@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import { Prisma, PrismaClient } from '../generated/prisma'
 import { loadWeeklyReviewPlanningData } from './review-plan-data'
 import { PrismaWeeklyReviewPlanningDataSource } from './prisma-review-plan-data-source'
-import { assignBucket } from './sample-bucket'
+import { BUCKET_COUNT, assignBucket } from './sample-bucket'
 
 interface SyntheticClassificationRow {
   accountId: string
@@ -355,7 +355,7 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
   })
 
   describe('weekly_review_sample_bucket parity', () => {
-    it('TS の assignBucket と DB の weekly_review_sample_bucket は同じ accountId に同じ bucket を返す', async () => {
+    it('TS の assignBucket と DB の weekly_review_sample_bucket は SHA-256 先頭 32bit 由来の bucket を返す', async () => {
       const accountIds = [
         'bucket_parity_alpha',
         'bucket_parity_beta',
@@ -365,10 +365,15 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
       ]
 
       for (const accountId of accountIds) {
+        const expectedBucket =
+          Number.parseInt(createHash('sha256').update(accountId).digest('hex').slice(0, 8), 16) &
+          (BUCKET_COUNT - 1)
+
         const [row] = await prisma.$queryRaw<{ bucket: number }[]>(
           Prisma.sql`SELECT weekly_review_sample_bucket(${accountId}) AS bucket`,
         )
-        expect(row.bucket).toBe(assignBucket(accountId))
+        expect(row.bucket).toBe(expectedBucket)
+        expect(assignBucket(accountId)).toBe(expectedBucket)
       }
     })
   })

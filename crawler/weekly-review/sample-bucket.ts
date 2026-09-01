@@ -16,7 +16,7 @@ export const OVERSAMPLE_FACTOR = 8
  * @returns 0..4095 の bucket 番号
  */
 export function assignBucket(accountId: string): number {
-  const hex = createHash('md5').update(accountId).digest('hex').slice(0, 8)
+  const hex = createHash('sha256').update(accountId).digest('hex').slice(0, 8)
   return Number.parseInt(hex, 16) & (BUCKET_COUNT - 1)
 }
 

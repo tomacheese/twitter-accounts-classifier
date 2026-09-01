@@ -16,12 +16,13 @@ CREATE TABLE "WeeklyReviewSampleBucketCount" (
 );
 
 -- Account ID だけから 0..4095 の bucket を返す immutable 関数。
--- md5 の先頭 32 bit を符号なし整数として読み、下位 12 bit をマスクして bucket にする。
+-- sha256 の先頭 32 bit を符号なし整数として読み、下位 12 bit をマスクして bucket にする。
 -- run ID はここに含めない (bucket assignment は書き込み時に固定し、run ごとの
 -- ランダム性は「どの bucket を読むか」側で与える)。
+-- pgcrypto 拡張を追加せずに済むよう、PostgreSQL core の sha256() を使う。
 CREATE OR REPLACE FUNCTION weekly_review_sample_bucket(account_id text)
 RETURNS integer AS $$
-  SELECT ('x' || substr(md5(account_id), 1, 8))::bit(32)::int & 4095
+  SELECT ('x' || substr(encode(sha256(convert_to(account_id, 'UTF8')), 'hex'), 1, 8))::bit(32)::int & 4095
 $$ LANGUAGE sql IMMUTABLE;
 
 -- AccountClassificationLatest への書き込みと同一トランザクション・同一行ロックの
