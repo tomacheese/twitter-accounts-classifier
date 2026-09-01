@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
 import { PrismaWeeklyReviewPlanningDataSource } from './prisma-review-plan-data-source'
@@ -99,5 +101,18 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
     await source.listBaselineCandidates(10, 'stable-seed')
 
     expect(queries).toHaveLength(1)
+  })
+
+  it('listChangeCandidates を除く全メソッドが AccountLabel/AccountLabelLatest を参照しない', () => {
+    // tsconfig の module は CommonJS のため import.meta は使えない。
+    // eslint-disable-next-line unicorn/prefer-module
+    const sourcePath = path.join(__dirname, 'prisma-review-plan-data-source.ts')
+    const source = readFileSync(sourcePath, 'utf8')
+    const changeCandidatesStart = source.indexOf('public async listChangeCandidates')
+    expect(changeCandidatesStart).toBeGreaterThan(0)
+
+    const withoutChangeCandidates = source.slice(0, changeCandidatesStart)
+
+    expect(withoutChangeCandidates).not.toContain('AccountLabel')
   })
 })
