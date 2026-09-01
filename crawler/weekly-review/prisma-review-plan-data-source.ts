@@ -15,8 +15,13 @@ import type {
   WeeklyReviewPlanningDataSource,
 } from './review-plan-data'
 
-/** bootstrap の schema key。readiness gate はこの bootstrap の完了を要求する。 */
-const ACCOUNT_SUMMARY_BOOTSTRAP_MODEL_KEY = 'account_summary_v2'
+/**
+ * sampling bootstrap の schema key。readiness gate はこの bootstrap の完了を要求する。
+ * 旧 `account_summary_v2` は再利用しない。PR #281 のバグ入り実装が一時的にでも
+ * 稼働した環境ではその modelKey の下に不正な cursor が残っている可能性があるため、
+ * readiness 判定はその値を無視し、無関係な新しい modelKey だけを見る。
+ */
+const ACCOUNT_SUMMARY_BOOTSTRAP_MODEL_KEY = 'account_summary_sampling_v2'
 /** `AccountClassificationLatest` read model の schema key。 */
 const ACCOUNT_SUMMARY_LATEST_MODEL_KEY = 'account_summary_latest'
 /** readiness gate が要求する最小 schemaVersion。 */

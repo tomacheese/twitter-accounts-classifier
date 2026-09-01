@@ -153,10 +153,11 @@ export async function upsertAccountClassificationLatest(
       ${sortedRows.map((row) => row.observedAt)}::timestamp[],
       ${sortedRows.map((row) => row.sourceObservationId)}::text[],
       ${sortedRows.map((row) => row.evaluable)}::boolean[],
-      -- legacy bootstrap は labeledAt を全行 null で渡す。全要素が null の配列は
-      -- driver 側で integer[] と推定され timestamp[] への直接 cast が失敗するため、
-      -- text[] を経由させて要素型推定に依存しないようにする。
-      ${sortedRows.map((row) => row.labeledAt)}::text[]::timestamp[]
+      -- labeledAt は Date と null が同一バッチ内に混在し得る。Date のまま渡すと
+      -- 配列内容によって driver の推定型が integer[]/timestamp[] のどちらにも
+      -- なり得て cast の成否が値依存になるため、ISO 文字列へ正規化してから
+      -- text[] を経由させ、要素型推定に依存しないようにする。
+      ${sortedRows.map((row) => row.labeledAt?.toISOString() ?? null)}::text[]::timestamp[]
     ) AS u(
       "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion",
       "observedAt", "sourceObservationId", "evaluable", "labeledAt"

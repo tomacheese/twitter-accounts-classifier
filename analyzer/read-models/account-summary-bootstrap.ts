@@ -19,8 +19,14 @@ const WORK_ITEM_KIND = 'account_summary_bootstrap'
 const LEGACY_MODEL_KEY = 'account_summary'
 const LEGACY_TRIGGER = 'account_summary_bootstrap_chunk'
 
-/** sampling phase: 既存 `AccountClassificationLatest` 行だけに `evaluable`/`labeledAt` を追いつかせる。 */
-const SAMPLING_MODEL_KEY = 'account_summary_v2'
+/**
+ * sampling phase: 既存 `AccountClassificationLatest` 行だけに `evaluable`/`labeledAt` を追いつかせる。
+ * modelKey は `account_summary_v2` を再利用しない。PR #281 のバグ入り実装が一時的にでも
+ * 稼働した環境では、その modelKey の下に Account-id cursor が残っている可能性があり、
+ * 新しい AccountClassificationLatest-accountId cursor がそれを誤って引き継いでしまう。
+ * 古い行は放置し、無関係な新しい modelKey を割り当てることで曖昧さを排除する。
+ */
+const SAMPLING_MODEL_KEY = 'account_summary_sampling_v2'
 const SAMPLING_TRIGGER = 'account_summary_sampling_bootstrap_chunk'
 
 const ACCOUNT_SUMMARY_LATEST_SCHEMA_VERSION = 2
@@ -126,11 +132,14 @@ async function ensurePhaseQueued(
 }
 
 /**
- * analyzer 起動時に呼ぶ。legacy phase (`account_summary`) の進行/自己回復を優先し、
- * それが `completed` になって初めて sampling phase (`account_summary_v2`) を
- * 進行/自己回復させる。本番は legacy phase が既に `completed` のため即座に
+ * `analyzer/index.ts` の `main()` から起動のたびに呼ぶ (entrypoint.sh の sleep ループで
+ * 1 pass ごとに再実行される前提)。legacy phase (`account_summary`) の進行/自己回復を
+ * 優先し、それが `completed` になって初めて sampling phase (`account_summary_sampling_v2`)
+ * を進行/自己回復させる。本番は legacy phase が既に `completed` のため即座に
  * sampling phase が動き出す一方、fresh DB では legacy phase が先に完走するまで
- * sampling phase の WorkItem は enqueue されない。
+ * sampling phase の WorkItem は enqueue されない。1 回の呼び出しでは legacy phase が
+ * 完走した直後の sampling phase 開始までは進まないため、fresh DB では legacy phase
+ * 完走後の次回 pass で sampling phase が enqueue される。
  * @param prisma - Prisma クライアント
  */
 export async function enqueueAccountSummaryBootstrapIfNeeded(prisma: PrismaClient): Promise<void> {

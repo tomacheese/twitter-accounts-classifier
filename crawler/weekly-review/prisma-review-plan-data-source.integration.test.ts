@@ -281,11 +281,14 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
   })
 
   describe('assertSamplingReady', () => {
-    const bootstrapModelKey = 'account_summary_v2'
+    const bootstrapModelKey = 'account_summary_sampling_v2'
+    const legacyBuggyModelKey = 'account_summary_v2'
     const stateModelKey = 'account_summary_latest'
 
     afterAll(async () => {
-      await prisma.readModelBootstrap.deleteMany({ where: { modelKey: bootstrapModelKey } })
+      await prisma.readModelBootstrap.deleteMany({
+        where: { modelKey: { in: [bootstrapModelKey, legacyBuggyModelKey] } },
+      })
       await prisma.readModelState.deleteMany({ where: { modelKey: stateModelKey } })
     })
 
@@ -347,6 +350,23 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
         where: { modelKey: stateModelKey },
         create: { modelKey: stateModelKey, schemaVersion: 2, status: 'degraded' },
         update: { schemaVersion: 2, status: 'degraded' },
+      })
+
+      const source = new PrismaWeeklyReviewPlanningDataSource(prisma)
+      await expect(source.assertSamplingReady()).rejects.toThrow()
+    })
+
+    it('旧 account_summary_v2 が completed でも、新 account_summary_sampling_v2 が無ければ拒否する', async () => {
+      await prisma.readModelBootstrap.upsert({
+        where: { modelKey: legacyBuggyModelKey },
+        create: { modelKey: legacyBuggyModelKey, status: 'completed', cursor: 'acct_9999999' },
+        update: { status: 'completed', cursor: 'acct_9999999' },
+      })
+      await prisma.readModelBootstrap.deleteMany({ where: { modelKey: bootstrapModelKey } })
+      await prisma.readModelState.upsert({
+        where: { modelKey: stateModelKey },
+        create: { modelKey: stateModelKey, schemaVersion: 2, status: 'healthy' },
+        update: { schemaVersion: 2, status: 'healthy' },
       })
 
       const source = new PrismaWeeklyReviewPlanningDataSource(prisma)

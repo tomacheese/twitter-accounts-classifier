@@ -475,7 +475,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 2 })
 
       const bootstrap = await prisma.readModelBootstrap.findUnique({
-        where: { modelKey: 'account_summary_v2' },
+        where: { modelKey: 'account_summary_sampling_v2' },
       })
       expect(bootstrap?.status).toBe('completed')
       expect(bootstrap?.processedCount).toBe(0)
@@ -529,7 +529,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // acct_sampling_0/1 のチャンクと acct_sampling_2/3 のチャンクへ
       // 直列に (どちらが先でも) 一意に振り分けられ、二重処理は起きない。
       const bootstrap = await prisma.readModelBootstrap.findUnique({
-        where: { modelKey: 'account_summary_v2' },
+        where: { modelKey: 'account_summary_sampling_v2' },
       })
       expect(bootstrap?.processedCount).toBe(4)
       expect(bootstrap?.cursor).toBe('acct_sampling_3')
@@ -570,7 +570,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
     await enqueueAccountSummaryBootstrapIfNeeded(prisma)
 
     const samplingRow = await prisma.readModelBootstrap.findUnique({
-      where: { modelKey: 'account_summary_v2' },
+      where: { modelKey: 'account_summary_sampling_v2' },
     })
     expect(samplingRow).toBeNull()
     const workItems = await prisma.analysisWorkItem.findMany({
@@ -587,7 +587,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
     await enqueueAccountSummaryBootstrapIfNeeded(prisma)
 
     const samplingRow = await prisma.readModelBootstrap.findUnique({
-      where: { modelKey: 'account_summary_v2' },
+      where: { modelKey: 'account_summary_sampling_v2' },
     })
     expect(samplingRow?.status).toBe('pending')
     const workItems = await prisma.analysisWorkItem.findMany({
@@ -602,7 +602,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
       data: { modelKey: 'account_summary', status: 'completed' },
     })
     await prisma.readModelBootstrap.create({
-      data: { modelKey: 'account_summary_v2', status: 'completed' },
+      data: { modelKey: 'account_summary_sampling_v2', status: 'completed' },
     })
     await enqueueAccountSummaryBootstrapIfNeeded(prisma)
     const workItems = await prisma.analysisWorkItem.findMany({
@@ -616,7 +616,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
       data: { modelKey: 'account_summary', status: 'completed' },
     })
     await prisma.readModelBootstrap.create({
-      data: { modelKey: 'account_summary_v2', status: 'pending' },
+      data: { modelKey: 'account_summary_sampling_v2', status: 'pending' },
     })
     // 進行可能な (queued/leased/failed) WorkItem が 1 件も無い状態を再現する。
     // dead まで進んだ WorkItem を残しておくことで、self-heal がそれを
@@ -644,7 +644,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
       data: { modelKey: 'account_summary', status: 'completed' },
     })
     await prisma.readModelBootstrap.create({
-      data: { modelKey: 'account_summary_v2', status: 'running', cursor: 'acct_1' },
+      data: { modelKey: 'account_summary_sampling_v2', status: 'running', cursor: 'acct_1' },
     })
     await prisma.analysisWorkItem.create({
       data: {
@@ -659,6 +659,55 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
 
     const workItems = await prisma.analysisWorkItem.findMany({
       where: { kind: 'account_summary_bootstrap' },
+    })
+    expect(workItems).toHaveLength(1)
+  })
+
+  it('starts the sampling phase under the new key even when a pre-existing buggy account_summary_v2 row is completed', async () => {
+    // PR #281 のバグ入り実装が一時的に稼働した環境を模す。旧 modelKey には
+    // Account-id cursor が残っている可能性があるが、新しい modelKey
+    // (account_summary_sampling_v2) はこれと無関係に判定される必要がある。
+    await prisma.readModelBootstrap.create({
+      data: { modelKey: 'account_summary', status: 'completed' },
+    })
+    await prisma.readModelBootstrap.create({
+      data: { modelKey: 'account_summary_v2', status: 'completed', cursor: 'acct_9999999' },
+    })
+
+    await enqueueAccountSummaryBootstrapIfNeeded(prisma)
+
+    const samplingRow = await prisma.readModelBootstrap.findUnique({
+      where: { modelKey: 'account_summary_sampling_v2' },
+    })
+    expect(samplingRow?.status).toBe('pending')
+    const workItems = await prisma.analysisWorkItem.findMany({
+      where: {
+        kind: 'account_summary_bootstrap',
+        triggerType: 'account_summary_sampling_bootstrap_chunk',
+      },
+    })
+    expect(workItems).toHaveLength(1)
+  })
+
+  it('starts the sampling phase under the new key even when a pre-existing buggy account_summary_v2 row is still running', async () => {
+    await prisma.readModelBootstrap.create({
+      data: { modelKey: 'account_summary', status: 'completed' },
+    })
+    await prisma.readModelBootstrap.create({
+      data: { modelKey: 'account_summary_v2', status: 'running', cursor: 'acct_9999999' },
+    })
+
+    await enqueueAccountSummaryBootstrapIfNeeded(prisma)
+
+    const samplingRow = await prisma.readModelBootstrap.findUnique({
+      where: { modelKey: 'account_summary_sampling_v2' },
+    })
+    expect(samplingRow?.status).toBe('pending')
+    const workItems = await prisma.analysisWorkItem.findMany({
+      where: {
+        kind: 'account_summary_bootstrap',
+        triggerType: 'account_summary_sampling_bootstrap_chunk',
+      },
     })
     expect(workItems).toHaveLength(1)
   })
