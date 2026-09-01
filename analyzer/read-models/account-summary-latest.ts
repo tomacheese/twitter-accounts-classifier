@@ -104,7 +104,7 @@ export interface AccountClassificationLatestRow {
   observedAt: Date
   sourceObservationId: string | null
   evaluable: boolean
-  labeledAt: Date
+  labeledAt: Date | null
 }
 
 /**
@@ -153,7 +153,10 @@ export async function upsertAccountClassificationLatest(
       ${sortedRows.map((row) => row.observedAt)}::timestamp[],
       ${sortedRows.map((row) => row.sourceObservationId)}::text[],
       ${sortedRows.map((row) => row.evaluable)}::boolean[],
-      ${sortedRows.map((row) => row.labeledAt)}::timestamp[]
+      -- legacy bootstrap は labeledAt を全行 null で渡す。全要素が null の配列は
+      -- driver 側で integer[] と推定され timestamp[] への直接 cast が失敗するため、
+      -- text[] を経由させて要素型推定に依存しないようにする。
+      ${sortedRows.map((row) => row.labeledAt)}::text[]::timestamp[]
     ) AS u(
       "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion",
       "observedAt", "sourceObservationId", "evaluable", "labeledAt"

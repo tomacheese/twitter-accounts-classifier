@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { getPrismaClient } from '../db/client'
-import { processAccountSummaryRefresh } from '../worker-processors'
 import {
   processAccountSummaryBootstrap,
   enqueueAccountSummaryBootstrapIfNeeded,
@@ -9,11 +8,28 @@ import {
 
 const prisma = getPrismaClient()
 
+/** `AccountClassificationLatest` の sampling population テスト用に最小限の Account を作る。 */
+async function createAccount(id: string): Promise<void> {
+  await prisma.account.create({
+    data: {
+      id,
+      screenName: id,
+      displayName: id,
+      followersCount: 0,
+      followingCount: 0,
+      tweetCount: 0,
+      accountCreatedAt: new Date(),
+      lastCrawledAt: new Date('2026-01-01T00:00:00Z'),
+    },
+  })
+}
+
 async function resetDb(): Promise<void> {
   await prisma.analysisWorkItem.deleteMany()
   await prisma.readModelBootstrap.deleteMany()
   await prisma.readModelState.deleteMany()
   await prisma.accountClassificationObservation.deleteMany()
+  await prisma.weeklyReviewSampleBucketCount.deleteMany()
   await prisma.accountClassificationLatest.deleteMany()
   await prisma.accountSummaryLatest.deleteMany()
   await prisma.accountLabelLatest.deleteMany()
@@ -39,7 +55,7 @@ describe('processAccountSummaryBootstrap transaction options', () => {
       callback(tx),
     )
     const fakePrisma = { $transaction: transaction }
-    const workItem = { id: 'work_item' }
+    const workItem = { id: 'work_item', triggerType: 'account_summary_bootstrap_chunk' }
 
     await processAccountSummaryBootstrap(fakePrisma as never, workItem as never, { chunkSize: 10 })
 
@@ -69,222 +85,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     expect(rows[0]?.indexdef).toContain('INCLUDE ("screenName", "displayName", "lastCrawledAt")')
   })
 
-  it('builds AccountSummaryLatest from Account/AccountLabelLatest baseline and marks completed when done', async () => {
-    const account = await prisma.account.create({
-      data: {
-        id: 'acct_bootstrap',
-        screenName: 'erin',
-        displayName: 'Erin',
-        followersCount: 0,
-        followingCount: 0,
-        tweetCount: 0,
-        accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-01T00:00:00Z'),
-      },
-    })
-    const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'test_bootstrap_label', description: 'テスト用ラベル' },
-    })
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId: account.id,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.8,
-        reason: 'test reason',
-        method: 'rule',
-        ruleVersion: 'v1',
-        labeledAt: new Date('2026-01-01T00:00:00Z'),
-      },
-    })
-    const workItem = await prisma.analysisWorkItem.create({
-      data: {
-        kind: 'account_summary_bootstrap',
-        triggerType: 'account_summary_bootstrap_chunk',
-        triggerId: randomUUID(),
-      },
-    })
-
-    await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 10 })
-
-    const bootstrap = await prisma.readModelBootstrap.findUnique({
-      where: { modelKey: 'account_summary_v2' },
-    })
-    expect(bootstrap?.status).toBe('completed')
-    const summary = await prisma.accountSummaryLatest.findUnique({
-      where: { accountId: account.id },
-    })
-    expect(summary?.activeLabelKeys).toEqual(['test_bootstrap_label'])
-    const readModelState = await prisma.readModelState.findUnique({
-      where: { modelKey: 'account_summary_latest' },
-    })
-    expect(readModelState?.status).toBe('healthy')
-    expect(readModelState?.sourceWatermarkAt?.getTime()).toBe(account.lastCrawledAt.getTime())
-  })
-
-  it('uses AccountClassificationObservation.observedAt as classificationObservedAt when it is newer than AccountLabelLatest.labeledAt', async () => {
-    const labeledAt = new Date('2026-01-01T00:00:00Z')
-    const observedAt = new Date('2026-01-02T00:00:00Z')
-    const account = await prisma.account.create({
-      data: {
-        id: 'acct_bootstrap_observation',
-        screenName: 'grace',
-        displayName: 'Grace',
-        followersCount: 0,
-        followingCount: 0,
-        tweetCount: 0,
-        accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-01T00:00:00Z'),
-      },
-    })
-    const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'test_bootstrap_observation_label', description: 'テスト用ラベル' },
-    })
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId: account.id,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.8,
-        reason: 'test reason',
-        method: 'rule',
-        ruleVersion: 'v1',
-        labeledAt,
-      },
-    })
-    await prisma.accountClassificationObservation.create({
-      data: { accountId: account.id, observedAt, labelCount: 1 },
-    })
-    const workItem = await prisma.analysisWorkItem.create({
-      data: {
-        kind: 'account_summary_bootstrap',
-        triggerType: 'account_summary_bootstrap_chunk',
-        triggerId: randomUUID(),
-      },
-    })
-
-    await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 10 })
-
-    const summary = await prisma.accountSummaryLatest.findUnique({
-      where: { accountId: account.id },
-    })
-    expect(summary?.classificationObservedAt?.getTime()).toBe(observedAt.getTime())
-  })
-
-  it('falls back to AccountLabelLatest.labeledAt when no AccountClassificationObservation exists (relabel-only account)', async () => {
-    const labeledAt = new Date('2026-01-01T00:00:00Z')
-    const account = await prisma.account.create({
-      data: {
-        id: 'acct_bootstrap_relabel_only',
-        screenName: 'heidi',
-        displayName: 'Heidi',
-        followersCount: 0,
-        followingCount: 0,
-        tweetCount: 0,
-        accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-01T00:00:00Z'),
-      },
-    })
-    const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'test_bootstrap_relabel_only_label', description: 'テスト用ラベル' },
-    })
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId: account.id,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.8,
-        reason: 'test reason',
-        method: 'relabel',
-        ruleVersion: 'v1',
-        labeledAt,
-      },
-    })
-    const workItem = await prisma.analysisWorkItem.create({
-      data: {
-        kind: 'account_summary_bootstrap',
-        triggerType: 'account_summary_bootstrap_chunk',
-        triggerId: randomUUID(),
-      },
-    })
-
-    await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 10 })
-
-    const summary = await prisma.accountSummaryLatest.findUnique({
-      where: { accountId: account.id },
-    })
-    expect(summary?.classificationObservedAt?.getTime()).toBe(labeledAt.getTime())
-  })
-
-  it('computes the same classificationObservedAt as processAccountSummaryRefresh for a normal crawl-produced account', async () => {
-    const labeledAt = new Date('2026-01-01T00:00:00Z')
-    const observedAt = new Date('2026-01-02T00:00:00Z')
-    const account = await prisma.account.create({
-      data: {
-        id: 'acct_bootstrap_refresh_parity',
-        screenName: 'ivan',
-        displayName: 'Ivan',
-        followersCount: 0,
-        followingCount: 0,
-        tweetCount: 0,
-        accountCreatedAt: new Date(),
-        lastCrawledAt: labeledAt,
-      },
-    })
-    const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'test_bootstrap_refresh_parity_label', description: 'テスト用ラベル' },
-    })
-    const labelData = {
-      accountId: account.id,
-      labelDefinitionId: labelDefinition.id,
-      value: true,
-      confidence: 0.8,
-      reason: 'test reason',
-      method: 'rule',
-      ruleVersion: 'v1',
-      labeledAt,
-    }
-    // bootstrap は AccountLabelLatest を、processAccountSummaryRefresh は AccountLabel 履歴を
-    // それぞれ読むため、両方に同じ値の行を用意する。
-    await prisma.accountLabelLatest.create({ data: labelData })
-    await prisma.accountLabel.create({ data: labelData })
-    const observation = await prisma.accountClassificationObservation.create({
-      data: { accountId: account.id, observedAt, labelCount: 1 },
-    })
-    const bootstrapWorkItem = await prisma.analysisWorkItem.create({
-      data: {
-        kind: 'account_summary_bootstrap',
-        triggerType: 'account_summary_bootstrap_chunk',
-        triggerId: randomUUID(),
-      },
-    })
-
-    await processAccountSummaryBootstrap(prisma, bootstrapWorkItem, { chunkSize: 10 })
-    const bootstrapSummary = await prisma.accountSummaryLatest.findUnique({
-      where: { accountId: account.id },
-    })
-
-    const refreshWorkItem = await prisma.analysisWorkItem.create({
-      data: {
-        kind: 'account_summary_refresh',
-        triggerType: 'account_classification_observation',
-        triggerId: observation.id,
-      },
-    })
-    await processAccountSummaryRefresh(prisma, refreshWorkItem)
-    const refreshSummary = await prisma.accountSummaryLatest.findUnique({
-      where: { accountId: account.id },
-    })
-
-    // lastClassificationChangedAt は一致を要求しない: 増分側の変化検出ロジックとは
-    // 一致しないことを許容する既存差異のため。
-    expect(bootstrapSummary?.classificationObservedAt?.getTime()).toBe(
-      refreshSummary?.classificationObservedAt?.getTime(),
-    )
-    expect(bootstrapSummary?.classificationObservedAt?.getTime()).toBe(observedAt.getTime())
-  })
-
-  it('does not overwrite a live update that is newer than the bootstrap baseline', async () => {
+  it('does not overwrite an existing classification whose semantics no longer match AccountLabelLatest', async () => {
     const account = await prisma.account.create({
       data: {
         id: 'acct_live_wins',
@@ -350,7 +151,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     expect(classification?.reason).toBe('new reason')
   })
 
-  it('propagates AccountLabelLatest.evaluable/labeledAt as-is into AccountClassificationLatest', async () => {
+  it('inserts new classification rows as fail-closed (evaluable=false/labeledAt=null) regardless of AccountLabelLatest.evaluable', async () => {
     const labeledAt = new Date('2026-01-01T00:00:00Z')
     const account = await prisma.account.create({
       data: {
@@ -367,6 +168,8 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: 'test_bootstrap_evaluable_label', description: 'テスト用ラベル' },
     })
+    // AccountLabelLatest 側は evaluable=true でも、legacy phase は
+    // sampling phase による意味的一致検証を経ずに eligible 扱いにしない。
     await prisma.accountLabelLatest.create({
       data: {
         accountId: account.id,
@@ -376,7 +179,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
         reason: 'test reason',
         method: 'rule',
         ruleVersion: 'v1',
-        evaluable: false,
+        evaluable: true,
         labeledAt,
       },
     })
@@ -399,12 +202,12 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
       },
     })
     expect(classification?.evaluable).toBe(false)
-    expect(classification?.labeledAt?.toISOString()).toBe(labeledAt.toISOString())
+    expect(classification?.labeledAt).toBeNull()
     // 不変条件: bootstrap は observedAt に wall-clock now ではなく label.labeledAt を使う。
     expect(classification?.observedAt.toISOString()).toBe(labeledAt.toISOString())
   })
 
-  it('最終 chunk 完了時に ReadModelState.account_summary_latest.schemaVersion を 2 に更新する', async () => {
+  it('最終 chunk 完了時に ReadModelState.account_summary_latest.schemaVersion を bump しない (sampling phase の役割)', async () => {
     // Account が 0 件でも accounts.length (0) < chunkSize となり即座に isDone になる。
     const workItem = await prisma.analysisWorkItem.create({
       data: {
@@ -417,13 +220,13 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 10 })
 
     const bootstrap = await prisma.readModelBootstrap.findUnique({
-      where: { modelKey: 'account_summary_v2' },
+      where: { modelKey: 'account_summary' },
     })
     expect(bootstrap?.status).toBe('completed')
     const readModelState = await prisma.readModelState.findUnique({
       where: { modelKey: 'account_summary_latest' },
     })
-    expect(readModelState?.schemaVersion).toBe(2)
+    expect(readModelState).toBeNull()
   })
 
   it('advances cursor/processedCount exactly once per row when two work items race on the same chunk', async () => {
@@ -467,7 +270,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     // acct_concurrent_0/1 のチャンクと acct_concurrent_2/3 のチャンクへ
     // 直列に (どちらが先でも) 一意に振り分けられ、二重処理は起きない。
     const bootstrap = await prisma.readModelBootstrap.findUnique({
-      where: { modelKey: 'account_summary_v2' },
+      where: { modelKey: 'account_summary' },
     })
     expect(bootstrap?.processedCount).toBe(4)
     expect(bootstrap?.cursor).toBe('acct_concurrent_3')
@@ -486,10 +289,259 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
   })
 })
 
+describe.skipIf(!process.env.DATABASE_URL)(
+  'processAccountSummaryBootstrap classification metadata backfill (existing population only)',
+  () => {
+    beforeEach(resetDb)
+
+    it('does not insert a classification row for a pair that exists only in AccountLabelLatest', async () => {
+      await createAccount('acct_label_only')
+      const labelDefinition = await prisma.labelDefinition.create({
+        data: { key: 'test_label_only', description: 'テスト用ラベル' },
+      })
+      await prisma.accountLabelLatest.create({
+        data: {
+          accountId: 'acct_label_only',
+          labelDefinitionId: labelDefinition.id,
+          value: true,
+          confidence: 0.8,
+          reason: 'test reason',
+          method: 'rule',
+          ruleVersion: 'v1',
+          labeledAt: new Date('2026-01-01T00:00:00Z'),
+        },
+      })
+      const workItem = await prisma.analysisWorkItem.create({
+        data: {
+          kind: 'account_summary_bootstrap',
+          triggerType: 'account_summary_sampling_bootstrap_chunk',
+          triggerId: randomUUID(),
+        },
+      })
+
+      await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 10 })
+
+      const classificationCount = await prisma.accountClassificationLatest.count({
+        where: { accountId: 'acct_label_only' },
+      })
+      expect(classificationCount).toBe(0)
+    })
+
+    it('leaves migration-default evaluable=false/labeledAt=null untouched when the matching AccountLabelLatest row has different semantics', async () => {
+      await createAccount('acct_mismatch')
+      const labelDefinition = await prisma.labelDefinition.create({
+        data: { key: 'test_mismatch', description: 'テスト用ラベル' },
+      })
+      // migration 直後の既定値 (evaluable=false, labeledAt=null) を再現する。
+      await prisma.accountClassificationLatest.create({
+        data: {
+          accountId: 'acct_mismatch',
+          labelDefinitionId: labelDefinition.id,
+          value: true,
+          confidence: 0.8,
+          reason: 'old reason',
+          method: 'rule',
+          ruleVersion: 'v1',
+          observedAt: new Date('2026-01-01T00:00:00Z'),
+          evaluable: false,
+          labeledAt: null,
+        },
+      })
+      // AccountLabelLatest 側は同じ key だが value が異なる (semantics mismatch)。
+      await prisma.accountLabelLatest.create({
+        data: {
+          accountId: 'acct_mismatch',
+          labelDefinitionId: labelDefinition.id,
+          value: false,
+          confidence: 0.8,
+          reason: 'old reason',
+          method: 'rule',
+          ruleVersion: 'v1',
+          labeledAt: new Date('2026-01-02T00:00:00Z'),
+        },
+      })
+      const workItem = await prisma.analysisWorkItem.create({
+        data: {
+          kind: 'account_summary_bootstrap',
+          triggerType: 'account_summary_sampling_bootstrap_chunk',
+          triggerId: randomUUID(),
+        },
+      })
+
+      await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 10 })
+
+      const classification = await prisma.accountClassificationLatest.findUniqueOrThrow({
+        where: {
+          accountId_labelDefinitionId: {
+            accountId: 'acct_mismatch',
+            labelDefinitionId: labelDefinition.id,
+          },
+        },
+      })
+      // 不一致行は evaluable/labeledAt だけでなく value/reason/ruleVersion も変更しない。
+      expect(classification.value).toBe(true)
+      expect(classification.reason).toBe('old reason')
+      expect(classification.ruleVersion).toBe('v1')
+      expect(classification.evaluable).toBe(false)
+      expect(classification.labeledAt).toBeNull()
+    })
+
+    it('sets evaluable/labeledAt when the matching AccountLabelLatest row has identical semantics', async () => {
+      await createAccount('acct_match')
+      const labelDefinition = await prisma.labelDefinition.create({
+        data: { key: 'test_match', description: 'テスト用ラベル' },
+      })
+      const labeledAt = new Date('2026-01-02T00:00:00Z')
+      await prisma.accountClassificationLatest.create({
+        data: {
+          accountId: 'acct_match',
+          labelDefinitionId: labelDefinition.id,
+          value: true,
+          confidence: 0.8,
+          reason: 'same reason',
+          method: 'rule',
+          ruleVersion: 'v1',
+          observedAt: new Date('2026-01-01T00:00:00Z'),
+          evaluable: false,
+          labeledAt: null,
+        },
+      })
+      await prisma.accountLabelLatest.create({
+        data: {
+          accountId: 'acct_match',
+          labelDefinitionId: labelDefinition.id,
+          value: true,
+          confidence: 0.8,
+          reason: 'same reason',
+          method: 'rule',
+          ruleVersion: 'v1',
+          evaluable: true,
+          labeledAt,
+        },
+      })
+      const workItem = await prisma.analysisWorkItem.create({
+        data: {
+          kind: 'account_summary_bootstrap',
+          triggerType: 'account_summary_sampling_bootstrap_chunk',
+          triggerId: randomUUID(),
+        },
+      })
+
+      await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 10 })
+
+      const classification = await prisma.accountClassificationLatest.findUniqueOrThrow({
+        where: {
+          accountId_labelDefinitionId: {
+            accountId: 'acct_match',
+            labelDefinitionId: labelDefinition.id,
+          },
+        },
+      })
+      expect(classification.evaluable).toBe(true)
+      expect(classification.labeledAt?.getTime()).toBe(labeledAt.getTime())
+
+      // metadata-only UPDATE が WeeklyReviewSampleBucketCount trigger を発火させ、
+      // eligibility 遷移 (ineligible → eligible) を反映することを確認する。
+      const [{ bucket }] = await prisma.$queryRaw<{ bucket: number }[]>`
+        SELECT weekly_review_sample_bucket('acct_match') AS bucket
+      `
+      const bucketCount = await prisma.weeklyReviewSampleBucketCount.findUnique({
+        where: {
+          labelDefinitionId_value_bucket: {
+            labelDefinitionId: labelDefinition.id,
+            value: true,
+            bucket,
+          },
+        },
+      })
+      expect(bucketCount?.count).toBe(1)
+    })
+
+    it('completes immediately without scanning unrelated Account rows that have no AccountClassificationLatest row', async () => {
+      // AccountClassificationLatest に行が無いアカウントを複数用意しても、
+      // それらは既存 sampling population に含まれないため cursor の対象にならない。
+      for (let i = 0; i < 5; i++) {
+        await createAccount(`acct_unclassified_${i}`)
+      }
+
+      const workItem = await prisma.analysisWorkItem.create({
+        data: {
+          kind: 'account_summary_bootstrap',
+          triggerType: 'account_summary_sampling_bootstrap_chunk',
+          triggerId: randomUUID(),
+        },
+      })
+
+      await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 2 })
+
+      const bootstrap = await prisma.readModelBootstrap.findUnique({
+        where: { modelKey: 'account_summary_v2' },
+      })
+      expect(bootstrap?.status).toBe('completed')
+      expect(bootstrap?.processedCount).toBe(0)
+      expect(bootstrap?.cursor).toBeNull()
+    })
+
+    it('advances the sampling cursor exactly once per accountId when two work items race on the same chunk', async () => {
+      const labelDefinition = await prisma.labelDefinition.create({
+        data: { key: 'test_sampling_race', description: 'テスト用ラベル' },
+      })
+      // id は 'acct_sampling_0' .. '_4' の辞書順が数値順と一致するため、
+      // orderBy accountId asc のチャンク境界を事前に予測できる。
+      for (let i = 0; i < 5; i++) {
+        await createAccount(`acct_sampling_${i}`)
+        await prisma.accountClassificationLatest.create({
+          data: {
+            accountId: `acct_sampling_${i}`,
+            labelDefinitionId: labelDefinition.id,
+            value: true,
+            confidence: 0.8,
+            reason: 'test reason',
+            method: 'rule',
+            ruleVersion: 'v1',
+            observedAt: new Date('2026-01-01T00:00:00Z'),
+            evaluable: false,
+            labeledAt: null,
+          },
+        })
+      }
+      const workItemA = await prisma.analysisWorkItem.create({
+        data: {
+          kind: 'account_summary_bootstrap',
+          triggerType: 'account_summary_sampling_bootstrap_chunk',
+          triggerId: randomUUID(),
+        },
+      })
+      const workItemB = await prisma.analysisWorkItem.create({
+        data: {
+          kind: 'account_summary_bootstrap',
+          triggerType: 'account_summary_sampling_bootstrap_chunk',
+          triggerId: randomUUID(),
+        },
+      })
+
+      await Promise.all([
+        processAccountSummaryBootstrap(prisma, workItemA, { chunkSize: 2 }),
+        processAccountSummaryBootstrap(prisma, workItemB, { chunkSize: 2 }),
+      ])
+
+      // ReadModelBootstrap 行を FOR UPDATE でロックするため、2 つの WorkItem は
+      // acct_sampling_0/1 のチャンクと acct_sampling_2/3 のチャンクへ
+      // 直列に (どちらが先でも) 一意に振り分けられ、二重処理は起きない。
+      const bootstrap = await prisma.readModelBootstrap.findUnique({
+        where: { modelKey: 'account_summary_v2' },
+      })
+      expect(bootstrap?.processedCount).toBe(4)
+      expect(bootstrap?.cursor).toBe('acct_sampling_3')
+      expect(bootstrap?.status).toBe('running')
+    })
+  },
+)
+
 describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeeded', () => {
   beforeEach(resetDb)
 
-  it('enqueues only one work item when called concurrently', async () => {
+  it('enqueues only one legacy work item when called concurrently on a fresh DB', async () => {
     await Promise.all([
       enqueueAccountSummaryBootstrapIfNeeded(prisma),
       enqueueAccountSummaryBootstrapIfNeeded(prisma),
@@ -499,9 +551,56 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
       where: { kind: 'account_summary_bootstrap' },
     })
     expect(workItems).toHaveLength(1)
+    expect(workItems[0]?.triggerType).toBe('account_summary_bootstrap_chunk')
   })
 
-  it('does nothing when ReadModelBootstrap is already completed', async () => {
+  it('does not start the sampling phase while the legacy phase is still pending/running', async () => {
+    await prisma.readModelBootstrap.create({
+      data: { modelKey: 'account_summary', status: 'running', cursor: 'acct_1' },
+    })
+    await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_bootstrap',
+        triggerType: 'account_summary_bootstrap_chunk',
+        triggerId: randomUUID(),
+        status: 'queued',
+      },
+    })
+
+    await enqueueAccountSummaryBootstrapIfNeeded(prisma)
+
+    const samplingRow = await prisma.readModelBootstrap.findUnique({
+      where: { modelKey: 'account_summary_v2' },
+    })
+    expect(samplingRow).toBeNull()
+    const workItems = await prisma.analysisWorkItem.findMany({
+      where: { kind: 'account_summary_bootstrap' },
+    })
+    expect(workItems).toHaveLength(1)
+  })
+
+  it('starts the sampling phase once the legacy phase is completed (production upgrade path)', async () => {
+    await prisma.readModelBootstrap.create({
+      data: { modelKey: 'account_summary', status: 'completed' },
+    })
+
+    await enqueueAccountSummaryBootstrapIfNeeded(prisma)
+
+    const samplingRow = await prisma.readModelBootstrap.findUnique({
+      where: { modelKey: 'account_summary_v2' },
+    })
+    expect(samplingRow?.status).toBe('pending')
+    const workItems = await prisma.analysisWorkItem.findMany({
+      where: { kind: 'account_summary_bootstrap' },
+    })
+    expect(workItems).toHaveLength(1)
+    expect(workItems[0]?.triggerType).toBe('account_summary_sampling_bootstrap_chunk')
+  })
+
+  it('does nothing when both phases are already completed', async () => {
+    await prisma.readModelBootstrap.create({
+      data: { modelKey: 'account_summary', status: 'completed' },
+    })
     await prisma.readModelBootstrap.create({
       data: { modelKey: 'account_summary_v2', status: 'completed' },
     })
@@ -512,7 +611,10 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
     expect(workItems).toHaveLength(0)
   })
 
-  it('self-heals an orphaned pending bootstrap with no progressable work item', async () => {
+  it('self-heals an orphaned pending sampling phase with no progressable work item', async () => {
+    await prisma.readModelBootstrap.create({
+      data: { modelKey: 'account_summary', status: 'completed' },
+    })
     await prisma.readModelBootstrap.create({
       data: { modelKey: 'account_summary_v2', status: 'pending' },
     })
@@ -522,7 +624,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
     await prisma.analysisWorkItem.create({
       data: {
         kind: 'account_summary_bootstrap',
-        triggerType: 'account_summary_bootstrap_chunk',
+        triggerType: 'account_summary_sampling_bootstrap_chunk',
         triggerId: randomUUID(),
         status: 'dead',
       },
@@ -534,16 +636,20 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
       where: { kind: 'account_summary_bootstrap', status: { not: 'dead' } },
     })
     expect(workItems).toHaveLength(1)
+    expect(workItems[0]?.triggerType).toBe('account_summary_sampling_bootstrap_chunk')
   })
 
-  it('does not double-enqueue when a progressable work item already exists for a running bootstrap', async () => {
+  it('does not double-enqueue the sampling phase when a progressable work item already exists', async () => {
+    await prisma.readModelBootstrap.create({
+      data: { modelKey: 'account_summary', status: 'completed' },
+    })
     await prisma.readModelBootstrap.create({
       data: { modelKey: 'account_summary_v2', status: 'running', cursor: 'acct_1' },
     })
     await prisma.analysisWorkItem.create({
       data: {
         kind: 'account_summary_bootstrap',
-        triggerType: 'account_summary_bootstrap_chunk',
+        triggerType: 'account_summary_sampling_bootstrap_chunk',
         triggerId: randomUUID(),
         status: 'queued',
       },
