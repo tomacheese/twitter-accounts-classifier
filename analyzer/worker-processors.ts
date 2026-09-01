@@ -740,6 +740,7 @@ const NON_CYCLE_TRIGGER_TYPES = new Set([
   'account_classification_observation',
   'review_finding_occurrence',
   'account_summary_bootstrap_chunk',
+  'account_summary_sampling_bootstrap_chunk',
   'bootstrap_completion',
   RETENTION_SWEEP_TRIGGER_TYPE,
   WORK_ITEM_COMPLETION_TRIGGER_TYPE,

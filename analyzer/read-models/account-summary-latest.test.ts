@@ -17,6 +17,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountSummaryLatest', () => {
     await prisma.accountLabelLatest.deleteMany()
     await prisma.accountLabel.deleteMany()
     await prisma.labelDefinition.deleteMany()
+    await prisma.block.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -137,6 +138,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
     await prisma.accountLabelLatest.deleteMany()
     await prisma.accountLabel.deleteMany()
     await prisma.labelDefinition.deleteMany()
+    await prisma.block.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -344,6 +346,73 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
     // observedAt/sourceObservationId は独立して observedAt=t20 (live refresh) のまま。
     expect(row?.observedAt.toISOString()).toBe(t20.toISOString())
     expect(row?.sourceObservationId).toBe('observation_live')
+  })
+
+  it('1回の呼び出しでlabeledAtがnullの行とnon-nullの行が混在してもtext[]::timestamp[]経由のcastが両方を正しく書き込む', async () => {
+    const accountWithLabel = await prisma.account.create({
+      data: {
+        id: 'acct_mixed_labeled',
+        screenName: 'frank',
+        displayName: 'Frank',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const accountWithoutLabel = await prisma.account.create({
+      data: {
+        id: 'acct_mixed_unlabeled',
+        screenName: 'judy',
+        displayName: 'Judy',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'test_label_mixed', description: 'テスト用ラベル' },
+    })
+    const labeledAt = new Date('2026-01-03T00:00:00Z')
+
+    await upsertAccountClassificationLatest(prisma, [
+      {
+        accountId: accountWithLabel.id,
+        labelDefinitionId: labelDefinition.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'labeled reason',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: labeledAt,
+        sourceObservationId: null,
+        evaluable: true,
+        labeledAt,
+      },
+      {
+        accountId: accountWithoutLabel.id,
+        labelDefinitionId: labelDefinition.id,
+        value: false,
+        confidence: 0.1,
+        reason: 'unlabeled reason',
+        method: 'rule',
+        ruleVersion: 'v1',
+        observedAt: labeledAt,
+        sourceObservationId: null,
+        evaluable: false,
+        labeledAt: null,
+      },
+    ])
+
+    const rows = await prisma.accountClassificationLatest.findMany({
+      where: { labelDefinitionId: labelDefinition.id },
+      orderBy: { accountId: 'asc' },
+    })
+    const labeled = rows.find((row) => row.accountId === accountWithLabel.id)
+    const unlabeled = rows.find((row) => row.accountId === accountWithoutLabel.id)
+    expect(labeled?.labeledAt?.toISOString()).toBe(labeledAt.toISOString())
+    expect(unlabeled?.labeledAt).toBeNull()
   })
 })
 

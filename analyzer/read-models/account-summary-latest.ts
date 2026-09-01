@@ -104,7 +104,7 @@ export interface AccountClassificationLatestRow {
   observedAt: Date
   sourceObservationId: string | null
   evaluable: boolean
-  labeledAt: Date
+  labeledAt: Date | null
 }
 
 /**
@@ -153,7 +153,11 @@ export async function upsertAccountClassificationLatest(
       ${sortedRows.map((row) => row.observedAt)}::timestamp[],
       ${sortedRows.map((row) => row.sourceObservationId)}::text[],
       ${sortedRows.map((row) => row.evaluable)}::boolean[],
-      ${sortedRows.map((row) => row.labeledAt)}::timestamp[]
+      -- labeledAt は Date と null が同一バッチ内に混在し得る。Date のまま渡すと
+      -- 配列内容によって driver の推定型が integer[]/timestamp[] のどちらにも
+      -- なり得て cast の成否が値依存になるため、ISO 文字列へ正規化してから
+      -- text[] を経由させ、要素型推定に依存しないようにする。
+      ${sortedRows.map((row) => row.labeledAt?.toISOString() ?? null)}::text[]::timestamp[]
     ) AS u(
       "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion",
       "observedAt", "sourceObservationId", "evaluable", "labeledAt"
