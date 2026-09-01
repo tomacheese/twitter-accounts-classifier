@@ -43,7 +43,7 @@ async function resetDb(): Promise<void> {
 }
 
 describe('processAccountSummaryBootstrap transaction options', () => {
-  it('uses an explicit transaction timeout for bootstrap chunks', async () => {
+  it('uses the legacy transaction timeout for legacy bootstrap chunks', async () => {
     const tx = {
       $executeRaw: vi.fn().mockResolvedValue(1),
       $queryRaw: vi.fn().mockResolvedValue([{ status: 'pending', cursor: null }]),
@@ -67,6 +67,30 @@ describe('processAccountSummaryBootstrap transaction options', () => {
       expect.objectContaining({
         data: expect.objectContaining({ status: 'completed', errorSummary: null }),
       }),
+    )
+  })
+
+  it('uses a longer transaction timeout for sampling bootstrap chunks', async () => {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(1),
+      $queryRaw: vi.fn().mockResolvedValue([{ status: 'pending', cursor: null }]),
+      readModelBootstrap: { update: vi.fn().mockResolvedValue({}) },
+      analysisWorkItem: { upsert: vi.fn().mockResolvedValue({}) },
+    }
+    const transaction = vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+      callback(tx),
+    )
+    const fakePrisma = { $transaction: transaction }
+    const workItem = {
+      id: 'work_item',
+      triggerType: 'account_summary_sampling_bootstrap_chunk',
+    }
+
+    await processAccountSummaryBootstrap(fakePrisma as never, workItem as never, { chunkSize: 10 })
+
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ timeout: 120_000 }),
     )
   })
 })
