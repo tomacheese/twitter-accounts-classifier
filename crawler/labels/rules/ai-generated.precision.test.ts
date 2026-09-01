@@ -44,6 +44,7 @@ describe('aiGeneratedRule precision regressions', () => {
   it.each([
     '生成AI×動画制作をしています。',
     '生成AIの利用で画像を作っています。',
+    '生成AIの利用で画像を作っています。可愛い猫の作品を投稿しています。',
   ])('preserves creator self-declarations that are not permission/ban grammar: %s', (bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle(bio)).value).toBe(true)
   })

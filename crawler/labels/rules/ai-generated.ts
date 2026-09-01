@@ -139,7 +139,8 @@ function isThirdPartyReference(bio: string): boolean {
 const AI_AS_USAGE_DESTINATION_PATTERN = /(?:生成AI|AI生成)(?:等)?への(?:画像)?(?:利用|使用)/gi
 const AI_USAGE_OF_PATTERN = /(?:生成AI|AI生成)(?:等)?の(?:利用|使用)/gi
 const USAGE_PERMISSION_CUE_WINDOW_LENGTH = 15
-const USAGE_PERMISSION_CUE_PATTERN = /反対|禁止|お断り|お断わり|不可|大丈夫|可|\bNG\b/i
+const USAGE_PERMISSION_CUE_PATTERN =
+  /反対|禁止|お断り|お断わり|不可|大丈夫|\bNG\b|(?:^|[はも:=：／/、,\s])可(?:$|[。！!、,\s])/i
 const AI_IMAGE_GENERATION_POST_PATTERN =
   /AI(?:画像|イラスト|作品|動画).{0,8}(?:を)?(?:生成|作成|制作).{0,8}(?:して)?投稿/i
 
