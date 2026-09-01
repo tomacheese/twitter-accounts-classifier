@@ -20,7 +20,7 @@ DECLARE
     'ReadModelGeneration', 'ReadModelPointer', 'ReadModelState', 'DetectorState',
     'AccountClassificationValueCount', 'AccountClassificationConfidenceBucketCount',
     'AccountClassificationRuleVersionCount', 'AccountClassificationFreshnessBucket',
-    'AccountClassificationReasonCount'
+    'AccountClassificationReasonCount', 'WeeklyReviewSampleBucketCount'
   ];
   limited_write_allowlist text[] := ARRAY['ComponentBuildIdentity'];
   update_only_allowlist text[] := ARRAY['LabeledAccountCounter'];

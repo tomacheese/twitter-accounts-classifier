@@ -46,6 +46,11 @@ analyzer_labeled_account_counter_privileges() {
     "SELECT has_table_privilege('analyzer', 'public.\"LabeledAccountCounter\"', 'SELECT')::text || ':' || has_table_privilege('analyzer', 'public.\"LabeledAccountCounter\"', 'INSERT')::text || ':' || has_table_privilege('analyzer', 'public.\"LabeledAccountCounter\"', 'UPDATE')::text || ':' || has_table_privilege('analyzer', 'public.\"LabeledAccountCounter\"', 'DELETE')::text"
 }
 
+analyzer_weekly_review_sample_bucket_count_privileges() {
+  psql -At "$DATABASE_URL" -c \
+    "SELECT has_table_privilege('analyzer', 'public.\"WeeklyReviewSampleBucketCount\"', 'SELECT')::text || ':' || has_table_privilege('analyzer', 'public.\"WeeklyReviewSampleBucketCount\"', 'INSERT')::text || ':' || has_table_privilege('analyzer', 'public.\"WeeklyReviewSampleBucketCount\"', 'UPDATE')::text || ':' || has_table_privilege('analyzer', 'public.\"WeeklyReviewSampleBucketCount\"', 'DELETE')::text"
+}
+
 if psql -At "$DATABASE_URL" -c "SELECT rolname FROM pg_roles WHERE rolname IN ('viewer', 'analyzer')" | grep -q .; then
   echo "viewer/analyzer must not exist before this test" >&2
   exit 1
@@ -64,6 +69,7 @@ test -z "$(psql -At "$DATABASE_URL" -c "SELECT rolname FROM pg_roles WHERE rolna
 test "$(viewer_component_build_identity_privileges)" = "true:true:true:false"
 test "$(analyzer_component_build_identity_privileges)" = "true:true:true:false"
 test "$(analyzer_labeled_account_counter_privileges)" = "true:false:true:false"
+test "$(analyzer_weekly_review_sample_bucket_count_privileges)" = "true:true:true:true"
 test "$(role_config_has crawler client_connection_check_interval=5s)" = "true"
 test "$(role_config_has viewer client_connection_check_interval=5s)" = "true"
 test "$(role_config_has analyzer client_connection_check_interval=5s)" = "true"
