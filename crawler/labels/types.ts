@@ -69,6 +69,11 @@ export interface AccountFeatureBundle {
      */
     inReplyToTweetId?: string | null
     /**
+     * このリプライの投稿者が、リプライ先ツイートの投稿者本人と同一か (自己リプライスレッドか)。
+     * リプライでない場合は無関係。任意項目にする理由は `professionalType` と同じ。
+     */
+    isAuthorReply?: boolean
+    /**
      * X のコンテンツ開示 API が、このツイートに AI 生成メディアが含まれると判定したか。
      * `null` は「一度も評価されていない」(旧ツイートや開示情報のない取得経路) ことを表し、
      * 「取得の結果 AI 生成メディアなしと確定した」ことを表す `false` とは区別する。
@@ -120,7 +125,7 @@ export interface AccountFeatureBundle {
   /**
    * URL・メンション除去後、この投稿者自身の bio と正規化形で完全一致する bio を持つ、
    * 他アカウントの最大観測数。同一テンプレート bio を使い回す複製ネットワークの特徴を示す。
-   * ルールごとではなく実行ごとに共有コーパスから一度算出する（`buildBioDuplicateIndex` 参照）。
+   * ルールごとではなく実行ごとに共有インデックスから一度算出する（`buildBioDuplicateIndex` 参照）。
    * この値を持たない bundle（多くのルール単体テストなど）では 0 として扱う。
    */
   bioDuplicateNetworkSize?: number

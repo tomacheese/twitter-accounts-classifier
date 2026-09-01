@@ -101,7 +101,7 @@ describe('replyFloodingRule', () => {
       const result = replyFloodingRule.evaluate(
         makeBundle(
           Array.from({ length: 8 }, (_, i) => ({
-            fullText: `@target 言い換えリプライ ${i}`,
+            fullText: `@target これは十分に長い言い換えリプライ本文で境界値を確認します ${i}`,
             isReply: true,
             minutesAgo: i * 3,
           })),
@@ -124,7 +124,7 @@ describe('replyFloodingRule', () => {
       const result = replyFloodingRule.evaluate(
         makeBundle(
           Array.from({ length: 8 }, (_, i) => ({
-            fullText: `@target 類似度境界の返信 ${i}`,
+            fullText: `@target これは十分に長い類似度境界の返信本文で丸め前の値を確認します ${i}`,
             isReply: true,
             minutesAgo: i * 3,
           })),

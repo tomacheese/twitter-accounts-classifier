@@ -85,6 +85,7 @@ export function buildAccountFeatureBundle(
       likeCount: tweet.likeCount,
       isReply: tweet.isReply,
       isRetweet: tweet.isRetweet,
+      isAuthorReply: tweet.isAuthorReply,
       isPromoted: tweet.isPromoted,
       isPaidPromotion: tweet.isPaidPromotion,
       expandedUrls: tweet.expandedUrls,
