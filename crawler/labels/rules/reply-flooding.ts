@@ -1,6 +1,6 @@
 import { rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
-import { averagePairwiseSimilarity } from '../text-similarity'
+import { averagePairwiseSimilarity, normalizeForSimilarity } from '../text-similarity'
 import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 
 // この「インプレゾンビ」的なアーキタイプ(言い換えや、
@@ -12,16 +12,28 @@ import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 const MIN_REPLIES_TO_SAME_TARGET = 8
 const WINDOW_HOURS = 24
 const SIMILARITY_THRESHOLD = 0.05
+// 実況やキャンペーン参加の短文連投は、言い換えが少なくても偶然の字面一致で
+// 0.05 を超えやすい。本文が短いグループに限りコピペ・微修正の連投とみなせる
+// 高い類似度のみを陽性の根拠にし、通常閾値は長文の言い換え・翻訳連投向けに残す。
+const SHORT_REPLY_MEDIAN_LENGTH_THRESHOLD = 18
+const SHORT_REPLY_SIMILARITY_THRESHOLD = 0.3
+const SIMILARITY_RAMP_WIDTH = 0.12
 
 // reason 文字列にハンドルを人が読める形で表示するためだけに使う。
 // グルーピング自体は `inReplyToTweetId` を基準に行う。
 const REPLY_TARGET_PATTERN = /^@(\w+)/
 
+function median(numbers: number[]): number {
+  const sorted = numbers.toSorted((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+}
+
 export const replyFloodingRule: LabelRule = {
   key: 'reply_flooding',
   description:
     '同一相手への返信を短時間のうちに大量投稿しており、その文面が言い換えや翻訳違いを含めて内容的に酷似している。1つのバズったツイートに大量の言い換えリプライを浴びせてインプレッションを稼ぐ「インプレゾンビ」の典型パターン',
-  version: '1.5.0',
+  version: '1.6.0',
   evaluate(bundle) {
     // 先頭の @メンション(会話相手)でグルーピングすると、
     // 通常の相互会話との区別ができない。一人との往復チャットや口論でも、
@@ -33,9 +45,12 @@ export const replyFloodingRule: LabelRule = {
     // 本番データのリプライはすべて `inReplyToTweetId` を持つため、
     // これを基準にグルーピングしても失われる情報はなく、
     // 親ツイート ID が不明なリプライは同一グループとみなさずスキップする。
+    // isAuthorReply=true(投稿者自身への返信)は通常の連続スレッドであり、
+    // 他者のツイートへの大量リプライという本ルールの対象アーキタイプではないため除外する。
     const groups = new Map<string, { fullText: string; createdAt: Date }[]>()
     for (const tweet of bundle.recentTweets) {
       if (!tweet.isReply || tweet.isRetweet) continue
+      if (tweet.isAuthorReply === true) continue
       const targetTweetId = tweet.inReplyToTweetId
       if (targetTweetId === null || targetTweetId === undefined) continue
       const group = groups.get(targetTweetId) ?? []
@@ -43,13 +58,26 @@ export const replyFloodingRule: LabelRule = {
       groups.set(targetTweetId, group)
     }
 
-    let best: { target: string; count: number; similarity: number } | null = null
+    let best: {
+      target: string
+      count: number
+      similarity: number
+      similarityThreshold: number
+    } | null = null
     for (const replies of groups.values()) {
       if (replies.length < MIN_REPLIES_TO_SAME_TARGET) continue
 
       const timestamps = replies.map((r) => r.createdAt.getTime())
       const spanHours = (Math.max(...timestamps) - Math.min(...timestamps)) / (1000 * 60 * 60)
       if (spanHours > WINDOW_HOURS) continue
+
+      const medianLength = median(
+        replies.map((r) => normalizeForSimilarity(r.fullText, { removeHashtags: true }).length),
+      )
+      const similarityThreshold =
+        medianLength < SHORT_REPLY_MEDIAN_LENGTH_THRESHOLD
+          ? SHORT_REPLY_SIMILARITY_THRESHOLD
+          : SIMILARITY_THRESHOLD
 
       const similarity = averagePairwiseSimilarity(
         replies.map((r) => r.fullText),
@@ -58,10 +86,10 @@ export const replyFloodingRule: LabelRule = {
           removeCommonPhrases: true,
         },
       )
-      if (similarity < SIMILARITY_THRESHOLD) continue
+      if (similarity < similarityThreshold) continue
       if (best === null || similarity > best.similarity) {
         const target = REPLY_TARGET_PATTERN.exec(replies[0].fullText)?.[1] ?? 'unknown'
-        best = { target, count: replies.length, similarity }
+        best = { target, count: replies.length, similarity, similarityThreshold }
       }
     }
 
@@ -79,8 +107,8 @@ export const replyFloodingRule: LabelRule = {
     const volumeScore = rampScore(best.count, MIN_REPLIES_TO_SAME_TARGET, 12, 'higher-is-positive')
     const similarityScore = rampScore(
       best.similarity,
-      SIMILARITY_THRESHOLD,
-      0.12,
+      best.similarityThreshold,
+      SIMILARITY_RAMP_WIDTH,
       'higher-is-positive',
     )
     // 必須/代替条件ではなく連続的な加重ブレンドであるため combineRequired/combineAlternatives は使わない。

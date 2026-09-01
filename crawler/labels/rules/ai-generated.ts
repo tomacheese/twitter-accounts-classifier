@@ -134,6 +134,53 @@ function isThirdPartyReference(bio: string): boolean {
   )
 }
 
+// 「生成AIへの利用」「AI生成等への画像利用」は、生成AIを投稿手段ではなく
+// 著作物の利用先・許諾対象として述べる文法であり、それ単独では自己申告ではない。
+const AI_AS_USAGE_DESTINATION_PATTERN = /(?:生成AI|AI生成)(?:等)?への(?:画像)?(?:利用|使用)/gi
+const AI_USAGE_OF_PATTERN = /(?:生成AI|AI生成)(?:等)?の(?:利用|使用)/gi
+const USAGE_PERMISSION_CUE_WINDOW_LENGTH = 15
+const USAGE_PERMISSION_CUE_PATTERN = /反対|禁止|お断り|お断わり|不可|大丈夫|可|\bNG\b/i
+const AI_IMAGE_GENERATION_POST_PATTERN =
+  /AI(?:画像|イラスト|作品|動画).{0,8}(?:を)?(?:生成|作成|制作).{0,8}(?:して)?投稿/i
+
+function collectAiUsageTargetRanges(bio: string): [number, number][] {
+  const ranges: [number, number][] = []
+
+  AI_AS_USAGE_DESTINATION_PATTERN.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = AI_AS_USAGE_DESTINATION_PATTERN.exec(bio)) !== null) {
+    ranges.push([match.index, match.index + match[0].length])
+  }
+
+  AI_USAGE_OF_PATTERN.lastIndex = 0
+  while ((match = AI_USAGE_OF_PATTERN.exec(bio)) !== null) {
+    const afterMatch = bio.slice(
+      match.index + match[0].length,
+      match.index + match[0].length + USAGE_PERMISSION_CUE_WINDOW_LENGTH,
+    )
+    if (USAGE_PERMISSION_CUE_PATTERN.test(afterMatch)) {
+      ranges.push([match.index, match.index + match[0].length])
+    }
+  }
+
+  return ranges
+}
+
+function isAiAsUsageTargetMention(bio: string): boolean {
+  const ranges = collectAiUsageTargetRanges(bio)
+  if (ranges.length === 0) return false
+
+  let withoutUsageTargets = bio
+  for (const [start, end] of ranges.toSorted((a, b) => b[0] - a[0])) {
+    withoutUsageTargets = `${withoutUsageTargets.slice(0, start)}${' '.repeat(end - start)}${withoutUsageTargets.slice(end)}`
+  }
+
+  const hasIndependentSelfDeclaration =
+    BIO_DECLARATION_PATTERN.test(withoutUsageTargets) ||
+    AI_IMAGE_GENERATION_POST_PATTERN.test(withoutUsageTargets)
+  return !hasIndependentSelfDeclaration
+}
+
 // 「/」「、」「,」やカッコなど、両側とも列挙の区切り文字に挟まれている用語は、
 // 趣味・スキルの一覧の1項目として並べられているだけで、
 // 自身のコンテンツの生成元を宣言しているわけではない。
@@ -173,7 +220,7 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.9.8',
+  version: '1.10.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
@@ -185,7 +232,8 @@ export const aiGeneratedRule: LabelRule = {
       !isTopicInterestMention(bio) &&
       !isThirdPartyReference(bio) &&
       !isListEnumerationItem(bio) &&
-      !isOppositionListHeader(bio)
+      !isOppositionListHeader(bio) &&
+      !isAiAsUsageTargetMention(bio)
 
     const sampled = bundle.recentTweets
     const hasCorroboratingTweet = sampled.some((t) => TWEET_BOILERPLATE_PATTERN.test(t.fullText))
