@@ -113,9 +113,10 @@ export interface WeeklyReviewPlanningDataSource {
     limit: number,
   ): Promise<PlanningCandidateRow[]>
   /**
-   * `WeeklyReviewSampleBucketCount` を集計した、ラベル×value ごとの current/evaluable
-   * 母集団件数を返す。近似値であり、`M=4096`(全 bucket 読み込み)の縮退分岐でのみ
-   * `poolSize / populationCount` が厳密な inclusion probability と一致する。
+   * `WeeklyReviewSampleBucketCount` を集計した current/evaluable 母集団件数を返す。
+   * この値はラベル×value ごとに正確である。
+   * ただし `poolSize / populationCount` を候補の inclusion probability とみなす場合は近似である。
+   * 厳密に一致するのは `M=4096`(全 bucket 読み込み)の縮退分岐のみである。
    */
   listPopulationCounts(): Promise<PlanningPopulationCountRow[]>
   /**

@@ -1,5 +1,4 @@
 import { Prisma, type PrismaClient } from '../generated/prisma'
-import { runWithConcurrencyLimit } from '../utils/concurrency-limit'
 import {
   BUCKET_COUNT,
   OVERSAMPLE_FACTOR,
@@ -15,8 +14,6 @@ import type {
   PlanningSnapshotRow,
   WeeklyReviewPlanningDataSource,
 } from './review-plan-data'
-
-const BASELINE_CANDIDATE_QUERY_CONCURRENCY = 2
 
 /** bootstrap の schema key。readiness gate はこの bootstrap の完了を要求する。 */
 const ACCOUNT_SUMMARY_BOOTSTRAP_MODEL_KEY = 'account_summary_v2'
@@ -142,57 +139,57 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
       }
     }
 
-    const rowsByTask: PlanningCandidateRow[][] = Array.from({ length: tasks.length }, () => [])
+    const rowsByTask: PlanningCandidateRow[][] = []
 
-    await runWithConcurrencyLimit(
-      tasks,
-      BASELINE_CANDIDATE_QUERY_CONCURRENCY,
-      async (task, index) => {
-        const bucketReadCount = computeBucketReadCount(
-          task.populationCount,
-          poolSize,
-          OVERSAMPLE_FACTOR,
-        )
-        const buckets =
-          bucketReadCount >= BUCKET_COUNT
-            ? undefined
-            : selectBuckets(seed, task.definitionId, task.value, bucketReadCount)
-        const rows = await this.prisma.$queryRaw<BaselineCandidateByValueRow[]>(Prisma.sql`
-          SELECT
-            classification."accountId",
-            classification.value,
-            classification.confidence,
-            classification.reason,
-            classification."ruleVersion",
-            classification."labeledAt",
-            classification.evaluable,
-            account."recentTweetsFetchStatus",
-            account."lastRecentTweetsAttemptedAt",
-            account."lastRecentTweetsFetchedAt"
-          FROM "AccountClassificationLatest" classification
-          JOIN "Account" account ON account.id = classification."accountId"
-          WHERE classification."labelDefinitionId" = ${task.definitionId}
-            AND classification.value = ${task.value}
-            AND classification.evaluable = true
-            AND classification."labeledAt" IS NOT NULL
-            ${
-              buckets === undefined
-                ? Prisma.empty
-                : Prisma.sql`AND weekly_review_sample_bucket(classification."accountId") = ANY(${buckets}::int[])`
-            }
-        `)
-        const ranked = rows.toSorted((a, b) =>
-          stableRank(seed, task.definitionId, String(task.value), a.accountId).localeCompare(
-            stableRank(seed, task.definitionId, String(task.value), b.accountId),
-          ),
-        )
-        rowsByTask[index] = ranked.slice(0, poolSize).map((row) => ({
+    // REPEATABLE READ の interactive transaction は単一 connection 上で実質直列にしか
+    // 実行されないため、並行実行しても短縮効果がなく複雑さだけが増える。
+    for (const task of tasks) {
+      const bucketReadCount = computeBucketReadCount(
+        task.populationCount,
+        poolSize,
+        OVERSAMPLE_FACTOR,
+      )
+      const buckets =
+        bucketReadCount >= BUCKET_COUNT
+          ? undefined
+          : selectBuckets(seed, task.definitionId, task.value, bucketReadCount)
+      const rows = await this.prisma.$queryRaw<BaselineCandidateByValueRow[]>(Prisma.sql`
+        SELECT
+          classification."accountId",
+          classification.value,
+          classification.confidence,
+          classification.reason,
+          classification."ruleVersion",
+          classification."labeledAt",
+          classification.evaluable,
+          account."recentTweetsFetchStatus",
+          account."lastRecentTweetsAttemptedAt",
+          account."lastRecentTweetsFetchedAt"
+        FROM "AccountClassificationLatest" classification
+        JOIN "Account" account ON account.id = classification."accountId"
+        WHERE classification."labelDefinitionId" = ${task.definitionId}
+          AND classification.value = ${task.value}
+          AND classification.evaluable = true
+          AND classification."labeledAt" IS NOT NULL
+          ${
+            buckets === undefined
+              ? Prisma.empty
+              : Prisma.sql`AND weekly_review_sample_bucket(classification."accountId") = ANY(${buckets}::int[])`
+          }
+      `)
+      const ranked = rows.toSorted((a, b) =>
+        stableRank(seed, task.definitionId, String(task.value), a.accountId).localeCompare(
+          stableRank(seed, task.definitionId, String(task.value), b.accountId),
+        ),
+      )
+      rowsByTask.push(
+        ranked.slice(0, poolSize).map((row) => ({
           ...row,
           labelDefinitionId: task.definitionId,
           labelKey: task.labelKey,
-        }))
-      },
-    )
+        })),
+      )
+    }
 
     return rowsByTask.flat()
   }

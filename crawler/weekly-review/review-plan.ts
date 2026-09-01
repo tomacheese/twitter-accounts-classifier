@@ -69,8 +69,9 @@ export interface WeeklyReviewSample {
   selectionSignals: WeeklyReviewSelectionSignal[]
   /**
    * random_positive/random_negative サンプルにのみ設定する (targeted サンプルは持たない)。
-   * 近似値であり、`M=4096`(全 bucket 読み込み)の縮退分岐でのみ厳密に一致し、
-   * それ以外は oversample factor に依存する精度の近似となる。
+   * `WeeklyReviewSampleBucketCount` から得るこの値自体は正確である。
+   * ただし `poolSize / populationCount` を候補の inclusion probability とみなす場合は近似である。
+   * 厳密に一致するのは `M=4096`(全 bucket 読み込み)の縮退分岐のみである。
    */
   populationCount?: number
 }
