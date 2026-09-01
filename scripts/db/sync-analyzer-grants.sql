@@ -48,7 +48,7 @@ GRANT INSERT, UPDATE, DELETE ON TABLE
   "ReadModelGeneration", "ReadModelPointer", "ReadModelState", "DetectorState",
   "AccountClassificationValueCount", "AccountClassificationConfidenceBucketCount",
   "AccountClassificationRuleVersionCount", "AccountClassificationFreshnessBucket",
-  "AccountClassificationReasonCount"
+  "AccountClassificationReasonCount", "WeeklyReviewSampleBucketCount"
   TO analyzer;
 
 -- AccountSummaryLatest のトリガーが labeled counter を更新するため UPDATE のみ許可する。
