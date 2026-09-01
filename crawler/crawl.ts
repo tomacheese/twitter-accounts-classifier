@@ -126,6 +126,7 @@ import {
   type RecordCrawlAccountRunParams,
   type CrawlWarning,
   type CrawlWarningType,
+  type FollowSampleStatus,
 } from './db/crawl-run-repository'
 
 const logger = Logger.configure('crawl')
@@ -287,6 +288,30 @@ class TimelineUnavailableError extends Error {
  * オプショナルチェイニングが `data.user` しか保護しておらず、`result.timeline` が
  * 欠けている場合に型付きエラーではなく素の TypeError を投げるため、
  * 型で判定できず message 文字列の一致で見分けている。
+ * @param error - 捕捉した例外
+ * @returns 既知のライブラリ不具合 (timeline 欠落) による TypeError であれば true
+ */
+function isTimelineUnavailableTypeError(error: unknown): boolean {
+  return error instanceof TypeError && error.message.includes("reading 'timeline'")
+}
+
+/**
+ * `getFollowing` は `errorCheck(e.data.user).result.timeline.timeline.instructions` まで
+ * 直接参照しており、`result.timeline` 自体が欠ける場合は `reading 'timeline'`、
+ * `result.timeline` はあってもその配下の `timeline` が欠ける場合は次の `.instructions` 参照で
+ * `reading 'instructions'` になり、参照先プロパティ名が異なる TypeError になるため、
+ * follow sample に限りその両方を対象にする。
+ * @param error - 捕捉した例外
+ * @returns follow sample 取得で既知のライブラリ不具合による TypeError であれば true
+ */
+function isFollowSampleTimelineUnavailableTypeError(error: unknown): boolean {
+  return (
+    isTimelineUnavailableTypeError(error) ||
+    (error instanceof TypeError && error.message.includes("reading 'instructions'"))
+  )
+}
+
+/**
  * @param fetch - ガード対象の `fetchRecentTweets` 呼び出し
  * @returns 呼び出し結果。既知のライブラリ不具合の場合は `TimelineUnavailableError` を rethrow する
  */
@@ -294,7 +319,7 @@ async function guardTimelineFetch<T>(fetch: () => Promise<T>): Promise<T> {
   try {
     return await fetch()
   } catch (error) {
-    if (error instanceof TypeError && error.message.includes("reading 'timeline'")) {
+    if (isTimelineUnavailableTypeError(error)) {
       throw new TimelineUnavailableError(error)
     }
     throw error
@@ -679,8 +704,7 @@ export async function runAuthorUnitPhase(
     const authorRetryWait = { ms: 0 }
     const trackAuthorRetryWait = createScopedRetryWaitTracker(trackRetryWait, authorRetryWait)
     const authorWarnings: CrawlWarning[] = []
-    let followSampleStatus: 'fetched' | 'budget_skipped' | 'rate_limit_skipped' | 'failed' | null =
-      null
+    let followSampleStatus: FollowSampleStatus = null
     let followSampleRequestCount = 0
     let followSampleRateLimitRemaining: number | undefined
     let followSampleRateLimitReset: number | undefined
@@ -746,6 +770,8 @@ export async function runAuthorUnitPhase(
       } catch (error) {
         if (error instanceof OptionalFollowingSkipError) {
           followSampleStatus = error.decision
+        } else if (isFollowSampleTimelineUnavailableTypeError(error)) {
+          followSampleStatus = 'unavailable'
         } else {
           const diagnostics = getResponseErrorDiagnostics(error)
           if (diagnostics?.httpStatus === 429) {

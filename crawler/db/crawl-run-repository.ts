@@ -241,7 +241,7 @@ export async function completeCrawlAccountCheckpoint(
 
 export type CrawlAuthorCheckpointStatus = 'success' | 'unavailable' | 'failed'
 export type FollowSampleStatus =
-  'fetched' | 'budget_skipped' | 'rate_limit_skipped' | 'failed' | null
+  'fetched' | 'budget_skipped' | 'rate_limit_skipped' | 'unavailable' | 'failed' | null
 
 export interface CrawlAuthorCheckpointParams {
   crawlRunId: string
@@ -278,7 +278,9 @@ export interface CrawlAuthorCheckpointRecord {
 }
 
 function isFollowSampleStatus(value: unknown): value is Exclude<FollowSampleStatus, null> {
-  return ['fetched', 'budget_skipped', 'rate_limit_skipped', 'failed'].includes(value as string)
+  return ['fetched', 'budget_skipped', 'rate_limit_skipped', 'unavailable', 'failed'].includes(
+    value as string,
+  )
 }
 
 /**

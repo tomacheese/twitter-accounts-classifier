@@ -538,6 +538,175 @@ describe('runCrawlCycle', () => {
     )
   })
 
+  it.each([
+    ["reading 'timeline'", "Cannot read properties of undefined (reading 'timeline')"],
+    ["reading 'instructions'", "Cannot read properties of undefined (reading 'instructions')"],
+  ])(
+    'treats the getFollowing %s TypeError as an expected follow sample unavailability, without a warning',
+    async (_label, message) => {
+      const author = rawUser('author1')
+      const tweet = rawTweet('tweet1', author)
+      const deps = makeDeps({
+        createOpenApiClient: vi.fn().mockResolvedValue({
+          client: {
+            getTweetApi: () => ({
+              getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+              getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            }),
+            getUserApi: () => ({
+              getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+              getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+              getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            }),
+            getUserListApi: () => ({
+              // login account 自身の following sync は authorId ではなく viewer1 の userId で呼ばれるため、
+              // それとは区別して optional follow sample (author1) の呼び出しのみを失敗させる。
+              getFollowing: vi
+                .fn()
+                .mockImplementation((param: { userId: string }) =>
+                  param.userId === 'author1'
+                    ? Promise.reject(new TypeError(message))
+                    : Promise.resolve({ data: [], nextCursor: undefined }),
+                ),
+              getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
+            getBlocksApi: () => ({
+              getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
+          },
+        }),
+      })
+
+      await runCrawlCycle(deps)
+
+      expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+        expect.objectContaining({
+          followSample: null,
+          followSampleStatus: 'unavailable',
+          warnings: [],
+        }),
+      )
+      expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'success', warnings: [] }),
+      )
+    },
+  )
+
+  it('does not misclassify an unrelated TypeError from getFollowing as an expected follow sample unavailability', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi
+              .fn()
+              .mockImplementation((param: { userId: string }) =>
+                param.userId === 'author1'
+                  ? Promise.reject(
+                      new TypeError("Cannot read properties of undefined (reading 'legacy')"),
+                    )
+                  : Promise.resolve({ data: [], nextCursor: undefined }),
+              ),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        followSample: null,
+        followSampleStatus: 'failed',
+        warnings: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'labeling_follow_sample_failed',
+            authorId: 'author1',
+            errorMessage: "Cannot read properties of undefined (reading 'legacy')",
+          }),
+        ]),
+      }),
+    )
+  })
+
+  it('keeps following_sync_failed as a warning for the login account even when it is the same reading timeline TypeError, while the author optional sample still succeeds', async () => {
+    const author = rawUser('author1')
+    const tweet = rawTweet('tweet1', author)
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId: vi.fn().mockResolvedValue({ data: author }),
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserListApi: () => ({
+            // login account 自身 (viewer1) の following sync のみを既知のライブラリ不具合 TypeError で失敗させ、
+            // author1 向けの optional follow sample は成功させることで、両者の扱いが分岐することを固定する。
+            getFollowing: vi
+              .fn()
+              .mockImplementation((param: { userId: string }) =>
+                param.userId === 'viewer1'
+                  ? Promise.reject(
+                      new TypeError("Cannot read properties of undefined (reading 'timeline')"),
+                    )
+                  : Promise.resolve({ data: [], nextCursor: undefined }),
+              ),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        warnings: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'following_sync_failed',
+            username: 'v',
+            errorMessage: "Cannot read properties of undefined (reading 'timeline')",
+          }),
+        ]),
+      }),
+    )
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        followSample: { ids: [], authors: [], reachedEnd: true, requestCount: 1 },
+        followSampleStatus: 'fetched',
+        warnings: [],
+      }),
+    )
+  })
+
   it('treats a labeling follow sample 429 as an intentional rate-limit skip', async () => {
     const author = rawUser('author1')
     const tweet = rawTweet('tweet1', author)
