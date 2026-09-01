@@ -21,7 +21,7 @@ esac
 cd "$(dirname "$0")/.."
 
 MIGRATION_DIR="migrations"
-NEW_MIGRATION_NAMES=$(ls "$MIGRATION_DIR" | grep -E "add_weekly_review_sample_bucket$")
+NEW_MIGRATION_NAMES=$(ls "$MIGRATION_DIR" | grep -E "add_weekly_review_sample_bucket$|add_weekly_review_sample_bucket_index$")
 STASH_DIR=$(mktemp -d)
 
 cleanup() {
