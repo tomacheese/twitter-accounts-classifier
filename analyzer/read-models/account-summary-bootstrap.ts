@@ -31,7 +31,12 @@ const SAMPLING_TRIGGER = 'account_summary_sampling_bootstrap_chunk'
 
 const ACCOUNT_SUMMARY_LATEST_SCHEMA_VERSION = 2
 const DEFAULT_CHUNK_SIZE = 2000
-const BOOTSTRAP_TRANSACTION_TIMEOUT_MS = 60_000
+const LEGACY_TRANSACTION_TIMEOUT_MS = 60_000
+/**
+ * sampling chunk は本番で 60_000ms を超えて P2028 timeout する事例が観測されたため、
+ * legacy chunk より長い専用 timeout を持つ (I/O ばらつきの吸収が目的で、chunk size は変更しない)。
+ */
+const SAMPLING_TRANSACTION_TIMEOUT_MS = 120_000
 
 /** account_summary_bootstrap WorkItem がまだ進行可能とみなせる status。 */
 const PROGRESSABLE_WORK_ITEM_STATUSES = ['queued', 'leased', 'failed']
@@ -504,10 +509,13 @@ export async function processAccountSummaryBootstrap(
   const chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE
 
   let modelKey: string
+  let transactionTimeoutMs: number
   if (workItem.triggerType === LEGACY_TRIGGER) {
     modelKey = LEGACY_MODEL_KEY
+    transactionTimeoutMs = LEGACY_TRANSACTION_TIMEOUT_MS
   } else if (workItem.triggerType === SAMPLING_TRIGGER) {
     modelKey = SAMPLING_MODEL_KEY
+    transactionTimeoutMs = SAMPLING_TRANSACTION_TIMEOUT_MS
   } else {
     throw new Error(`unknown account_summary_bootstrap trigger type: ${workItem.triggerType}`)
   }
@@ -521,7 +529,7 @@ export async function processAccountSummaryBootstrap(
         await processSamplingChunk(tx as unknown as PrismaClient, chunkSize)
         return null
       },
-      { timeout: BOOTSTRAP_TRANSACTION_TIMEOUT_MS },
+      { timeout: transactionTimeoutMs },
     )
 
     // このチャンクで実際に処理した Account が無い (他 worker が先に進めた、または
