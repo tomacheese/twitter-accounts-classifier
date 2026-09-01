@@ -203,7 +203,33 @@ export async function loadRecentTweetsForAccounts(
     SELECT t.*
     FROM UNNEST(${accountIds}::text[]) AS target("accountId")
     CROSS JOIN LATERAL (
-      SELECT *
+      SELECT
+        "id",
+        "accountId",
+        "fullText",
+        "createdAt",
+        "retweetCount",
+        "likeCount",
+        "replyCount",
+        "quoteCount",
+        "isReply",
+        "inReplyToTweetId",
+        "isAuthorReply",
+        "isRetweet",
+        "retweetedTweetId",
+        "isPromoted",
+        "isPaidPromotion",
+        "expandedUrls",
+        "cardDestinationUrls",
+        "cardDestinationUrlsEvaluated",
+        "hasAiGeneratedMedia",
+        "aiGeneratedDetectionSource",
+        "quotedTweetId",
+        "quotedTweetAuthorId",
+        "quotedTweetHasVideo",
+        "foreignVideoSourceCount",
+        "source",
+        "collectedAt"
       FROM "Tweet"
       WHERE "Tweet"."accountId" = target."accountId"
       ORDER BY "createdAt" DESC

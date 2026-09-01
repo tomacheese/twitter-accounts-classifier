@@ -425,6 +425,7 @@ describe('loadRecentTweetsForAccounts', () => {
     expect(queryRaw).toHaveBeenCalledTimes(1)
     const sql = (queryRaw.mock.calls[0][0] as unknown[]).join('')
     expect(sql).toContain('CROSS JOIN LATERAL')
+    expect(sql).not.toMatch(/CROSS JOIN LATERAL \(\s+SELECT \*\s+FROM "Tweet"/)
     expect(sql).toContain('ORDER BY "createdAt" DESC')
     expect(result.get('u1')).toEqual([rows[0], rows[1]])
     expect(result.get('u2')).toEqual([rows[2]])
