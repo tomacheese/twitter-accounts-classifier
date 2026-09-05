@@ -148,17 +148,10 @@ model AccountLabel {
   sourceId          String?
   sourceUsername    String?
 
-  // account-detail.ts の accountId 絞り込みにはこの単一インデックスで足りる。
-  // labeledAt 降順の並び替え性能まで複合インデックスで確保する必要はないと判断している。
-  // ルールバージョン検索は AccountLabelLatest で足りるため、AccountLabel 側には置かない。
+  // AccountLabel は無制限に増える監査履歴のため、確認済みの本番クエリで使う accountId のみを維持する。
   @@index([accountId])
-  @@index([labeledAt(sort: Desc), id(sort: Desc)])
-  @@index([labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])
+  // 分類の発生源を監査する検索に使う。
   @@index([sourceKind, sourceId])
-  // weekly-review の listPopulationCounts が行う
-  // DISTINCT ON (labelDefinitionId, accountId) ORDER BY labeledAt DESC, id DESC を
-  // インデックススキャンで処理できるよう、この並び順で複合インデックスを用意する。
-  @@index([labelDefinitionId, accountId, labeledAt(sort: Desc), id(sort: Desc)])
 }
 
 // AccountLabel は監査証跡としてほぼ無制限に増え続ける履歴テーブルであり、
