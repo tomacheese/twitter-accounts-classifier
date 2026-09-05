@@ -4,8 +4,8 @@ set -eu
 # Weekly maintenance for unattended operation: weekly-analyze.sh rebuilds the crawler/viewer
 # images whenever the review skill commits a fix, and each rebuild leaves the previous
 # image layers and build cache behind. Without this, disk usage would grow unbounded over
-# months of daily cron runs. Only images/cache untouched for 30+ days are removed, and named
-# volumes (postgres-data) are never touched, so running containers and their data are safe.
+# months of daily cron runs. PostgreSQL は ./data/postgres の bind mount を使うため、この script は
+# Docker image と build cache だけを prune し、DB data は削除しない。
 cd "$(dirname "$0")/.."
 
 LOG_FILE="$(pwd)/logs/docker-cleanup.log"

@@ -56,6 +56,8 @@ jobs:
           bash scripts/weekly-analyze-runtime.test.sh
           bash scripts/weekly-analyze-supervisor.test.sh
           bash scripts/weekly-review-agent-contract.test.sh
+          sh prisma/migrations/verify-drop-unused-account-label-history-indexes.test.sh
+          sh scripts/check-postgres-storage.test.sh
       - name: Verify service role bootstrap
         run: bash scripts/db/role-bootstrap.test.sh
       # weekly_review は外部開発機向けの任意ロールなので、専用の手動作成経路も別途検証する。

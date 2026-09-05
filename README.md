@@ -86,3 +86,17 @@ pnpm --filter crawler run backfill:recent-tweets -- --limit 100 --execute --user
   - `discord_webhook_url` (トップレベル、任意): ブロック結果を通知する Discord Webhook URL
 - `data/postgres/`: Postgres の実データ (bind mount、git 管理外)
 - `logs/`: クロールログ (実アカウント名を含むため git 管理外)
+
+### PostgreSQL ストレージ容量の監視
+
+`scripts/check-postgres-storage.sh` は `data/postgres/` のファイルシステムについて、使用率と空き容量を確認する読み取り専用の guard である。空き容量が 100 GiB 未満、または使用率が 80% 以上で非ゼロ終了する。`POSTGRES_STORAGE_MIN_AVAILABLE_GIB` と `POSTGRES_STORAGE_MAX_USED_PERCENT` でそれぞれの整数閾値を変更でき、別の bind mount を確認する場合は `POSTGRES_DATA_PATH` を指定する。
+
+```bash
+scripts/check-postgres-storage.sh
+```
+
+ホストの crontab へ設定する例は次のとおり。これは 1 時間ごとに確認するだけで、DB データを削除しない。
+
+```cron
+0 * * * * PATH=/usr/local/bin:/usr/bin:/bin /path/to/twitter-accounts-classifier/scripts/check-postgres-storage.sh
+```
