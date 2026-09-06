@@ -32,7 +32,12 @@ import {
   findActiveFindingsAtWatermarkForAccount,
   findLabelsAtWatermarkForAccount,
   findPreviousLabelAtWatermarkForAccount,
+  type LabelAtWatermark,
 } from './read-models/build-account-summary-latest-row'
+import {
+  parseClassificationSnapshot,
+  SUPPORTED_ACCOUNT_CLASSIFICATION_SNAPSHOT_VERSION,
+} from './read-models/account-classification-snapshot'
 import {
   touchAccountSummaryLatestState,
   upsertAccountClassificationLatest,
@@ -221,9 +226,27 @@ export async function processAccountSummaryRefresh(
   const account = await prisma.account.findUniqueOrThrow({
     where: { id: observation.accountId },
   })
+  // snapshot 付き Observation は crawl 時点の確定値を持つため、AccountLabel への
+  // クエリなしで読み取れる。AccountLabelChange は DB トリガーが AccountLabelLatest
+  // への書き込みから既に生成済みのため、この経路ではアプリ側で生成しない。
+  const useSnapshot =
+    observation.snapshotVersion === SUPPORTED_ACCOUNT_CLASSIFICATION_SNAPSHOT_VERSION
+  logger.info(
+    `processAccountSummaryRefresh: using ${useSnapshot ? 'snapshot' : 'watermark reconstruction'} (accountId=${observation.accountId}, observationId=${observation.id})`,
+  )
   const [labels, previousLabels, existing] = await Promise.all([
-    findLabelsAtWatermarkForAccount(prisma, observation.accountId, observation.observedAt),
-    findPreviousLabelAtWatermarkForAccount(prisma, observation.accountId, observation.observedAt),
+    useSnapshot
+      ? Promise.resolve(
+          parseClassificationSnapshot(observation.accountId, observation.classificationSnapshot),
+        )
+      : findLabelsAtWatermarkForAccount(prisma, observation.accountId, observation.observedAt),
+    useSnapshot
+      ? Promise.resolve<LabelAtWatermark[]>([])
+      : findPreviousLabelAtWatermarkForAccount(
+          prisma,
+          observation.accountId,
+          observation.observedAt,
+        ),
     prisma.accountSummaryLatest.findUnique({ where: { accountId: observation.accountId } }),
   ])
   const previousByLabelDefinitionId = new Map(
@@ -289,6 +312,8 @@ export async function processAccountSummaryRefresh(
           labeledAt: label.labeledAt,
         })),
       )
+
+      if (useSnapshot) return
 
       for (const label of labels) {
         const previous = previousByLabelDefinitionId.get(label.labelDefinitionId)

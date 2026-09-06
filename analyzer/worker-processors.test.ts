@@ -7,6 +7,7 @@ import { detectAnalysisStageFailure } from './operational-issues/detect-run-fail
 import * as labelMetricSnapshotModule from './metrics/label-metric-snapshot'
 import * as publishModule from './read-models/publish'
 import * as sentryModule from './monitoring/sentry'
+import * as accountSummaryLatestRowModule from './read-models/build-account-summary-latest-row'
 import {
   processReadModelRefresh,
   processLabelAggregateRefresh,
@@ -639,6 +640,90 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
       where: { accountId: account.id },
     })
     expect(classificationRows).toHaveLength(0)
+  })
+
+  it('builds AccountClassificationLatest/AccountSummaryLatest from classificationSnapshot without querying AccountLabel, and does not generate AccountLabelChange at the app layer', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_refresh_snapshot',
+        screenName: 'iris',
+        displayName: 'Iris',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'label_snapshot_refresh', description: 'テスト用ラベル' },
+    })
+    const labeledAt = new Date('2026-01-02T00:00:00Z')
+    const observedAt = labeledAt
+    const observation = await prisma.accountClassificationObservation.create({
+      data: {
+        accountId: account.id,
+        observedAt,
+        labelCount: 1,
+        snapshotVersion: 1,
+        classificationSnapshot: [
+          {
+            labelDefinitionId: labelDefinition.id,
+            value: true,
+            confidence: 0.9,
+            reason: 'r',
+            method: 'rule',
+            ruleVersion: 'v1',
+            evaluable: true,
+            labeledAt: labeledAt.toISOString(),
+          },
+        ],
+      },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+        triggerId: observation.id,
+      },
+    })
+
+    // snapshot 分岐では AccountLabel への watermark 復元クエリを一切発行しないことを、
+    // 実クエリを壊さず検証するため、Prisma クライアント自体ではなく呼び出し元の
+    // モジュール関数を spy する。
+    const findLabelsSpy = vi.spyOn(accountSummaryLatestRowModule, 'findLabelsAtWatermarkForAccount')
+    const findPreviousLabelSpy = vi.spyOn(
+      accountSummaryLatestRowModule,
+      'findPreviousLabelAtWatermarkForAccount',
+    )
+
+    await processAccountSummaryRefresh(prisma, workItem)
+
+    expect(findLabelsSpy).not.toHaveBeenCalled()
+    expect(findPreviousLabelSpy).not.toHaveBeenCalled()
+    findLabelsSpy.mockRestore()
+    findPreviousLabelSpy.mockRestore()
+
+    const row = await prisma.accountClassificationLatest.findUnique({
+      where: {
+        accountId_labelDefinitionId: {
+          accountId: account.id,
+          labelDefinitionId: labelDefinition.id,
+        },
+      },
+    })
+    expect(row?.value).toBe(true)
+    expect(row?.labeledAt?.toISOString()).toBe(labeledAt.toISOString())
+
+    const summary = await prisma.accountSummaryLatest.findUnique({
+      where: { accountId: account.id },
+    })
+    expect(summary?.activeLabelKeys).toEqual(['label_snapshot_refresh'])
+
+    const changes = await prisma.accountLabelChange.findMany({
+      where: { accountId: account.id },
+    })
+    expect(changes).toHaveLength(0)
   })
 })
 
