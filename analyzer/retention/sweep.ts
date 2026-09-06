@@ -5,6 +5,7 @@ const LABEL_METRIC_SNAPSHOT_RETENTION_DAYS = 90
 const WORK_ITEM_RETENTION_DAYS = 30
 const OVERVIEW_SNAPSHOT_RETENTION_DAYS = 30
 const SHADOW_DETECTOR_EVALUATION_RETENTION_DAYS = 30
+const ACCOUNT_CLASSIFICATION_OBSERVATION_RETENTION_DAYS = 30
 
 // リトライを使い切って再試行され得なくなった WorkItem。succeeded と同じく
 // 完了済みとして 30日retentionの対象にする。
@@ -94,6 +95,39 @@ async function sweepShadowDetectorEvaluations(prisma: PrismaClient, now: Date): 
   return result.count
 }
 
+/**
+ * AccountClassificationObservation を保持期間に応じて削除する。
+ * account_summary_refresh WorkItem が triggerId として参照している間は、
+ * その WorkItem が succeeded/dead (再試行され得ない) になるまで削除しない。
+ * WorkItem 側は自身の 30日 retention (`sweepWorkItems`) で先に消えることがあるが、
+ * その場合は保護対象から自然に外れるため二重に気にする必要はない。
+ * @param prisma - Prisma クライアント
+ * @param now - 基準時刻
+ * @returns 削除した行数
+ */
+async function sweepAccountClassificationObservations(
+  prisma: PrismaClient,
+  now: Date,
+): Promise<number> {
+  const nonterminalWorkItems = await prisma.analysisWorkItem.findMany({
+    where: {
+      kind: 'account_summary_refresh',
+      triggerType: 'account_classification_observation',
+      status: { notIn: TERMINAL_WORK_ITEM_STATUSES },
+    },
+    select: { triggerId: true },
+  })
+  const protectedObservationIds = nonterminalWorkItems.map((workItem) => workItem.triggerId)
+
+  const result = await prisma.accountClassificationObservation.deleteMany({
+    where: {
+      observedAt: { lt: daysBefore(now, ACCOUNT_CLASSIFICATION_OBSERVATION_RETENTION_DAYS) },
+      id: { notIn: protectedObservationIds },
+    },
+  })
+  return result.count
+}
+
 /** runRetentionSweep の結果。 */
 export interface RetentionSweepResult {
   deletedAnalysisRunCount: number
@@ -101,6 +135,7 @@ export interface RetentionSweepResult {
   deletedLabelMetricSnapshotCount: number
   deletedOverviewSnapshotCount: number
   deletedShadowDetectorEvaluationCount: number
+  deletedAccountClassificationObservationCount: number
 }
 
 /**
@@ -125,6 +160,10 @@ export async function runRetentionSweep(
 
   const deletedOverviewSnapshotCount = await sweepOverviewSnapshots(prisma, now)
   const deletedShadowDetectorEvaluationCount = await sweepShadowDetectorEvaluations(prisma, now)
+  const deletedAccountClassificationObservationCount = await sweepAccountClassificationObservations(
+    prisma,
+    now,
+  )
 
   return {
     deletedAnalysisRunCount: analysisRunResult.count,
@@ -132,5 +171,6 @@ export async function runRetentionSweep(
     deletedLabelMetricSnapshotCount: labelMetricSnapshotResult.count,
     deletedOverviewSnapshotCount,
     deletedShadowDetectorEvaluationCount,
+    deletedAccountClassificationObservationCount,
   }
 }

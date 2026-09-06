@@ -701,7 +701,8 @@ export async function processRetentionSweep(
       `${result.deletedWorkItemCount} AnalysisWorkItem, ` +
       `${result.deletedLabelMetricSnapshotCount} LabelMetricSnapshot, ` +
       `${result.deletedOverviewSnapshotCount} OverviewSnapshot, ` +
-      `${result.deletedShadowDetectorEvaluationCount} shadow DetectorEvaluation rows`,
+      `${result.deletedShadowDetectorEvaluationCount} shadow DetectorEvaluation rows, ` +
+      `${result.deletedAccountClassificationObservationCount} AccountClassificationObservation rows`,
   )
 }
 
