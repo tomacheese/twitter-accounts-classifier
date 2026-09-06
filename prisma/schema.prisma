@@ -191,6 +191,20 @@ model AccountLabelLatest {
   // block candidate selector 用の (labelDefinitionId, ruleVersion, confidence DESC, accountId)
   // WHERE value = true 部分 index も同様の理由で
   // migration 20260830185000_add_account_label_latest_block_candidate_index の raw SQL で管理する。
+  // このテーブルへの INSERT/UPDATE には AccountLabelChange を自動生成するトリガーが付いている。
+  // Prisma の schema DSL ではトリガーを表現できないため、raw SQL の
+  // migration 20260906010000_add_account_classification_snapshot_and_label_change_trigger で管理する。
+}
+
+/// storage-guard が計測したホストファイルシステムの空き容量・使用率を保持する単一行テーブル。
+/// relabel の fail-closed circuit breaker が読む唯一の情報源であり、書き込みは storage-guard
+/// service のみが行う。
+model StorageCapacityState {
+  id           String   @id
+  availableGib Float
+  usedPercent  Int
+  measuredAt   DateTime
+  updatedAt    DateTime @updatedAt
 }
 
 model WeeklyAnalysisRun {
@@ -525,6 +539,13 @@ model AccountClassificationObservation {
   observedAt DateTime
   labelCount Int
   createdAt  DateTime @default(now())
+  // crawl 経路でのみ設定する。relabel は Observation を作らないため常に null。
+  // サポートするバージョンは analyzer 側の分岐ロジックが判定する。
+  snapshotVersion       Int?
+  // labelDefinitionId・value・confidence・reason・method・ruleVersion・evaluable・labeledAt を
+  // 持つ不変な配列。crawl 実行時点の AccountLabelLatest 書き込みと同一 transaction で確定するため、
+  // 後続の relabel による上書きの影響を受けない。
+  classificationSnapshot Json?
 
   @@index([accountId, observedAt(sort: Desc)])
 }
