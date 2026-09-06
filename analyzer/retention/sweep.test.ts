@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { getPrismaClient } from '../db/client'
 import type { PrismaClient } from '../generated/prisma'
 import { runRetentionSweep } from './sweep'
 
 function createMockPrisma(
-  overrides: { eligibleWorkItemIds?: string[]; currentGenerationId?: string | null } = {},
+  overrides: {
+    eligibleWorkItemIds?: string[]
+    currentGenerationId?: string | null
+  } = {},
 ) {
   const analysisRunDeleteMany = vi.fn().mockResolvedValue({ count: 3 })
   const analysisWorkItemFindMany = vi
@@ -24,6 +28,9 @@ function createMockPrisma(
     )
   const overviewSnapshotDeleteMany = vi.fn().mockResolvedValue({ count: 4 })
   const detectorEvaluationDeleteMany = vi.fn().mockResolvedValue({ count: 5 })
+  // sweepAccountClassificationObservations は NOT EXISTS を含む一つの raw SQL 文で
+  // 削除するため、$executeRaw 経由になる (他の sweep 関数と違い model の deleteMany ではない)。
+  const executeRaw = vi.fn().mockResolvedValue(6)
   const prisma = {
     analysisRun: { deleteMany: analysisRunDeleteMany },
     analysisWorkItem: {
@@ -34,6 +41,7 @@ function createMockPrisma(
     readModelPointer: { findUnique: readModelPointerFindUnique },
     overviewSnapshot: { deleteMany: overviewSnapshotDeleteMany },
     detectorEvaluation: { deleteMany: detectorEvaluationDeleteMany },
+    $executeRaw: executeRaw,
   } as unknown as PrismaClient
   return {
     prisma,
@@ -44,6 +52,7 @@ function createMockPrisma(
     readModelPointerFindUnique,
     overviewSnapshotDeleteMany,
     detectorEvaluationDeleteMany,
+    executeRaw,
   }
 }
 
@@ -166,6 +175,97 @@ describe('runRetentionSweep', () => {
       deletedLabelMetricSnapshotCount: 1,
       deletedOverviewSnapshotCount: 4,
       deletedShadowDetectorEvaluationCount: 5,
+      deletedAccountClassificationObservationCount: 6,
     })
+  })
+
+  it('sweepAccountClassificationObservationsはexecuteRawの返り値をそのまま件数として使う', async () => {
+    const { prisma, executeRaw } = createMockPrisma()
+
+    const result = await runRetentionSweep(prisma, new Date('2026-08-08T00:00:00.000Z'))
+
+    expect(executeRaw).toHaveBeenCalledTimes(1)
+    expect(result.deletedAccountClassificationObservationCount).toBe(6)
+  })
+})
+
+// NOT EXISTS を含む一つの raw SQL 文であるため、削除対象の判定を伴う実際の挙動は
+// mock ではなく実 DB で検証する。
+describe.skipIf(!process.env.DATABASE_URL)('sweepAccountClassificationObservations (実DB)', () => {
+  const prisma = getPrismaClient()
+  const OLD = new Date('2026-01-01T00:00:00.000Z')
+  const now = new Date('2026-08-08T00:00:00.000Z')
+
+  beforeEach(async () => {
+    await prisma.analysisWorkItem.deleteMany()
+    await prisma.accountClassificationObservation.deleteMany()
+  })
+
+  it('nonterminalなaccount_summary_refresh WorkItemが参照する古い行は削除しない', async () => {
+    const observation = await prisma.accountClassificationObservation.create({
+      data: { accountId: 'acct_retained', observedAt: OLD, labelCount: 0 },
+    })
+    await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+        triggerId: observation.id,
+        status: 'queued',
+      },
+    })
+
+    await runRetentionSweep(prisma, now)
+
+    const remaining = await prisma.accountClassificationObservation.findUnique({
+      where: { id: observation.id },
+    })
+    expect(remaining).not.toBeNull()
+  })
+
+  it('参照するWorkItemがsucceeded/deadのみの古い行は削除する', async () => {
+    const observation = await prisma.accountClassificationObservation.create({
+      data: { accountId: 'acct_terminal_only', observedAt: OLD, labelCount: 0 },
+    })
+    await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+        triggerId: observation.id,
+        status: 'succeeded',
+      },
+    })
+
+    await runRetentionSweep(prisma, now)
+
+    const remaining = await prisma.accountClassificationObservation.findUnique({
+      where: { id: observation.id },
+    })
+    expect(remaining).toBeNull()
+  })
+
+  it('参照するWorkItemが無い古い行は削除する', async () => {
+    const observation = await prisma.accountClassificationObservation.create({
+      data: { accountId: 'acct_unreferenced', observedAt: OLD, labelCount: 0 },
+    })
+
+    await runRetentionSweep(prisma, now)
+
+    const remaining = await prisma.accountClassificationObservation.findUnique({
+      where: { id: observation.id },
+    })
+    expect(remaining).toBeNull()
+  })
+
+  it('保持期間内の新しい行はWorkItemの有無に関わらず削除しない', async () => {
+    const observation = await prisma.accountClassificationObservation.create({
+      data: { accountId: 'acct_recent', observedAt: now, labelCount: 0 },
+    })
+
+    await runRetentionSweep(prisma, now)
+
+    const remaining = await prisma.accountClassificationObservation.findUnique({
+      where: { id: observation.id },
+    })
+    expect(remaining).not.toBeNull()
   })
 })

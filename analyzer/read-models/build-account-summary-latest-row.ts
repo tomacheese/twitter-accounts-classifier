@@ -2,6 +2,7 @@ import type { PrismaClient } from '../generated/prisma'
 
 /** watermark 時点でのラベル値 1 件。 */
 export interface LabelAtWatermark {
+  sourceLabelId?: string
   accountId: string
   labelDefinitionId: string
   value: boolean
@@ -29,7 +30,7 @@ export async function findLabelsAtWatermarkForAccount(
 ): Promise<LabelAtWatermark[]> {
   return prisma.$queryRaw<LabelAtWatermark[]>`
     SELECT DISTINCT ON ("labelDefinitionId")
-      "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt",
+      "id" AS "sourceLabelId", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt",
       "evaluable"
     FROM "AccountLabel"
     WHERE "accountId" = ${accountId} AND "labeledAt" <= ${sourceWatermarkAt}
@@ -52,10 +53,10 @@ export async function findPreviousLabelAtWatermarkForAccount(
   sourceWatermarkAt: Date,
 ): Promise<LabelAtWatermark[]> {
   return prisma.$queryRaw<LabelAtWatermark[]>`
-    SELECT "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt",
+    SELECT "sourceLabelId", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt",
       "evaluable"
     FROM (
-      SELECT "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt",
+      SELECT "id" AS "sourceLabelId", "accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt",
         "evaluable",
         ROW_NUMBER() OVER (
           PARTITION BY "labelDefinitionId"

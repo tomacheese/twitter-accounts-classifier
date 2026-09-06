@@ -57,6 +57,9 @@ GRANT UPDATE ON TABLE "LabeledAccountCounter" TO analyzer;
 -- build identity は analyzer 自身の起動情報を upsert するため INSERT/UPDATE のみ許可する。
 GRANT INSERT, UPDATE ON TABLE "ComponentBuildIdentity" TO analyzer;
 
+-- retention sweep が保持期間超過分を削除するのみで INSERT/UPDATE はしないため DELETE のみ許可する。
+GRANT DELETE ON TABLE "AccountClassificationObservation" TO analyzer;
+
 -- 現行スキーマは autoincrement を使わずシーケンスを持たないため、schema 全体への
 -- USAGE/SELECT は付与しない。write allowlist のテーブルがシーケンス列を持つに至った
 -- 時点で、個別のシーケンスを名指しして GRANT を追加する。

@@ -13,9 +13,10 @@ services:
     shm_size: 512mb
     # 本番機のホスト RAM 15GB は Postgres・crawler・viewer で共有しており、
     # postgres:17-alpine の既定値 (shared_buffers=128MB、work_mem=4MB) は小さすぎるため調整する。
-    # ストレージは HDD のため、random_page_cost は既定値の 4 から変更しない。
-    # SSD/NVMe 向けの低い値に下げると、ランダムアクセスの実コストを過小評価し、
-    # 非効率な実行計画を選ばせる恐れがある。
+    # 本番は POSTGRES_DATA_HOST_PATH 経由で SSD (/mnt/ssd/twitter-accounts-classifier/postgres) を
+    # マウントするが、random_page_cost は既定値の 4 から変更しない。この値は他プランと比べた
+    # ランダムアクセスの相対コストを表すもので、ストレージ種別だけで機械的に下げてよい値ではなく、
+    # 実行計画の変化を検証しないまま変更するのは避ける。
     command:
       - "postgres"
       - "-c"
@@ -33,7 +34,7 @@ services:
       POSTGRES_PASSWORD: crawler
       POSTGRES_DB: twitter_accounts_classifier
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - ${POSTGRES_DATA_HOST_PATH:-./data/postgres}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U crawler -d twitter_accounts_classifier"]
       interval: 5s
@@ -101,13 +102,48 @@ services:
         condition: service_completed_successfully
     entrypoint: ["/app/relabeler-entrypoint.sh"]
     environment:
-      # analyzer と同様、HDD と PostgreSQL の shared memory を圧迫しないよう DB 接続本数を絞る。
+      # analyzer と同様、PostgreSQL の shared memory を圧迫しないよう DB 接続本数を絞る。
       DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}?connection_limit=5&pool_timeout=0
       RELABELER_INTERVAL_SECONDS: ${RELABELER_INTERVAL_SECONDS:-30}
       RELABELER_PRODUCER_BATCH_SIZE: ${RELABELER_PRODUCER_BATCH_SIZE:-5000}
       RELABELER_WORKER_BATCH_SIZE: ${RELABELER_WORKER_BATCH_SIZE:-2000}
       RELABELER_WORKER_CONCURRENCY: ${RELABELER_WORKER_CONCURRENCY:-1}
+      # 本番での drain 確認後、環境変数側でのみ false に切り替えて AccountLabel への
+      # 履歴書き込みを止める (Phase B)。イメージの再デプロイは不要。
+      RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED: ${RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED:-true}
+      # storage-guard が書く StorageCapacityState を見て relabel のクレームを止める circuit breaker のしきい値。
+      RELABEL_STORAGE_WARNING_AVAILABLE_GIB: ${RELABEL_STORAGE_WARNING_AVAILABLE_GIB:-120}
+      RELABEL_STORAGE_WARNING_USED_PERCENT: ${RELABEL_STORAGE_WARNING_USED_PERCENT:-75}
+      RELABEL_STORAGE_BLOCKED_AVAILABLE_GIB: ${RELABEL_STORAGE_BLOCKED_AVAILABLE_GIB:-100}
+      RELABEL_STORAGE_BLOCKED_USED_PERCENT: ${RELABEL_STORAGE_BLOCKED_USED_PERCENT:-80}
+      RELABEL_STORAGE_HYSTERESIS_RESUME_AVAILABLE_GIB: ${RELABEL_STORAGE_HYSTERESIS_RESUME_AVAILABLE_GIB:-120}
+      RELABEL_STORAGE_HYSTERESIS_RESUME_USED_PERCENT: ${RELABEL_STORAGE_HYSTERESIS_RESUME_USED_PERCENT:-75}
+      RELABEL_STORAGE_MAX_STALE_SECONDS: ${RELABEL_STORAGE_MAX_STALE_SECONDS:-180}
       GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
+    logging: *default-logging
+
+  storage-guard:
+    build:
+      context: .
+      dockerfile: crawler/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # entrypoint.sh は引数ありなら migrate/seed/crawl ループを飛ばしてそのまま exec するため、
+    # crawler 用の image をそのまま流用しつつこのサービス専用のコマンドだけを差し替えられる。
+    command: ["node", "dist/scripts/storage-guard-cycle.js"]
+    environment:
+      DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}?connection_limit=1&pool_timeout=0
+      STORAGE_GUARD_INTERVAL_SECONDS: ${STORAGE_GUARD_INTERVAL_SECONDS:-60}
+      POSTGRES_DATA_PATH: /data/postgres
+      GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
+    volumes:
+      # postgres service と同じホストパスを読み取り専用でマウントし、
+      # ファイルシステムの実測値 (df) を計測する。DB 内部のサイズ推定には依らない。
+      - ${POSTGRES_DATA_HOST_PATH:-./data/postgres}:/data/postgres:ro
     logging: *default-logging
 
   viewer:
@@ -197,7 +233,7 @@ services:
       # crawler/blocker/viewer と異なり、analyzer は正本テーブルへ SELECT のみ・
       # 分析/運用テーブルへ書き込み可能な allowlist 権限の analyzer ロールで接続する
       # (scripts/db/create-analyzer-role.sql 参照)。
-      # label metric refresh は全 Label を一時的に並列投入する。HDD と PostgreSQL の shared memory を圧迫しないよう DB 接続を 1 本に直列化し、有限件数のキュー待ちは失敗させない。
+      # label metric refresh は全 Label を一時的に並列投入する。PostgreSQL の shared memory を圧迫しないよう DB 接続を 1 本に直列化し、有限件数のキュー待ちは失敗させない。
       DATABASE_URL: postgresql://analyzer:${ANALYZER_DB_PASSWORD:?ANALYZER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}?connection_limit=1&pool_timeout=0
       ANALYZER_WORKER_CONCURRENCY: ${ANALYZER_WORKER_CONCURRENCY:-1}
       ANALYZER_POLL_INTERVAL_SECONDS: ${ANALYZER_POLL_INTERVAL_SECONDS:-10}

@@ -191,6 +191,26 @@ model AccountLabelLatest {
   // block candidate selector 用の (labelDefinitionId, ruleVersion, confidence DESC, accountId)
   // WHERE value = true 部分 index も同様の理由で
   // migration 20260830185000_add_account_label_latest_block_candidate_index の raw SQL で管理する。
+  // このテーブルへの INSERT/UPDATE には AccountLabelChange を自動生成するトリガーが付いている。
+  // Prisma の schema DSL ではトリガーを表現できないため、raw SQL の
+  // migration 20260906010000_add_account_classification_snapshot_and_label_change_trigger で管理する。
+}
+
+/// storage-guard が計測したホストファイルシステムの空き容量・使用率を保持する単一行テーブル。
+/// relabel の fail-closed circuit breaker が読む唯一の情報源であり、書き込みは storage-guard
+/// service のみが行う。
+model StorageCapacityState {
+  id           String   @id
+  availableGib Float
+  usedPercent  Int
+  measuredAt   DateTime
+  // circuit breaker の hysteresis 判定結果 (blocked かどうか) の永続化。
+  // プロセス内メモリだけで持つと relabeler 再起動のたびに ok 相当から
+  // 再判定してしまい、blocked から回復しきい値に届く前の中間的な値を
+  // 再起動直後の最初の計測として受け取った際に hysteresis を経ずに
+  // 再開してしまうため、storage-guard の書き込みを跨いで保持する。
+  relabelBlocked Boolean  @default(false)
+  updatedAt      DateTime @updatedAt
 }
 
 model WeeklyAnalysisRun {
@@ -525,6 +545,13 @@ model AccountClassificationObservation {
   observedAt DateTime
   labelCount Int
   createdAt  DateTime @default(now())
+  // crawl 経路でのみ設定する。relabel は Observation を作らないため常に null。
+  // サポートするバージョンは analyzer 側の分岐ロジックが判定する。
+  snapshotVersion       Int?
+  // labelDefinitionId・value・confidence・reason・method・ruleVersion・evaluable・labeledAt を
+  // 持つ不変な配列。crawl 実行時点の AccountLabelLatest 書き込みと同一 transaction で確定するため、
+  // 後続の relabel による上書きの影響を受けない。
+  classificationSnapshot Json?
 
   @@index([accountId, observedAt(sort: Desc)])
 }
@@ -963,10 +990,10 @@ model LabelMetricDaily {
   @@index([labelDefinitionId, date(sort: Desc)])
 }
 
-// sourceId (CrawlRun.id) を分類更新の再試行冪等キーとして使う。
-// 同じ CrawlRun による retry では sourceId が変わらず一致する。
-// sourceId が null の行 (直接呼び出しや legacy データ) は Postgres の仕様上
-// NULL 同士が重複と判定されないため、この場合は冪等性の保証対象外になる。
+// legacy snapshotless analyzer の再構築経路では、変化元 AccountLabel.id を
+// sourceLabelId として保持し、同じ raw history row の再処理だけを重複排除する。
+// DB trigger 由来の transition は raw AccountLabel row を持たないため null のままとし、
+// 同一ミリ秒に複数回 value が反転しても各 transition を別イベントとして保持する。
 model AccountLabelChange {
   id                 String   @id @default(cuid())
   accountId          String
@@ -979,15 +1006,10 @@ model AccountLabelChange {
   previousReason     String?
   newReason          String?
   sourceId           String?
+  sourceLabelId      String?  @unique
   changedAt          DateTime @default(now())
 
-  // changedAt には集計 build の watermark ではなく、変化の原因になった
-  // AccountLabel 行自身の labeledAt を入れる。同じ変化イベントは
-  // ANALYZER_WORKER_CONCURRENCY > 1 で並行 build しても常に同じ labeledAt
-  // を指すため、sourceId (どの build が記録したか) ではなく変化イベント自体の
-  // 同一性で重複排除できる。sourceId は NULL 同士が重複と判定されない
-  // (Postgres の仕様) ため、この一意制約には使えない。
-  @@unique([accountId, labelDefinitionId, changedAt])
+  @@index([accountId, labelDefinitionId, changedAt])
   @@index([accountId, changedAt(sort: Desc)])
   @@index([labelDefinitionId, changedAt(sort: Desc), id(sort: Desc)])
   @@index([changedAt(sort: Desc), id(sort: Desc)])

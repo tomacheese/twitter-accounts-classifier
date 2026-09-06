@@ -24,11 +24,14 @@ DECLARE
   ];
   limited_write_allowlist text[] := ARRAY['ComponentBuildIdentity'];
   update_only_allowlist text[] := ARRAY['LabeledAccountCounter'];
+  delete_only_allowlist text[] := ARRAY['AccountClassificationObservation'];
   missing_writes text;
   missing_limited_writes text;
   missing_update_only text;
+  missing_delete_only text;
   unexpected_limited_deletes text;
   unexpected_update_only_writes text;
+  unexpected_delete_only_writes text;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'analyzer') THEN
     RAISE EXCEPTION 'role analyzer does not exist';
@@ -123,6 +126,33 @@ BEGIN
       unexpected_update_only_writes;
   END IF;
 
+  SELECT string_agg(t, ', ')
+  INTO missing_delete_only
+  FROM unnest(delete_only_allowlist) AS t
+  WHERE to_regclass(format('public.%I', t)) IS NOT NULL
+    AND NOT has_table_privilege(
+      'analyzer', format('public.%I', t), 'DELETE'
+    );
+
+  IF missing_delete_only IS NOT NULL THEN
+    RAISE EXCEPTION 'analyzer lacks DELETE on delete-only tables: %',
+      missing_delete_only;
+  END IF;
+
+  SELECT string_agg(t, ', ')
+  INTO unexpected_delete_only_writes
+  FROM unnest(delete_only_allowlist) AS t
+  WHERE to_regclass(format('public.%I', t)) IS NOT NULL
+    AND has_table_privilege(
+      'analyzer', format('public.%I', t),
+      'INSERT, UPDATE, TRUNCATE, REFERENCES, TRIGGER'
+    );
+
+  IF unexpected_delete_only_writes IS NOT NULL THEN
+    RAISE EXCEPTION 'analyzer has unexpected non-DELETE writes on delete-only tables: %',
+      unexpected_delete_only_writes;
+  END IF;
+
   SELECT string_agg(format('%I.%I', n.nspname, c.relname), ', ' ORDER BY c.relname)
   INTO unexpected_write_tables
   FROM pg_class c
@@ -132,6 +162,7 @@ BEGIN
     AND NOT (c.relname = ANY (write_allowlist))
     AND NOT (c.relname = ANY (limited_write_allowlist))
     AND NOT (c.relname = ANY (update_only_allowlist))
+    AND NOT (c.relname = ANY (delete_only_allowlist))
     AND has_table_privilege(
       'analyzer',
       format('%I.%I', n.nspname, c.relname),

@@ -117,6 +117,33 @@ async function seedFollowGraphAndLabels(
 const MAX_WORKER_DRAIN_CYCLES = 10_000
 
 /**
+ * worker benchmark では本番の `storage-guard` service を同時起動しないため、
+ * fail-closed circuit breaker が「計測行なし/陳腐化」を理由に benchmark 自体を止めないよう、
+ * ローカル使い捨て DB にだけ合成の正常計測値を入れる。長時間 benchmark でも
+ * `RELABEL_STORAGE_MAX_STALE_SECONDS` を超えないよう各 cycle 直前に measuredAt を更新する。
+ * 本番コード側の fail-closed 条件やしきい値は一切変更しない。
+ */
+async function refreshBenchmarkStorageCapacityState(prisma: PrismaClient): Promise<void> {
+  const measuredAt = new Date()
+  await prisma.storageCapacityState.upsert({
+    where: { id: 'singleton' },
+    create: {
+      id: 'singleton',
+      availableGib: 500,
+      usedPercent: 10,
+      measuredAt,
+      relabelBlocked: false,
+    },
+    update: {
+      availableGib: 500,
+      usedPercent: 10,
+      measuredAt,
+      relabelBlocked: false,
+    },
+  })
+}
+
+/**
  * account_relabel の WorkItem queue が空になるまで runRelabelWorkerCycleOnce を回し、
  * サイクル数・経過時間・throughput を計測する。
  * chunk size を変えた比較に使う本命のベンチマークパス。
@@ -132,6 +159,7 @@ async function runWorkerDrainBenchmark(prisma: PrismaClient): Promise<void> {
   let pending: number
   do {
     cycles++
+    await refreshBenchmarkStorageCapacityState(prisma)
     await runRelabelWorkerCycleOnce(prisma)
     pending = await prisma.analysisWorkItem.count({
       where: { kind: 'account_relabel', status: { in: ['queued', 'failed'] } },
