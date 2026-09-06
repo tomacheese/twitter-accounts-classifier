@@ -18,6 +18,7 @@ import {
 } from './db/analysis-work-item-repository'
 import {
   recordAccountLabelsBulkForAccounts,
+  recordAccountLabelsBulkLatestOnlyForAccounts,
   ensureLabelDefinitionsForRules,
   type AccountLabelBulkInput,
 } from './db/label-repository'
@@ -45,6 +46,7 @@ import {
   getRelabelerWorkerBatchSize,
   getRelabelerWorkerChunkSize,
   getRelabelerWorkerConcurrency,
+  isRelabelAccountLabelHistoryWriteEnabled,
 } from './config/env'
 
 const logger = Logger.configure('relabel-worker')
@@ -291,10 +293,10 @@ async function evaluateAccountRelabelItemGroup(
             return evidence ? [evidence] : []
           })
           if (subBatchLabels.length > 0) {
-            await recordAccountLabelsBulkForAccounts(tx, {
-              sourceKind: 'relabel',
-              labels: subBatchLabels,
-            })
+            const recordLabels = isRelabelAccountLabelHistoryWriteEnabled()
+              ? recordAccountLabelsBulkForAccounts
+              : recordAccountLabelsBulkLatestOnlyForAccounts
+            await recordLabels(tx, { sourceKind: 'relabel', labels: subBatchLabels })
           }
           for (const evidence of subBatchEvidence) {
             await upsertReplyHijackEvidence(tx, evidence)

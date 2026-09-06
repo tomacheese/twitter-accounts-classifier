@@ -342,6 +342,70 @@ export async function recordAccountLabelsBulkForAccounts(
 }
 
 /**
+ * `recordAccountLabelsBulkForAccounts` と異なり `AccountLabel` への履歴 INSERT を行わず、
+ * `AccountLabelLatest` の現在値だけを更新する。Phase B (relabel の history 書き込み停止) 用。
+ * `AccountLabelLatest` への変化は `AccountLabelChange` トリガーが引き続き検出するため、
+ * viewer の変更履歴表示はこの経路でも失われない。
+ * @param prisma - Prisma クライアント
+ * @param params - 記録対象のアカウントを跨いだ評価結果一覧
+ */
+export async function recordAccountLabelsBulkLatestOnlyForAccounts(
+  prisma: PrismaClient | Prisma.TransactionClient,
+  params: RecordAccountLabelsBulkForAccountsParams,
+): Promise<void> {
+  for (
+    let offset = 0;
+    offset < params.labels.length;
+    offset += RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE
+  ) {
+    const subChunk = params.labels.slice(offset, offset + RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE)
+    if (subChunk.length === 0) continue
+
+    const accountIds = subChunk.map((label) => label.accountId)
+    const labelDefinitionIds = subChunk.map((label) => label.labelDefinitionId)
+    const values = subChunk.map((label) => label.result.value)
+    const confidences = subChunk.map((label) => label.result.confidence)
+    const reasons = subChunk.map((label) => label.result.reason)
+    const methods = subChunk.map((label) => label.method)
+    const ruleVersions = subChunk.map((label) => label.ruleVersion)
+    const evaluables = subChunk.map((label) => label.result.evaluable ?? true)
+    const { sourceKind, sourceId, sourceUsername } = params
+
+    await prisma.$executeRaw`
+      WITH shared_now AS (
+        SELECT now() AS "labeledAt"
+      ),
+      input_rows AS (
+        SELECT * FROM UNNEST(${accountIds}::text[], ${labelDefinitionIds}::text[], ${values}::boolean[], ${confidences}::double precision[], ${reasons}::text[], ${methods}::text[], ${ruleVersions}::text[], ${evaluables}::boolean[])
+          AS u("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable")
+      ),
+      to_upsert AS (
+        SELECT ir.*
+        FROM input_rows ir
+        LEFT JOIN "AccountLabelLatest" al
+          ON al."accountId" = ir."accountId" AND al."labelDefinitionId" = ir."labelDefinitionId"
+        WHERE al."accountId" IS NULL
+           OR al."value" IS DISTINCT FROM ir."value"
+           OR al."ruleVersion" IS DISTINCT FROM ir."ruleVersion"
+           OR al."confidence" IS DISTINCT FROM ir."confidence"
+           OR al."reason" IS DISTINCT FROM ir."reason"
+           OR al."method" IS DISTINCT FROM ir."method"
+           OR al."evaluable" IS DISTINCT FROM ir."evaluable"
+      )
+      INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
+      SELECT tu."accountId", tu."labelDefinitionId", tu."value", tu."confidence", tu."reason", tu."method", tu."ruleVersion", tu."evaluable", shared_now."labeledAt", ${sourceKind}, ${sourceId ?? null}, ${sourceUsername ?? null}
+      FROM to_upsert tu
+      CROSS JOIN shared_now
+      ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
+      SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
+          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "evaluable" = EXCLUDED."evaluable", "labeledAt" = EXCLUDED."labeledAt",
+          "sourceKind" = EXCLUDED."sourceKind", "sourceId" = EXCLUDED."sourceId", "sourceUsername" = EXCLUDED."sourceUsername"
+      WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
+    `
+  }
+}
+
+/**
  * crawl 中のラベル評価結果を記録する。
  * `AccountLabelLatest` の直前の value・ruleVersion・confidence・reason のいずれかと
  * 一致しない場合のみ `AccountLabel` に履歴を追記し、

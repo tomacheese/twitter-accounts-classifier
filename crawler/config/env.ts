@@ -150,3 +150,15 @@ export function getRelabelerLabelLookupChunkSize(): number {
 export function getRelabelerOrphanRecoveryBatchSize(): number {
   return parsePositiveIntEnv('RELABELER_ORPHAN_RECOVERY_BATCH_SIZE', 1000)
 }
+
+/**
+ * relabel が `AccountLabel` へ履歴行を書き続けるか (Phase A) を制御する feature flag。
+ * 本番での drain 確認が済むまでは既定で有効のままにし、確認後に環境変数側でのみ
+ * 無効化 (Phase B) してロールバック可能性を保つ。
+ * @returns 有効なら true (既定)。`RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED` が
+ *   大文字小文字を問わず厳密に `false` のときのみ false
+ */
+export function isRelabelAccountLabelHistoryWriteEnabled(): boolean {
+  const raw = process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED
+  return raw?.toLowerCase() !== 'false'
+}

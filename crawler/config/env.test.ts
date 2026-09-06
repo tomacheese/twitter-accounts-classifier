@@ -12,6 +12,7 @@ import {
   getWeeklyAnalysisStaleThresholdSeconds,
   getTwitterRequestTimeoutMs,
   getCrawlAccountTimeoutMs,
+  isRelabelAccountLabelHistoryWriteEnabled,
 } from './env'
 
 const { warnMock } = vi.hoisted(() => ({ warnMock: vi.fn() }))
@@ -408,5 +409,32 @@ describe('getCrawlAccountTimeoutMs', () => {
     expect(() => getCrawlAccountTimeoutMs()).toThrow(
       'CRAWL_ACCOUNT_TIMEOUT_MS environment variable must be a positive integer',
     )
+  })
+})
+
+describe('isRelabelAccountLabelHistoryWriteEnabled', () => {
+  const originalValue = process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      delete process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED
+    } else {
+      process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED = originalValue
+    }
+  })
+
+  it('returns true when unset (Phase A の既定)', () => {
+    delete process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED
+    expect(isRelabelAccountLabelHistoryWriteEnabled()).toBe(true)
+  })
+
+  it('returns false only when the value is exactly "false" (大文字小文字を問わない)', () => {
+    process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED = 'FALSE'
+    expect(isRelabelAccountLabelHistoryWriteEnabled()).toBe(false)
+  })
+
+  it('returns true for any other value', () => {
+    process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED = 'no'
+    expect(isRelabelAccountLabelHistoryWriteEnabled()).toBe(true)
   })
 })

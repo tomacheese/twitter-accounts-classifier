@@ -798,6 +798,58 @@ describe('evaluateAccountRelabelItems', () => {
       data: { lastErrorSummary: expect.stringContaining('connection reset') as string },
     })
   })
+
+  it('calls recordAccountLabelsBulkLatestOnlyForAccounts instead of recordAccountLabelsBulkForAccounts when the history-write flag is disabled (Phase B)', async () => {
+    const originalValue = process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED
+    process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED = 'false'
+    try {
+      const rule: LabelRule = {
+        key: 'test_rule',
+        description: 'test',
+        version: '1.0.0',
+        evaluate: () => ({ value: true, confidence: 1, reason: 'test' }),
+      }
+      const registry = new LabelRuleRegistry()
+      registry.register(rule)
+      const prisma = makeTransactionalPrisma({
+        account: { findMany: vi.fn().mockResolvedValue([{ id: 'account-1' }]) },
+      })
+      vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
+      vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
+      const historyWriteSpy = vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+      const latestOnlySpy = vi
+        .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
+        .mockResolvedValue()
+      vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
+        { id: 'wi-1', status: 'succeeded' },
+      ])
+
+      await evaluateAccountRelabelItems(prisma, [{ id: 'wi-1', triggerId: 'account-1' } as never], {
+        registry,
+        labelDefinitionIds: new Map([['test_rule', 'def-1']]),
+        duplicateReplyIndex: { countOtherAccounts: () => 0 },
+        bioDuplicateIndex: { countOtherAccounts: () => 0 },
+        replyHijackIndex: {
+          swarmSizeFor: () => 0,
+          isEligibleForScreening: () => true,
+          evidenceFor: () => undefined,
+        },
+        followGraphLabelIndex: { signalsFor: () => ({}) },
+        selfReplyPromoIndex: { evidenceFor: () => undefined },
+        concurrency: 1,
+        leaseOwner: 'test-worker',
+      })
+
+      expect(historyWriteSpy).not.toHaveBeenCalled()
+      expect(latestOnlySpy).toHaveBeenCalledWith(prisma, expect.anything())
+    } finally {
+      if (originalValue === undefined) {
+        delete process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED
+      } else {
+        process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED = originalValue
+      }
+    }
+  })
 })
 
 describe('scanForStaleAccounts', () => {
