@@ -92,7 +92,43 @@ interface RecordAccountLabelsBulkRow {
   historyInserted: boolean
   latestUpserted: boolean
   semanticNoOp: boolean
+  effectiveLabeledAt: Date
 }
+
+/**
+ * この呼び出しで評価された 1 ラベル分の確定後の値。
+ * `AccountLabel` への履歴 INSERT の有無 (semanticNoOp かどうか) によらず、
+ * 評価対象になった全ラベルについて 1 件ずつ得られる。
+ */
+export interface EffectiveLabelRow {
+  labelDefinitionId: string
+  value: boolean
+  confidence: number
+  reason: string
+  method: string
+  ruleVersion: string
+  evaluable: boolean
+  labeledAt: Date
+}
+
+/**
+ * `AccountClassificationObservation.classificationSnapshot` に格納する 1 ラベル分の内容。
+ * analyzer 側の分岐ロジックが対応バージョンを判定するため、
+ * `snapshotVersion` とセットで保存する。
+ */
+export interface ClassificationSnapshotEntry {
+  labelDefinitionId: string
+  value: boolean
+  confidence: number
+  reason: string
+  method: string
+  ruleVersion: string
+  evaluable: boolean
+  labeledAt: string
+}
+
+/** `AccountClassificationObservation.snapshotVersion` の現行値。 */
+export const ACCOUNT_CLASSIFICATION_SNAPSHOT_VERSION = 1
 
 export interface AccountLabelBulkInput {
   accountId: string
@@ -111,8 +147,10 @@ export interface AccountLabelBulkInput {
  * @param sourceKind - どの処理がこの行を書いたか (crawl・relabel など)
  * @param sourceId - 発生源となった run の ID
  * @param sourceUsername - 発生源となったログインアカウント
- * @returns 作成された `AccountLabel` 履歴行。`labels` と同じ順序とは限らないため、
- *   対応付けが必要なら `accountId`・`labelDefinitionId` で突き合わせる。
+ * @returns `history` (作成された `AccountLabel` 履歴行。`labels` と同じ順序とは限らないため、
+ *   対応付けが必要なら `accountId`・`labelDefinitionId` で突き合わせる) と、
+ *   `effective` (この呼び出しで評価された全ラベルの確定後の値。`AccountLabel` への
+ *   履歴 INSERT の有無を問わない)
  */
 async function recordAccountLabelsBulkCore(
   prisma: PrismaClient | Prisma.TransactionClient,
@@ -120,8 +158,8 @@ async function recordAccountLabelsBulkCore(
   sourceKind: string,
   sourceId: string | undefined,
   sourceUsername: string | undefined,
-): Promise<AccountLabel[]> {
-  if (labels.length === 0) return []
+): Promise<{ history: AccountLabel[]; effective: EffectiveLabelRow[] }> {
+  if (labels.length === 0) return { history: [], effective: [] }
 
   const ids = labels.map(() => randomUUID())
   const accountIds = labels.map((label) => label.accountId)
@@ -185,14 +223,27 @@ async function recordAccountLabelsBulkCore(
       ) AS "latestUpserted",
       NOT EXISTS (
         SELECT 1 FROM to_insert ti WHERE ti."id" = ir."id"
-      ) AS "semanticNoOp"
+      ) AS "semanticNoOp",
+      -- semanticNoOp な行 (今回の評価が既存 AccountLabelLatest と全フィールド一致) は
+      -- 今回書き込まれないため、その行の実効 labeledAt は既存行のものを引き継ぐ。
+      COALESCE(ih."labeledAt", al."labeledAt") AS "effectiveLabeledAt"
     FROM input_rows ir
     LEFT JOIN inserted_history ih ON ih."id" = ir."id"
+    LEFT JOIN "AccountLabelLatest" al
+      ON al."accountId" = ir."accountId" AND al."labelDefinitionId" = ir."labelDefinitionId"
   `
 
   const history: AccountLabel[] = []
+  const effective: EffectiveLabelRow[] = []
   for (const row of rows) {
-    const { historyInserted, latestUpserted, semanticNoOp, labeledAt, ...rest } = row
+    const {
+      historyInserted,
+      latestUpserted,
+      semanticNoOp,
+      labeledAt,
+      effectiveLabeledAt,
+      ...rest
+    } = row
     if (!latestUpserted && !semanticNoOp) {
       logger.warn(
         `recordAccountLabelsBulk: AccountLabelLatest upsert guard skipped the write (accountId=${rest.accountId}, labelDefinitionId=${rest.labelDefinitionId})`,
@@ -207,9 +258,19 @@ async function recordAccountLabelsBulkCore(
         sourceUsername: sourceUsername ?? null,
       })
     }
+    effective.push({
+      labelDefinitionId: rest.labelDefinitionId,
+      value: rest.value,
+      confidence: rest.confidence,
+      reason: rest.reason,
+      method: rest.method,
+      ruleVersion: rest.ruleVersion,
+      evaluable: rest.evaluable,
+      labeledAt: effectiveLabeledAt,
+    })
   }
 
-  return history
+  return { history, effective }
 }
 
 /**
@@ -223,13 +284,14 @@ export async function recordAccountLabelsBulk(
   prisma: PrismaClient,
   params: RecordAccountLabelsBulkParams,
 ): Promise<AccountLabel[]> {
-  return recordAccountLabelsBulkCore(
+  const { history } = await recordAccountLabelsBulkCore(
     prisma,
     params.labels.map((label) => ({ ...label, accountId: params.accountId })),
     params.sourceKind,
     params.sourceId,
     params.sourceUsername,
   )
+  return history
 }
 
 export interface RecordAccountLabelsBulkForAccountsParams {
@@ -267,15 +329,14 @@ export async function recordAccountLabelsBulkForAccounts(
     offset += RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE
   ) {
     const subChunk = params.labels.slice(offset, offset + RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE)
-    history.push(
-      ...(await recordAccountLabelsBulkCore(
-        prisma,
-        subChunk,
-        params.sourceKind,
-        params.sourceId,
-        params.sourceUsername,
-      )),
+    const { history: subHistory } = await recordAccountLabelsBulkCore(
+      prisma,
+      subChunk,
+      params.sourceKind,
+      params.sourceId,
+      params.sourceUsername,
     )
+    history.push(...subHistory)
   }
   return history
 }
@@ -450,13 +511,26 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
       result: label.result,
     }))
 
-  await recordAccountLabelsBulk(prisma, {
-    accountId: params.accountId,
-    labels: claimedLabels,
-    sourceKind: 'crawl',
-    sourceId: params.crawlRunId,
-    sourceUsername: params.username,
-  })
+  const { effective } = await recordAccountLabelsBulkCore(
+    prisma,
+    claimedLabels.map((label) => ({ ...label, accountId: params.accountId })),
+    'crawl',
+    params.crawlRunId,
+    params.username,
+  )
+
+  // snapshot は「この crawl で評価された全ラベルの現在値」を漏れなく含む必要があるため、
+  // AccountLabel への履歴 INSERT の有無 (semanticNoOp かどうか) を問わない effective を使う。
+  const classificationSnapshot: ClassificationSnapshotEntry[] = effective.map((row) => ({
+    labelDefinitionId: row.labelDefinitionId,
+    value: row.value,
+    confidence: row.confidence,
+    reason: row.reason,
+    method: row.method,
+    ruleVersion: row.ruleVersion,
+    evaluable: row.evaluable,
+    labeledAt: row.labeledAt.toISOString(),
+  }))
 
   const observation = await prisma.accountClassificationObservation.create({
     data: {
@@ -465,6 +539,8 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
       username: params.username,
       observedAt: new Date(),
       labelCount: claimedLabels.length,
+      snapshotVersion: ACCOUNT_CLASSIFICATION_SNAPSHOT_VERSION,
+      classificationSnapshot: classificationSnapshot as unknown as Prisma.InputJsonValue,
     },
   })
 

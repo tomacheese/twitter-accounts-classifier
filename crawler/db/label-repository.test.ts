@@ -626,7 +626,25 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
   it('claims labels and returns an observation id without opening its own transaction', async () => {
     const queryRaw = vi
       .fn()
-      .mockResolvedValue([{ labelDefinitionId: 'ld1', method: 'rule', ruleVersion: 'v1' }])
+      .mockResolvedValueOnce([{ labelDefinitionId: 'ld1', method: 'rule', ruleVersion: 'v1' }])
+      .mockResolvedValueOnce([
+        {
+          id: 'al1',
+          accountId: 'u1',
+          labelDefinitionId: 'ld1',
+          value: true,
+          confidence: 1,
+          reason: 'test',
+          method: 'rule',
+          ruleVersion: 'v1',
+          evaluable: true,
+          labeledAt: new Date('2026-08-04T00:00:00Z'),
+          historyInserted: true,
+          latestUpserted: true,
+          semanticNoOp: false,
+          effectiveLabeledAt: new Date('2026-08-04T00:00:00Z'),
+        },
+      ])
     const create = vi.fn().mockResolvedValue({ id: 'observation1' })
     const upsert = vi.fn().mockResolvedValue({})
     const txClient = {
@@ -652,6 +670,23 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
     })
 
     expect(observationId).toBe('observation1')
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        snapshotVersion: 1,
+        classificationSnapshot: [
+          {
+            labelDefinitionId: 'ld1',
+            value: true,
+            confidence: 1,
+            reason: 'test',
+            method: 'rule',
+            ruleVersion: 'v1',
+            evaluable: true,
+            labeledAt: '2026-08-04T00:00:00.000Z',
+          },
+        ],
+      }),
+    })
   })
 
   it('returns null without creating an observation when there are no labels', async () => {

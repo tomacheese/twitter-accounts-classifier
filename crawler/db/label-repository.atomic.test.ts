@@ -125,6 +125,92 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
     })
     expect(workItemCount).toBe(1)
   })
+
+  it('stores a classificationSnapshot covering every evaluated label, including semantic no-ops carrying the existing AccountLabelLatest value', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_snapshot',
+        screenName: 'dave',
+        displayName: 'Dave',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelA = await prisma.labelDefinition.create({
+      data: { key: 'test_label_snapshot_a', description: 'テスト用ラベルA' },
+    })
+    const labelB = await prisma.labelDefinition.create({
+      data: { key: 'test_label_snapshot_b', description: 'テスト用ラベルB' },
+    })
+    const crawlRun1 = await prisma.crawlRun.create({
+      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
+    })
+
+    const firstObservationId = await recordCrawlAccountLabelsAtomic(prisma, {
+      accountId: account.id,
+      crawlRunId: crawlRun1.id,
+      username: 'login_account',
+      labels: [
+        {
+          labelDefinitionId: labelA.id,
+          result: { value: true, confidence: 0.9, reason: 'reason a' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+        {
+          labelDefinitionId: labelB.id,
+          result: { value: false, confidence: 0.1, reason: 'reason b' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+    const firstObservation = await prisma.accountClassificationObservation.findUniqueOrThrow({
+      where: { id: firstObservationId ?? '' },
+    })
+    expect(firstObservation.snapshotVersion).toBe(1)
+    const firstSnapshot = firstObservation.classificationSnapshot as unknown as {
+      labelDefinitionId: string
+      value: boolean
+    }[]
+    expect(firstSnapshot).toHaveLength(2)
+    expect(firstSnapshot.find((entry) => entry.labelDefinitionId === labelA.id)?.value).toBe(true)
+    expect(firstSnapshot.find((entry) => entry.labelDefinitionId === labelB.id)?.value).toBe(false)
+
+    // 2 回目の crawl (別 crawlRunId) で labelA を同一の内容で再評価する。
+    // CrawlAccountLabelRun の一意制約は crawlRunId を含むため claim は成立するが、
+    // AccountLabelLatest への値そのものは変わらない semanticNoOp になる。
+    const crawlRun2 = await prisma.crawlRun.create({
+      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
+    })
+    const secondObservationId = await recordCrawlAccountLabelsAtomic(prisma, {
+      accountId: account.id,
+      crawlRunId: crawlRun2.id,
+      username: 'login_account',
+      labels: [
+        {
+          labelDefinitionId: labelA.id,
+          result: { value: true, confidence: 0.9, reason: 'reason a' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+    const secondObservation = await prisma.accountClassificationObservation.findUniqueOrThrow({
+      where: { id: secondObservationId ?? '' },
+    })
+    const secondSnapshot = secondObservation.classificationSnapshot as unknown as {
+      labelDefinitionId: string
+      value: boolean
+      confidence: number
+    }[]
+    expect(secondSnapshot).toHaveLength(1)
+    expect(secondSnapshot[0].labelDefinitionId).toBe(labelA.id)
+    expect(secondSnapshot[0].value).toBe(true)
+    expect(secondSnapshot[0].confidence).toBe(0.9)
+  })
 })
 
 describe.skipIf(!process.env.DATABASE_URL)('recordAccountLabelsBulk', () => {
