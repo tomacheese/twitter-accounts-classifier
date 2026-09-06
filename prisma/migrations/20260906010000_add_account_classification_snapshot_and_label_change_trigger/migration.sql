@@ -4,8 +4,8 @@ ALTER TABLE "AccountClassificationObservation"
   ADD COLUMN "snapshotVersion" INTEGER,
   ADD COLUMN "classificationSnapshot" JSONB;
 
--- gen_random_uuid() の可用性を明示的に保証する。
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- gen_random_uuid() は PostgreSQL 13 以降 pg_catalog に組み込みのため、
+-- pgcrypto extension の作成は不要 (権限要求を増やすだけになる)。
 
 -- AccountLabelLatest への書き込みを契機に AccountLabelChange を自動生成するトリガー。
 -- relabel が Observation を作らないため、relabel 由来の value 変化を捕捉できるのは
@@ -53,6 +53,7 @@ CREATE TABLE "StorageCapacityState" (
   "availableGib" DOUBLE PRECISION NOT NULL,
   "usedPercent" INTEGER NOT NULL,
   "measuredAt" TIMESTAMP(3) NOT NULL,
+  "relabelBlocked" BOOLEAN NOT NULL DEFAULT false,
   "updatedAt" TIMESTAMP(3) NOT NULL,
 
   CONSTRAINT "StorageCapacityState_pkey" PRIMARY KEY ("id")

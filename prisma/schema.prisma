@@ -204,7 +204,13 @@ model StorageCapacityState {
   availableGib Float
   usedPercent  Int
   measuredAt   DateTime
-  updatedAt    DateTime @updatedAt
+  // circuit breaker の hysteresis 判定結果 (blocked かどうか) の永続化。
+  // プロセス内メモリだけで持つと relabeler 再起動のたびに ok 相当から
+  // 再判定してしまい、blocked から回復しきい値に届く前の中間的な値を
+  // 再起動直後の最初の計測として受け取った際に hysteresis を経ずに
+  // 再開してしまうため、storage-guard の書き込みを跨いで保持する。
+  relabelBlocked Boolean  @default(false)
+  updatedAt      DateTime @updatedAt
 }
 
 model WeeklyAnalysisRun {

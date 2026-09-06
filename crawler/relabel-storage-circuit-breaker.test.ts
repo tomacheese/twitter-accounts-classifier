@@ -1,9 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from './generated/prisma'
-import {
-  checkRelabelStorageCircuitBreaker,
-  resetRelabelStorageCircuitBreakerStateForTest,
-} from './relabel-storage-circuit-breaker'
+import { checkRelabelStorageCircuitBreaker } from './relabel-storage-circuit-breaker'
 
 const ENV_KEYS = [
   'RELABEL_STORAGE_WARNING_AVAILABLE_GIB',
@@ -18,13 +15,21 @@ const ENV_KEYS = [
 const NOW = new Date('2026-09-06T00:00:00.000Z')
 
 function createMockPrisma(
-  state: { availableGib: number; usedPercent: number; measuredAt: Date } | null,
+  state: {
+    availableGib: number
+    usedPercent: number
+    measuredAt: Date
+    relabelBlocked: boolean
+  } | null,
 ) {
-  return {
+  const update = vi.fn().mockResolvedValue({})
+  const prisma = {
     storageCapacityState: {
       findUnique: () => Promise.resolve(state),
+      update,
     },
   } as unknown as PrismaClient
+  return { prisma, update }
 }
 
 describe('checkRelabelStorageCircuitBreaker', () => {
@@ -35,7 +40,6 @@ describe('checkRelabelStorageCircuitBreaker', () => {
       originalValues[key] = process.env[key]
       Reflect.deleteProperty(process.env, key)
     }
-    resetRelabelStorageCircuitBreakerStateForTest()
   })
 
   afterEach(() => {
@@ -49,7 +53,7 @@ describe('checkRelabelStorageCircuitBreaker', () => {
   })
 
   it('行が存在しない場合は blocked を返す (fail-closed)', async () => {
-    const prisma = createMockPrisma(null)
+    const { prisma } = createMockPrisma(null)
 
     const result = await checkRelabelStorageCircuitBreaker(prisma, { now: NOW })
 
@@ -58,10 +62,11 @@ describe('checkRelabelStorageCircuitBreaker', () => {
 
   it('measuredAt が既定の maxStaleSeconds (180秒) を超えて古い場合は blocked を返す', async () => {
     const staleMeasuredAt = new Date(NOW.getTime() - 181_000)
-    const prisma = createMockPrisma({
+    const { prisma } = createMockPrisma({
       availableGib: 500,
       usedPercent: 10,
       measuredAt: staleMeasuredAt,
+      relabelBlocked: false,
     })
 
     const result = await checkRelabelStorageCircuitBreaker(prisma, { now: NOW })
@@ -69,64 +74,124 @@ describe('checkRelabelStorageCircuitBreaker', () => {
     expect(result.status).toBe('blocked')
   })
 
-  it('blocked 条件 (空き容量不足) を満たす場合は blocked を返す', async () => {
-    const prisma = createMockPrisma({ availableGib: 99, usedPercent: 10, measuredAt: NOW })
+  it('blocked 条件 (空き容量不足) を満たす場合は blocked を返し、relabelBlocked を true へ更新する', async () => {
+    const { prisma, update } = createMockPrisma({
+      availableGib: 99,
+      usedPercent: 10,
+      measuredAt: NOW,
+      relabelBlocked: false,
+    })
 
     const result = await checkRelabelStorageCircuitBreaker(prisma, { now: NOW })
 
     expect(result).toEqual({ status: 'blocked', availableGib: 99, usedPercent: 10 })
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'singleton' },
+      data: { relabelBlocked: true },
+    })
   })
 
   it('blocked 条件 (使用率過多) を満たす場合は blocked を返す', async () => {
-    const prisma = createMockPrisma({ availableGib: 500, usedPercent: 80, measuredAt: NOW })
+    const { prisma } = createMockPrisma({
+      availableGib: 500,
+      usedPercent: 80,
+      measuredAt: NOW,
+      relabelBlocked: false,
+    })
 
     const result = await checkRelabelStorageCircuitBreaker(prisma, { now: NOW })
 
     expect(result.status).toBe('blocked')
   })
 
-  it('直前が blocked で復帰条件を満たさない場合は blocked を維持する (hysteresis)', async () => {
-    const blockedPrisma = createMockPrisma({ availableGib: 99, usedPercent: 10, measuredAt: NOW })
-    await checkRelabelStorageCircuitBreaker(blockedPrisma, { now: NOW })
-
+  it('永続化された relabelBlocked=true を再起動後の最初の計測として読んだ場合、復帰条件を満たさない中間的な値では blocked を維持する (hysteresis)', async () => {
     // blocked しきい値 (< 100 GiB) は脱したが、復帰しきい値 (> 120 GiB) にはまだ届かない
-    const recoveringPrisma = createMockPrisma({
+    const { prisma, update } = createMockPrisma({
       availableGib: 110,
       usedPercent: 10,
       measuredAt: NOW,
+      relabelBlocked: true,
     })
-    const result = await checkRelabelStorageCircuitBreaker(recoveringPrisma, { now: NOW })
+
+    const result = await checkRelabelStorageCircuitBreaker(prisma, { now: NOW })
 
     expect(result.status).toBe('blocked')
+    expect(update).not.toHaveBeenCalled()
   })
 
-  it('直前が blocked でも復帰条件を満たせば ok/warning へ戻る', async () => {
-    const blockedPrisma = createMockPrisma({ availableGib: 99, usedPercent: 10, measuredAt: NOW })
-    await checkRelabelStorageCircuitBreaker(blockedPrisma, { now: NOW })
-
-    const recoveredPrisma = createMockPrisma({
+  it('永続化された relabelBlocked=true でも復帰条件を満たせば ok へ戻り、relabelBlocked を false へ更新する', async () => {
+    const { prisma, update } = createMockPrisma({
       availableGib: 200,
       usedPercent: 10,
       measuredAt: NOW,
+      relabelBlocked: true,
     })
-    const result = await checkRelabelStorageCircuitBreaker(recoveredPrisma, { now: NOW })
+
+    const result = await checkRelabelStorageCircuitBreaker(prisma, { now: NOW })
 
     expect(result.status).toBe('ok')
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'singleton' },
+      data: { relabelBlocked: false },
+    })
   })
 
-  it('warning 条件のみを満たす場合は warning を返す (blocked にはしない)', async () => {
-    const prisma = createMockPrisma({ availableGib: 119, usedPercent: 10, measuredAt: NOW })
+  it('永続化された relabelBlocked=false のまま warning 条件のみを満たす場合は warning を返し、クレームを止めない (blocked にしない)', async () => {
+    const { prisma, update } = createMockPrisma({
+      availableGib: 119,
+      usedPercent: 10,
+      measuredAt: NOW,
+      relabelBlocked: false,
+    })
 
     const result = await checkRelabelStorageCircuitBreaker(prisma, { now: NOW })
 
     expect(result.status).toBe('warning')
+    expect(update).not.toHaveBeenCalled()
   })
 
   it('どちらの条件も満たさない場合は ok を返す', async () => {
-    const prisma = createMockPrisma({ availableGib: 500, usedPercent: 10, measuredAt: NOW })
+    const { prisma } = createMockPrisma({
+      availableGib: 500,
+      usedPercent: 10,
+      measuredAt: NOW,
+      relabelBlocked: false,
+    })
 
     const result = await checkRelabelStorageCircuitBreaker(prisma, { now: NOW })
 
     expect(result).toEqual({ status: 'ok', availableGib: 500, usedPercent: 10 })
+  })
+
+  it('プロセス再起動直後でも、直前に relabelBlocked=false で保存された警告水準の計測では warning のまま継続する (再起動で誤って停止しない)', async () => {
+    // relabelBlocked=false は「再起動前も blocked ではなかった」という永続化済みの事実であり、
+    // プロセス内メモリと違って再起動でリセットされない。available=115 は warning 水準だが
+    // 復帰しきい値 (120) には届かないため、モジュール内メモリ方式なら再起動直後に
+    // 誤って blocked へ倒れていたケース。
+    const { prisma, update } = createMockPrisma({
+      availableGib: 115,
+      usedPercent: 50,
+      measuredAt: NOW,
+      relabelBlocked: false,
+    })
+
+    const result = await checkRelabelStorageCircuitBreaker(prisma, { now: NOW })
+
+    expect(result.status).toBe('warning')
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('プロセス再起動直後でも、直前に relabelBlocked=true で保存されていれば中間的な値では blocked を維持する', async () => {
+    const { prisma, update } = createMockPrisma({
+      availableGib: 110,
+      usedPercent: 10,
+      measuredAt: NOW,
+      relabelBlocked: true,
+    })
+
+    const result = await checkRelabelStorageCircuitBreaker(prisma, { now: NOW })
+
+    expect(result.status).toBe('blocked')
+    expect(update).not.toHaveBeenCalled()
   })
 })

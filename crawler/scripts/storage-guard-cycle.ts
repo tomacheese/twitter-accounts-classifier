@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { Logger } from '@book000/node-utils'
 import { PrismaClient } from '../generated/prisma'
@@ -45,39 +45,38 @@ export function parseStorageGuardOutput(stdout: string): StorageGuardMeasurement
 }
 
 /**
- * `check-postgres-storage.sh` を子プロセスとして実行し、標準出力を返す。
- * 終了コードが非ゼロ (閾値超過) でも出力自体は計測結果として有効なため、
- * 例外を投げず標準出力を捕捉する。
- * @returns 標準出力 (df 自体が失敗し stdout が空の場合は空文字列)
+ * `check-postgres-storage.sh` を子プロセスとして実行する。
+ * 終了コード 0 (正常) と 1 (閾値超過) はどちらも計測行を標準出力へ出す契約のため、
+ * 例外を投げる execFileSync ではなく、終了コードと標準出力を直接返す spawnSync を使う。
+ * @returns spawnSync の実行結果
  */
-function runStorageGuardScript(): string {
-  try {
-    return execFileSync(GUARD_SCRIPT_PATH, { encoding: 'utf8' })
-  } catch (error) {
-    // 非ゼロ終了時は execFileSync が例外を投げるが、閾値超過による想定内の
-    // 非ゼロ終了と df 自体の失敗を区別する必要はなく、どちらも stdout の
-    // 抽出可否だけで後続の upsert 有無を決める。ただし ENOENT のように
-    // stdout 自体が存在しない失敗は空文字列だけでは原因が追えないため、
-    // GlitchTip へ送る目的でエラー自体も別途記録する。
-    const stdout = (error as { stdout?: Buffer | string }).stdout
-    if (stdout === undefined) {
-      logger.error(`check-postgres-storage.sh execution failed: ${String(error)}`)
-      captureException(error, { source: 'storage-guard-cycle.runStorageGuardScript' })
-      return ''
-    }
-    return stdout.toString()
-  }
+function runStorageGuardScript(): ReturnType<typeof spawnSync> {
+  return spawnSync(GUARD_SCRIPT_PATH, { encoding: 'utf8' })
 }
 
 /**
  * ストレージ計測を 1 回実行し、抽出できた場合のみ `StorageCapacityState` を upsert する。
+ * プロセス自体を起動できない場合や、終了コード 2 (設定・df 自体の失敗) で計測行が
+ * 出力されない場合は、直前の DB 状態を変えず GlitchTip へ通知するだけに留める。
  * @param prisma - Prisma クライアント
  */
 export async function runStorageGuardCycleOnce(prisma: PrismaClient): Promise<void> {
-  const stdout = runStorageGuardScript()
+  const result = runStorageGuardScript()
+  if (result.error) {
+    logger.error(`check-postgres-storage.sh execution failed: ${String(result.error)}`)
+    captureException(result.error, { source: 'storage-guard-cycle.runStorageGuardCycleOnce' })
+    return
+  }
+
+  const stdout = result.stdout.toString()
   const measurement = parseStorageGuardOutput(stdout)
   if (!measurement) {
-    logger.error(`could not parse check-postgres-storage.sh output: ${stdout}`)
+    logger.error(
+      `could not parse check-postgres-storage.sh output (exit ${String(result.status)}): ${stdout}${result.stderr.toString()}`,
+    )
+    captureException(new Error('could not parse check-postgres-storage.sh output'), {
+      source: 'storage-guard-cycle.runStorageGuardCycleOnce',
+    })
     return
   }
 

@@ -36,9 +36,9 @@ SQL
 # 1. value=true の新規 INSERT → 'added' が 1 行増える。
 psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
 INSERT INTO "AccountLabelLatest"
-  ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt")
+  ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt", "sourceKind", "sourceId")
 VALUES
-  ('trigger_verify_account', 'trigger_verify_label', true, 0.9, 'r1', 'rule', '1.0.0', now());
+  ('trigger_verify_account', 'trigger_verify_label', true, 0.9, 'r1', 'rule', '1.0.0', now(), 'crawl', 'trigger_verify_crawl_run');
 SQL
 COUNT_AFTER_INSERT_TRUE=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
   SELECT count(*) FROM \"AccountLabelChange\"
@@ -46,6 +46,14 @@ COUNT_AFTER_INSERT_TRUE=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
 ")
 if [ "$COUNT_AFTER_INSERT_TRUE" -ne 1 ]; then
   echo "FAIL: expected 1 AccountLabelChange row after value=true INSERT, got $COUNT_AFTER_INSERT_TRUE" >&2
+  exit 1
+fi
+SOURCE_ID=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
+  SELECT \"sourceId\" FROM \"AccountLabelChange\"
+  WHERE \"accountId\" = 'trigger_verify_account' AND \"labelDefinitionId\" = 'trigger_verify_label'
+")
+if [ "$SOURCE_ID" != "trigger_verify_crawl_run" ]; then
+  echo "FAIL: expected AccountLabelChange.sourceId to carry over AccountLabelLatest.sourceId ('trigger_verify_crawl_run'), got '$SOURCE_ID'" >&2
   exit 1
 fi
 CHANGE_TYPE=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
