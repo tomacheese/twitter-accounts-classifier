@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { PrismaClient } from './generated/prisma'
-import { checkRelabelStorageCircuitBreaker } from './relabel-storage-circuit-breaker'
+import {
+  checkRelabelStorageCircuitBreaker,
+  resetRelabelStorageCircuitBreakerStateForTest,
+} from './relabel-storage-circuit-breaker'
 
 const ENV_KEYS = [
   'RELABEL_STORAGE_WARNING_AVAILABLE_GIB',
@@ -32,6 +35,7 @@ describe('checkRelabelStorageCircuitBreaker', () => {
       originalValues[key] = process.env[key]
       Reflect.deleteProperty(process.env, key)
     }
+    resetRelabelStorageCircuitBreakerStateForTest()
   })
 
   afterEach(() => {

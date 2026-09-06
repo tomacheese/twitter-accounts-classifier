@@ -3,6 +3,7 @@ import path from 'node:path'
 import { Logger } from '@book000/node-utils'
 import { PrismaClient } from '../generated/prisma'
 import { parsePositiveIntEnv } from '../config/env'
+import { initMonitoring, captureException } from '../monitoring/sentry'
 
 const logger = Logger.configure('storage-guard-cycle')
 
@@ -55,9 +56,16 @@ function runStorageGuardScript(): string {
   } catch (error) {
     // 非ゼロ終了時は execFileSync が例外を投げるが、閾値超過による想定内の
     // 非ゼロ終了と df 自体の失敗を区別する必要はなく、どちらも stdout の
-    // 抽出可否だけで後続の upsert 有無を決める。
+    // 抽出可否だけで後続の upsert 有無を決める。ただし ENOENT のように
+    // stdout 自体が存在しない失敗は空文字列だけでは原因が追えないため、
+    // GlitchTip へ送る目的でエラー自体も別途記録する。
     const stdout = (error as { stdout?: Buffer | string }).stdout
-    return stdout === undefined ? '' : stdout.toString()
+    if (stdout === undefined) {
+      logger.error(`check-postgres-storage.sh execution failed: ${String(error)}`)
+      captureException(error, { source: 'storage-guard-cycle.runStorageGuardScript' })
+      return ''
+    }
+    return stdout.toString()
   }
 }
 
@@ -97,6 +105,7 @@ async function main(): Promise<void> {
       await runStorageGuardCycleOnce(prisma)
     } catch (error) {
       logger.error(`storage guard cycle failed: ${String(error)}`)
+      captureException(error, { source: 'storage-guard-cycle.main' })
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }
@@ -104,8 +113,10 @@ async function main(): Promise<void> {
 
 // eslint-disable-next-line unicorn/prefer-module
 if (require.main === module) {
+  initMonitoring()
   main().catch((error: unknown) => {
     logger.error(`storage guard process crashed: ${String(error)}`)
+    captureException(error, { source: 'storage-guard-cycle.main' })
     process.exitCode = 1
   })
 }

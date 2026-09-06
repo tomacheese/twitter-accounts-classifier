@@ -76,4 +76,16 @@ describe('runStorageGuardCycleOnce', () => {
 
     expect(upsert).toHaveBeenCalledTimes(1)
   })
+
+  it('ENOENTのようにstdout自体を持たない例外ではupsertせず例外を握りつぶさない', async () => {
+    const error = Object.assign(new Error('spawnSync ENOENT'), { code: 'ENOENT' })
+    vi.mocked(childProcess.execFileSync).mockImplementation(() => {
+      throw error
+    })
+    const { prisma, upsert } = createMockPrisma()
+
+    await expect(runStorageGuardCycleOnce(prisma)).resolves.toBeUndefined()
+
+    expect(upsert).not.toHaveBeenCalled()
+  })
 })

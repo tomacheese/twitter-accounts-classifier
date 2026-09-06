@@ -27,6 +27,14 @@ export interface RelabelStorageCircuitBreakerOptions {
 let lastKnownStatus: RelabelStorageCircuitBreakerStatus = 'ok'
 
 /**
+ * テストが hysteresis 状態をまたいで汚染し合わないよう、モジュール内メモリを初期値へ戻す。
+ * 本番コードからは呼ばない。
+ */
+export function resetRelabelStorageCircuitBreakerStateForTest(): void {
+  lastKnownStatus = 'ok'
+}
+
+/**
  * `StorageCapacityState` を読み、relabel が新規クレームを続けてよいかを判定する。
  * 行が存在しない、または古すぎる (`RELABEL_STORAGE_MAX_STALE_SECONDS` 超過) 場合は、
  * storage-guard 自体の停止・障害を「空き容量に問題なし」と誤認しないよう fail-closed で
