@@ -16,10 +16,12 @@ const GUARD_SCRIPT_PATH = path.join(process.cwd(), '..', 'scripts', 'check-postg
 
 /**
  * `storage-guard-cycle` の実行間隔 (秒)。
- * @returns 実行間隔 (秒)。既定 300
+ * RELABEL_STORAGE_MAX_STALE_SECONDS (既定 180) より短くないと、正常稼働中でも
+ * 前回計測からの経過時間が stale 判定に達し fail-closed が常時発火してしまう。
+ * @returns 実行間隔 (秒)。既定 60
  */
 export function getStorageGuardIntervalSeconds(): number {
-  return parsePositiveIntEnv('STORAGE_GUARD_INTERVAL_SECONDS', 300)
+  return parsePositiveIntEnv('STORAGE_GUARD_INTERVAL_SECONDS', 60)
 }
 
 export interface StorageGuardMeasurement {

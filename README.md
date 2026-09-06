@@ -93,7 +93,7 @@ pnpm --filter crawler run backfill:recent-tweets -- --limit 100 --execute --user
 
 `scripts/check-postgres-storage.sh` は `POSTGRES_DATA_PATH` のファイルシステムについて、使用率と空き容量を確認する読み取り専用の guard である。空き容量が 100 GiB 未満、または使用率が 80% 以上で非ゼロ終了する。`POSTGRES_STORAGE_MIN_AVAILABLE_GIB` と `POSTGRES_STORAGE_MAX_USED_PERCENT` でそれぞれの整数閾値を変更できる。
 
-compose 環境では、この guard を `storage-guard` service が `STORAGE_GUARD_INTERVAL_SECONDS` (既定 300秒) 間隔で定期実行し、計測結果を `StorageCapacityState` テーブルへ書き込む。`postgres`/`storage-guard` 双方の bind mount は `POSTGRES_DATA_HOST_PATH` という単一の環境変数から解決されるため、ホストパスを変更する際はこの変数だけを更新すればよい。ホストの crontab を別途設定する必要はない。
+compose 環境では、この guard を `storage-guard` service が `STORAGE_GUARD_INTERVAL_SECONDS` (既定 60秒) 間隔で定期実行し、計測結果を `StorageCapacityState` テーブルへ書き込む。`postgres`/`storage-guard` 双方の bind mount は `POSTGRES_DATA_HOST_PATH` という単一の環境変数から解決されるため、ホストパスを変更する際はこの変数だけを更新すればよい。ホストの crontab を別途設定する必要はない。
 
 `relabeler` はこの `StorageCapacityState` を読み、空き容量やホスト使用率が閾値を割り込むと relabel のクレームを止める circuit breaker を持つ。
 

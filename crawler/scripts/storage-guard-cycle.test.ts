@@ -1,7 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import * as childProcess from 'node:child_process'
 import type { PrismaClient } from '../generated/prisma'
-import { parseStorageGuardOutput, runStorageGuardCycleOnce } from './storage-guard-cycle'
+import { getRelabelStorageMaxStaleSeconds } from '../config/env'
+import {
+  getStorageGuardIntervalSeconds,
+  parseStorageGuardOutput,
+  runStorageGuardCycleOnce,
+} from './storage-guard-cycle'
 
 vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(),
@@ -29,6 +34,12 @@ function mockSpawnResult(overrides: {
     error: overrides.error,
   } as unknown as ReturnType<typeof childProcess.spawnSync>)
 }
+
+describe('getStorageGuardIntervalSeconds', () => {
+  it('既定の実行間隔は RELABEL_STORAGE_MAX_STALE_SECONDS の既定値より短い (fail-closed の常時誤検知を防ぐ)', () => {
+    expect(getStorageGuardIntervalSeconds()).toBeLessThan(getRelabelStorageMaxStaleSeconds())
+  })
+})
 
 describe('parseStorageGuardOutput', () => {
   it('抽出できた場合は availableGib/usedPercent を返す', () => {

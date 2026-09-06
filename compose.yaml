@@ -137,7 +137,7 @@ services:
     command: ["node", "dist/scripts/storage-guard-cycle.js"]
     environment:
       DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}?connection_limit=1&pool_timeout=0
-      STORAGE_GUARD_INTERVAL_SECONDS: ${STORAGE_GUARD_INTERVAL_SECONDS:-300}
+      STORAGE_GUARD_INTERVAL_SECONDS: ${STORAGE_GUARD_INTERVAL_SECONDS:-60}
       POSTGRES_DATA_PATH: /data/postgres
       GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
     volumes:
