@@ -162,3 +162,63 @@ export function isRelabelAccountLabelHistoryWriteEnabled(): boolean {
   const raw = process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED
   return raw?.toLowerCase() !== 'false'
 }
+
+/**
+ * relabel の storage circuit breaker が `warning` を出す空き容量のしきい値 (GiB)。
+ * @returns しきい値 (GiB)。既定 120
+ */
+export function getRelabelStorageWarningAvailableGib(): number {
+  return parsePositiveIntEnv('RELABEL_STORAGE_WARNING_AVAILABLE_GIB', 120)
+}
+
+/**
+ * relabel の storage circuit breaker が `warning` を出す使用率のしきい値 (%)。
+ * @returns しきい値 (%)。既定 75
+ */
+export function getRelabelStorageWarningUsedPercent(): number {
+  return parsePositiveIntEnv('RELABEL_STORAGE_WARNING_USED_PERCENT', 75)
+}
+
+/**
+ * relabel の storage circuit breaker が `blocked` に倒す空き容量のしきい値 (GiB)。
+ * @returns しきい値 (GiB)。既定 100
+ */
+export function getRelabelStorageBlockedAvailableGib(): number {
+  return parsePositiveIntEnv('RELABEL_STORAGE_BLOCKED_AVAILABLE_GIB', 100)
+}
+
+/**
+ * relabel の storage circuit breaker が `blocked` に倒す使用率のしきい値 (%)。
+ * @returns しきい値 (%)。既定 80
+ */
+export function getRelabelStorageBlockedUsedPercent(): number {
+  return parsePositiveIntEnv('RELABEL_STORAGE_BLOCKED_USED_PERCENT', 80)
+}
+
+/**
+ * `blocked` から復帰するために必要な空き容量のしきい値 (GiB)。
+ * ブロックしきい値と同値にすると解消直後に再度ブロックへ揺れ戻るため、
+ * ブロックしきい値より高い値を既定にして hysteresis を持たせる。
+ * @returns しきい値 (GiB)。既定 120
+ */
+export function getRelabelStorageHysteresisResumeAvailableGib(): number {
+  return parsePositiveIntEnv('RELABEL_STORAGE_HYSTERESIS_RESUME_AVAILABLE_GIB', 120)
+}
+
+/**
+ * `blocked` から復帰するために必要な使用率のしきい値 (%)。
+ * @returns しきい値 (%)。既定 75
+ */
+export function getRelabelStorageHysteresisResumeUsedPercent(): number {
+  return parsePositiveIntEnv('RELABEL_STORAGE_HYSTERESIS_RESUME_USED_PERCENT', 75)
+}
+
+/**
+ * `StorageCapacityState.measuredAt` をどれだけ古くなるまで有効とみなすか (秒)。
+ * これを超えると、storage-guard が停止・失敗している可能性を疑い fail-closed で
+ * `blocked` とみなす。
+ * @returns 許容する最大経過秒数。既定 180
+ */
+export function getRelabelStorageMaxStaleSeconds(): number {
+  return parsePositiveIntEnv('RELABEL_STORAGE_MAX_STALE_SECONDS', 180)
+}

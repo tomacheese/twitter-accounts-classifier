@@ -39,6 +39,7 @@ import { buildFollowGraphLabelIndex } from './labels/follow-graph-label-index'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { initMonitoring, captureException } from './monitoring/sentry'
+import { checkRelabelStorageCircuitBreaker } from './relabel-storage-circuit-breaker'
 import {
   getRelabelerLabelLookupChunkSize,
   getRelabelerOrphanRecoveryBatchSize,
@@ -473,6 +474,19 @@ export async function scanForStaleAccounts(
  * @param prisma - Prisma クライアント
  */
 export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<void> {
+  const storageStatus = await checkRelabelStorageCircuitBreaker(prisma)
+  if (storageStatus.status === 'blocked') {
+    logger.warn(
+      `Relabel cycle skipped: storage circuit breaker is blocked (availableGib=${String(storageStatus.availableGib)}, usedPercent=${String(storageStatus.usedPercent)})`,
+    )
+    return
+  }
+  if (storageStatus.status === 'warning') {
+    logger.warn(
+      `Relabel storage circuit breaker is in warning (availableGib=${String(storageStatus.availableGib)}, usedPercent=${String(storageStatus.usedPercent)}), continuing`,
+    )
+  }
+
   const registry = new LabelRuleRegistry()
   for (const rule of ALL_LABEL_RULES) registry.register(rule)
   const labelDefinitionIds = await ensureLabelDefinitionsForRules(prisma, registry.getAll())

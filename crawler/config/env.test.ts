@@ -13,6 +13,13 @@ import {
   getTwitterRequestTimeoutMs,
   getCrawlAccountTimeoutMs,
   isRelabelAccountLabelHistoryWriteEnabled,
+  getRelabelStorageWarningAvailableGib,
+  getRelabelStorageWarningUsedPercent,
+  getRelabelStorageBlockedAvailableGib,
+  getRelabelStorageBlockedUsedPercent,
+  getRelabelStorageHysteresisResumeAvailableGib,
+  getRelabelStorageHysteresisResumeUsedPercent,
+  getRelabelStorageMaxStaleSeconds,
 } from './env'
 
 const { warnMock } = vi.hoisted(() => ({ warnMock: vi.fn() }))
@@ -436,5 +443,48 @@ describe('isRelabelAccountLabelHistoryWriteEnabled', () => {
   it('returns true for any other value', () => {
     process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED = 'no'
     expect(isRelabelAccountLabelHistoryWriteEnabled()).toBe(true)
+  })
+})
+
+describe.each([
+  ['RELABEL_STORAGE_WARNING_AVAILABLE_GIB', getRelabelStorageWarningAvailableGib, 120],
+  ['RELABEL_STORAGE_WARNING_USED_PERCENT', getRelabelStorageWarningUsedPercent, 75],
+  ['RELABEL_STORAGE_BLOCKED_AVAILABLE_GIB', getRelabelStorageBlockedAvailableGib, 100],
+  ['RELABEL_STORAGE_BLOCKED_USED_PERCENT', getRelabelStorageBlockedUsedPercent, 80],
+  [
+    'RELABEL_STORAGE_HYSTERESIS_RESUME_AVAILABLE_GIB',
+    getRelabelStorageHysteresisResumeAvailableGib,
+    120,
+  ],
+  [
+    'RELABEL_STORAGE_HYSTERESIS_RESUME_USED_PERCENT',
+    getRelabelStorageHysteresisResumeUsedPercent,
+    75,
+  ],
+  ['RELABEL_STORAGE_MAX_STALE_SECONDS', getRelabelStorageMaxStaleSeconds, 180],
+] as const)('%s getter', (envName, getter, defaultValue) => {
+  const originalValue = process.env[envName]
+
+  afterEach(() => {
+    if (originalValue === undefined) {
+      Reflect.deleteProperty(process.env, envName)
+    } else {
+      process.env[envName] = originalValue
+    }
+  })
+
+  it(`returns ${defaultValue} when unset`, () => {
+    Reflect.deleteProperty(process.env, envName)
+    expect(getter()).toBe(defaultValue)
+  })
+
+  it('returns the configured value', () => {
+    process.env[envName] = '42'
+    expect(getter()).toBe(42)
+  })
+
+  it('throws when the value is not a positive integer', () => {
+    process.env[envName] = '-1'
+    expect(() => getter()).toThrow(`${envName} environment variable must be a positive integer`)
   })
 })

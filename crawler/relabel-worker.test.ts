@@ -10,6 +10,7 @@ import * as replyCorpusModule from './db/reply-corpus'
 import * as bioCorpusModule from './db/bio-corpus'
 import * as selfReplyPromoCorpusModule from './db/self-reply-promo-corpus'
 import * as evidenceRepository from './db/reply-hijack-evidence-repository'
+import * as circuitBreakerModule from './relabel-storage-circuit-breaker'
 import { replyHijackSwarmRule } from './labels/rules/reply-hijack-swarm'
 import {
   evaluateAccountRelabelItems,
@@ -1014,6 +1015,12 @@ describe('runRelabelWorkerCycleOnce', () => {
       reArmed: 0,
       parkedAsFailed: 0,
     })
+    // 個別のテストで上書きしない限り、storage circuit breaker は ok の前提にする。
+    vi.spyOn(circuitBreakerModule, 'checkRelabelStorageCircuitBreaker').mockResolvedValue({
+      status: 'ok',
+      availableGib: 500,
+      usedPercent: 10,
+    })
   })
 
   afterEach(() => {
@@ -1432,5 +1439,34 @@ describe('runRelabelWorkerCycleOnce', () => {
       workItemIds: ['wi-1'],
       leaseOwner: expect.any(String),
     })
+  })
+
+  it('storage circuit breakerがblockedの場合、recoverExhaustedExpiredWorkItems すら呼ばず即座に終了する', async () => {
+    vi.spyOn(circuitBreakerModule, 'checkRelabelStorageCircuitBreaker').mockResolvedValue({
+      status: 'blocked',
+      availableGib: 50,
+      usedPercent: 90,
+    })
+    const recoverSpy = vi.spyOn(workItemRepository, 'recoverExhaustedExpiredWorkItems')
+    const prisma = makeCursorPrisma()
+
+    await runRelabelWorkerCycleOnce(prisma)
+
+    expect(recoverSpy).not.toHaveBeenCalled()
+  })
+
+  it('storage circuit breakerがwarningの場合、クレームは継続する', async () => {
+    vi.spyOn(circuitBreakerModule, 'checkRelabelStorageCircuitBreaker').mockResolvedValue({
+      status: 'warning',
+      availableGib: 115,
+      usedPercent: 76,
+    })
+    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
+    const peekSpy = vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([])
+    const prisma = makeCursorPrisma()
+
+    await runRelabelWorkerCycleOnce(prisma)
+
+    expect(peekSpy).toHaveBeenCalled()
   })
 })
