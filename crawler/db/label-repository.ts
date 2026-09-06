@@ -596,6 +596,35 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
     labeledAt: row.labeledAt.toISOString(),
   }))
 
+  // 再開時の重複呼び出しで claim が部分的にしか成功しない場合、今回claimできなかった
+  // ラベルは前回の呼び出しで既に AccountLabelLatest へ書き込まれている。それらを
+  // snapshot から漏らすと AccountSummaryLatest.activeLabelKeys の全置換で消えてしまうため、
+  // AccountLabelLatest から現在値を読み足して補う。
+  if (claimedLabels.length < params.labels.length) {
+    const claimedLabelDefinitionIds = new Set(claimedLabels.map((label) => label.labelDefinitionId))
+    const unclaimedLabelDefinitionIds = params.labels
+      .map((label) => label.labelDefinitionId)
+      .filter((labelDefinitionId) => !claimedLabelDefinitionIds.has(labelDefinitionId))
+    const existingLatest = await prisma.accountLabelLatest.findMany({
+      where: {
+        accountId: params.accountId,
+        labelDefinitionId: { in: unclaimedLabelDefinitionIds },
+      },
+    })
+    for (const row of existingLatest) {
+      classificationSnapshot.push({
+        labelDefinitionId: row.labelDefinitionId,
+        value: row.value,
+        confidence: row.confidence,
+        reason: row.reason,
+        method: row.method,
+        ruleVersion: row.ruleVersion,
+        evaluable: row.evaluable,
+        labeledAt: row.labeledAt.toISOString(),
+      })
+    }
+  }
+
   const observation = await prisma.accountClassificationObservation.create({
     data: {
       accountId: params.accountId,

@@ -211,6 +211,77 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
     expect(secondSnapshot[0].value).toBe(true)
     expect(secondSnapshot[0].confidence).toBe(0.9)
   })
+
+  it('同一crawlRunIdの部分的な再開呼び出しでも、前回claim済みのラベルをAccountLabelLatestから補いsnapshotに含める', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_partial_resume',
+        screenName: 'erin',
+        displayName: 'Erin',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelA = await prisma.labelDefinition.create({
+      data: { key: 'test_label_partial_a', description: 'テスト用ラベルA' },
+    })
+    const labelB = await prisma.labelDefinition.create({
+      data: { key: 'test_label_partial_b', description: 'テスト用ラベルB' },
+    })
+    const crawlRun = await prisma.crawlRun.create({
+      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
+    })
+
+    // 1 回目は labelA のみ claim・記録する (labelB の評価前にプロセスが再起動した想定)。
+    await recordCrawlAccountLabelsAtomic(prisma, {
+      accountId: account.id,
+      crawlRunId: crawlRun.id,
+      username: 'login_account',
+      labels: [
+        {
+          labelDefinitionId: labelA.id,
+          result: { value: true, confidence: 0.9, reason: 'reason a' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+
+    // 2 回目は同一 crawlRunId で labelA・labelB 両方を渡す (再開後の再評価想定)。
+    // labelA は CrawlAccountLabelRun の一意制約により claim できず、labelB のみ claim される。
+    const resumedObservationId = await recordCrawlAccountLabelsAtomic(prisma, {
+      accountId: account.id,
+      crawlRunId: crawlRun.id,
+      username: 'login_account',
+      labels: [
+        {
+          labelDefinitionId: labelA.id,
+          result: { value: true, confidence: 0.9, reason: 'reason a' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+        {
+          labelDefinitionId: labelB.id,
+          result: { value: true, confidence: 0.8, reason: 'reason b' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+    const resumedObservation = await prisma.accountClassificationObservation.findUniqueOrThrow({
+      where: { id: resumedObservationId ?? '' },
+    })
+    const resumedSnapshot = resumedObservation.classificationSnapshot as unknown as {
+      labelDefinitionId: string
+      value: boolean
+    }[]
+    // labelB (今回 claim) だけでなく、labelA (前回 claim・AccountLabelLatest から補完) も含む。
+    expect(resumedSnapshot).toHaveLength(2)
+    expect(resumedSnapshot.find((entry) => entry.labelDefinitionId === labelA.id)?.value).toBe(true)
+    expect(resumedSnapshot.find((entry) => entry.labelDefinitionId === labelB.id)?.value).toBe(true)
+  })
 })
 
 describe.skipIf(!process.env.DATABASE_URL)('recordAccountLabelsBulk', () => {
