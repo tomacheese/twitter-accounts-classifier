@@ -42,7 +42,7 @@ export function getCrawlWarningThreshold(): number {
  * @param defaultValue - 未設定・空文字時のデフォルト値
  * @returns 読み取った正の整数
  */
-function parsePositiveIntEnv(name: string, defaultValue: number): number {
+export function parsePositiveIntEnv(name: string, defaultValue: number): number {
   const raw = process.env[name]
   if (raw === undefined || raw === '') return defaultValue
   if (!/^[1-9]\d*$/.test(raw)) {

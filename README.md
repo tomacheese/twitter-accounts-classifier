@@ -84,19 +84,19 @@ pnpm --filter crawler run backfill:recent-tweets -- --limit 100 --execute --user
   - `block_rule` (アカウントごと、任意): このアカウントに適用するブロックルール。`target_labels` はラベルごとの確信度閾値 (`label`・`confidence_threshold`) のリストで、対象ラベルは複数指定できる。省略時はトップレベルの `block` を使う
   - `block` (トップレベル、任意): 全アカウント共通のデフォルトブロックルール
   - `discord_webhook_url` (トップレベル、任意): ブロック結果を通知する Discord Webhook URL
-- `data/postgres/`: Postgres の実データ (bind mount、git 管理外)
+- `data/postgres/` (既定パス): Postgres の実データ (bind mount、git 管理外)。実体のホストパスは
+  `POSTGRES_DATA_HOST_PATH` で変更できる (未設定時は `./data/postgres`、本番は
+  `/mnt/ssd/twitter-accounts-classifier/postgres`)。
 - `logs/`: クロールログ (実アカウント名を含むため git 管理外)
 
 ### PostgreSQL ストレージ容量の監視
 
-`scripts/check-postgres-storage.sh` は `data/postgres/` のファイルシステムについて、使用率と空き容量を確認する読み取り専用の guard である。空き容量が 100 GiB 未満、または使用率が 80% 以上で非ゼロ終了する。`POSTGRES_STORAGE_MIN_AVAILABLE_GIB` と `POSTGRES_STORAGE_MAX_USED_PERCENT` でそれぞれの整数閾値を変更でき、別の bind mount を確認する場合は `POSTGRES_DATA_PATH` を指定する。
+`scripts/check-postgres-storage.sh` は `POSTGRES_DATA_PATH` のファイルシステムについて、使用率と空き容量を確認する読み取り専用の guard である。空き容量が 100 GiB 未満、または使用率が 80% 以上で非ゼロ終了する。`POSTGRES_STORAGE_MIN_AVAILABLE_GIB` と `POSTGRES_STORAGE_MAX_USED_PERCENT` でそれぞれの整数閾値を変更できる。
 
-```bash
-scripts/check-postgres-storage.sh
-```
+compose 環境では、この guard を `storage-guard` service が `STORAGE_GUARD_INTERVAL_SECONDS` (既定 300秒) 間隔で定期実行し、計測結果を `StorageCapacityState` テーブルへ書き込む。`postgres`/`storage-guard` 双方の bind mount は `POSTGRES_DATA_HOST_PATH` という単一の環境変数から解決されるため、ホストパスを変更する際はこの変数だけを更新すればよい。ホストの crontab を別途設定する必要はない。
 
-ホストの crontab へ設定する例は次のとおり。これは 1 時間ごとに確認するだけで、DB データを削除しない。
+`relabeler` はこの `StorageCapacityState` を読み、空き容量やホスト使用率が閾値を割り込むと relabel のクレームを止める circuit breaker を持つ。
 
-```cron
-0 * * * * PATH=/usr/local/bin:/usr/bin:/bin /path/to/twitter-accounts-classifier/scripts/check-postgres-storage.sh
-```
+- `blocked` (クレーム自体を止める): `available < RELABEL_STORAGE_BLOCKED_AVAILABLE_GIB` (既定 100) または `usedPercent >= RELABEL_STORAGE_BLOCKED_USED_PERCENT` (既定 80)。直前が `blocked` の場合は、`available > RELABEL_STORAGE_HYSTERESIS_RESUME_AVAILABLE_GIB` (既定 120) かつ `usedPercent < RELABEL_STORAGE_HYSTERESIS_RESUME_USED_PERCENT` (既定 75) の両方を満たすまで維持する (hysteresis)。
+- `warning` (ログのみ、クレームは継続): `available < RELABEL_STORAGE_WARNING_AVAILABLE_GIB` (既定 120) または `usedPercent >= RELABEL_STORAGE_WARNING_USED_PERCENT` (既定 75)。
+- `StorageCapacityState` が存在しない、または `measuredAt` が `RELABEL_STORAGE_MAX_STALE_SECONDS` (既定 180秒) より古い場合も `blocked` として扱う (fail-closed)。storage-guard が停止・失敗し続けている状態を「空き容量に問題なし」と誤認しないための挙動であり、crawler 側のクロール自体は止めない。
