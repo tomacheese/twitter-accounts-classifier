@@ -26,9 +26,9 @@ pnpm --filter analyzer exec prisma migrate deploy --schema=../prisma/schema.pris
 psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
 INSERT INTO "Account"
   ("id", "screenName", "displayName", "followersCount", "followingCount", "tweetCount",
-   "accountCreatedAt")
+   "accountCreatedAt", "updatedAt")
 VALUES
-  ('trigger_verify_account', 'trigger_verify_account', 'trigger verify account', 0, 0, 0, now());
+  ('trigger_verify_account', 'trigger_verify_account', 'trigger verify account', 0, 0, 0, now(), now());
 INSERT INTO "LabelDefinition" (id, key, description)
   VALUES ('trigger_verify_label', 'trigger_verify_label', 'トリガー検証用ラベル');
 SQL
