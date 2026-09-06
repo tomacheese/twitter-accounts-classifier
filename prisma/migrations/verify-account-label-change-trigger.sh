@@ -38,7 +38,7 @@ psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
 INSERT INTO "AccountLabelLatest"
   ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "labeledAt", "sourceKind", "sourceId")
 VALUES
-  ('trigger_verify_account', 'trigger_verify_label', true, 0.9, 'r1', 'rule', '1.0.0', now(), 'crawl', 'trigger_verify_crawl_run');
+  ('trigger_verify_account', 'trigger_verify_label', true, 0.9, 'r1', 'rule', '1.0.0', TIMESTAMP '2026-09-06 12:00:00.123', 'crawl', 'trigger_verify_crawl_run');
 SQL
 COUNT_AFTER_INSERT_TRUE=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
   SELECT count(*) FROM \"AccountLabelChange\"
@@ -67,7 +67,7 @@ fi
 
 # 2. confidence のみ変更する UPDATE → 行数が変化しない。
 psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
-UPDATE "AccountLabelLatest" SET "confidence" = 0.5, "labeledAt" = now()
+UPDATE "AccountLabelLatest" SET "confidence" = 0.5, "labeledAt" = TIMESTAMP '2026-09-06 12:00:00.123'
 WHERE "accountId" = 'trigger_verify_account' AND "labelDefinitionId" = 'trigger_verify_label';
 SQL
 COUNT_AFTER_CONFIDENCE_UPDATE=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
@@ -81,7 +81,7 @@ fi
 
 # 3. value=false への UPDATE → 'removed' が 1 行増える (計 2 行)。
 psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
-UPDATE "AccountLabelLatest" SET "value" = false, "labeledAt" = now()
+UPDATE "AccountLabelLatest" SET "value" = false, "labeledAt" = TIMESTAMP '2026-09-06 12:00:00.123'
 WHERE "accountId" = 'trigger_verify_account' AND "labelDefinitionId" = 'trigger_verify_label';
 SQL
 COUNT_AFTER_VALUE_UPDATE=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
@@ -89,11 +89,26 @@ COUNT_AFTER_VALUE_UPDATE=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
   WHERE \"accountId\" = 'trigger_verify_account' AND \"labelDefinitionId\" = 'trigger_verify_label'
 ")
 if [ "$COUNT_AFTER_VALUE_UPDATE" -ne 2 ]; then
-  echo "FAIL: expected 2 AccountLabelChange rows after value=false UPDATE, got $COUNT_AFTER_VALUE_UPDATE" >&2
+  echo "FAIL: expected 2 AccountLabelChange rows after value=false UPDATE at the same labeledAt, got $COUNT_AFTER_VALUE_UPDATE" >&2
   exit 1
 fi
 
-# 4. value=false の新規 INSERT (別ラベル) → 行数が変化しない。
+# 4. 同一 labeledAt でも false→true の別 transition は失わず 1 行増える (計 3 行)。
+psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+UPDATE "AccountLabelLatest"
+SET "value" = true, "labeledAt" = TIMESTAMP '2026-09-06 12:00:00.123'
+WHERE "accountId" = 'trigger_verify_account' AND "labelDefinitionId" = 'trigger_verify_label';
+SQL
+COUNT_AFTER_SAME_TIMESTAMP_READD=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
+  SELECT count(*) FROM \"AccountLabelChange\"
+  WHERE \"accountId\" = 'trigger_verify_account' AND \"labelDefinitionId\" = 'trigger_verify_label'
+")
+if [ "$COUNT_AFTER_SAME_TIMESTAMP_READD" -ne 3 ]; then
+  echo "FAIL: expected 3 AccountLabelChange rows after a second value transition at the same labeledAt, got $COUNT_AFTER_SAME_TIMESTAMP_READD" >&2
+  exit 1
+fi
+
+# 5. value=false の新規 INSERT (別ラベル) → 行数が変化しない。
 psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
 INSERT INTO "LabelDefinition" (id, key, description)
   VALUES ('trigger_verify_label_2', 'trigger_verify_label_2', 'トリガー検証用ラベル2');
@@ -105,8 +120,8 @@ SQL
 COUNT_AFTER_INSERT_FALSE=$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -tAc "
   SELECT count(*) FROM \"AccountLabelChange\" WHERE \"accountId\" = 'trigger_verify_account'
 ")
-if [ "$COUNT_AFTER_INSERT_FALSE" -ne 2 ]; then
-  echo "FAIL: expected AccountLabelChange row count unchanged (2) after value=false INSERT, got $COUNT_AFTER_INSERT_FALSE" >&2
+if [ "$COUNT_AFTER_INSERT_FALSE" -ne 3 ]; then
+  echo "FAIL: expected AccountLabelChange row count unchanged (3) after value=false INSERT, got $COUNT_AFTER_INSERT_FALSE" >&2
   exit 1
 fi
 

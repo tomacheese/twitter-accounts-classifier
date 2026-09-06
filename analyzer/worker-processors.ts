@@ -317,37 +317,50 @@ export async function processAccountSummaryRefresh(
 
       for (const label of labels) {
         const previous = previousByLabelDefinitionId.get(label.labelDefinitionId)
-        let changeType: string | undefined
+        let changeType: 'added' | 'removed' | undefined
         if (previous === undefined) {
           if (label.value) changeType = 'added'
         } else if (previous.value !== label.value) {
           changeType = label.value ? 'added' : 'removed'
-        } else if (previous.confidence !== label.confidence || previous.reason !== label.reason) {
-          changeType = 'updated'
         }
         if (!changeType) continue
+        if (!label.sourceLabelId) {
+          throw new Error('legacy watermark label is missing sourceLabelId')
+        }
 
-        await (tx as unknown as PrismaClient).accountLabelChange.upsert({
-          where: {
-            accountId_labelDefinitionId_changedAt: {
-              accountId: label.accountId,
-              labelDefinitionId: label.labelDefinitionId,
-              changedAt: label.labeledAt,
-            },
-          },
-          create: {
-            accountId: label.accountId,
-            labelDefinitionId: label.labelDefinitionId,
-            changeType,
-            previousValue: previous?.value ?? null,
-            newValue: label.value,
-            previousConfidence: previous?.confidence ?? null,
-            newConfidence: label.confidence,
-            previousReason: previous?.reason ?? null,
-            newReason: label.reason,
-            sourceId: observation.crawlRunId,
-            changedAt: label.labeledAt,
-          },
+        const changeData = {
+          accountId: label.accountId,
+          labelDefinitionId: label.labelDefinitionId,
+          changeType,
+          previousValue: previous?.value ?? null,
+          newValue: label.value,
+          previousConfidence: previous?.confidence ?? null,
+          newConfidence: label.confidence,
+          previousReason: previous?.reason ?? null,
+          newReason: label.reason,
+          sourceId: observation.crawlRunId,
+          changedAt: label.labeledAt,
+        }
+        const changeClient = (tx as unknown as PrismaClient).accountLabelChange
+
+        // Migration 前に同じ legacy event が記録済みなら、その行へ raw AccountLabel.id
+        // を紐付けて新しい冪等キーへ移行する。trigger 由来の同一 event が存在する
+        // rolling-deploy 中も、payload 全体が一致する場合だけ同一イベントとみなす。
+        const existingLegacyEvent = await changeClient.findFirst({
+          where: { ...changeData, sourceLabelId: null },
+          select: { id: true },
+        })
+        if (existingLegacyEvent) {
+          await changeClient.update({
+            where: { id: existingLegacyEvent.id },
+            data: { sourceLabelId: label.sourceLabelId },
+          })
+          continue
+        }
+
+        await changeClient.upsert({
+          where: { sourceLabelId: label.sourceLabelId },
+          create: { ...changeData, sourceLabelId: label.sourceLabelId },
           update: {},
         })
       }

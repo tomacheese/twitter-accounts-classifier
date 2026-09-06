@@ -990,10 +990,10 @@ model LabelMetricDaily {
   @@index([labelDefinitionId, date(sort: Desc)])
 }
 
-// sourceId (CrawlRun.id) を分類更新の再試行冪等キーとして使う。
-// 同じ CrawlRun による retry では sourceId が変わらず一致する。
-// sourceId が null の行 (直接呼び出しや legacy データ) は Postgres の仕様上
-// NULL 同士が重複と判定されないため、この場合は冪等性の保証対象外になる。
+// legacy snapshotless analyzer の再構築経路では、変化元 AccountLabel.id を
+// sourceLabelId として保持し、同じ raw history row の再処理だけを重複排除する。
+// DB trigger 由来の transition は raw AccountLabel row を持たないため null のままとし、
+// 同一ミリ秒に複数回 value が反転しても各 transition を別イベントとして保持する。
 model AccountLabelChange {
   id                 String   @id @default(cuid())
   accountId          String
@@ -1006,15 +1006,10 @@ model AccountLabelChange {
   previousReason     String?
   newReason          String?
   sourceId           String?
+  sourceLabelId      String?  @unique
   changedAt          DateTime @default(now())
 
-  // changedAt には集計 build の watermark ではなく、変化の原因になった
-  // AccountLabel 行自身の labeledAt を入れる。同じ変化イベントは
-  // ANALYZER_WORKER_CONCURRENCY > 1 で並行 build しても常に同じ labeledAt
-  // を指すため、sourceId (どの build が記録したか) ではなく変化イベント自体の
-  // 同一性で重複排除できる。sourceId は NULL 同士が重複と判定されない
-  // (Postgres の仕様) ため、この一意制約には使えない。
-  @@unique([accountId, labelDefinitionId, changedAt])
+  @@index([accountId, labelDefinitionId, changedAt])
   @@index([accountId, changedAt(sort: Desc)])
   @@index([labelDefinitionId, changedAt(sort: Desc), id(sort: Desc)])
   @@index([changedAt(sort: Desc), id(sort: Desc)])

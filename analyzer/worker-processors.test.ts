@@ -479,7 +479,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
       },
     })
     const observedAt = new Date('2026-01-02T00:00:00Z')
-    await prisma.accountLabel.create({
+    const currentLabelA = await prisma.accountLabel.create({
       data: {
         accountId: account.id,
         labelDefinitionId: labelA.id,
@@ -491,7 +491,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
         labeledAt: observedAt,
       },
     })
-    await prisma.accountLabel.create({
+    const currentLabelB = await prisma.accountLabel.create({
       data: {
         accountId: account.id,
         labelDefinitionId: labelB.id,
@@ -528,6 +528,9 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
 
     expect(transactionOptions).toEqual({ timeout: 60_000 })
 
+    // 同じ snapshotless WorkItem を再処理しても raw AccountLabel.id で冪等になる。
+    await processAccountSummaryRefresh(prisma, workItem)
+
     const summary = await prisma.accountSummaryLatest.findUnique({
       where: { accountId: account.id },
     })
@@ -540,14 +543,141 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
       orderBy: { labelDefinitionId: 'asc' },
     })
     expect(changes).toHaveLength(2)
-    expect(changes.find((c) => c.labelDefinitionId === labelA.id)?.changeType).toBe('removed')
-    expect(changes.find((c) => c.labelDefinitionId === labelB.id)?.changeType).toBe('added')
+    const changeA = changes.find((c) => c.labelDefinitionId === labelA.id)
+    const changeB = changes.find((c) => c.labelDefinitionId === labelB.id)
+    expect(changeA?.changeType).toBe('removed')
+    expect(changeA?.sourceLabelId).toBe(currentLabelA.id)
+    expect(changeB?.changeType).toBe('added')
+    expect(changeB?.sourceLabelId).toBe(currentLabelB.id)
 
     const state = await prisma.readModelState.findUnique({
       where: { modelKey: 'account_summary_latest' },
     })
     expect(state?.status).toBe('healthy')
     expect(state?.sourceWatermarkAt?.toISOString()).toBe(observedAt.toISOString())
+  })
+
+  it('snapshotless legacy fallback does not audit confidence/reason-only changes', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_refresh_metadata_only',
+        screenName: 'metadata_only',
+        displayName: 'Metadata Only',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'label_metadata_only', description: 'metadata-only test' },
+    })
+    await prisma.accountLabel.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelDefinition.id,
+        value: true,
+        confidence: 0.9,
+        reason: 'old reason',
+        method: 'rule',
+        ruleVersion: 'v1',
+        labeledAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    })
+    const observedAt = new Date('2026-01-02T00:00:00Z')
+    await prisma.accountLabel.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelDefinition.id,
+        value: true,
+        confidence: 0.4,
+        reason: 'new reason',
+        method: 'rule',
+        ruleVersion: 'v1',
+        labeledAt: observedAt,
+      },
+    })
+    const observation = await prisma.accountClassificationObservation.create({
+      data: { accountId: account.id, observedAt, labelCount: 1 },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+        triggerId: observation.id,
+      },
+    })
+
+    await processAccountSummaryRefresh(prisma, workItem)
+
+    const changes = await prisma.accountLabelChange.findMany({
+      where: { accountId: account.id },
+    })
+    expect(changes).toEqual([])
+  })
+
+  it('snapshotless legacy fallback adopts a pre-migration audit row without duplicating it', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_refresh_legacy_adopt',
+        screenName: 'legacy_adopt',
+        displayName: 'Legacy Adopt',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'label_legacy_adopt', description: 'legacy adopt test' },
+    })
+    const observedAt = new Date('2026-01-02T00:00:00Z')
+    const rawLabel = await prisma.accountLabel.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelDefinition.id,
+        value: true,
+        confidence: 0.8,
+        reason: 'legacy event',
+        method: 'rule',
+        ruleVersion: 'v1',
+        labeledAt: observedAt,
+      },
+    })
+    const oldChange = await prisma.accountLabelChange.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelDefinition.id,
+        changeType: 'added',
+        previousValue: null,
+        newValue: true,
+        previousConfidence: null,
+        newConfidence: 0.8,
+        previousReason: null,
+        newReason: 'legacy event',
+        sourceId: null,
+        changedAt: observedAt,
+      },
+    })
+    const observation = await prisma.accountClassificationObservation.create({
+      data: { accountId: account.id, observedAt, labelCount: 1 },
+    })
+    const workItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'account_summary_refresh',
+        triggerType: 'account_classification_observation',
+        triggerId: observation.id,
+      },
+    })
+
+    await processAccountSummaryRefresh(prisma, workItem)
+
+    const changes = await prisma.accountLabelChange.findMany({
+      where: { accountId: account.id },
+    })
+    expect(changes).toHaveLength(1)
+    expect(changes[0].id).toBe(oldChange.id)
+    expect(changes[0].sourceLabelId).toBe(rawLabel.id)
   })
 
   it('propagates label.evaluable/label.labeledAt as-is into AccountClassificationLatest', async () => {
