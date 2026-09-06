@@ -1,6 +1,64 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { PrismaClient } from '../generated/prisma'
 import { getPrismaClient } from './client'
-import { recordAccountLabelsBulk, recordCrawlAccountLabelsAtomic } from './label-repository'
+import {
+  recordAccountLabelsBulk,
+  recordCrawlAccountLabelsAtomic,
+  recordCrawlAccountLabelsAtomicWithinTx,
+} from './label-repository'
+
+/** 非同期 transaction 間のテスト用 barrier。 */
+function createDeferred() {
+  let settle!: () => void
+  const promise = new Promise<void>((resolve) => {
+    settle = resolve
+  })
+  return { promise, resolve: settle }
+}
+
+/** 指定した Latest row が別 transaction に lock されているか確認する。 */
+async function waitForLatestRowToBeLocked(
+  prisma: PrismaClient,
+  accountId: string,
+  labelDefinitionId: string,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      await prisma.$queryRaw`
+        SELECT 1
+        FROM "AccountLabelLatest"
+        WHERE "accountId" = ${accountId} AND "labelDefinitionId" = ${labelDefinitionId}
+        FOR UPDATE NOWAIT
+      `
+    } catch (error) {
+      if (String(error).includes('55P03') || String(error).includes('could not obtain lock')) {
+        return true
+      }
+      throw error
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  return false
+}
+
+/** 指定した application_name の transaction が Postgres の lock wait に入るまで待つ。 */
+async function waitForSessionToWaitOnLock(
+  prisma: PrismaClient,
+  applicationName: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rows = await prisma.$queryRaw<{ waiting: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE application_name = ${applicationName} AND wait_event_type = 'Lock'
+      ) AS "waiting"
+    `
+    if (rows[0]?.waiting) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error(`Timed out waiting for Postgres lock wait: ${applicationName}`)
+}
 
 // node:crypto の randomUUID は label-repository.test.ts でモックされているが、
 // このファイルは実 DB を使うため、そちらの影響を受けないよう別ファイルに分離する
@@ -18,10 +76,11 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
     await prisma.crawlAuthorCheckpoint.deleteMany()
     await prisma.crawlRun.deleteMany()
     await prisma.labelDefinition.deleteMany()
-    // 他の integration test ファイルが同じ DB に Block/Tweet を残していると、
+    // 他の integration test / benchmark が同じ DB に Block/Tweet/Follow を残していると、
     // account の外部キー制約により削除が失敗するため先に消しておく。
     await prisma.block.deleteMany()
     await prisma.tweet.deleteMany()
+    await prisma.follow.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -212,6 +271,88 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
     expect(secondSnapshot[0].confidence).toBe(0.9)
   })
 
+  it('AccountLabelLatest の labeledAt guard が古い評価を拒否した場合、snapshot には永続化済み Latest を保存する', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_snapshot_guard',
+        screenName: 'frank',
+        displayName: 'Frank',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelDefinition = await prisma.labelDefinition.create({
+      data: { key: 'test_label_snapshot_guard', description: '競合guardテスト用ラベル' },
+    })
+    const crawlRun = await prisma.crawlRun.create({
+      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
+    })
+    const newerLabeledAt = new Date('2100-01-01T00:00:00.000Z')
+    await prisma.accountLabelLatest.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: labelDefinition.id,
+        value: true,
+        confidence: 0.99,
+        reason: 'newer committed value',
+        method: 'rule',
+        ruleVersion: 'v2',
+        evaluable: true,
+        labeledAt: newerLabeledAt,
+        sourceKind: 'relabel',
+      },
+    })
+
+    const observationId = await recordCrawlAccountLabelsAtomic(prisma, {
+      accountId: account.id,
+      crawlRunId: crawlRun.id,
+      username: 'login_account',
+      labels: [
+        {
+          labelDefinitionId: labelDefinition.id,
+          result: { value: false, confidence: 0.1, reason: 'stale crawl value' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+
+    const latest = await prisma.accountLabelLatest.findUniqueOrThrow({
+      where: {
+        accountId_labelDefinitionId: {
+          accountId: account.id,
+          labelDefinitionId: labelDefinition.id,
+        },
+      },
+    })
+    expect(latest.value).toBe(true)
+    expect(latest.ruleVersion).toBe('v2')
+    expect(latest.labeledAt).toEqual(newerLabeledAt)
+
+    const observation = await prisma.accountClassificationObservation.findUniqueOrThrow({
+      where: { id: observationId ?? '' },
+    })
+    const snapshot = observation.classificationSnapshot as unknown as {
+      labelDefinitionId: string
+      value: boolean
+      confidence: number
+      reason: string
+      ruleVersion: string
+      labeledAt: string
+    }[]
+    expect(snapshot).toHaveLength(1)
+    expect(snapshot[0]).toMatchObject({
+      labelDefinitionId: labelDefinition.id,
+      value: true,
+      confidence: 0.99,
+      reason: 'newer committed value',
+      ruleVersion: 'v2',
+      labeledAt: newerLabeledAt.toISOString(),
+    })
+  })
+
   it('同一crawlRunIdの部分的な再開呼び出しでも、前回claim済みのラベルをAccountLabelLatestから補いsnapshotに含める', async () => {
     const account = await prisma.account.create({
       data: {
@@ -282,6 +423,110 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
     expect(resumedSnapshot.find((entry) => entry.labelDefinitionId === labelA.id)?.value).toBe(true)
     expect(resumedSnapshot.find((entry) => entry.labelDefinitionId === labelB.id)?.value).toBe(true)
   })
+
+  it('部分 resume の全 label snapshot lock と concurrent bulk writer が deadlock せず完了する', async () => {
+    const account = await prisma.account.create({
+      data: {
+        id: 'acct_partial_resume_lock_order',
+        screenName: 'grace',
+        displayName: 'Grace',
+        followersCount: 0,
+        followingCount: 0,
+        tweetCount: 0,
+        accountCreatedAt: new Date(),
+      },
+    })
+    const labelDefinitions = await Promise.all([
+      prisma.labelDefinition.create({
+        data: { key: 'test_label_lock_order_a', description: 'lock order test label A' },
+      }),
+      prisma.labelDefinition.create({
+        data: { key: 'test_label_lock_order_b', description: 'lock order test label B' },
+      }),
+    ])
+    const [firstLabel, secondLabel] = labelDefinitions.toSorted((a, b) => a.id.localeCompare(b.id))
+    const crawlRun = await prisma.crawlRun.create({
+      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
+    })
+    const labels = [firstLabel, secondLabel].map((label, index) => ({
+      labelDefinitionId: label.id,
+      result: { value: index === 0, confidence: 0.9, reason: `reason ${index}` },
+      method: 'rule',
+      ruleVersion: 'v1',
+    }))
+
+    await recordCrawlAccountLabelsAtomic(prisma, {
+      accountId: account.id,
+      crawlRunId: crawlRun.id,
+      username: 'login_account',
+      labels: [labels[0]],
+    })
+    await prisma.accountLabelLatest.create({
+      data: {
+        accountId: account.id,
+        labelDefinitionId: secondLabel.id,
+        value: true,
+        confidence: 0.1,
+        reason: 'seeded before partial resume',
+        method: 'rule',
+        ruleVersion: 'v0',
+        evaluable: true,
+        labeledAt: new Date(),
+        sourceKind: 'relabel',
+      },
+    })
+
+    const firstLatestLocked = createDeferred()
+    const allowConcurrentWrite = createDeferred()
+    const concurrentBulkWrite = prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SET LOCAL deadlock_timeout = '100ms'")
+      await tx.$queryRaw`
+        SELECT 1
+        FROM "AccountLabelLatest"
+        WHERE "accountId" = ${account.id} AND "labelDefinitionId" = ${firstLabel.id}
+        FOR UPDATE
+      `
+      firstLatestLocked.resolve()
+      await allowConcurrentWrite.promise
+      return recordAccountLabelsBulk(tx as unknown as PrismaClient, {
+        accountId: account.id,
+        sourceKind: 'relabel',
+        labels: labels.map((label) => ({
+          ...label,
+          result: {
+            ...label.result,
+            value: !label.result.value,
+            reason: `concurrent ${label.result.reason}`,
+          },
+        })),
+      })
+    })
+    await firstLatestLocked.promise
+    const applicationName = 'tac_partial_resume_snapshot_prelock'
+    const partialResume = prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`SET LOCAL application_name = '${applicationName}'`)
+      return recordCrawlAccountLabelsAtomicWithinTx(tx as unknown as PrismaClient, {
+        accountId: account.id,
+        crawlRunId: crawlRun.id,
+        username: 'login_account',
+        labels,
+      })
+    })
+    try {
+      await waitForSessionToWaitOnLock(prisma, applicationName)
+      const secondLatestWasLocked = await waitForLatestRowToBeLocked(
+        prisma,
+        account.id,
+        secondLabel.id,
+      )
+      expect(secondLatestWasLocked).toBe(false)
+      allowConcurrentWrite.resolve()
+      await expect(Promise.all([partialResume, concurrentBulkWrite])).resolves.toHaveLength(2)
+    } finally {
+      allowConcurrentWrite.resolve()
+      await Promise.allSettled([partialResume, concurrentBulkWrite])
+    }
+  }, 15_000)
 })
 
 describe.skipIf(!process.env.DATABASE_URL)('recordAccountLabelsBulk', () => {
@@ -296,6 +541,7 @@ describe.skipIf(!process.env.DATABASE_URL)('recordAccountLabelsBulk', () => {
     await prisma.crawlRun.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.follow.deleteMany()
     await prisma.account.deleteMany()
   })
 

@@ -7,6 +7,7 @@ import {
   filterAccountIdsWithExistingLabels,
   recordAccountLabelsBulk,
   recordAccountLabelsBulkForAccounts,
+  recordAccountLabelsBulkLatestOnlyForAccounts,
   recordCrawlAccountLabel,
   recordCrawlAccountLabelsAtomic,
   recordCrawlAccountLabelsAtomicWithinTx,
@@ -373,6 +374,80 @@ describe('recordAccountLabelsBulkForAccounts', () => {
     // recordAccountLabelsBulk と異なり、accountId 列は行ごとに異なる値を持つ。
     expect(values[1]).toEqual(['u1', 'u2'])
   })
+
+  it('orders multi-account UPSERT input by accountId and labelDefinitionId before taking row locks', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await recordAccountLabelsBulkForAccounts(prisma, {
+      sourceKind: 'relabel',
+      labels: [
+        {
+          accountId: 'account-b',
+          labelDefinitionId: 'label-a',
+          result: { value: true, confidence: 1, reason: 'b-a' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+        {
+          accountId: 'account-a',
+          labelDefinitionId: 'label-z',
+          result: { value: true, confidence: 1, reason: 'a-z' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+        {
+          accountId: 'account-a',
+          labelDefinitionId: 'label-a',
+          result: { value: true, confidence: 1, reason: 'a-a' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+
+    const [, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    expect(values[1]).toEqual(['account-a', 'account-a', 'account-b'])
+    expect(values[2]).toEqual(['label-a', 'label-z', 'label-a'])
+  })
+})
+
+describe('recordAccountLabelsBulkLatestOnlyForAccounts', () => {
+  it('orders Phase B latest-only UPSERT input by accountId and labelDefinitionId before taking row locks', async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0)
+    const prisma = { $executeRaw: executeRaw } as unknown as PrismaClient
+
+    await recordAccountLabelsBulkLatestOnlyForAccounts(prisma, {
+      sourceKind: 'relabel',
+      labels: [
+        {
+          accountId: 'account-b',
+          labelDefinitionId: 'label-a',
+          result: { value: true, confidence: 1, reason: 'b-a' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+        {
+          accountId: 'account-a',
+          labelDefinitionId: 'label-z',
+          result: { value: true, confidence: 1, reason: 'a-z' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+        {
+          accountId: 'account-a',
+          labelDefinitionId: 'label-a',
+          result: { value: true, confidence: 1, reason: 'a-a' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+
+    const [, ...values] = executeRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    expect(values[0]).toEqual(['account-a', 'account-a', 'account-b'])
+    expect(values[1]).toEqual(['label-a', 'label-z', 'label-a'])
+  })
 })
 
 describe('recordAccountLabelsBulk evaluable column', () => {
@@ -627,6 +702,7 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
     const queryRaw = vi
       .fn()
       .mockResolvedValueOnce([{ labelDefinitionId: 'ld1', method: 'rule', ruleVersion: 'v1' }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
           id: 'al1',
@@ -642,7 +718,18 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
           historyInserted: true,
           latestUpserted: true,
           semanticNoOp: false,
-          effectiveLabeledAt: new Date('2026-08-04T00:00:00Z'),
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          labelDefinitionId: 'ld1',
+          value: true,
+          confidence: 1,
+          reason: 'test',
+          method: 'rule',
+          ruleVersion: 'v1',
+          evaluable: true,
+          labeledAt: new Date('2026-08-04T00:00:00Z'),
         },
       ])
     const create = vi.fn().mockResolvedValue({ id: 'observation1' })
@@ -670,6 +757,10 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
     })
 
     expect(observationId).toBe('observation1')
+    const preLockSql = queryRaw.mock.calls[1]?.[0]
+    expect(String(preLockSql)).toContain('FOR UPDATE')
+    const snapshotReadSql = queryRaw.mock.calls[3]?.[0]
+    expect(String(snapshotReadSql)).toContain('FOR UPDATE')
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         snapshotVersion: 1,

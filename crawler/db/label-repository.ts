@@ -92,23 +92,6 @@ interface RecordAccountLabelsBulkRow {
   historyInserted: boolean
   latestUpserted: boolean
   semanticNoOp: boolean
-  effectiveLabeledAt: Date
-}
-
-/**
- * この呼び出しで評価された 1 ラベル分の確定後の値。
- * `AccountLabel` への履歴 INSERT の有無 (semanticNoOp かどうか) によらず、
- * 評価対象になった全ラベルについて 1 件ずつ得られる。
- */
-export interface EffectiveLabelRow {
-  labelDefinitionId: string
-  value: boolean
-  confidence: number
-  reason: string
-  method: string
-  ruleVersion: string
-  evaluable: boolean
-  labeledAt: Date
 }
 
 /**
@@ -138,6 +121,15 @@ export interface AccountLabelBulkInput {
   ruleVersion: string
 }
 
+/** 複数 row の writer 間で lock 順序を共有するための正準順序。 */
+function orderAccountLabelBulkInputs(labels: AccountLabelBulkInput[]): AccountLabelBulkInput[] {
+  return labels.toSorted(
+    (left, right) =>
+      left.accountId.localeCompare(right.accountId) ||
+      left.labelDefinitionId.localeCompare(right.labelDefinitionId),
+  )
+}
+
 /**
  * ラベルごとに `$queryRaw` を逐次発行する代わりに、列単位の配列を `UNNEST` で展開し、`AccountLabel` への INSERT と `AccountLabelLatest` への UPSERT を 1 ラウンドトリップにまとめる。
  * `AccountLabelLatest` への UPSERT は値・confidence・reason・method・ruleVersion が不変なら行わない (`recordCrawlAccountLabel` は claim 成立時に無条件で UPSERT する点が異なる)。
@@ -148,9 +140,7 @@ export interface AccountLabelBulkInput {
  * @param sourceId - 発生源となった run の ID
  * @param sourceUsername - 発生源となったログインアカウント
  * @returns `history` (作成された `AccountLabel` 履歴行。`labels` と同じ順序とは限らないため、
- *   対応付けが必要なら `accountId`・`labelDefinitionId` で突き合わせる) と、
- *   `effective` (この呼び出しで評価された全ラベルの確定後の値。`AccountLabel` への
- *   履歴 INSERT の有無を問わない)
+ *   対応付けが必要なら `accountId`・`labelDefinitionId` で突き合わせる)
  */
 async function recordAccountLabelsBulkCore(
   prisma: PrismaClient | Prisma.TransactionClient,
@@ -158,18 +148,21 @@ async function recordAccountLabelsBulkCore(
   sourceKind: string,
   sourceId: string | undefined,
   sourceUsername: string | undefined,
-): Promise<{ history: AccountLabel[]; effective: EffectiveLabelRow[] }> {
-  if (labels.length === 0) return { history: [], effective: [] }
+): Promise<{ history: AccountLabel[] }> {
+  if (labels.length === 0) return { history: [] }
 
-  const ids = labels.map(() => randomUUID())
-  const accountIds = labels.map((label) => label.accountId)
-  const labelDefinitionIds = labels.map((label) => label.labelDefinitionId)
-  const values = labels.map((label) => label.result.value)
-  const confidences = labels.map((label) => label.result.confidence)
-  const reasons = labels.map((label) => label.result.reason)
-  const methods = labels.map((label) => label.method)
-  const ruleVersions = labels.map((label) => label.ruleVersion)
-  const evaluables = labels.map((label) => label.result.evaluable ?? true)
+  // 複数 row の UPSERT は同じ一意キーを異なる順序で lock すると deadlock しうるため、
+  // crawl/relabel のどの caller でも (accountId, labelDefinitionId) の正準順序で処理する。
+  const orderedLabels = orderAccountLabelBulkInputs(labels)
+  const ids = orderedLabels.map(() => randomUUID())
+  const accountIds = orderedLabels.map((label) => label.accountId)
+  const labelDefinitionIds = orderedLabels.map((label) => label.labelDefinitionId)
+  const values = orderedLabels.map((label) => label.result.value)
+  const confidences = orderedLabels.map((label) => label.result.confidence)
+  const reasons = orderedLabels.map((label) => label.result.reason)
+  const methods = orderedLabels.map((label) => label.method)
+  const ruleVersions = orderedLabels.map((label) => label.ruleVersion)
+  const evaluables = orderedLabels.map((label) => label.result.evaluable ?? true)
 
   const rows = await prisma.$queryRaw<RecordAccountLabelsBulkRow[]>`
     WITH shared_now AS (
@@ -203,9 +196,13 @@ async function recordAccountLabelsBulkCore(
     upserted_latest AS (
       INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
       SELECT ir."accountId", ir."labelDefinitionId", ir."value", ir."confidence", ir."reason", ir."method", ir."ruleVersion", ir."evaluable", shared_now."labeledAt", ${sourceKind}, ${sourceId ?? null}, ${sourceUsername ?? null}
-      FROM input_rows ir
+      FROM (
+        SELECT ir.*
+        FROM input_rows ir
+        WHERE EXISTS (SELECT 1 FROM to_insert ti WHERE ti."id" = ir."id")
+        ORDER BY ir."accountId", ir."labelDefinitionId"
+      ) ir
       CROSS JOIN shared_now
-      WHERE EXISTS (SELECT 1 FROM to_insert ti WHERE ti."id" = ir."id")
       ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
       SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
           "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "evaluable" = EXCLUDED."evaluable", "labeledAt" = EXCLUDED."labeledAt",
@@ -223,27 +220,14 @@ async function recordAccountLabelsBulkCore(
       ) AS "latestUpserted",
       NOT EXISTS (
         SELECT 1 FROM to_insert ti WHERE ti."id" = ir."id"
-      ) AS "semanticNoOp",
-      -- semanticNoOp な行 (今回の評価が既存 AccountLabelLatest と全フィールド一致) は
-      -- 今回書き込まれないため、その行の実効 labeledAt は既存行のものを引き継ぐ。
-      COALESCE(ih."labeledAt", al."labeledAt") AS "effectiveLabeledAt"
+      ) AS "semanticNoOp"
     FROM input_rows ir
     LEFT JOIN inserted_history ih ON ih."id" = ir."id"
-    LEFT JOIN "AccountLabelLatest" al
-      ON al."accountId" = ir."accountId" AND al."labelDefinitionId" = ir."labelDefinitionId"
   `
 
   const history: AccountLabel[] = []
-  const effective: EffectiveLabelRow[] = []
   for (const row of rows) {
-    const {
-      historyInserted,
-      latestUpserted,
-      semanticNoOp,
-      labeledAt,
-      effectiveLabeledAt,
-      ...rest
-    } = row
+    const { historyInserted, latestUpserted, semanticNoOp, labeledAt, ...rest } = row
     if (!latestUpserted && !semanticNoOp) {
       logger.warn(
         `recordAccountLabelsBulk: AccountLabelLatest upsert guard skipped the write (accountId=${rest.accountId}, labelDefinitionId=${rest.labelDefinitionId})`,
@@ -258,19 +242,9 @@ async function recordAccountLabelsBulkCore(
         sourceUsername: sourceUsername ?? null,
       })
     }
-    effective.push({
-      labelDefinitionId: rest.labelDefinitionId,
-      value: rest.value,
-      confidence: rest.confidence,
-      reason: rest.reason,
-      method: rest.method,
-      ruleVersion: rest.ruleVersion,
-      evaluable: rest.evaluable,
-      labeledAt: effectiveLabeledAt,
-    })
   }
 
-  return { history, effective }
+  return { history }
 }
 
 /**
@@ -323,12 +297,13 @@ export async function recordAccountLabelsBulkForAccounts(
   params: RecordAccountLabelsBulkForAccountsParams,
 ): Promise<AccountLabel[]> {
   const history: AccountLabel[] = []
+  const orderedLabels = orderAccountLabelBulkInputs(params.labels)
   for (
     let offset = 0;
-    offset < params.labels.length;
+    offset < orderedLabels.length;
     offset += RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE
   ) {
-    const subChunk = params.labels.slice(offset, offset + RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE)
+    const subChunk = orderedLabels.slice(offset, offset + RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE)
     const { history: subHistory } = await recordAccountLabelsBulkCore(
       prisma,
       subChunk,
@@ -353,12 +328,13 @@ export async function recordAccountLabelsBulkLatestOnlyForAccounts(
   prisma: PrismaClient | Prisma.TransactionClient,
   params: RecordAccountLabelsBulkForAccountsParams,
 ): Promise<void> {
+  const orderedLabels = orderAccountLabelBulkInputs(params.labels)
   for (
     let offset = 0;
-    offset < params.labels.length;
+    offset < orderedLabels.length;
     offset += RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE
   ) {
-    const subChunk = params.labels.slice(offset, offset + RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE)
+    const subChunk = orderedLabels.slice(offset, offset + RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE)
     if (subChunk.length === 0) continue
 
     const accountIds = subChunk.map((label) => label.accountId)
@@ -394,7 +370,11 @@ export async function recordAccountLabelsBulkLatestOnlyForAccounts(
       )
       INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
       SELECT tu."accountId", tu."labelDefinitionId", tu."value", tu."confidence", tu."reason", tu."method", tu."ruleVersion", tu."evaluable", shared_now."labeledAt", ${sourceKind}, ${sourceId ?? null}, ${sourceUsername ?? null}
-      FROM to_upsert tu
+      FROM (
+        SELECT tu.*
+        FROM to_upsert tu
+        ORDER BY tu."accountId", tu."labelDefinitionId"
+      ) tu
       CROSS JOIN shared_now
       ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
       SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
@@ -575,7 +555,24 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
       result: label.result,
     }))
 
-  const { effective } = await recordAccountLabelsBulkCore(
+  const snapshotLabelDefinitionIds = [
+    ...new Set(params.labels.map((label) => label.labelDefinitionId)),
+  ].toSorted((left, right) => left.localeCompare(right))
+
+  // 部分 resume は今回 claim できた subset だけを書き込む一方で、snapshot には active
+  // label 全件を含める。subset を先に UPSERT してから残りを lock すると、別 writer が
+  // 残りを lock した状態で subset を待つ循環を作れる。既存 Latest を正準順序で先に lock
+  // してから書き込むことで、snapshot に含める既存 row と同じ lock 順序を保つ。
+  await prisma.$queryRaw`
+    SELECT "labelDefinitionId"
+    FROM "AccountLabelLatest"
+    WHERE "accountId" = ${params.accountId}
+      AND "labelDefinitionId" = ANY(${snapshotLabelDefinitionIds}::text[])
+    ORDER BY "labelDefinitionId"
+    FOR UPDATE
+  `
+
+  await recordAccountLabelsBulkCore(
     prisma,
     claimedLabels.map((label) => ({ ...label, accountId: params.accountId })),
     'crawl',
@@ -583,9 +580,47 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
     params.username,
   )
 
-  // snapshot は「この crawl で評価された全ラベルの現在値」を漏れなく含む必要があるため、
-  // AccountLabel への履歴 INSERT の有無 (semanticNoOp かどうか) を問わない effective を使う。
-  const classificationSnapshot: ClassificationSnapshotEntry[] = effective.map((row) => ({
+  // Observation の snapshot は、入力値ではなく永続化済み AccountLabelLatest を唯一の
+  // source of truth とする。labeledAt guard が今回の UPSERT を拒否した場合、入力値を
+  // snapshot に残すと「DB の Latest は新しい値なのに Observation だけ古い値」という
+  // 逆転が起きる。さらに通常の SELECT だけでは、読取後〜Observation 作成の間に
+  // relabel/crawl の別 writer が同じ Latest を更新できるため競合窓が残る。
+  //
+  // 最新状態を保存した後に全件を再読込する。READ COMMITTED では、直前の FOR UPDATE が
+  // 待った並行 writer の commit もこの statement から見え、row lock は Observation/work-item
+  // transaction の commit まで保持される。今回新規作成した Latest row もここで含める。
+  const latestRows = await prisma.$queryRaw<
+    {
+      labelDefinitionId: string
+      value: boolean
+      confidence: number
+      reason: string
+      method: string
+      ruleVersion: string
+      evaluable: boolean
+      labeledAt: Date
+    }[]
+  >`
+    SELECT
+      "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt"
+    FROM "AccountLabelLatest"
+    WHERE "accountId" = ${params.accountId}
+      AND "labelDefinitionId" = ANY(${snapshotLabelDefinitionIds}::text[])
+    ORDER BY "labelDefinitionId"
+    FOR UPDATE
+  `
+  const latestByLabelDefinitionId = new Map(
+    latestRows.map((row) => [row.labelDefinitionId, row] as const),
+  )
+  const missingLabelDefinitionIds = snapshotLabelDefinitionIds.filter(
+    (labelDefinitionId) => !latestByLabelDefinitionId.has(labelDefinitionId),
+  )
+  if (missingLabelDefinitionIds.length > 0) {
+    throw new Error(
+      `recordCrawlAccountLabelsAtomicWithinTx: AccountLabelLatest missing after claim persistence (accountId=${params.accountId}, labelDefinitionIds=${missingLabelDefinitionIds.join(',')})`,
+    )
+  }
+  const classificationSnapshot: ClassificationSnapshotEntry[] = latestRows.map((row) => ({
     labelDefinitionId: row.labelDefinitionId,
     value: row.value,
     confidence: row.confidence,
@@ -595,35 +630,6 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
     evaluable: row.evaluable,
     labeledAt: row.labeledAt.toISOString(),
   }))
-
-  // 再開時の重複呼び出しで claim が部分的にしか成功しない場合、今回claimできなかった
-  // ラベルは前回の呼び出しで既に AccountLabelLatest へ書き込まれている。それらを
-  // snapshot から漏らすと AccountSummaryLatest.activeLabelKeys の全置換で消えてしまうため、
-  // AccountLabelLatest から現在値を読み足して補う。
-  if (claimedLabels.length < params.labels.length) {
-    const claimedLabelDefinitionIds = new Set(claimedLabels.map((label) => label.labelDefinitionId))
-    const unclaimedLabelDefinitionIds = params.labels
-      .map((label) => label.labelDefinitionId)
-      .filter((labelDefinitionId) => !claimedLabelDefinitionIds.has(labelDefinitionId))
-    const existingLatest = await prisma.accountLabelLatest.findMany({
-      where: {
-        accountId: params.accountId,
-        labelDefinitionId: { in: unclaimedLabelDefinitionIds },
-      },
-    })
-    for (const row of existingLatest) {
-      classificationSnapshot.push({
-        labelDefinitionId: row.labelDefinitionId,
-        value: row.value,
-        confidence: row.confidence,
-        reason: row.reason,
-        method: row.method,
-        ruleVersion: row.ruleVersion,
-        evaluable: row.evaluable,
-        labeledAt: row.labeledAt.toISOString(),
-      })
-    }
-  }
 
   const observation = await prisma.accountClassificationObservation.create({
     data: {
