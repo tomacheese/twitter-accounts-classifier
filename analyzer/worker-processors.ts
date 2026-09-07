@@ -28,16 +28,8 @@ import { validateStructuredOutputAgainstReviewPlan } from './weekly-review/valid
 import { loadPolicy } from './policy/load-policy'
 import { computePolicyHash } from './policy/policy-hash'
 import { Logger } from '@book000/node-utils'
-import {
-  findActiveFindingsAtWatermarkForAccount,
-  findLabelsAtWatermarkForAccount,
-  findPreviousLabelAtWatermarkForAccount,
-  type LabelAtWatermark,
-} from './read-models/build-account-summary-latest-row'
-import {
-  parseClassificationSnapshot,
-  SUPPORTED_ACCOUNT_CLASSIFICATION_SNAPSHOT_VERSION,
-} from './read-models/account-classification-snapshot'
+import { findActiveFindingsAtWatermarkForAccount } from './read-models/build-account-summary-latest-row'
+import { parseClassificationSnapshot } from './read-models/account-classification-snapshot'
 import {
   touchAccountSummaryLatestState,
   upsertAccountClassificationLatest,
@@ -210,9 +202,8 @@ function isSameLabelKeySet(a: string[], b: string[]): boolean {
  * `AccountSummaryLatest`/`AccountClassificationLatest` へ反映する。
  * finding 系フィールド (activeFindingCount/highestFindingSeverity/findingObservedAt) は
  * ここでは更新しない (現状値をそのまま渡す)。
- * `AccountLabelChange` は `AccountLabel` 履歴上の直前行との比較 (既存の
- * 既存の分類値と同じロジックで判定し、`AccountClassificationLatest` の
- * 前回値には依存しない (並行更新の順序に依存させないため)。
+ * `AccountLabelChange` は `AccountLabelLatest` への書き込みを検出する DB トリガーが
+ * 生成するため、ここでは生成しない。
  * @param prisma - Prisma クライアント
  * @param workItem - `triggerType: 'account_classification_observation'` の WorkItem
  */
@@ -226,32 +217,12 @@ export async function processAccountSummaryRefresh(
   const account = await prisma.account.findUniqueOrThrow({
     where: { id: observation.accountId },
   })
-  // snapshot 付き Observation は crawl 時点の確定値を持つため、AccountLabel への
-  // クエリなしで読み取れる。AccountLabelChange は DB トリガーが AccountLabelLatest
-  // への書き込みから既に生成済みのため、この経路ではアプリ側で生成しない。
-  const useSnapshot =
-    observation.snapshotVersion === SUPPORTED_ACCOUNT_CLASSIFICATION_SNAPSHOT_VERSION
-  logger.info(
-    `processAccountSummaryRefresh: using ${useSnapshot ? 'snapshot' : 'watermark reconstruction'} (accountId=${observation.accountId}, observationId=${observation.id})`,
-  )
-  const [labels, previousLabels, existing] = await Promise.all([
-    useSnapshot
-      ? Promise.resolve(
-          parseClassificationSnapshot(observation.accountId, observation.classificationSnapshot),
-        )
-      : findLabelsAtWatermarkForAccount(prisma, observation.accountId, observation.observedAt),
-    useSnapshot
-      ? Promise.resolve<LabelAtWatermark[]>([])
-      : findPreviousLabelAtWatermarkForAccount(
-          prisma,
-          observation.accountId,
-          observation.observedAt,
-        ),
+  const [labels, existing] = await Promise.all([
+    Promise.resolve(
+      parseClassificationSnapshot(observation.accountId, observation.classificationSnapshot),
+    ),
     prisma.accountSummaryLatest.findUnique({ where: { accountId: observation.accountId } }),
   ])
-  const previousByLabelDefinitionId = new Map(
-    previousLabels.map((label) => [label.labelDefinitionId, label]),
-  )
   const labelDefinitions = await prisma.labelDefinition.findMany({
     select: { id: true, key: true },
   })
@@ -312,58 +283,6 @@ export async function processAccountSummaryRefresh(
           labeledAt: label.labeledAt,
         })),
       )
-
-      if (useSnapshot) return
-
-      for (const label of labels) {
-        const previous = previousByLabelDefinitionId.get(label.labelDefinitionId)
-        let changeType: 'added' | 'removed' | undefined
-        if (previous === undefined) {
-          if (label.value) changeType = 'added'
-        } else if (previous.value !== label.value) {
-          changeType = label.value ? 'added' : 'removed'
-        }
-        if (!changeType) continue
-        if (!label.sourceLabelId) {
-          throw new Error('legacy watermark label is missing sourceLabelId')
-        }
-
-        const changeData = {
-          accountId: label.accountId,
-          labelDefinitionId: label.labelDefinitionId,
-          changeType,
-          previousValue: previous?.value ?? null,
-          newValue: label.value,
-          previousConfidence: previous?.confidence ?? null,
-          newConfidence: label.confidence,
-          previousReason: previous?.reason ?? null,
-          newReason: label.reason,
-          sourceId: observation.crawlRunId,
-          changedAt: label.labeledAt,
-        }
-        const changeClient = (tx as unknown as PrismaClient).accountLabelChange
-
-        // Migration 前に同じ legacy event が記録済みなら、その行へ raw AccountLabel.id
-        // を紐付けて新しい冪等キーへ移行する。trigger 由来の同一 event が存在する
-        // rolling-deploy 中も、payload 全体が一致する場合だけ同一イベントとみなす。
-        const existingLegacyEvent = await changeClient.findFirst({
-          where: { ...changeData, sourceLabelId: null },
-          select: { id: true },
-        })
-        if (existingLegacyEvent) {
-          await changeClient.update({
-            where: { id: existingLegacyEvent.id },
-            data: { sourceLabelId: label.sourceLabelId },
-          })
-          continue
-        }
-
-        await changeClient.upsert({
-          where: { sourceLabelId: label.sourceLabelId },
-          create: { ...changeData, sourceLabelId: label.sourceLabelId },
-          update: {},
-        })
-      }
     },
     { timeout: ACCOUNT_SUMMARY_REFRESH_TRANSACTION_TIMEOUT_MS },
   )

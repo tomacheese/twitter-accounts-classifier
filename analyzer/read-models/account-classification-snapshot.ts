@@ -1,8 +1,20 @@
 import type { Prisma } from '../generated/prisma'
-import type { LabelAtWatermark } from './build-account-summary-latest-row'
 
 /** `AccountClassificationObservation.classificationSnapshot` として現状サポートするバージョン。 */
 export const SUPPORTED_ACCOUNT_CLASSIFICATION_SNAPSHOT_VERSION = 1
+
+/** `classificationSnapshot` から復元した 1 ラベル分の値。 */
+export interface ClassificationSnapshotLabel {
+  accountId: string
+  labelDefinitionId: string
+  value: boolean
+  confidence: number
+  reason: string
+  method: string
+  ruleVersion: string
+  labeledAt: Date
+  evaluable: boolean
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -10,17 +22,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * `AccountClassificationObservation.classificationSnapshot` (Prisma `Json`) を
- * `LabelAtWatermark` 相当の配列へ変換する。crawl 経路が書き込む形状は固定のため、
+ * `ClassificationSnapshotLabel` の配列へ変換する。crawl 経路が書き込む形状は固定のため、
  * zod 等の追加ライブラリは導入せず型ガードのみで検証する。
  * @param accountId - 対象アカウント (snapshot 自体は accountId を持たないため補う)
  * @param snapshot - `AccountClassificationObservation.classificationSnapshot`
- * @returns watermark 復元と同じ形状のラベル値一覧
+ * @returns ラベル値一覧
  * @throws 配列でない、または要素が必須フィールドを欠く場合
  */
 export function parseClassificationSnapshot(
   accountId: string,
   snapshot: Prisma.JsonValue,
-): LabelAtWatermark[] {
+): ClassificationSnapshotLabel[] {
   if (!Array.isArray(snapshot)) {
     throw new TypeError('classificationSnapshot must be an array')
   }
