@@ -53,12 +53,14 @@ describe('AccountLabels', () => {
       value: true,
       history: [
         {
-          value: false,
-          confidence: 0.4,
-          reason: 'old reasoning',
-          method: 'heuristic',
-          ruleVersion: '0.9.0',
-          labeledAt: new Date('2026-06-01T00:00:00Z'),
+          changeType: 'removed',
+          previousValue: true,
+          newValue: false,
+          previousConfidence: 0.9,
+          newConfidence: 0.4,
+          previousReason: 'matches keyword',
+          newReason: 'old reasoning',
+          changedAt: new Date('2026-06-01T00:00:00Z'),
         },
       ],
     })

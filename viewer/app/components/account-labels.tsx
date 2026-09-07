@@ -37,11 +37,17 @@ function LabelCard({ label }: { label: AccountDetailLabel }): React.ReactElement
             {label.history.map((entry, index) => (
               <li key={index} className="border-t pt-2 dark:border-gray-700">
                 <p>
-                  {entry.value ? 'true' : 'false'} (confidence {entry.confidence.toFixed(2)})
+                  {entry.changeType}:{' '}
+                  {entry.previousValue === null ? '—' : String(entry.previousValue)} (confidence{' '}
+                  {entry.previousConfidence === null ? '—' : entry.previousConfidence.toFixed(2)}) →{' '}
+                  {entry.newValue === null ? '—' : String(entry.newValue)} (confidence{' '}
+                  {entry.newConfidence === null ? '—' : entry.newConfidence.toFixed(2)})
                 </p>
-                <p className="mt-1 text-gray-500 dark:text-gray-400">{entry.reason}</p>
+                <p className="mt-1 text-gray-500 dark:text-gray-400">
+                  {entry.previousReason ?? '—'} → {entry.newReason ?? '—'}
+                </p>
                 <p className="mt-1 text-gray-400 dark:text-gray-500">
-                  {entry.method} · {entry.ruleVersion} · {formatDateTime(entry.labeledAt)}
+                  {formatDateTime(entry.changedAt)}
                 </p>
               </li>
             ))}
