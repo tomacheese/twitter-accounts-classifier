@@ -253,7 +253,6 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
     await prisma.blockAccountRun.deleteMany()
     await prisma.blockRun.deleteMany()
     await prisma.accountLabelLatest.deleteMany()
-    await prisma.accountLabel.deleteMany()
     await prisma.account.deleteMany()
     await prisma.labelDefinition.deleteMany()
   })
@@ -285,17 +284,6 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
     })
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: 'spam', description: '架空のテスト用ラベル' },
-    })
-    await prisma.accountLabel.create({
-      data: {
-        accountId: blockedId,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.9,
-        reason: 'test',
-        method: 'rule',
-        ruleVersion: 'v1',
-      },
     })
     await prisma.accountLabelLatest.create({
       data: {

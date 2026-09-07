@@ -35,7 +35,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // account の外部キー制約により削除が失敗するため先に消しておく。
       await prisma.analysisWorkItem.deleteMany()
       await prisma.accountClassificationObservation.deleteMany()
-      await prisma.accountLabel.deleteMany()
       await prisma.accountLabelLatest.deleteMany()
       await prisma.crawlAccountLabelRun.deleteMany()
       await prisma.block.deleteMany()

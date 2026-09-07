@@ -785,7 +785,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // account 削除時の FK 違反を避けるため先に消しておく。
       await prisma.block.deleteMany()
       await prisma.tweet.deleteMany()
-      await prisma.accountLabel.deleteMany()
       await prisma.accountLabelLatest.deleteMany()
       await prisma.crawlAuthorCheckpoint.deleteMany()
       await prisma.crawlAccountLabelRun.deleteMany()
