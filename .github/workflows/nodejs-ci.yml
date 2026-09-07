@@ -117,7 +117,7 @@ jobs:
       - name: Run analyzer tests
         run: pnpm --filter analyzer run test
       - name: Run crawler tests
-        run: pnpm --filter crawler run test
+        run: pnpm --filter crawler run test -- --no-file-parallelism
       - name: Run blocker tests
         run: pnpm --filter blocker run test
       - name: Run viewer tests
