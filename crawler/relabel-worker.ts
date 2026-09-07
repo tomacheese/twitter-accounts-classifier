@@ -17,7 +17,6 @@ import {
   type WorkItemCandidate,
 } from './db/analysis-work-item-repository'
 import {
-  recordAccountLabelsBulkForAccounts,
   recordAccountLabelsBulkLatestOnlyForAccounts,
   ensureLabelDefinitionsForRules,
   type AccountLabelBulkInput,
@@ -47,7 +46,6 @@ import {
   getRelabelerWorkerBatchSize,
   getRelabelerWorkerChunkSize,
   getRelabelerWorkerConcurrency,
-  isRelabelAccountLabelHistoryWriteEnabled,
 } from './config/env'
 
 const logger = Logger.configure('relabel-worker')
@@ -115,7 +113,7 @@ export interface EvaluateAccountRelabelItemsResult {
  * `evaluateAccountRelabelItemGroup` がラベル永続化・work item 完了を分割する account 数。
  * グループ全体を 1 回で永続化・完了すると、その 1 回の失敗で maxAttempts を使い切った account が二度と claim も再 enqueue もされず取り残される。
  * 失敗時に失われる範囲をこのサブバッチ単位に留める。
- * ルール数 (`ALL_LABEL_RULES.length`、現状 49) との積が `recordAccountLabelsBulkForAccounts` の
+ * ルール数 (`ALL_LABEL_RULES.length`、現状 49) との積が `recordAccountLabelsBulkLatestOnlyForAccounts` の
  * サブチャンク上限 2000 行に収まるようこの値を選んでおり、1 サブバッチが常に 1 回の UNNEST
  * UPSERT で書けるようにしている。将来ルールが増えても 80 個までは 2000 行以内に収まる。
  */
@@ -264,7 +262,7 @@ async function evaluateAccountRelabelItemGroup(
       offset + ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE,
     )
     try {
-      // recordAccountLabelsBulkForAccounts の UPSERT は leaseOwner を条件にしない。
+      // recordAccountLabelsBulkLatestOnlyForAccounts の UPSERT は leaseOwner を条件にしない。
       // 生存確認とラベル書き込みを別々の呼び出しにすると、確認直後に lease が失効し
       // 別 worker が再 claim・再評価・先に書き込みを終えたあとで、この worker が
       // 古い評価結果を遅れて書いて新しい結果を上書きしてしまいうる (AccountLabelLatest の
@@ -294,10 +292,10 @@ async function evaluateAccountRelabelItemGroup(
             return evidence ? [evidence] : []
           })
           if (subBatchLabels.length > 0) {
-            const recordLabels = isRelabelAccountLabelHistoryWriteEnabled()
-              ? recordAccountLabelsBulkForAccounts
-              : recordAccountLabelsBulkLatestOnlyForAccounts
-            await recordLabels(tx, { sourceKind: 'relabel', labels: subBatchLabels })
+            await recordAccountLabelsBulkLatestOnlyForAccounts(tx, {
+              sourceKind: 'relabel',
+              labels: subBatchLabels,
+            })
           }
           for (const evidence of subBatchEvidence) {
             await upsertReplyHijackEvidence(tx, evidence)

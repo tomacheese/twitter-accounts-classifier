@@ -58,6 +58,8 @@ jobs:
           bash scripts/weekly-review-agent-contract.test.sh
           sh prisma/migrations/verify-drop-unused-account-label-history-indexes.test.sh
           sh scripts/check-postgres-storage.test.sh
+          sh scripts/verify-no-account-label-code-references.sh
+          sh prisma/migrations/20260907000000_rename_account_label_to_legacy/verify-rename-account-label-legacy.test.sh
       - name: Verify service role bootstrap
         run: bash scripts/db/role-bootstrap.test.sh
       # weekly_review は外部開発機向けの任意ロールなので、専用の手動作成経路も別途検証する。
@@ -115,7 +117,7 @@ jobs:
       - name: Run analyzer tests
         run: pnpm --filter analyzer run test
       - name: Run crawler tests
-        run: pnpm --filter crawler run test
+        run: pnpm --filter crawler exec vitest run --no-file-parallelism
       - name: Run blocker tests
         run: pnpm --filter blocker run test
       - name: Run viewer tests

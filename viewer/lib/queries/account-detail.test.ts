@@ -13,7 +13,7 @@ describe('getAccountDetail', () => {
     expect(result).toBeNull()
   })
 
-  it('assembles profile, label history, and recent tweets for an existing account', async () => {
+  it('assembles profile, label history (added→removed→added transitions), and recent tweets for an existing account', async () => {
     const account = {
       id: 'a1',
       screenName: 'alice',
@@ -30,9 +30,9 @@ describe('getAccountDetail', () => {
     const findUnique = vi.fn().mockResolvedValue(account)
     const latestFindMany = vi.fn().mockResolvedValue([
       {
-        value: false,
+        value: true,
         confidence: 0.95,
-        reason: 'no longer matches keyword',
+        reason: 'reappeared spam pattern',
         method: 'heuristic',
         ruleVersion: '1.2.0',
         labeledAt: new Date('2026-07-03T00:00:00Z'),
@@ -50,42 +50,52 @@ describe('getAccountDetail', () => {
         labelDefinition: { key: 'bot' },
       },
     ])
-    const labelFindMany = vi.fn().mockResolvedValue([
+    // ld-spam は added(初回) → removed → added(現在値) の3回遷移している。
+    // ld-bot は初回 added のみで、それ以降の遷移がない。
+    const labelChangeFindMany = vi.fn().mockResolvedValue([
       {
-        value: false,
-        confidence: 0.95,
-        reason: 'no longer matches keyword',
-        method: 'heuristic',
-        ruleVersion: '1.2.0',
-        labeledAt: new Date('2026-07-03T00:00:00Z'),
         labelDefinitionId: 'ld-spam',
+        changeType: 'added',
+        previousValue: false,
+        newValue: true,
+        previousConfidence: 0.9,
+        newConfidence: 0.95,
+        previousReason: 'no evidence',
+        newReason: 'reappeared spam pattern',
+        changedAt: new Date('2026-07-03T00:00:00Z'),
       },
       {
-        value: false,
-        confidence: 0.9,
-        reason: 'matches keyword',
-        method: 'heuristic',
-        ruleVersion: '1.1.0',
-        labeledAt: new Date('2026-07-02T00:00:00Z'),
         labelDefinitionId: 'ld-spam',
+        changeType: 'removed',
+        previousValue: true,
+        newValue: false,
+        previousConfidence: 0.95,
+        newConfidence: 0.9,
+        previousReason: 'matches keyword',
+        newReason: 'no evidence',
+        changedAt: new Date('2026-07-02T00:00:00Z'),
       },
       {
-        value: false,
-        confidence: 0.9,
-        reason: 'matches keyword',
-        method: 'heuristic',
-        ruleVersion: '1.0.0',
-        labeledAt: new Date('2026-07-01T00:00:00Z'),
         labelDefinitionId: 'ld-spam',
+        changeType: 'added',
+        previousValue: null,
+        newValue: true,
+        previousConfidence: null,
+        newConfidence: 0.95,
+        previousReason: null,
+        newReason: 'matches keyword',
+        changedAt: new Date('2026-07-01T00:00:00Z'),
       },
       {
-        value: true,
-        confidence: 0.8,
-        reason: 'account behavior matches bot pattern',
-        method: 'ai-generated',
-        ruleVersion: '1.0.0',
-        labeledAt: new Date('2026-07-01T00:00:00Z'),
         labelDefinitionId: 'ld-bot',
+        changeType: 'added',
+        previousValue: null,
+        newValue: true,
+        previousConfidence: null,
+        newConfidence: 0.8,
+        previousReason: null,
+        newReason: 'account behavior matches bot pattern',
+        changedAt: new Date('2026-07-01T00:00:00Z'),
       },
     ])
     const tweetFindMany = vi.fn().mockResolvedValue([
@@ -146,7 +156,7 @@ describe('getAccountDetail', () => {
     const prisma = {
       account: { findUnique },
       accountLabelLatest: { findMany: latestFindMany },
-      accountLabel: { findMany: labelFindMany },
+      accountLabelChange: { findMany: labelChangeFindMany },
       tweet: { findMany: tweetFindMany },
       follow: { findMany: followFindMany, count: followCount },
       block: { findMany: blockFindMany, count: blockCount },
@@ -171,28 +181,42 @@ describe('getAccountDetail', () => {
       labels: [
         {
           labelKey: 'spam',
-          value: false,
+          value: true,
           confidence: 0.95,
-          reason: 'no longer matches keyword',
+          reason: 'reappeared spam pattern',
           method: 'heuristic',
           ruleVersion: '1.2.0',
           labeledAt: new Date('2026-07-03T00:00:00Z'),
           history: [
             {
-              value: false,
-              confidence: 0.9,
-              reason: 'matches keyword',
-              method: 'heuristic',
-              ruleVersion: '1.1.0',
-              labeledAt: new Date('2026-07-02T00:00:00Z'),
+              changeType: 'added',
+              previousValue: false,
+              newValue: true,
+              previousConfidence: 0.9,
+              newConfidence: 0.95,
+              previousReason: 'no evidence',
+              newReason: 'reappeared spam pattern',
+              changedAt: new Date('2026-07-03T00:00:00Z'),
             },
             {
-              value: false,
-              confidence: 0.9,
-              reason: 'matches keyword',
-              method: 'heuristic',
-              ruleVersion: '1.0.0',
-              labeledAt: new Date('2026-07-01T00:00:00Z'),
+              changeType: 'removed',
+              previousValue: true,
+              newValue: false,
+              previousConfidence: 0.95,
+              newConfidence: 0.9,
+              previousReason: 'matches keyword',
+              newReason: 'no evidence',
+              changedAt: new Date('2026-07-02T00:00:00Z'),
+            },
+            {
+              changeType: 'added',
+              previousValue: null,
+              newValue: true,
+              previousConfidence: null,
+              newConfidence: 0.95,
+              previousReason: null,
+              newReason: 'matches keyword',
+              changedAt: new Date('2026-07-01T00:00:00Z'),
             },
           ],
         },
@@ -204,7 +228,18 @@ describe('getAccountDetail', () => {
           method: 'ai-generated',
           ruleVersion: '1.0.0',
           labeledAt: new Date('2026-07-01T00:00:00Z'),
-          history: [],
+          history: [
+            {
+              changeType: 'added',
+              previousValue: null,
+              newValue: true,
+              previousConfidence: null,
+              newConfidence: 0.8,
+              previousReason: null,
+              newReason: 'account behavior matches bot pattern',
+              changedAt: new Date('2026-07-01T00:00:00Z'),
+            },
+          ],
         },
       ],
       recentTweets: [
@@ -263,10 +298,10 @@ describe('getAccountDetail', () => {
         orderBy: { labeledAt: 'desc' },
       }),
     )
-    expect(labelFindMany).toHaveBeenCalledWith(
+    expect(labelChangeFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { accountId: 'a1' },
-        orderBy: [{ labeledAt: 'desc' }, { id: 'desc' }],
+        orderBy: [{ changedAt: 'desc' }, { id: 'desc' }],
       }),
     )
   })
@@ -288,7 +323,7 @@ describe('getAccountDetail', () => {
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
       accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
-      accountLabel: { findMany: vi.fn().mockResolvedValue([]) },
+      accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: {
         findMany: vi.fn().mockResolvedValue([]),
@@ -327,7 +362,7 @@ describe('getAccountDetail', () => {
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
       accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
-      accountLabel: { findMany: vi.fn().mockResolvedValue([]) },
+      accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: { findMany: followFindMany, count: followCount },
       block: { findMany: blockFindMany, count: blockCount },
@@ -361,7 +396,7 @@ describe('getAccountDetail', () => {
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
       accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
-      accountLabel: { findMany: vi.fn().mockResolvedValue([]) },
+      accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: { findMany: followFindMany, count: vi.fn().mockResolvedValue(0) },
       block: { findMany: blockFindMany, count: vi.fn().mockResolvedValue(0) },
@@ -403,14 +438,16 @@ describe('getAccountDetail', () => {
       isBlueVerified: false,
       verifiedType: null,
     }
-    const evaluations = Array.from({ length: 25 }, (_, index) => ({
-      value: true,
-      confidence: 0.9,
-      reason: `evaluation ${index}`,
-      method: 'heuristic',
-      ruleVersion: '1.0.0',
-      labeledAt: new Date(2026, 6, 25 - index),
+    const changeRows = Array.from({ length: 25 }, (_, index) => ({
       labelDefinitionId: 'ld-spam',
+      changeType: 'added',
+      previousValue: null,
+      newValue: true,
+      previousConfidence: null,
+      newConfidence: 0.9,
+      previousReason: null,
+      newReason: `evaluation ${index}`,
+      changedAt: new Date(2026, 6, 25 - index),
     }))
     const latestFindMany = vi.fn().mockResolvedValue([
       {
@@ -427,7 +464,7 @@ describe('getAccountDetail', () => {
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
       accountLabelLatest: { findMany: latestFindMany },
-      accountLabel: { findMany: vi.fn().mockResolvedValue(evaluations) },
+      accountLabelChange: { findMany: vi.fn().mockResolvedValue(changeRows) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: {
         findMany: vi.fn().mockResolvedValue([]),
@@ -445,7 +482,7 @@ describe('getAccountDetail', () => {
     expect(result?.labels[0].history).toHaveLength(20)
   })
 
-  it('caps the total number of AccountLabel rows fetched per account', async () => {
+  it('caps the total number of AccountLabelChange rows fetched per account', async () => {
     const account = {
       id: 'a6',
       screenName: 'frank',
@@ -459,11 +496,11 @@ describe('getAccountDetail', () => {
       isBlueVerified: false,
       verifiedType: null,
     }
-    const labelFindMany = vi.fn().mockResolvedValue([])
+    const labelChangeFindMany = vi.fn().mockResolvedValue([])
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
       accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
-      accountLabel: { findMany: labelFindMany },
+      accountLabelChange: { findMany: labelChangeFindMany },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: {
         findMany: vi.fn().mockResolvedValue([]),
@@ -477,10 +514,10 @@ describe('getAccountDetail', () => {
 
     await getAccountDetail(prisma, 'a6', 10)
 
-    expect(labelFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 2000 }))
+    expect(labelChangeFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 2000 }))
   })
 
-  it('keeps a label visible from AccountLabelLatest even when its history rows are crowded out of the capped AccountLabel fetch', async () => {
+  it('keeps a label visible from AccountLabelLatest even when its history rows are crowded out of the capped AccountLabelChange fetch', async () => {
     const account = {
       id: 'a7',
       screenName: 'grace',
@@ -494,7 +531,7 @@ describe('getAccountDetail', () => {
       isBlueVerified: false,
       verifiedType: null,
     }
-    // 別ラベルの変化行だけで ACCOUNT_LABEL_FETCH_LIMIT を使い切り、
+    // 別ラベルの変化行だけで ACCOUNT_LABEL_CHANGE_FETCH_LIMIT を使い切り、
     // ld-quiet 自身の履歴行が取得結果に一件も含まれない状況を再現する。
     const latestFindMany = vi.fn().mockResolvedValue([
       {
@@ -511,7 +548,7 @@ describe('getAccountDetail', () => {
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
       accountLabelLatest: { findMany: latestFindMany },
-      accountLabel: { findMany: vi.fn().mockResolvedValue([]) },
+      accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: {
         findMany: vi.fn().mockResolvedValue([]),
@@ -531,6 +568,65 @@ describe('getAccountDetail', () => {
         value: true,
         confidence: 0.7,
         reason: 'stable evaluation',
+        method: 'heuristic',
+        ruleVersion: '1.0.0',
+        labeledAt: new Date('2026-01-01T00:00:00Z'),
+        history: [],
+      },
+    ])
+  })
+
+  it('keeps a never-triggered (value=false) label visible with an empty history when it has no AccountLabelChange rows at all', async () => {
+    const account = {
+      id: 'a8',
+      screenName: 'henry',
+      displayName: 'Henry',
+      bio: null,
+      profileImageUrl: null,
+      followersCount: 0,
+      followingCount: 0,
+      tweetCount: 0,
+      accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
+      isBlueVerified: false,
+      verifiedType: null,
+    }
+    // ルールが一度も true 判定を出したことがないラベルは、AccountLabelChange
+    // トリガーが一度も発火しないため変化行がそもそも存在しない。
+    const latestFindMany = vi.fn().mockResolvedValue([
+      {
+        value: false,
+        confidence: 0.1,
+        reason: 'no keyword match',
+        method: 'heuristic',
+        ruleVersion: '1.0.0',
+        labeledAt: new Date('2026-01-01T00:00:00Z'),
+        labelDefinitionId: 'ld-never-triggered',
+        labelDefinition: { key: 'never_triggered' },
+      },
+    ])
+    const prisma = {
+      account: { findUnique: vi.fn().mockResolvedValue(account) },
+      accountLabelLatest: { findMany: latestFindMany },
+      accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
+      tweet: { findMany: vi.fn().mockResolvedValue([]) },
+      follow: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+      block: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+    } as unknown as PrismaClient
+
+    const result = await getAccountDetail(prisma, 'a8', 10)
+
+    expect(result?.labels).toEqual([
+      {
+        labelKey: 'never_triggered',
+        value: false,
+        confidence: 0.1,
+        reason: 'no keyword match',
         method: 'heuristic',
         ruleVersion: '1.0.0',
         labeledAt: new Date('2026-01-01T00:00:00Z'),

@@ -1,14 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
+import { Logger } from '@book000/node-utils'
 import type { PrismaClient } from '../generated/prisma'
 import type { LabelRule } from '../labels/types'
 import {
   ensureLabelDefinition,
   ensureLabelDefinitionsForRules,
   filterAccountIdsWithExistingLabels,
-  recordAccountLabelsBulk,
-  recordAccountLabelsBulkForAccounts,
   recordAccountLabelsBulkLatestOnlyForAccounts,
-  recordCrawlAccountLabel,
   recordCrawlAccountLabelsAtomic,
   recordCrawlAccountLabelsAtomicWithinTx,
 } from './label-repository'
@@ -86,336 +84,10 @@ describe('ensureLabelDefinitionsForRules', () => {
   })
 })
 
-describe('recordAccountLabelsBulk', () => {
-  it('does not call queryRaw when there are no labels to persist', async () => {
-    const queryRaw = vi.fn()
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    const result = await recordAccountLabelsBulk(prisma, {
-      sourceKind: 'relabel',
-      accountId: 'u1',
-      labels: [],
-    })
-
-    expect(result).toEqual([])
-    expect(queryRaw).not.toHaveBeenCalled()
-  })
-
-  it('persists every label for an account via a single queryRaw call bound with UNNEST arrays', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([
-      {
-        id: 'al1',
-        accountId: 'u1',
-        labelDefinitionId: 'ld1',
-        value: true,
-        confidence: 1,
-        reason: 'because a',
-        method: 'rule-a',
-        ruleVersion: '1.0.0',
-        labeledAt: new Date('2026-08-04T00:00:00Z'),
-        historyInserted: true,
-        latestUpserted: true,
-      },
-      {
-        id: 'al2',
-        accountId: 'u1',
-        labelDefinitionId: 'ld2',
-        value: false,
-        confidence: 0.5,
-        reason: 'because b',
-        method: 'rule-b',
-        ruleVersion: '2.0.0',
-        labeledAt: new Date('2026-08-04T00:00:00Z'),
-        historyInserted: true,
-        latestUpserted: true,
-      },
-    ])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    const result = await recordAccountLabelsBulk(prisma, {
-      sourceKind: 'relabel',
-      accountId: 'u1',
-      labels: [
-        {
-          labelDefinitionId: 'ld1',
-          result: { value: true, confidence: 1, reason: 'because a' },
-          method: 'rule-a',
-          ruleVersion: '1.0.0',
-        },
-        {
-          labelDefinitionId: 'ld2',
-          result: { value: false, confidence: 0.5, reason: 'because b' },
-          method: 'rule-b',
-          ruleVersion: '2.0.0',
-        },
-      ],
-    })
-
-    expect(result).toEqual([
-      expect.objectContaining({ id: 'al1' }),
-      expect.objectContaining({ id: 'al2' }),
-    ])
-    expect(queryRaw).toHaveBeenCalledTimes(1)
-    const [sql, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    expect(sql.join('')).toContain('UNNEST(')
-    expect(sql.join('')).toContain('INSERT INTO "AccountLabel"')
-    expect(sql.join('')).toContain('INSERT INTO "AccountLabelLatest"')
-    // UNNEST に渡す配列は列ごとにまとめており、位置がずれると全ラベルの
-    // 値が一斉に入れ替わる。列の並びどおりに配列で比較し、取り違えを検知する。
-    expect(values).toEqual([
-      ['mock-id', 'mock-id'],
-      ['u1', 'u1'],
-      ['ld1', 'ld2'],
-      [true, false],
-      [1, 0.5],
-      ['because a', 'because b'],
-      ['rule-a', 'rule-b'],
-      ['1.0.0', '2.0.0'],
-      [true, true],
-      // 発生源の 3 列は AccountLabel・AccountLabelLatest の両方へ同じ値を渡す。
-      'relabel',
-      null,
-      null,
-      'relabel',
-      null,
-      null,
-    ])
-  })
-
-  it('logs a warning for each row where the AccountLabelLatest upsert guard skipped the write', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([
-      {
-        id: 'al1',
-        accountId: 'u1',
-        labelDefinitionId: 'ld1',
-        value: true,
-        confidence: 1,
-        reason: 'because a',
-        method: 'rule-a',
-        ruleVersion: '1.0.0',
-        labeledAt: new Date('2026-08-04T00:00:00Z'),
-        historyInserted: true,
-        latestUpserted: false,
-      },
-      {
-        id: 'al2',
-        accountId: 'u1',
-        labelDefinitionId: 'ld2',
-        value: false,
-        confidence: 0.5,
-        reason: 'because b',
-        method: 'rule-b',
-        ruleVersion: '2.0.0',
-        labeledAt: new Date('2026-08-04T00:00:00Z'),
-        historyInserted: true,
-        latestUpserted: true,
-      },
-    ])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-    const { Logger } = await import('@book000/node-utils')
-    const warn = vi
-      .spyOn(Logger.configure('label-repository'), 'warn')
-      .mockImplementation(() => undefined)
-
-    const result = await recordAccountLabelsBulk(prisma, {
-      sourceKind: 'relabel',
-      accountId: 'u1',
-      labels: [
-        {
-          labelDefinitionId: 'ld1',
-          result: { value: true, confidence: 1, reason: 'because a' },
-          method: 'rule-a',
-          ruleVersion: '1.0.0',
-        },
-        {
-          labelDefinitionId: 'ld2',
-          result: { value: false, confidence: 0.5, reason: 'because b' },
-          method: 'rule-b',
-          ruleVersion: '2.0.0',
-        },
-      ],
-    })
-
-    expect(result).toHaveLength(2)
-    expect(warn).toHaveBeenCalledTimes(1)
-  })
-
-  it('omits a label from the returned history when its value, ruleVersion, confidence, and reason are all unchanged from the previous latest', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([
-      {
-        id: 'mock-id',
-        accountId: 'u1',
-        labelDefinitionId: 'ld1',
-        value: true,
-        confidence: 1,
-        reason: 'because a',
-        method: 'rule-a',
-        ruleVersion: '1.0.0',
-        labeledAt: null,
-        historyInserted: false,
-        latestUpserted: true,
-      },
-      {
-        id: 'mock-id',
-        accountId: 'u1',
-        labelDefinitionId: 'ld2',
-        value: false,
-        confidence: 0.5,
-        reason: 'because b',
-        method: 'rule-b',
-        ruleVersion: '2.0.0',
-        labeledAt: new Date('2026-08-04T00:00:00Z'),
-        historyInserted: true,
-        latestUpserted: true,
-      },
-    ])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    const result = await recordAccountLabelsBulk(prisma, {
-      sourceKind: 'relabel',
-      accountId: 'u1',
-      labels: [
-        {
-          labelDefinitionId: 'ld1',
-          result: { value: true, confidence: 1, reason: 'because a' },
-          method: 'rule-a',
-          ruleVersion: '1.0.0',
-        },
-        {
-          labelDefinitionId: 'ld2',
-          result: { value: false, confidence: 0.5, reason: 'because b' },
-          method: 'rule-b',
-          ruleVersion: '2.0.0',
-        },
-      ],
-    })
-
-    expect(result).toHaveLength(1)
-    expect(result[0].labelDefinitionId).toBe('ld2')
-    const [sql] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    const sqlText = sql.join('')
-    expect(sqlText).toContain('LEFT JOIN "AccountLabelLatest"')
-    expect(sqlText).toContain('al."confidence" IS DISTINCT FROM')
-    expect(sqlText).toContain('al."reason" IS DISTINCT FROM')
-  })
-})
-
-describe('recordAccountLabelsBulkForAccounts', () => {
-  it('does not call queryRaw when there are no labels to persist', async () => {
-    const queryRaw = vi.fn()
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    const result = await recordAccountLabelsBulkForAccounts(prisma, {
-      sourceKind: 'relabel',
-      labels: [],
-    })
-
-    expect(result).toEqual([])
-    expect(queryRaw).not.toHaveBeenCalled()
-  })
-
-  it('persists labels across multiple accounts via a single queryRaw call, each row keeping its own accountId', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([
-      {
-        id: 'al1',
-        accountId: 'u1',
-        labelDefinitionId: 'ld1',
-        value: true,
-        confidence: 1,
-        reason: 'because a',
-        method: 'rule-a',
-        ruleVersion: '1.0.0',
-        labeledAt: new Date('2026-08-04T00:00:00Z'),
-        historyInserted: true,
-        latestUpserted: true,
-      },
-      {
-        id: 'al2',
-        accountId: 'u2',
-        labelDefinitionId: 'ld1',
-        value: false,
-        confidence: 0.5,
-        reason: 'because b',
-        method: 'rule-a',
-        ruleVersion: '1.0.0',
-        labeledAt: new Date('2026-08-04T00:00:00Z'),
-        historyInserted: true,
-        latestUpserted: true,
-      },
-    ])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    const result = await recordAccountLabelsBulkForAccounts(prisma, {
-      sourceKind: 'relabel',
-      labels: [
-        {
-          accountId: 'u1',
-          labelDefinitionId: 'ld1',
-          result: { value: true, confidence: 1, reason: 'because a' },
-          method: 'rule-a',
-          ruleVersion: '1.0.0',
-        },
-        {
-          accountId: 'u2',
-          labelDefinitionId: 'ld1',
-          result: { value: false, confidence: 0.5, reason: 'because b' },
-          method: 'rule-a',
-          ruleVersion: '1.0.0',
-        },
-      ],
-    })
-
-    expect(result).toEqual([
-      expect.objectContaining({ id: 'al1', accountId: 'u1' }),
-      expect.objectContaining({ id: 'al2', accountId: 'u2' }),
-    ])
-    expect(queryRaw).toHaveBeenCalledTimes(1)
-    const [, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    // recordAccountLabelsBulk と異なり、accountId 列は行ごとに異なる値を持つ。
-    expect(values[1]).toEqual(['u1', 'u2'])
-  })
-
-  it('orders multi-account UPSERT input by accountId and labelDefinitionId before taking row locks', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    await recordAccountLabelsBulkForAccounts(prisma, {
-      sourceKind: 'relabel',
-      labels: [
-        {
-          accountId: 'account-b',
-          labelDefinitionId: 'label-a',
-          result: { value: true, confidence: 1, reason: 'b-a' },
-          method: 'rule',
-          ruleVersion: 'v1',
-        },
-        {
-          accountId: 'account-a',
-          labelDefinitionId: 'label-z',
-          result: { value: true, confidence: 1, reason: 'a-z' },
-          method: 'rule',
-          ruleVersion: 'v1',
-        },
-        {
-          accountId: 'account-a',
-          labelDefinitionId: 'label-a',
-          result: { value: true, confidence: 1, reason: 'a-a' },
-          method: 'rule',
-          ruleVersion: 'v1',
-        },
-      ],
-    })
-
-    const [, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    expect(values[1]).toEqual(['account-a', 'account-a', 'account-b'])
-    expect(values[2]).toEqual(['label-a', 'label-z', 'label-a'])
-  })
-})
-
 describe('recordAccountLabelsBulkLatestOnlyForAccounts', () => {
   it('orders Phase B latest-only UPSERT input by accountId and labelDefinitionId before taking row locks', async () => {
-    const executeRaw = vi.fn().mockResolvedValue(0)
-    const prisma = { $executeRaw: executeRaw } as unknown as PrismaClient
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
     await recordAccountLabelsBulkLatestOnlyForAccounts(prisma, {
       sourceKind: 'relabel',
@@ -444,282 +116,77 @@ describe('recordAccountLabelsBulkLatestOnlyForAccounts', () => {
       ],
     })
 
-    const [, ...values] = executeRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    const [, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
     expect(values[0]).toEqual(['account-a', 'account-a', 'account-b'])
     expect(values[1]).toEqual(['label-a', 'label-z', 'label-a'])
   })
-})
 
-describe('recordAccountLabelsBulk evaluable column', () => {
-  it('passes evaluable (defaulting to true) through UNNEST and writes it to both tables', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([])
+  it('logs a warning when the AccountLabelLatest upsert guard rejects a genuinely changed row', async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValue([
+        { accountId: 'account-a', labelDefinitionId: 'label-a', latestUpserted: false },
+      ])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    await recordAccountLabelsBulk(prisma, {
-      accountId: 'account-1',
-      labels: [
-        {
-          labelDefinitionId: 'label-1',
-          result: { value: true, confidence: 0.8, reason: 'test', evaluable: false },
-          method: 'crawl',
-          ruleVersion: '1.0.0',
-        },
-      ],
-      sourceKind: 'crawl',
-    })
-
-    const [sql, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    const sqlText = sql.join('')
-    expect(sqlText).toContain('"evaluable"')
-    expect(values).toContainEqual([false])
-  })
-
-  it('defaults evaluable to true when the rule result omits it', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    await recordAccountLabelsBulk(prisma, {
-      accountId: 'account-1',
-      labels: [
-        {
-          labelDefinitionId: 'label-1',
-          result: { value: true, confidence: 0.8, reason: 'test' },
-          method: 'crawl',
-          ruleVersion: '1.0.0',
-        },
-      ],
-      sourceKind: 'crawl',
-    })
-
-    const [, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    expect(values).toContainEqual([true])
-  })
-})
-
-describe('recordAccountLabelsBulk no-op suppression', () => {
-  it('does not warn when the value is unchanged (semantic no-op)', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([
-      {
-        id: 'mock-id',
-        accountId: 'u1',
-        labelDefinitionId: 'ld1',
-        value: true,
-        confidence: 1,
-        reason: 'because a',
-        method: 'rule-a',
-        ruleVersion: '1.0.0',
-        labeledAt: null,
-        historyInserted: false,
-        latestUpserted: false,
-        semanticNoOp: true,
-      },
-    ])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-    const { Logger } = await import('@book000/node-utils')
     const warn = vi
       .spyOn(Logger.configure('label-repository'), 'warn')
       .mockImplementation(() => undefined)
 
-    await recordAccountLabelsBulk(prisma, {
+    await recordAccountLabelsBulkLatestOnlyForAccounts(prisma, {
       sourceKind: 'relabel',
-      accountId: 'u1',
       labels: [
         {
-          labelDefinitionId: 'ld1',
-          result: { value: true, confidence: 1, reason: 'because a' },
-          method: 'rule-a',
-          ruleVersion: '1.0.0',
+          accountId: 'account-a',
+          labelDefinitionId: 'label-a',
+          result: { value: true, confidence: 1, reason: 'stale write attempt' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toContain('account-a')
+    expect(warn.mock.calls[0][0]).toContain('label-a')
+    warn.mockRestore()
+  })
+
+  it('does not warn when every genuinely changed row is upserted', async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValue([
+        { accountId: 'account-a', labelDefinitionId: 'label-a', latestUpserted: true },
+      ])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+    const warn = vi
+      .spyOn(Logger.configure('label-repository'), 'warn')
+      .mockImplementation(() => undefined)
+
+    await recordAccountLabelsBulkLatestOnlyForAccounts(prisma, {
+      sourceKind: 'relabel',
+      labels: [
+        {
+          accountId: 'account-a',
+          labelDefinitionId: 'label-a',
+          result: { value: true, confidence: 1, reason: 'applied' },
+          method: 'rule',
+          ruleVersion: 'v1',
         },
       ],
     })
 
     expect(warn).not.toHaveBeenCalled()
-  })
-
-  it('still warns on a real stale-write rejection (semanticNoOp=false, latestUpserted=false)', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([
-      {
-        id: 'mock-id',
-        accountId: 'u1',
-        labelDefinitionId: 'ld1',
-        value: true,
-        confidence: 1,
-        reason: 'because a',
-        method: 'rule-a',
-        ruleVersion: '1.0.0',
-        labeledAt: null,
-        historyInserted: false,
-        latestUpserted: false,
-        semanticNoOp: false,
-      },
-    ])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-    const { Logger } = await import('@book000/node-utils')
-    const warn = vi
-      .spyOn(Logger.configure('label-repository'), 'warn')
-      .mockImplementation(() => undefined)
-
-    await recordAccountLabelsBulk(prisma, {
-      sourceKind: 'relabel',
-      accountId: 'u1',
-      labels: [
-        {
-          labelDefinitionId: 'ld1',
-          result: { value: true, confidence: 1, reason: 'because a' },
-          method: 'rule-a',
-          ruleVersion: '1.0.0',
-        },
-      ],
-    })
-
-    expect(warn).toHaveBeenCalled()
-  })
-
-  it('gates the AccountLabelLatest UPDATE (labeledAt and the 3 provenance fields included) on the same to_insert set as the history INSERT', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    await recordAccountLabelsBulk(prisma, {
-      sourceKind: 'relabel',
-      accountId: 'u1',
-      labels: [
-        {
-          labelDefinitionId: 'ld1',
-          result: { value: true, confidence: 1, reason: 'because a' },
-          method: 'rule-a',
-          ruleVersion: '1.0.0',
-        },
-      ],
-    })
-
-    const [sql] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    const sqlText = sql.join('')
-    // semantic no-op の行は upserted_latest の INSERT ... SELECT 自体に乗らないため、
-    // labeledAt・sourceKind・sourceId・sourceUsername を含め一切 UPDATE されない。
-    expect(sqlText).toMatch(
-      /upserted_latest AS \(\s*INSERT INTO "AccountLabelLatest"[\s\S]*?WHERE EXISTS \(SELECT 1 FROM to_insert ti WHERE ti\."id" = ir\."id"\)/,
-    )
-  })
-})
-
-describe('recordCrawlAccountLabel', () => {
-  it('does not append a duplicate history row when the same crawl label was already claimed', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    await expect(
-      recordCrawlAccountLabel(prisma, {
-        crawlRunId: 'run1',
-        username: 'viewer',
-        accountId: 'u1',
-        labelDefinitionId: 'ld1',
-        result: { value: true, confidence: 1, reason: 'because' },
-        method: 'blue_verified',
-        ruleVersion: '1.0.0',
-      }),
-    ).resolves.toBeUndefined()
-
-    const [sql] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    const sqlText = sql.join('')
-    expect(sqlText).toContain('INSERT INTO "CrawlAccountLabelRun"')
-    expect(sqlText).toContain(
-      'ON CONFLICT ("crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion") DO NOTHING',
-    )
-    expect(sqlText).toContain('WHERE EXISTS (SELECT 1 FROM claimed)')
-  })
-
-  it('includes a guard against re-inserting history when the previous latest value, ruleVersion, confidence, and reason are all unchanged', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([{ historyInserted: false, latestUpserted: true }])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    await recordCrawlAccountLabel(prisma, {
-      crawlRunId: 'run1',
-      username: 'viewer',
-      accountId: 'u1',
-      labelDefinitionId: 'ld1',
-      result: { value: true, confidence: 1, reason: 'because' },
-      method: 'blue_verified',
-      ruleVersion: '1.0.0',
-    })
-
-    const [sql] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    const sqlText = sql.join('')
-    expect(sqlText).toContain('FROM "AccountLabelLatest"')
-    expect(sqlText).toContain('NOT EXISTS')
-    expect(sqlText).toContain('"confidence" = ')
-    expect(sqlText).toContain('"reason" = ')
-  })
-
-  it('records the crawl run and login account as the source of the label', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([{ latestUpserted: true }])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    await recordCrawlAccountLabel(prisma, {
-      crawlRunId: 'run1',
-      username: 'viewer',
-      accountId: 'u1',
-      labelDefinitionId: 'ld1',
-      result: { value: true, confidence: 1, reason: 'because' },
-      method: 'blue_verified',
-      ruleVersion: '1.0.0',
-    })
-
-    const [sql, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    const sqlText = sql.join('')
-    expect(sqlText).toContain('"sourceKind", "sourceId", "sourceUsername"')
-    expect(values).toContain('run1')
-    expect(values).toContain('viewer')
-  })
-})
-
-describe('recordCrawlAccountLabel history guard method parity', () => {
-  it('includes method in the previous_latest comparison, matching recordAccountLabelsBulk', async () => {
-    const queryRaw = vi.fn().mockResolvedValue([{ latestUpserted: true }])
-    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
-
-    await recordCrawlAccountLabel(prisma, {
-      crawlRunId: 'run1',
-      username: 'viewer',
-      accountId: 'u1',
-      labelDefinitionId: 'ld1',
-      result: { value: true, confidence: 1, reason: 'because' },
-      method: 'blue_verified',
-      ruleVersion: '1.0.0',
-    })
-
-    const [sql] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    const sqlText = sql.join('')
-    // previous_latest CTE 自体が method 列を SELECT していることを確認する
-    // (method だけが後段の upserted_latest 側にしか出てこないと NOT EXISTS の比較には効かない)。
-    expect(sqlText).toMatch(
-      /previous_latest AS \(\s*SELECT "value", "ruleVersion", "confidence", "reason", "method"/,
-    )
+    warn.mockRestore()
   })
 })
 
 describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
-  it('claims labels and returns an observation id without opening its own transaction', async () => {
+  it('claims labels, persists via the AccountLabelLatest-only writer (no raw AccountLabel INSERT), and returns an observation id without opening its own transaction', async () => {
     const queryRaw = vi
       .fn()
       .mockResolvedValueOnce([{ labelDefinitionId: 'ld1', method: 'rule', ruleVersion: 'v1' }])
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          id: 'al1',
-          accountId: 'u1',
-          labelDefinitionId: 'ld1',
-          value: true,
-          confidence: 1,
-          reason: 'test',
-          method: 'rule',
-          ruleVersion: 'v1',
-          evaluable: true,
-          labeledAt: new Date('2026-08-04T00:00:00Z'),
-          historyInserted: true,
-          latestUpserted: true,
-          semanticNoOp: false,
-        },
-      ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
           labelDefinitionId: 'ld1',
@@ -737,8 +204,6 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
     const txClient = {
       $queryRaw: queryRaw,
       accountClassificationObservation: { create },
-      accountLabel: { upsert },
-      accountLabelLatest: { upsert },
       analysisWorkItem: { upsert },
     } as unknown as PrismaClient
 
@@ -757,10 +222,19 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
     })
 
     expect(observationId).toBe('observation1')
+    // claim → FOR UPDATE lock → latest-only UPSERT (RETURNING で guard 結果を検知) →
+    // snapshot 再読込 の4回のみ。raw AccountLabel INSERT を含む呼び出しは存在しない。
+    expect(queryRaw).toHaveBeenCalledTimes(4)
     const preLockSql = queryRaw.mock.calls[1]?.[0]
     expect(String(preLockSql)).toContain('FOR UPDATE')
+    const latestOnlyWriteSql = queryRaw.mock.calls[2]?.[0]
+    expect(String(latestOnlyWriteSql)).toContain('INSERT INTO "AccountLabelLatest"')
+    expect(String(latestOnlyWriteSql)).not.toContain('INSERT INTO "AccountLabel"')
     const snapshotReadSql = queryRaw.mock.calls[3]?.[0]
     expect(String(snapshotReadSql)).toContain('FOR UPDATE')
+    for (const call of queryRaw.mock.calls) {
+      expect(String(call[0])).not.toContain('INSERT INTO "AccountLabel"')
+    }
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         snapshotVersion: 1,

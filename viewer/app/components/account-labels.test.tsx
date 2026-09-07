@@ -53,12 +53,14 @@ describe('AccountLabels', () => {
       value: true,
       history: [
         {
-          value: false,
-          confidence: 0.4,
-          reason: 'old reasoning',
-          method: 'heuristic',
-          ruleVersion: '0.9.0',
-          labeledAt: new Date('2026-06-01T00:00:00Z'),
+          changeType: 'removed',
+          previousValue: true,
+          newValue: false,
+          previousConfidence: 0.9,
+          newConfidence: 0.4,
+          previousReason: 'matches keyword',
+          newReason: 'old reasoning',
+          changedAt: new Date('2026-06-01T00:00:00Z'),
         },
       ],
     })
@@ -69,5 +71,15 @@ describe('AccountLabels', () => {
     expect(html).toContain('履歴 (1件)')
     expect((html.match(/履歴 \(/g) ?? []).length).toBe(1)
     expect(html).toContain('old reasoning')
+  })
+
+  it('shows an explicit empty-history message when a label has no history entries', () => {
+    const html = renderToStaticMarkup(
+      <AccountLabels labels={[makeLabel({ labelKey: 'bot', value: true, history: [] })]} />,
+    )
+
+    expect(html).toContain(
+      'このラベルの value 遷移の記録はまだありません（過去に評価されていた可能性があります）',
+    )
   })
 })

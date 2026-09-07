@@ -36,7 +36,6 @@ async function resetDb(): Promise<void> {
   await prisma.reviewFindingOccurrence.deleteMany()
   await prisma.findingEvidence.deleteMany()
   await prisma.reviewFinding.deleteMany()
-  await prisma.accountLabel.deleteMany()
   await prisma.labelDefinition.deleteMany()
   await prisma.block.deleteMany()
   await prisma.account.deleteMany()

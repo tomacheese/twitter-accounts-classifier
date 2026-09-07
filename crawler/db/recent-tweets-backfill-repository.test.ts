@@ -229,7 +229,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           SELECT
             'synthetic_recent_backfill_' || ${runId} || '_attempted_' || lpad(g::text, 6, '0'),
             'synthetic_user_' || g, 'Synthetic User ' || g, 0, 0, 0, now(), now(), now()
-          FROM generate_series(1, 2000) AS g
+          FROM generate_series(1, 20000) AS g
         `
           await tx.$executeRaw`
           INSERT INTO "AccountLabelLatest" (
@@ -239,7 +239,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
           SELECT
             'synthetic_recent_backfill_' || ${runId} || '_attempted_' || lpad(g::text, 6, '0'),
             ${botDefinitionId}, false, 0, 'synthetic', 'synthetic', 'v1', false, now()
-          FROM generate_series(1, 2000) AS g
+          FROM generate_series(1, 20000) AS g
           WHERE g % 10 = 0
         `
           const candidateId = `synthetic_recent_backfill_${runId}_zzz_candidate`
@@ -257,6 +257,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           )
           VALUES (${candidateId}, ${botDefinitionId}, false, 0, 'synthetic', 'synthetic', 'v1', false, now())
         `
+          // planner の統計情報を synthetic fixture 挿入直後の実データに合わせておかないと、
+          // 共有 DB での実行順序次第で古い統計のまま EXPLAIN が別の plan を選び、
+          // 期待した index の使用を検証できなくなる。
+          await tx.$executeRaw`ANALYZE "Account", "AccountLabelLatest"`
 
           let capturedCandidateSql: Prisma.Sql | undefined
           const capturingClient = {

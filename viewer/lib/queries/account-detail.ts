@@ -26,12 +26,14 @@ export interface AccountDetailLabel {
 }
 
 export interface AccountDetailLabelHistoryEntry {
-  value: boolean
-  confidence: number
-  reason: string
-  method: string
-  ruleVersion: string
-  labeledAt: Date
+  changeType: string
+  previousValue: boolean | null
+  newValue: boolean | null
+  previousConfidence: number | null
+  newConfidence: number | null
+  previousReason: string | null
+  newReason: string | null
+  changedAt: Date
 }
 
 export interface AccountDetailTweet {
@@ -71,50 +73,48 @@ const FOLLOW_LIST_LIMIT = 100
 // history の件数を無制限に返すと再ラベリングを繰り返したアカウントほどページの転送量が増え続けるため、上限を設けて打ち切る。
 const LABEL_HISTORY_LIMIT = 20
 // ラベルルールが true/false を繰り返した場合でも 1 アカウントのページ読み込みが際限なく重くならないための防御的な上限。
-// AccountLabel には変化があった評価のみ記録されるため、この上限は history の長さを打ち切るだけであり、
+// AccountLabelChange には変化があった評価のみ記録されるため、この上限は history の長さを打ち切るだけであり、
 // 現在値 (labels[].value 等) は AccountLabelLatest から取得するため影響を受けない。
-const ACCOUNT_LABEL_FETCH_LIMIT = 2000
+const ACCOUNT_LABEL_CHANGE_FETCH_LIMIT = 2000
 
 /**
- * labeledAt 降順、id 降順で取得した AccountLabel の一覧から、labelDefinitionId ごとの history を組み立てる。
- * 各ラベルの最新行 (AccountLabelLatest の現在値と重複する) は除外し、それより前の変化のみを保持する。
- * @param labels - labeledAt 降順、id 降順で取得した AccountLabel の一覧
+ * changedAt 降順、id 降順で取得した AccountLabelChange の一覧から、labelDefinitionId ごとの history を組み立てる。
+ * @param changes - changedAt 降順、id 降順で取得した AccountLabelChange の一覧
  * @returns labelDefinitionId から history 配列へのマップ
  */
 function buildLabelHistoryByDefinition(
-  labels: {
+  changes: {
     labelDefinitionId: string
-    value: boolean
-    confidence: number
-    reason: string
-    method: string
-    ruleVersion: string
-    labeledAt: Date
+    changeType: string
+    previousValue: boolean | null
+    newValue: boolean | null
+    previousConfidence: number | null
+    newConfidence: number | null
+    previousReason: string | null
+    newReason: string | null
+    changedAt: Date
   }[],
 ): Map<string, AccountDetailLabelHistoryEntry[]> {
   const historyByDefinition = new Map<string, AccountDetailLabelHistoryEntry[]>()
-  const seenMostRecent = new Set<string>()
 
-  for (const label of labels) {
-    if (!seenMostRecent.has(label.labelDefinitionId)) {
-      seenMostRecent.add(label.labelDefinitionId)
-      continue
-    }
-    let history = historyByDefinition.get(label.labelDefinitionId)
+  for (const change of changes) {
+    let history = historyByDefinition.get(change.labelDefinitionId)
     if (!history) {
       history = []
-      historyByDefinition.set(label.labelDefinitionId, history)
+      historyByDefinition.set(change.labelDefinitionId, history)
     }
     if (history.length >= LABEL_HISTORY_LIMIT) {
       continue
     }
     history.push({
-      value: label.value,
-      confidence: label.confidence,
-      reason: label.reason,
-      method: label.method,
-      ruleVersion: label.ruleVersion,
-      labeledAt: label.labeledAt,
+      changeType: change.changeType,
+      previousValue: change.previousValue,
+      newValue: change.newValue,
+      previousConfidence: change.previousConfidence,
+      newConfidence: change.newConfidence,
+      previousReason: change.previousReason,
+      newReason: change.newReason,
+      changedAt: change.changedAt,
     })
   }
 
@@ -124,7 +124,7 @@ function buildLabelHistoryByDefinition(
 /**
  * AccountLabelLatest の現在値一覧に、対応する history を組み合わせてラベル一覧を組み立てる。
  * @param latestLabels - labeledAt 降順で取得した AccountLabelLatest の一覧 (labelDefinition を含む)
- * @param historyRows - labeledAt 降順、id 降順で取得した AccountLabel の一覧
+ * @param historyRows - changedAt 降順、id 降順で取得した AccountLabelChange の一覧
  * @returns ラベルごとに集約された一覧。並び順は AccountLabelLatest の並び順を保つ。
  */
 function groupLabelsByDefinition(
@@ -140,12 +140,14 @@ function groupLabelsByDefinition(
   }[],
   historyRows: {
     labelDefinitionId: string
-    value: boolean
-    confidence: number
-    reason: string
-    method: string
-    ruleVersion: string
-    labeledAt: Date
+    changeType: string
+    previousValue: boolean | null
+    newValue: boolean | null
+    previousConfidence: number | null
+    newConfidence: number | null
+    previousReason: string | null
+    newReason: string | null
+    changedAt: Date
   }[],
 ): AccountDetailLabel[] {
   const historyByDefinition = buildLabelHistoryByDefinition(historyRows)
@@ -195,11 +197,11 @@ export async function getAccountDetail(
       orderBy: { labeledAt: 'desc' },
       include: { labelDefinition: true },
     }),
-    prisma.accountLabel.findMany({
+    prisma.accountLabelChange.findMany({
       where: { accountId },
-      // 再ラベリングが短時間に連続すると labeledAt が同一になりうるため、id をタイブレークにして順序を固定する。
-      orderBy: [{ labeledAt: 'desc' }, { id: 'desc' }],
-      take: ACCOUNT_LABEL_FETCH_LIMIT,
+      // 再ラベリングが短時間に連続すると changedAt が同一になりうるため、id をタイブレークにして順序を固定する。
+      orderBy: [{ changedAt: 'desc' }, { id: 'desc' }],
+      take: ACCOUNT_LABEL_CHANGE_FETCH_LIMIT,
     }),
     prisma.tweet.findMany({
       where: { accountId },

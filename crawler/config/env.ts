@@ -152,18 +152,6 @@ export function getRelabelerOrphanRecoveryBatchSize(): number {
 }
 
 /**
- * relabel が `AccountLabel` へ履歴行を書き続けるか (Phase A) を制御する feature flag。
- * 本番での drain 確認が済むまでは既定で有効のままにし、確認後に環境変数側でのみ
- * 無効化 (Phase B) してロールバック可能性を保つ。
- * @returns 有効なら true (既定)。`RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED` が
- *   大文字小文字を問わず厳密に `false` のときのみ false
- */
-export function isRelabelAccountLabelHistoryWriteEnabled(): boolean {
-  const raw = process.env.RELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED
-  return raw?.toLowerCase() !== 'false'
-}
-
-/**
  * relabel の storage circuit breaker が `warning` を出す空き容量のしきい値 (GiB)。
  * @returns しきい値 (GiB)。既定 120
  */

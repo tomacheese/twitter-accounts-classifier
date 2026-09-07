@@ -47,6 +47,8 @@ describe('processAccountSummaryRefresh transaction budget', () => {
           accountId: 'account-1',
           crawlRunId: 'crawl-1',
           observedAt,
+          snapshotVersion: 1,
+          classificationSnapshot: [],
         }),
       },
       account: {
@@ -57,7 +59,6 @@ describe('processAccountSummaryRefresh transaction budget', () => {
           lastCrawledAt: observedAt,
         }),
       },
-      $queryRaw: vi.fn().mockResolvedValue([]),
       accountSummaryLatest: { findUnique: vi.fn().mockResolvedValue(null) },
       labelDefinition: { findMany: vi.fn().mockResolvedValue([]) },
       readModelState: { upsert: vi.fn().mockResolvedValue(undefined) },

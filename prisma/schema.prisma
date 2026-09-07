@@ -50,7 +50,6 @@ model Account {
   recentTweetsFetchStatus        String?
   updatedAt                      DateTime               @updatedAt
   tweets                         Tweet[]
-  labels                         AccountLabel[]
   latestLabels                   AccountLabelLatest[]
   followerEdges                  Follow[]               @relation("FollowerEdges")
   followeeEdges                  Follow[]               @relation("FolloweeEdges")
@@ -123,35 +122,9 @@ model LabelDefinition {
   description         String
   currentRuleVersion  String?
   createdAt           DateTime             @default(now())
-  accountLabels       AccountLabel[]
   accountLabelsLatest AccountLabelLatest[]
   blockActions        BlockAction[]
   blockOutboxEntries  BlockOutboxEntry[]
-}
-
-model AccountLabel {
-  id                String          @id @default(cuid())
-  accountId         String
-  account           Account         @relation(fields: [accountId], references: [id])
-  labelDefinitionId String
-  labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
-  value             Boolean
-  confidence        Float
-  reason            String
-  method            String
-  ruleVersion       String
-  evaluable         Boolean         @default(true)
-  labeledAt         DateTime        @default(now())
-  // 発生源追跡: どの Crawl・relabel・Weekly Review・backfill が作った行かを監査可能にする。
-  // 既存行は sourceKind = "legacy"、sourceId = null とし、推定 backfill しない。
-  sourceKind        String          @default("legacy")
-  sourceId          String?
-  sourceUsername    String?
-
-  // AccountLabel は無制限に増える監査履歴のため、確認済みの本番クエリで使う accountId のみを維持する。
-  @@index([accountId])
-  // 分類の発生源を監査する検索に使う。
-  @@index([sourceKind, sourceId])
 }
 
 // AccountLabel は監査証跡としてほぼ無制限に増え続ける履歴テーブルであり、
@@ -990,9 +963,8 @@ model LabelMetricDaily {
   @@index([labelDefinitionId, date(sort: Desc)])
 }
 
-// legacy snapshotless analyzer の再構築経路では、変化元 AccountLabel.id を
-// sourceLabelId として保持し、同じ raw history row の再処理だけを重複排除する。
-// DB trigger 由来の transition は raw AccountLabel row を持たないため null のままとし、
+// sourceLabelId (legacy snapshotless analyzer が変化元 AccountLabel.id の重複排除に使っていた列) は
+// Prisma schema からは削除済みだが、DB カラム自体は Stage 3 の DROP migration まで物理的に残る。
 // 同一ミリ秒に複数回 value が反転しても各 transition を別イベントとして保持する。
 model AccountLabelChange {
   id                 String   @id @default(cuid())
@@ -1006,7 +978,6 @@ model AccountLabelChange {
   previousReason     String?
   newReason          String?
   sourceId           String?
-  sourceLabelId      String?  @unique
   changedAt          DateTime @default(now())
 
   @@index([accountId, labelDefinitionId, changedAt])

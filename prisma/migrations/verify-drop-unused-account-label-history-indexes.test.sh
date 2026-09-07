@@ -28,11 +28,18 @@ assert_model_includes() {
     fi
 }
 
-assert_model_omits '@@index([labeledAt(sort: Desc), id(sort: Desc)])'
-assert_model_omits '@@index([labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])'
-assert_model_omits '@@index([labelDefinitionId, accountId, labeledAt(sort: Desc), id(sort: Desc)])'
-assert_model_includes '@@index([accountId])'
-assert_model_includes '@@index([sourceKind, sourceId])'
+if [ -n "$ACCOUNT_LABEL_MODEL" ]; then
+    assert_model_omits '@@index([labeledAt(sort: Desc), id(sort: Desc)])'
+    assert_model_omits '@@index([labelDefinitionId, labeledAt(sort: Desc), id(sort: Desc)])'
+    assert_model_omits '@@index([labelDefinitionId, accountId, labeledAt(sort: Desc), id(sort: Desc)])'
+    assert_model_includes '@@index([accountId])'
+    assert_model_includes '@@index([sourceKind, sourceId])'
+else
+    # model AccountLabel は schema.prisma から削除済みで、残存インデックスは
+    # raw SQL migration 側でのみ管理されるため、schema 上のモデル本体に
+    # 対する index 検証はここでは行わない。
+    echo 'INFO: model AccountLabel is no longer declared in schema.prisma; skipping schema-level index assertions'
+fi
 
 if [ ! -f "$MIGRATION" ]; then
     fail "missing forward migration: $MIGRATION"
