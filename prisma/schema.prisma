@@ -964,7 +964,7 @@ model LabelMetricDaily {
 }
 
 // sourceLabelId (legacy snapshotless analyzer が変化元 AccountLabel.id の重複排除に使っていた列) は
-// Prisma schema からは削除済みだが、DB カラム自体は Stage 3 の DROP migration まで物理的に残る。
+// Prisma schema・DB カラムともに DROP migration で削除済み。
 // 同一ミリ秒に複数回 value が反転しても各 transition を別イベントとして保持する。
 model AccountLabelChange {
   id                 String   @id @default(cuid())

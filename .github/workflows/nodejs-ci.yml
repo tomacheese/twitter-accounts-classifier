@@ -60,6 +60,7 @@ jobs:
           sh scripts/check-postgres-storage.test.sh
           sh scripts/verify-no-account-label-code-references.sh
           sh prisma/migrations/20260907000000_rename_account_label_to_legacy/verify-rename-account-label-legacy.test.sh
+          sh prisma/migrations/20260907090116_drop_account_label_legacy_and_source_label_id/verify-drop-account-label-legacy.test.sh
       - name: Verify service role bootstrap
         run: bash scripts/db/role-bootstrap.test.sh
       # weekly_review は外部開発機向けの任意ロールなので、専用の手動作成経路も別途検証する。
