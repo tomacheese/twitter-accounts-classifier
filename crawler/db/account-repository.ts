@@ -261,7 +261,7 @@ async function upsertAccountsBulkWithBisection(
 }
 
 /**
- * `crawler/db/label-repository.ts` の `recordAccountLabelsBulk()` と同じ `UNNEST` パターンで、
+ * `crawler/db/label-repository.ts` の `recordAccountLabelsBulkLatestOnlyForAccounts()` と同じ `UNNEST` パターンで、
  * 複数件の Account profile を 1 ラウンドトリップで upsert する。
  * bisection フォールバックは複数回に分けて実行する前提のため、
  * transaction client 内で呼ぶと 1 件のエラーでトランザクション全体が abort し、
