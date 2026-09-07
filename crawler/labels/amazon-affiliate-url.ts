@@ -44,6 +44,9 @@ export function classifyAmazonAffiliateUrl(value: string): AmazonAffiliateEviden
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
 
   const host = url.hostname.toLowerCase()
+  // amzn.to は Amazon Associates の SiteStripe からのみ発行される前提で、
+  // tag クエリの有無を問わず無条件にアフィリエイト証拠として扱っている。
+  // 非アフィリエイト共有用途にも amzn.to が開放された場合はこの前提が崩れる。
   if (isHostOrSubdomain(host, 'amzn.to')) {
     return { kind: 'associates-short-link', host }
   }

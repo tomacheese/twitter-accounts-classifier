@@ -13,7 +13,7 @@ const BIO_DECLARATION_PATTERN =
 // 確認範囲は前後に十分な幅を持たせている。
 const NEGATION_WINDOW_LENGTH = 30
 const NEGATION_PATTERN =
-  /しません|していません|しておりません|おりません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|不要|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|✖|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
+  /しません|していません|しておりません|おりません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|不要|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|✖|🆖|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
 
 function isNegatedDeclaration(bio: string): boolean {
   const match = BIO_DECLARATION_PATTERN.exec(bio)
@@ -63,6 +63,14 @@ function isInstitutionalMention(bio: string): boolean {
   return INSTITUTIONAL_CONTEXT_PATTERN.test(bio) && !isPersonalContentDeclaration(bio)
 }
 
+// 「生成AIパスポート」等の検定・資格名は、宅建・FP・ソムリエのような
+// 他の資格と並べて経歴として列挙されるだけで、自身の投稿の生成元の宣言ではない。
+const CERTIFICATION_PATTERN = /(?:生成AI|AI生成)(?:パスポート|検定|資格試験)/
+
+function isCertificationMention(bio: string): boolean {
+  return CERTIFICATION_PATTERN.test(bio) && !isPersonalContentDeclaration(bio)
+}
+
 // 職業的な文脈と同じ「AIは話題・関心事であり、
 // 投稿の生成元ではない」という構図を、趣味・投資対象としての言及や、
 // 業務効率化のための言及にも適用したもの。`isInstitutionalMention` と同様、
@@ -97,7 +105,7 @@ const AI_OPPOSITION_PATTERN =
 // 職業的・関心事の文脈と同様に無効化する。
 // ただし自身のコンテンツを指す明示的な表現を伴う場合は例外とする。
 const THIRD_PARTY_REFERENCE_PATTERN =
-  /(?:生成AI|AI生成).{0,10}(?:して(?:る|いる)|使って(?:る|いる))方/
+  /(?:生成AI|AI生成).{0,10}(?:して(?:る|いる)|使って(?:る|いる)|(?:が)?多い)方/
 
 // 「生成AIアカウント」は「〜している方」と異なり、
 // 自己申告(「生成AIアカウントです」)にも単独で使われる。
@@ -221,7 +229,7 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.10.0',
+  version: '1.11.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
@@ -230,6 +238,7 @@ export const aiGeneratedRule: LabelRule = {
       !isNegatedDeclaration(bio) &&
       !AI_OPPOSITION_PATTERN.test(bio) &&
       !isInstitutionalMention(bio) &&
+      !isCertificationMention(bio) &&
       !isTopicInterestMention(bio) &&
       !isThirdPartyReference(bio) &&
       !isListEnumerationItem(bio) &&
