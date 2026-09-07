@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import { Logger } from '@book000/node-utils'
 import type { LabelDefinition, Prisma, PrismaClient } from '../generated/prisma'
 import type { LabelRule, LabelRuleResult } from '../labels/types'
 import { enqueueWorkItem } from './analysis-work-item-repository'
+
+const logger = Logger.configure('label-repository')
 
 export interface LabelDefinitionInput {
   key: string
@@ -91,7 +94,7 @@ export interface RecordAccountLabelsBulkForAccountsParams {
 
 /**
  * `recordAccountLabelsBulkLatestOnlyForAccounts` が SQL 呼び出しを分割する行数。
- * この値を超えて 1 回の `$executeRaw` にまとめると、Postgres の推定コストが `jit_above_cost` を超えて JIT コンパイルが走り、実行時間より長いコンパイル時間がかかる。
+ * この値を超えて 1 回の `$queryRaw` にまとめると、Postgres の推定コストが `jit_above_cost` を超えて JIT コンパイルが走り、実行時間より長いコンパイル時間がかかる。
  */
 const RECORD_ACCOUNT_LABELS_BULK_SUB_CHUNK_SIZE = 2000
 
@@ -126,7 +129,9 @@ export async function recordAccountLabelsBulkLatestOnlyForAccounts(
     const evaluables = subChunk.map((label) => label.result.evaluable ?? true)
     const { sourceKind, sourceId, sourceUsername } = params
 
-    await prisma.$executeRaw`
+    const rows = await prisma.$queryRaw<
+      { accountId: string; labelDefinitionId: string; latestUpserted: boolean }[]
+    >`
       WITH shared_now AS (
         SELECT now() AS "labeledAt"
       ),
@@ -146,21 +151,38 @@ export async function recordAccountLabelsBulkLatestOnlyForAccounts(
            OR al."reason" IS DISTINCT FROM ir."reason"
            OR al."method" IS DISTINCT FROM ir."method"
            OR al."evaluable" IS DISTINCT FROM ir."evaluable"
+      ),
+      upserted AS (
+        INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
+        SELECT tu."accountId", tu."labelDefinitionId", tu."value", tu."confidence", tu."reason", tu."method", tu."ruleVersion", tu."evaluable", shared_now."labeledAt", ${sourceKind}, ${sourceId ?? null}, ${sourceUsername ?? null}
+        FROM (
+          SELECT tu.*
+          FROM to_upsert tu
+          ORDER BY tu."accountId", tu."labelDefinitionId"
+        ) tu
+        CROSS JOIN shared_now
+        ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
+        SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
+            "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "evaluable" = EXCLUDED."evaluable", "labeledAt" = EXCLUDED."labeledAt",
+            "sourceKind" = EXCLUDED."sourceKind", "sourceId" = EXCLUDED."sourceId", "sourceUsername" = EXCLUDED."sourceUsername"
+        WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
+        RETURNING "accountId", "labelDefinitionId"
       )
-      INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt", "sourceKind", "sourceId", "sourceUsername")
-      SELECT tu."accountId", tu."labelDefinitionId", tu."value", tu."confidence", tu."reason", tu."method", tu."ruleVersion", tu."evaluable", shared_now."labeledAt", ${sourceKind}, ${sourceId ?? null}, ${sourceUsername ?? null}
-      FROM (
-        SELECT tu.*
-        FROM to_upsert tu
-        ORDER BY tu."accountId", tu."labelDefinitionId"
-      ) tu
-      CROSS JOIN shared_now
-      ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE
-      SET "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "reason" = EXCLUDED."reason",
-          "method" = EXCLUDED."method", "ruleVersion" = EXCLUDED."ruleVersion", "evaluable" = EXCLUDED."evaluable", "labeledAt" = EXCLUDED."labeledAt",
-          "sourceKind" = EXCLUDED."sourceKind", "sourceId" = EXCLUDED."sourceId", "sourceUsername" = EXCLUDED."sourceUsername"
-      WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
+      SELECT tu."accountId", tu."labelDefinitionId",
+        EXISTS (
+          SELECT 1 FROM upserted u
+          WHERE u."accountId" = tu."accountId" AND u."labelDefinitionId" = tu."labelDefinitionId"
+        ) AS "latestUpserted"
+      FROM to_upsert tu
     `
+
+    for (const row of rows) {
+      if (!row.latestUpserted) {
+        logger.warn(
+          `recordAccountLabelsBulkLatestOnlyForAccounts: AccountLabelLatest upsert guard skipped the write (accountId=${row.accountId}, labelDefinitionId=${row.labelDefinitionId})`,
+        )
+      }
+    }
   }
 }
 /** recordCrawlAccountLabelsAtomic の入力。1 author 分のルール結果一覧を含む。 */

@@ -72,4 +72,14 @@ describe('AccountLabels', () => {
     expect((html.match(/履歴 \(/g) ?? []).length).toBe(1)
     expect(html).toContain('old reasoning')
   })
+
+  it('shows an explicit empty-history message when a label has no history entries', () => {
+    const html = renderToStaticMarkup(
+      <AccountLabels labels={[makeLabel({ labelKey: 'bot', value: true, history: [] })]} />,
+    )
+
+    expect(html).toContain(
+      'このラベルの value 遷移の記録はまだありません（過去に評価されていた可能性があります）',
+    )
+  })
 })

@@ -575,4 +575,63 @@ describe('getAccountDetail', () => {
       },
     ])
   })
+
+  it('keeps a never-triggered (value=false) label visible with an empty history when it has no AccountLabelChange rows at all', async () => {
+    const account = {
+      id: 'a8',
+      screenName: 'henry',
+      displayName: 'Henry',
+      bio: null,
+      profileImageUrl: null,
+      followersCount: 0,
+      followingCount: 0,
+      tweetCount: 0,
+      accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
+      isBlueVerified: false,
+      verifiedType: null,
+    }
+    // ルールが一度も true 判定を出したことがないラベルは、AccountLabelChange
+    // トリガーが一度も発火しないため変化行がそもそも存在しない。
+    const latestFindMany = vi.fn().mockResolvedValue([
+      {
+        value: false,
+        confidence: 0.1,
+        reason: 'no keyword match',
+        method: 'heuristic',
+        ruleVersion: '1.0.0',
+        labeledAt: new Date('2026-01-01T00:00:00Z'),
+        labelDefinitionId: 'ld-never-triggered',
+        labelDefinition: { key: 'never_triggered' },
+      },
+    ])
+    const prisma = {
+      account: { findUnique: vi.fn().mockResolvedValue(account) },
+      accountLabelLatest: { findMany: latestFindMany },
+      accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
+      tweet: { findMany: vi.fn().mockResolvedValue([]) },
+      follow: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+      block: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
+    } as unknown as PrismaClient
+
+    const result = await getAccountDetail(prisma, 'a8', 10)
+
+    expect(result?.labels).toEqual([
+      {
+        labelKey: 'never_triggered',
+        value: false,
+        confidence: 0.1,
+        reason: 'no keyword match',
+        method: 'heuristic',
+        ruleVersion: '1.0.0',
+        labeledAt: new Date('2026-01-01T00:00:00Z'),
+        history: [],
+      },
+    ])
+  })
 })

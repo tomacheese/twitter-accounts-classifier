@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { Logger } from '@book000/node-utils'
 import type { PrismaClient } from '../generated/prisma'
 import type { LabelRule } from '../labels/types'
 import {
@@ -85,8 +86,8 @@ describe('ensureLabelDefinitionsForRules', () => {
 
 describe('recordAccountLabelsBulkLatestOnlyForAccounts', () => {
   it('orders Phase B latest-only UPSERT input by accountId and labelDefinitionId before taking row locks', async () => {
-    const executeRaw = vi.fn().mockResolvedValue(0)
-    const prisma = { $executeRaw: executeRaw } as unknown as PrismaClient
+    const queryRaw = vi.fn().mockResolvedValue([])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
     await recordAccountLabelsBulkLatestOnlyForAccounts(prisma, {
       sourceKind: 'relabel',
@@ -115,9 +116,67 @@ describe('recordAccountLabelsBulkLatestOnlyForAccounts', () => {
       ],
     })
 
-    const [, ...values] = executeRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+    const [, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
     expect(values[0]).toEqual(['account-a', 'account-a', 'account-b'])
     expect(values[1]).toEqual(['label-a', 'label-z', 'label-a'])
+  })
+
+  it('logs a warning when the AccountLabelLatest upsert guard rejects a genuinely changed row', async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValue([
+        { accountId: 'account-a', labelDefinitionId: 'label-a', latestUpserted: false },
+      ])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+    const warn = vi
+      .spyOn(Logger.configure('label-repository'), 'warn')
+      .mockImplementation(() => undefined)
+
+    await recordAccountLabelsBulkLatestOnlyForAccounts(prisma, {
+      sourceKind: 'relabel',
+      labels: [
+        {
+          accountId: 'account-a',
+          labelDefinitionId: 'label-a',
+          result: { value: true, confidence: 1, reason: 'stale write attempt' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toContain('account-a')
+    expect(warn.mock.calls[0][0]).toContain('label-a')
+    warn.mockRestore()
+  })
+
+  it('does not warn when every genuinely changed row is upserted', async () => {
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValue([
+        { accountId: 'account-a', labelDefinitionId: 'label-a', latestUpserted: true },
+      ])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+    const warn = vi
+      .spyOn(Logger.configure('label-repository'), 'warn')
+      .mockImplementation(() => undefined)
+
+    await recordAccountLabelsBulkLatestOnlyForAccounts(prisma, {
+      sourceKind: 'relabel',
+      labels: [
+        {
+          accountId: 'account-a',
+          labelDefinitionId: 'label-a',
+          result: { value: true, confidence: 1, reason: 'applied' },
+          method: 'rule',
+          ruleVersion: 'v1',
+        },
+      ],
+    })
+
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 })
 
@@ -126,6 +185,7 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
     const queryRaw = vi
       .fn()
       .mockResolvedValueOnce([{ labelDefinitionId: 'ld1', method: 'rule', ruleVersion: 'v1' }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
@@ -139,12 +199,10 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
           labeledAt: new Date('2026-08-04T00:00:00Z'),
         },
       ])
-    const executeRaw = vi.fn().mockResolvedValue(0)
     const create = vi.fn().mockResolvedValue({ id: 'observation1' })
     const upsert = vi.fn().mockResolvedValue({})
     const txClient = {
       $queryRaw: queryRaw,
-      $executeRaw: executeRaw,
       accountClassificationObservation: { create },
       analysisWorkItem: { upsert },
     } as unknown as PrismaClient
@@ -164,21 +222,19 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
     })
 
     expect(observationId).toBe('observation1')
-    // claim → FOR UPDATE lock → snapshot 再読込 の3回のみ。history INSERT が
-    // recordAccountLabelsBulkLatestOnlyForAccounts (executeRaw) 側に移り、
-    // queryRaw からは raw AccountLabel INSERT を含む呼び出しが消える。
-    expect(queryRaw).toHaveBeenCalledTimes(3)
+    // claim → FOR UPDATE lock → latest-only UPSERT (RETURNING で guard 結果を検知) →
+    // snapshot 再読込 の4回のみ。raw AccountLabel INSERT を含む呼び出しは存在しない。
+    expect(queryRaw).toHaveBeenCalledTimes(4)
     const preLockSql = queryRaw.mock.calls[1]?.[0]
     expect(String(preLockSql)).toContain('FOR UPDATE')
-    const snapshotReadSql = queryRaw.mock.calls[2]?.[0]
+    const latestOnlyWriteSql = queryRaw.mock.calls[2]?.[0]
+    expect(String(latestOnlyWriteSql)).toContain('INSERT INTO "AccountLabelLatest"')
+    expect(String(latestOnlyWriteSql)).not.toContain('INSERT INTO "AccountLabel"')
+    const snapshotReadSql = queryRaw.mock.calls[3]?.[0]
     expect(String(snapshotReadSql)).toContain('FOR UPDATE')
     for (const call of queryRaw.mock.calls) {
       expect(String(call[0])).not.toContain('INSERT INTO "AccountLabel"')
     }
-    expect(executeRaw).toHaveBeenCalledTimes(1)
-    const latestOnlyWriteSql = executeRaw.mock.calls[0]?.[0]
-    expect(String(latestOnlyWriteSql)).toContain('INSERT INTO "AccountLabelLatest"')
-    expect(String(latestOnlyWriteSql)).not.toContain('INSERT INTO "AccountLabel"')
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         snapshotVersion: 1,

@@ -28,7 +28,7 @@ function LabelCard({ label }: { label: AccountDetailLabel }): React.ReactElement
       <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
         {label.method} · {label.ruleVersion} · {formatDateTime(label.labeledAt)}
       </p>
-      {label.history.length > 0 && (
+      {label.history.length > 0 ? (
         <details className="mt-2 text-xs">
           <summary className="cursor-pointer text-gray-500 dark:text-gray-400">
             履歴 ({label.history.length}件)
@@ -53,6 +53,10 @@ function LabelCard({ label }: { label: AccountDetailLabel }): React.ReactElement
             ))}
           </ul>
         </details>
+      ) : (
+        <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
+          このラベルの value 遷移の記録はまだありません（過去に評価されていた可能性があります）
+        </p>
       )}
     </li>
   )
