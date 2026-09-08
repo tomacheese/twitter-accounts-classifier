@@ -64,6 +64,22 @@ describe('topicSportsRule', () => {
     ).toBe(true)
   })
 
+  it('is true for a bio mentioning "Jリーグ" without an e-prefix', () => {
+    expect(
+      topicSportsRule.evaluate(
+        makeBundle({ bio: 'Jリーグ観戦が趣味です。応援しているチームは内緒。' }),
+      ).value,
+    ).toBe(true)
+  })
+
+  it('is false for an esports team bio mentioning an e-sports league by its "eJリーグ" name', () => {
+    expect(
+      topicSportsRule.evaluate(
+        makeBundle({ bio: 'eスポーツ公式チーム。eJリーグ所属、eFootball部門で活動中' }),
+      ).value,
+    ).toBe(false)
+  })
+
   it('is true for a plain スポーツ bio', () => {
     expect(topicSportsRule.evaluate(makeBundle({ bio: 'スポーツ観戦が大好きです🎵' })).value).toBe(
       true,

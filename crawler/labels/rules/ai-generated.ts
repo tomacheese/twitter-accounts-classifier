@@ -97,7 +97,7 @@ const AI_OPPOSITION_PATTERN =
 // 職業的・関心事の文脈と同様に無効化する。
 // ただし自身のコンテンツを指す明示的な表現を伴う場合は例外とする。
 const THIRD_PARTY_REFERENCE_PATTERN =
-  /(?:生成AI|AI生成).{0,10}(?:して(?:る|いる)|使って(?:る|いる)|が多い|を?多く投稿(?:する|してる|している)?)方/
+  /(?:生成AI|AI生成).{0,10}(?:して(?:る|いる)|使って(?:る|いる)|(?:が)?多い|を?多く投稿(?:する|してる|している)?)方/
 
 // 「生成AIアカウント」は「〜している方」と異なり、
 // 自己申告(「生成AIアカウントです」)にも単独で使われる。
@@ -242,7 +242,7 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.11.0',
+  version: '1.12.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
