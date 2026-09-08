@@ -154,6 +154,10 @@ grep -qx 'postgresql://weekly_review:test-password@192.0.2.10:5432/testdb?applic
 if grep -Fq -- 'DATABASE_URL=postgresql://' "$TMUX_ARGS"; then
   fail 'tmux invocation exposed the weekly-review DATABASE_URL value in process arguments'
 fi
+grep -Fq -- "--add-dir=$STALE_CASE/repo/logs/weekly-analysis-runs/run1" "$TMUX_ARGS" || \
+  fail 'claude invocation did not grant --add-dir access to the run diagnostics directory'
+grep -Fq -- 'Run the weekly review from the precomputed review plan. Use the weekly-crawl-review skill and make any needed fixes.' "$TMUX_ARGS" || \
+  fail 'claude prompt was swallowed by a variadic --add-dir instead of staying its own argument'
 
 
 TRAP_CASE="$TMP_ROOT/trap"
