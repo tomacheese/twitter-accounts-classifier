@@ -8,6 +8,7 @@ function makeBundle(
     fullText: string
     isReply?: boolean
     isRetweet?: boolean
+    isAuthorReply?: boolean
     minutesAgo?: number
     inReplyToTweetId?: string | null
   }[],
@@ -35,6 +36,7 @@ function makeBundle(
       likeCount: 0,
       isReply: t.isReply ?? false,
       isRetweet: t.isRetweet ?? false,
+      isAuthorReply: t.isAuthorReply ?? false,
       inReplyToTweetId: t.inReplyToTweetId === undefined ? 'target1' : t.inReplyToTweetId,
       isPromoted: false,
       isPaidPromotion: false,
@@ -277,6 +279,83 @@ describe('replyFloodingRule', () => {
       })),
     )
     const result = replyFloodingRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+  })
+
+  it('is true for a short-reply group above the raised short-reply similarity threshold', () => {
+    const similaritySpy = vi.spyOn(textSimilarity, 'averagePairwiseSimilarity').mockReturnValue(0.3)
+
+    try {
+      const result = replyFloodingRule.evaluate(
+        makeBundle(
+          Array.from({ length: 8 }, (_, i) => ({
+            fullText: `@target 神回すぎる ${i}`,
+            isReply: true,
+            minutesAgo: i * 3,
+          })),
+        ),
+      )
+
+      expect(result.value).toBe(true)
+    } finally {
+      similaritySpy.mockRestore()
+    }
+  })
+
+  it('is false for a short-reply group between the ordinary and raised similarity thresholds', () => {
+    const similaritySpy = vi
+      .spyOn(textSimilarity, 'averagePairwiseSimilarity')
+      .mockReturnValue(0.29)
+
+    try {
+      const result = replyFloodingRule.evaluate(
+        makeBundle(
+          Array.from({ length: 8 }, (_, i) => ({
+            fullText: `@target 神回すぎる ${i}`,
+            isReply: true,
+            minutesAgo: i * 3,
+          })),
+        ),
+      )
+
+      expect(result.value).toBe(false)
+    } finally {
+      similaritySpy.mockRestore()
+    }
+  })
+
+  it('uses the ordinary (non-raised) similarity threshold once the median reply length reaches the short-reply cutoff', () => {
+    const similaritySpy = vi.spyOn(textSimilarity, 'averagePairwiseSimilarity').mockReturnValue(0.1)
+
+    try {
+      const result = replyFloodingRule.evaluate(
+        makeBundle(
+          Array.from({ length: 8 }, (_, i) => ({
+            fullText: `@target これは十分に長い言い換えリプライ本文です ${i}`,
+            isReply: true,
+            minutesAgo: i * 3,
+          })),
+        ),
+      )
+
+      expect(result.value).toBe(true)
+    } finally {
+      similaritySpy.mockRestore()
+    }
+  })
+
+  it('is false for a high-volume self-thread (replies to the account’s own prior tweets), not third-party reply flooding', () => {
+    const bundle = makeBundle(
+      Array.from({ length: 10 }, (_, i) => ({
+        fullText: `全く同じ内容の自己スレッド返信です全く同じ内容です ${i}`,
+        isReply: true,
+        isAuthorReply: true,
+        minutesAgo: i,
+      })),
+    )
+
+    const result = replyFloodingRule.evaluate(bundle)
+
     expect(result.value).toBe(false)
   })
 

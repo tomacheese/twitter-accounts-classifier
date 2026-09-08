@@ -73,6 +73,17 @@ describe('videoRepostRule', () => {
     expect(result.reason).toBe('foreignVideoPostCount=3 (n=3)')
   })
 
+  it('is false when only two direct videos from other source accounts are found (just below the minimum)', () => {
+    const result = videoRepostRule.evaluate(
+      makeBundle([
+        tweet({ id: 't1', foreignVideoSourceCount: 1 }),
+        tweet({ id: 't2', foreignVideoSourceCount: 1 }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+    expect(result.reason).toBe('foreignVideoPostCount=2 (n=2)')
+  })
+
   it('excludes native retweets even when they carry source metadata', () => {
     const result = videoRepostRule.evaluate(
       makeBundle([

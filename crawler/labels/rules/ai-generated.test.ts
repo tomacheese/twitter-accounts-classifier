@@ -365,4 +365,52 @@ describe('aiGeneratedRule', () => {
   ])('is false for a bio describing a policy toward other accounts via %s', (_label, bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })
+
+  it.each([
+    [
+      'a department-manager career bio mentioning generative AI as a job topic',
+      '製造業の部長職。生成AI導入の社内推進を担当しています。',
+    ],
+    [
+      'a consulting-service bio describing generative-AI adoption as a client offering',
+      'AI導入支援サービスを提供しています。生成AIの最新情報もお届け。',
+    ],
+    [
+      'a podcaster bio covering generative AI as a media beat',
+      '生成AIについて話すポッドキャストを配信しています。',
+    ],
+  ])(
+    'is false for a bio mentioning generative AI via %s (business-context guard)',
+    (_label, bio) => {
+      expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('is false for a bio that denies AI generation using the squared-NG (🆖) prohibition emoji', () => {
+    const result = aiGeneratedRule.evaluate(makeBundle({ bio: '手描き専門。生成AI🆖です。' }))
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for a follow-back policy toward accounts that post many generative-AI images, phrased with "が多い方"', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: '生成AI画像の投稿が多い方はフォロバしません。ゲーム実況が趣味です。' }),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for a bio listing a generative-AI literacy certification among other qualifications', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({
+        bio: '保有資格：簿記2級、生成AIパスポート、TOEIC800点。よろしくお願いします。',
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for a bio that lists generative AI as one item in a newline-separated tag list', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: 'フリーランスDTP\nカメラ\n生成AI\nよろしくお願いします' }),
+    )
+    expect(result.value).toBe(false)
+  })
 })
