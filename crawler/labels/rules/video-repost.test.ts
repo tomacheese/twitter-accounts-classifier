@@ -73,6 +73,18 @@ describe('videoRepostRule', () => {
     expect(result.reason).toBe('foreignVideoPostCount=3 (n=3)')
   })
 
+  it('is false when foreign-video posts are just below the threshold', () => {
+    const result = videoRepostRule.evaluate(
+      makeBundle([
+        tweet({ id: 't1', foreignVideoSourceCount: 1 }),
+        tweet({ id: 't2', foreignVideoSourceCount: 1 }),
+        tweet({ id: 't3' }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+    expect(result.reason).toBe('foreignVideoPostCount=2 (n=3)')
+  })
+
   it('excludes native retweets even when they carry source metadata', () => {
     const result = videoRepostRule.evaluate(
       makeBundle([

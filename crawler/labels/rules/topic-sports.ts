@@ -10,14 +10,14 @@ import type { LabelRule } from '../types'
 // eスポーツ は topic_gaming 側のシグナルとして扱っており、
 // 含めると eスポーツ 関連のプレイヤーや会場アカウントをスポーツ関心ありと誤検知してしまうため。
 const SPORTS_PATTERN =
-  /\b(baseball|soccer|basketball|NBA|MLB|NPB)\b|(?<![eEｅＥ])スポーツ|野球|サッカー|バスケ(ットボール)?|Jリーグ/i
+  /\b(baseball|soccer|basketball|NBA|MLB|NPB)\b|(?<![eEｅＥ])スポーツ|野球|サッカー|バスケ(ットボール)?|(?<![eEｅＥ])Jリーグ/i
 
 const KEYWORD_SCORE = 0.8
 
 export const topicSportsRule: LabelRule = {
   key: 'topic_sports',
   description: 'プロフィールの直接証拠、またはフォロー関係からスポーツとの強い関連が示される',
-  version: '1.2.1',
+  version: '1.3.0',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account

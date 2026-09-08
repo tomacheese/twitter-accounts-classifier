@@ -160,6 +160,22 @@ describe('aiGeneratedRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it('is false for a bio that denies AI generation using the "🆖" NG-button emoji placed after the term', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: '手描きイラスト専門。生成AI🆖 無断使用もお断りします。' }),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is false for a bio listing generative-AI literacy certification among unrelated professional qualifications', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({
+        bio: '保有資格：宅地建物取引士、ファイナンシャルプランナー、生成AIパスポート、ソムリエ',
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
+
   it('is false for an investment/stock bio that mentions generative-AI stocks as a market topic, not a self-declaration', () => {
     const result = aiGeneratedRule.evaluate(
       makeBundle({ bio: '半導体・生成AI関連銘柄を中心に投資しています。日々の値動きを記録。' }),
@@ -357,6 +373,10 @@ describe('aiGeneratedRule', () => {
     [
       'a block policy aimed at other AI users phrased with "使っている方"',
       '手描きイラスト専門の趣味垢。AI生成使っている方はご遠慮ください。',
+    ],
+    [
+      'a follow-back refusal phrased with "〜が多い方" rather than "している方"',
+      '手描きイラスト専門の趣味垢。生成AIの投稿が多い方はフォロー控えさせていただきます。',
     ],
     [
       'a contact-restriction policy naming other accounts via "アカウント" rather than "方"',
