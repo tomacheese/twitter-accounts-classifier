@@ -317,6 +317,7 @@ echo "[weekly-analyze] starting weekly crawl review at $(date -Iseconds) in tmux
   -e "WEEKLY_REVIEW_PLAN_FILE=$REVIEW_PLAN_FILE" \
   -e "WEEKLY_REVIEW_RESULT_FILE=$REVIEW_RESULT_FILE" -e "PGAPPNAME=$PGAPPNAME" \
   "$CLAUDE_BIN" --agent weekly-review-coordinator --permission-mode auto \
+  --add-dir="$DIAGNOSTICS_DIR" \
   "Run the weekly review from the precomputed review plan. Use the weekly-crawl-review skill and make any needed fixes."
 TMUX_SESSION_STARTED=1
 TMUX_PANE_PID="$("$TMUX_BIN" display-message -p -t "$SESSION_NAME" '#{pane_pid}' 2>/dev/null || true)"
