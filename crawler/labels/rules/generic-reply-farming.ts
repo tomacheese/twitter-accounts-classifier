@@ -15,6 +15,23 @@ const GENERIC_REACTION_RATIO_THRESHOLD = 0.5
 const ABSTRACT_CLOSING_RATIO_THRESHOLD = 0.5
 const ABSTRACT_CLOSING_PATTERN = /(?:たい|たくなる|気になる|想像して(?:る|いる))$/u
 
+// 低頻度・越境言語 (プロフィールが非日本語、返信文は日本語) の文脈追随型リプライファーミング分岐。
+// 高頻度分岐とは速度域が逆方向 (低速であること自体が条件) のため、しきい値を共有せず独立して定義する。
+const MIN_SAMPLE_LOW_FREQ = 15
+const REPLY_RATIO_THRESHOLD_LOW_FREQ = 0.8
+const MIN_EXTERNAL_REPLIES_LOW_FREQ = 10
+const EXTERNAL_REPLY_RATIO_THRESHOLD_LOW_FREQ = 0.8
+const DISTINCT_PARENT_RATIO_THRESHOLD_LOW_FREQ = 0.8
+const MIN_DISTINCT_PARENT_AUTHORS = 8
+const DISTINCT_PARENT_AUTHOR_RATIO_THRESHOLD = 0.8
+const MAX_LIFETIME_VELOCITY_PER_DAY_LOW_FREQ = 8
+const MAX_RECENT_VELOCITY_PER_DAY_LOW_FREQ = 8
+const MIN_AVERAGE_REPLY_LENGTH_LOW_FREQ = 70
+const REPLY_JAPANESE_RATIO_THRESHOLD = 0.8
+// 1件の返信文が「日本語の返信」とみなされるために必要な、文字中の日本語スクリプト比率。
+const JAPANESE_TEXT_CHAR_RATIO_THRESHOLD = 0.5
+const JAPANESE_SCRIPT_PATTERN = /[぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ]/u
+
 const GENERIC_REACTION_PATTERNS = [
   /(?:わかり|分かり|素敵|すご|大変|つら|辛|嬉し|お疲れ|本当|ほんと|めっちゃ|ですよね|ですね|だね|ますね|良かった|よかった|大事|大切|かもしれません)/u,
   /(?:本当|ほんと)に(?:すご|素敵|大変|つら|辛|嬉し|良|愛おし|尊|心)/u,
@@ -46,6 +63,13 @@ function hasAbstractClosing(text: string): boolean {
   return ABSTRACT_CLOSING_PATTERN.test(normalized)
 }
 
+function isJapaneseText(text: string): boolean {
+  const chars = text.match(/./gu) ?? []
+  if (chars.length === 0) return false
+  const japaneseCount = chars.filter((char) => JAPANESE_SCRIPT_PATTERN.test(char)).length
+  return japaneseCount / chars.length >= JAPANESE_TEXT_CHAR_RATIO_THRESHOLD
+}
+
 function averageTweetsPerDay(tweetCount: number, accountCreatedAt: Date): number {
   const ageDays = Math.max(1, (Date.now() - accountCreatedAt.getTime()) / 86_400_000)
   return tweetCount / ageDays
@@ -64,8 +88,10 @@ function recentObservedTweetsPerDay(tweets: { createdAt: Date }[]): number {
 export const genericReplyFarmingRule: LabelRule = {
   key: 'generic_reply_farming',
   description:
-    '多数の異なる外部投稿へ、汎用的な評価・共感や抽象的な関心の締めを高頻度に繰り返す行動を検出する shadow ラベル。AI/LLM 利用そのものは推定しない',
-  version: '0.1.0',
+    '多数の異なる外部投稿へ、汎用的な評価・共感や抽象的な関心の締めを高頻度に繰り返す行動、' +
+    'および非日本語プロフィールが外部投稿へ低頻度に日本語の文脈追随型の返信を繰り返す行動を検出する shadow ラベル。' +
+    'AI/LLM 利用そのものは推定しない',
+  version: '0.2.0',
   excludeFromStaleScan: true,
   evaluate(bundle) {
     const sampled = bundle.recentTweets
@@ -119,12 +145,28 @@ export const genericReplyFarmingRule: LabelRule = {
       genericReactionRatio >= GENERIC_REACTION_RATIO_THRESHOLD ||
       abstractClosingRatio >= ABSTRACT_CLOSING_RATIO_THRESHOLD
 
+    const distinctParentAuthors = new Set(externalReplies.map((tweet) => tweet.parentTweetAuthorId))
+      .size
+    const distinctParentAuthorRatio =
+      externalReplies.length > 0 ? distinctParentAuthors / externalReplies.length : 0
+    const replyJapaneseRatio =
+      normalizedExternalReplies.length > 0
+        ? normalizedExternalReplies.filter((text) => isJapaneseText(text)).length /
+          normalizedExternalReplies.length
+        : 0
+    // NEVER screenName: screenName はアカウントが自由に選べない場合も多く、
+    // 非日本語話者かどうかの手掛かりとしては displayName・bio より弱いため使わない。
+    const profileText = [bundle.account.displayName, bundle.account.bio].filter(Boolean).join(' ')
+    const profileHasLetters = /\p{L}/u.test(profileText)
+    const profileHasJapanese = JAPANESE_SCRIPT_PATTERN.test(profileText)
+    const crossLanguageProfile = profileHasLetters && !profileHasJapanese
+
     const hasEnoughSample = sampled.length >= MIN_SAMPLE
     const evaluable =
       hasEnoughSample &&
       (replyRatio < REPLY_RATIO_THRESHOLD ||
         parentAuthorCoverage >= PARENT_AUTHOR_COVERAGE_THRESHOLD)
-    const candidate =
+    const highFrequencyCandidate =
       replyRatio >= REPLY_RATIO_THRESHOLD &&
       externalReplies.length >= MIN_EXTERNAL_REPLIES &&
       externalReplyRatio >= EXTERNAL_REPLY_RATIO_THRESHOLD &&
@@ -134,13 +176,41 @@ export const genericReplyFarmingRule: LabelRule = {
       averageReplyLength >= MIN_AVERAGE_REPLY_LENGTH &&
       questionRatio <= MAX_QUESTION_RATIO &&
       !isVerifiedBusiness
-    const value = evaluable && candidate && hasGenericStyle
+    const highFrequencyMatch = highFrequencyCandidate && hasGenericStyle
+
+    // questionRatio のゲートは意図的に課さない: 質問形での関心表明を交えた越境言語の
+    // 文脈追随も本分岐の検出対象に含めるため。
+    const lowFrequencyMatch =
+      sampled.length >= MIN_SAMPLE_LOW_FREQ &&
+      parentAuthorCoverage >= PARENT_AUTHOR_COVERAGE_THRESHOLD &&
+      replyRatio >= REPLY_RATIO_THRESHOLD_LOW_FREQ &&
+      externalReplies.length >= MIN_EXTERNAL_REPLIES_LOW_FREQ &&
+      externalReplyRatio >= EXTERNAL_REPLY_RATIO_THRESHOLD_LOW_FREQ &&
+      distinctParentRatio >= DISTINCT_PARENT_RATIO_THRESHOLD_LOW_FREQ &&
+      distinctParentAuthors >= MIN_DISTINCT_PARENT_AUTHORS &&
+      distinctParentAuthorRatio >= DISTINCT_PARENT_AUTHOR_RATIO_THRESHOLD &&
+      tweetsPerDay <= MAX_LIFETIME_VELOCITY_PER_DAY_LOW_FREQ &&
+      recentTweetsPerDay <= MAX_RECENT_VELOCITY_PER_DAY_LOW_FREQ &&
+      averageReplyLength >= MIN_AVERAGE_REPLY_LENGTH_LOW_FREQ &&
+      genericReactionRatio >= GENERIC_REACTION_RATIO_THRESHOLD &&
+      replyJapaneseRatio >= REPLY_JAPANESE_RATIO_THRESHOLD &&
+      crossLanguageProfile &&
+      !isVerifiedBusiness
+
+    const value = evaluable && (highFrequencyMatch || lowFrequencyMatch)
+    const matchedBranch = evaluable
+      ? highFrequencyMatch
+        ? 'high-frequency'
+        : lowFrequencyMatch
+          ? 'low-frequency-cross-language'
+          : 'none'
+      : 'none'
 
     const styleScore = combineAlternatives([
       rampScore(genericReactionRatio, GENERIC_REACTION_RATIO_THRESHOLD, 0.5),
       rampScore(abstractClosingRatio, ABSTRACT_CLOSING_RATIO_THRESHOLD, 0.5),
     ])
-    const evidenceScore = combineRequired([
+    const highFrequencyEvidenceScore = combineRequired([
       rampScore(replyRatio, REPLY_RATIO_THRESHOLD, 0.4),
       rampScore(externalReplies.length, MIN_EXTERNAL_REPLIES, MIN_EXTERNAL_REPLIES),
       rampScore(externalReplyRatio, EXTERNAL_REPLY_RATIO_THRESHOLD, 0.2),
@@ -160,6 +230,43 @@ export const genericReplyFarmingRule: LabelRule = {
       isVerifiedBusiness ? 0 : 1,
       styleScore,
     ])
+    const lowFrequencyEvidenceScore = combineRequired([
+      rampScore(replyRatio, REPLY_RATIO_THRESHOLD_LOW_FREQ, 0.2),
+      rampScore(
+        externalReplies.length,
+        MIN_EXTERNAL_REPLIES_LOW_FREQ,
+        MIN_EXTERNAL_REPLIES_LOW_FREQ,
+      ),
+      rampScore(externalReplyRatio, EXTERNAL_REPLY_RATIO_THRESHOLD_LOW_FREQ, 0.2),
+      rampScore(distinctParentRatio, DISTINCT_PARENT_RATIO_THRESHOLD_LOW_FREQ, 0.2),
+      rampScore(distinctParentAuthors, MIN_DISTINCT_PARENT_AUTHORS, MIN_DISTINCT_PARENT_AUTHORS),
+      rampScore(distinctParentAuthorRatio, DISTINCT_PARENT_AUTHOR_RATIO_THRESHOLD, 0.2),
+      rampScore(
+        tweetsPerDay,
+        MAX_LIFETIME_VELOCITY_PER_DAY_LOW_FREQ,
+        MAX_LIFETIME_VELOCITY_PER_DAY_LOW_FREQ,
+        'lower-is-positive',
+      ),
+      rampScore(
+        recentTweetsPerDay,
+        MAX_RECENT_VELOCITY_PER_DAY_LOW_FREQ,
+        MAX_RECENT_VELOCITY_PER_DAY_LOW_FREQ,
+        'lower-is-positive',
+      ),
+      rampScore(
+        averageReplyLength,
+        MIN_AVERAGE_REPLY_LENGTH_LOW_FREQ,
+        MIN_AVERAGE_REPLY_LENGTH_LOW_FREQ,
+      ),
+      rampScore(genericReactionRatio, GENERIC_REACTION_RATIO_THRESHOLD, 0.5),
+      rampScore(replyJapaneseRatio, REPLY_JAPANESE_RATIO_THRESHOLD, 0.2),
+      crossLanguageProfile ? 1 : 0,
+      isVerifiedBusiness ? 0 : 1,
+    ])
+    const evidenceScore = combineAlternatives([
+      highFrequencyEvidenceScore,
+      lowFrequencyEvidenceScore,
+    ])
 
     return {
       value,
@@ -171,7 +278,10 @@ export const genericReplyFarmingRule: LabelRule = {
         `externalReplies=${externalReplies.length}, externalReplyRatio=${externalReplyRatio.toFixed(2)}, ` +
         `distinctParentRatio=${distinctParentRatio.toFixed(2)}, avgReplyLength=${averageReplyLength.toFixed(1)}, ` +
         `questionRatio=${questionRatio.toFixed(2)}, genericReactionRatio=${genericReactionRatio.toFixed(2)}, ` +
-        `abstractClosingRatio=${abstractClosingRatio.toFixed(2)}, verifiedBusiness=${isVerifiedBusiness} (n=${sampled.length})`,
+        `abstractClosingRatio=${abstractClosingRatio.toFixed(2)}, verifiedBusiness=${isVerifiedBusiness}, ` +
+        `distinctParentAuthors=${distinctParentAuthors}, distinctParentAuthorRatio=${distinctParentAuthorRatio.toFixed(2)}, ` +
+        `replyJapaneseRatio=${replyJapaneseRatio.toFixed(2)}, profileHasLetters=${profileHasLetters}, ` +
+        `profileHasJapanese=${profileHasJapanese}, matchedBranch=${matchedBranch} (n=${sampled.length})`,
     }
   },
 }
