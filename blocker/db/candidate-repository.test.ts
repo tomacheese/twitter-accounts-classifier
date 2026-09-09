@@ -83,6 +83,28 @@ describe('selectBlockCandidates', () => {
     expect(values).not.toContainEqual(['reply_farming', 'generic_reply_farming'])
   })
 
+  it('filters the non-blocking contextual_reply_marketing label out of the SQL parameters', async () => {
+    const prisma = fakePrismaReturning([])
+
+    await selectBlockCandidates(
+      prisma as never,
+      'blocker-1',
+      {
+        targetLabels: [
+          { label: 'spam', confidenceThreshold: 0.8 },
+          { label: 'contextual_reply_marketing', confidenceThreshold: 0.5 },
+        ],
+      },
+      50,
+      3,
+      21_600,
+    )
+
+    const [, ...values] = prisma.$queryRaw.mock.calls[0]
+    expect(values).toEqual(expect.arrayContaining([['spam'], [0.8]]))
+    expect(values).not.toContainEqual(['spam', 'contextual_reply_marketing'])
+  })
+
   it('returns without querying when every configured target label is non-blocking', async () => {
     const prisma = fakePrismaReturning([])
 
@@ -93,6 +115,7 @@ describe('selectBlockCandidates', () => {
         targetLabels: [
           { label: 'reply_farming', confidenceThreshold: 0.5 },
           { label: 'generic_reply_farming', confidenceThreshold: 0.5 },
+          { label: 'contextual_reply_marketing', confidenceThreshold: 0.5 },
         ],
       },
       50,
