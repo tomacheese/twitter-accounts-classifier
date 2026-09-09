@@ -17,6 +17,9 @@ interface BundleOptions {
   resolvedReplyCount?: number
   parentMode?: 'external' | 'self'
   textFactory?: (index: number) => string
+  displayName?: string
+  bio?: string | null
+  distinctParentAuthorCount?: number
 }
 
 function makeBundle(options: BundleOptions = {}): AccountFeatureBundle {
@@ -35,8 +38,8 @@ function makeBundle(options: BundleOptions = {}): AccountFeatureBundle {
     account: {
       id: 'acct-1',
       screenName: 'sample',
-      displayName: 'Sample',
-      bio: null,
+      displayName: options.displayName ?? 'Sample',
+      bio: options.bio ?? null,
       followersCount: 100,
       followingCount: 100,
       tweetCount: Math.round(lifetimePerDay * ageDays),
@@ -47,6 +50,9 @@ function makeBundle(options: BundleOptions = {}): AccountFeatureBundle {
     recentTweets: Array.from({ length: sampleSize }, (_, index) => {
       const isReply = index < replyCount
       const hasResolvedParent = isReply && index < resolvedReplyCount
+      const parentAuthorIndex = options.distinctParentAuthorCount
+        ? index % options.distinctParentAuthorCount
+        : index
       return {
         id: `tweet-${index}`,
         fullText: isReply ? textFactory(index) : `original post ${index}`,
@@ -62,16 +68,38 @@ function makeBundle(options: BundleOptions = {}): AccountFeatureBundle {
         parentTweetAuthorId: hasResolvedParent
           ? options.parentMode === 'self'
             ? 'acct-1'
-            : `parent-author-${index}`
+            : `parent-author-${parentAuthorIndex}`
           : null,
       }
     }),
   }
 }
 
+/**
+ * 指定した interval (分) で n 件のツイート列を配置したときの recentTweetsPerDay 相当を得るための、
+ * 平均間隔 (分) を逆算する。makeBundle の intervalMinutes に渡す。
+ */
+function intervalMinutesForRecentRate(sampleSize: number, recentTweetsPerDay: number): number {
+  const spanDays = (sampleSize - 1) / recentTweetsPerDay
+  return (spanDays * 24 * 60) / (sampleSize - 1)
+}
+
+const crossLanguageGenericJapaneseText =
+  'そのお気持ち本当にすごくわかります。大変な状況の中で、それでも前向きに取り組んでいる姿勢が伝わってきて、' +
+  'こちらまで励まされる気持ちになりました。無理せず、ご自身のペースで進めていただければと思います。'
+const crossLanguageConcreteJapaneseText =
+  '今回の事例では二要素認証の設定手順が異なり、旧システムとの互換性にも個別の制約があります。' +
+  '導入時期によって参照すべき手順書のバージョンも変わるため、事前確認が必要です。'
+const crossLanguageEnglishText =
+  'Totally agree with this take, really appreciate you sharing the update with everyone here.'
+
 describe('genericReplyFarmingRule', () => {
   it('is registered as a shadow label rule', () => {
     expect(getRule()).toBeDefined()
+  })
+
+  it('bumps the version to reflect the added low-frequency branch', () => {
+    expect(getRule().version).toBe('0.2.0')
   })
 
   it('detects high-volume generic context-aware external replies', () => {
@@ -79,6 +107,13 @@ describe('genericReplyFarmingRule', () => {
 
     expect(result.value).toBe(true)
     expect(result.evaluable).toBe(true)
+  })
+
+  it('keeps the pre-existing high-frequency confidence and branch indicator unchanged', () => {
+    const result = getRule().evaluate(makeBundle())
+
+    expect(result.confidence).toBeCloseTo(0.588_888_888_888_888_9, 10)
+    expect(result.reason).toContain('matchedBranch=high-frequency')
   })
 
   it('detects an account-level repeated abstract closing even without generic empathy phrases', () => {
@@ -175,5 +210,109 @@ describe('genericReplyFarmingRule', () => {
     )
 
     expect(result.value).toBe(true)
+  })
+
+  describe('low-frequency cross-language contextual reply branch', () => {
+    const lowFrequencyBaseOptions = {
+      sampleSize: 17,
+      replyCount: 17,
+      resolvedReplyCount: 17,
+      lifetimePerDay: 3.8,
+      intervalMinutes: intervalMinutesForRecentRate(17, 1.9),
+      displayName: 'Alex Morgan',
+      bio: 'Sharing thoughts on markets and life',
+      textFactory: () => crossLanguageGenericJapaneseText,
+    } as const
+
+    const questionHeavyBaseOptions = {
+      sampleSize: 20,
+      replyCount: 20,
+      resolvedReplyCount: 20,
+      lifetimePerDay: 6.4,
+      intervalMinutes: intervalMinutesForRecentRate(20, 0.9),
+      displayName: 'Priya Shah',
+      bio: 'Just here to chat with people',
+      textFactory: (index: number) =>
+        index % 5 === 0
+          ? crossLanguageConcreteJapaneseText
+          : `${crossLanguageGenericJapaneseText}？`,
+    } as const
+
+    it('detects a low-frequency cross-language candidate (English profile, Japanese replies)', () => {
+      const result = getRule().evaluate(makeBundle(lowFrequencyBaseOptions))
+
+      expect(result.value).toBe(true)
+      expect(result.evaluable).toBe(true)
+      expect(result.reason).toContain('matchedBranch=low-frequency-cross-language')
+      expect(result.reason).toContain('distinctParentAuthors=17')
+      expect(result.reason).toContain('distinctParentAuthorRatio=1.00')
+      expect(result.reason).toContain('replyJapaneseRatio=1.00')
+      expect(result.reason).toContain('profileHasLetters=true')
+      expect(result.reason).toContain('profileHasJapanese=false')
+    })
+
+    it('detects a low-frequency cross-language candidate even with a high question ratio', () => {
+      const result = getRule().evaluate(makeBundle(questionHeavyBaseOptions))
+
+      expect(result.value).toBe(true)
+    })
+
+    it('does not label the same question-heavy fixture when the profile is Japanese', () => {
+      const result = getRule().evaluate(
+        makeBundle({
+          ...questionHeavyBaseOptions,
+          displayName: '田中太郎',
+          bio: '日常のことをつぶやいています',
+        }),
+      )
+
+      expect(result.value).toBe(false)
+    })
+
+    it('does not label a profile with no letters at all', () => {
+      const result = getRule().evaluate(
+        makeBundle({ ...lowFrequencyBaseOptions, displayName: '0000', bio: null }),
+      )
+
+      expect(result.value).toBe(false)
+    })
+
+    it('does not label a low-frequency candidate with too few distinct parent authors', () => {
+      const result = getRule().evaluate(
+        makeBundle({ ...questionHeavyBaseOptions, distinctParentAuthorCount: 3 }),
+      )
+
+      expect(result.value).toBe(false)
+    })
+
+    it('does not label a low-frequency candidate whose generic reaction ratio is below 0.5', () => {
+      const result = getRule().evaluate(
+        makeBundle({
+          ...lowFrequencyBaseOptions,
+          textFactory: () => crossLanguageConcreteJapaneseText,
+        }),
+      )
+
+      expect(result.value).toBe(false)
+    })
+
+    it('does not label a low-frequency candidate with insufficient Japanese reply ratio', () => {
+      const result = getRule().evaluate(
+        makeBundle({
+          ...lowFrequencyBaseOptions,
+          textFactory: () => crossLanguageEnglishText,
+        }),
+      )
+
+      expect(result.value).toBe(false)
+    })
+
+    it('does not label a low-frequency candidate on verified Business accounts', () => {
+      const result = getRule().evaluate(
+        makeBundle({ ...questionHeavyBaseOptions, verifiedType: 'Business' }),
+      )
+
+      expect(result.value).toBe(false)
+    })
   })
 })
