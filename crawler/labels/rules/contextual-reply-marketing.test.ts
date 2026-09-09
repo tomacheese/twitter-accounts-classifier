@@ -19,6 +19,15 @@ const SELF_POSITIONING_REPLY_TEXTS = [
   '転職活動、大変な時期ですね。何度か転職を経験した自分からすると、焦らず自分に合う環境を探すのが一番だと思います。',
 ]
 
+function makeReactionControlledReplyTexts(genericReaction: boolean): string[] {
+  const controlledPhrase = genericReaction ? '大変でした' : '記録したよ'
+  return Array.from(
+    { length: 6 },
+    (_, index) =>
+      `自分も在宅勤務を始めた時期があり、${controlledPhrase}。朝に机へ向かう時間を固定して、作業の区切りごとに休憩を入れ、週ごとに予定を見直していました。番号${index}`,
+  )
+}
+
 const PLAIN_EMPATHY_REPLY_TEXTS = [
   '在宅ワークを始めたばかりの頃は本当に大変ですよね。少しずつ慣れていくものだと思いますので、無理せず頑張ってください。',
   '引っ越し準備、本当にお疲れさまです。新しい生活が落ち着くまで大変だと思いますが、応援しています。',
@@ -39,6 +48,10 @@ function makeBundle(
     professionalType?: string | null
     resolvedReplyCount?: number
     originalTextFactory?: (index: number) => string
+    parentAuthorIds?: string[]
+    accountAgeDays?: number
+    originalExternalUrlCount?: number
+    originalXUrlCount?: number
   } = {},
 ): AccountFeatureBundle {
   const replyTexts = options.replyTexts ?? SELF_POSITIONING_REPLY_TEXTS
@@ -51,7 +64,7 @@ function makeBundle(
   const intervalMinutes = options.intervalMinutes ?? 655
   const resolvedReplyCount = options.resolvedReplyCount ?? replyCount
   const now = Date.now()
-  const ageDays = 200
+  const ageDays = options.accountAgeDays ?? 200
 
   return {
     account: {
@@ -70,6 +83,13 @@ function makeBundle(
     recentTweets: Array.from({ length: sampleSize }, (_, index) => {
       const isReply = index < replyCount
       const hasResolvedParent = isReply && index < resolvedReplyCount
+      const originalIndex = index - replyCount
+      const expandedUrls =
+        !isReply && originalIndex < (options.originalExternalUrlCount ?? 0)
+          ? [`https://example.com/posts/${originalIndex}`]
+          : !isReply && originalIndex < (options.originalXUrlCount ?? 0)
+            ? [`https://x.com/sample/status/${1000 + originalIndex}`]
+            : []
       return {
         id: `tweet-${index}`,
         fullText: isReply ? replyTexts[index] : originalTextFactory(index),
@@ -80,9 +100,13 @@ function makeBundle(
         isRetweet: false,
         isPromoted: false,
         isPaidPromotion: false,
+        expandedUrls,
+        cardDestinationUrls: [],
         inReplyToTweetId: isReply ? `parent-${index}` : null,
         parentTweetFullText: isReply ? `parent text ${index}` : null,
-        parentTweetAuthorId: hasResolvedParent ? `parent-author-${index}` : null,
+        parentTweetAuthorId: hasResolvedParent
+          ? (options.parentAuthorIds?.[index] ?? `parent-author-${index}`)
+          : null,
       }
     }),
   }
@@ -98,6 +122,41 @@ describe('contextualReplyMarketingRule', () => {
 
     expect(result.value).toBe(true)
     expect(result.evaluable).not.toBe(false)
+    expect(result.reason).toContain('distinctParentAuthors=')
+    expect(result.reason).toContain('distinctParentAuthorRatio=')
+    expect(result.reason).toContain('genericReactionRatio=')
+    expect(result.reason).toContain('originalExternalUrlRatio=')
+    expect(result.reason).toContain('accountAgeDays=')
+  })
+
+  it('does not label recurring conversations with too few distinct parent authors', () => {
+    const result = getRule().evaluate(
+      makeBundle({
+        parentAuthorIds: ['friend-a', 'friend-a', 'friend-b', 'friend-b', 'friend-c', 'friend-c'],
+      }),
+    )
+
+    expect(result.value).toBe(false)
+  })
+
+  it('does not label broad-looking reply activity when distinct parent author ratio is too low', () => {
+    const result = getRule().evaluate(
+      makeBundle({
+        replyTexts: [...SELF_POSITIONING_REPLY_TEXTS, SELF_POSITIONING_REPLY_TEXTS[0]],
+        originalCount: 12,
+        parentAuthorIds: [
+          'person-a',
+          'person-b',
+          'person-c',
+          'person-d',
+          'person-e',
+          'person-a',
+          'person-b',
+        ],
+      }),
+    )
+
+    expect(result.value).toBe(false)
   })
 
   it('does not label normal empathetic replies without repeated self-positioning', () => {
@@ -155,6 +214,52 @@ describe('contextualReplyMarketingRule', () => {
 
   it('does not label verified business accounts', () => {
     const result = getRule().evaluate(makeBundle({ verifiedType: 'Business' }))
+
+    expect(result.value).toBe(false)
+  })
+
+  it('uses generic-reaction style only as positive confidence support', () => {
+    const generic = getRule().evaluate(
+      makeBundle({ replyTexts: makeReactionControlledReplyTexts(true) }),
+    )
+    const neutral = getRule().evaluate(
+      makeBundle({ replyTexts: makeReactionControlledReplyTexts(false) }),
+    )
+
+    expect(generic.value).toBe(true)
+    expect(neutral.value).toBe(true)
+    expect(generic.confidence).toBeGreaterThan(neutral.confidence)
+  })
+
+  it('uses non-X external links in original posts only as positive confidence support', () => {
+    const external = getRule().evaluate(makeBundle({ originalExternalUrlCount: 6 }))
+    const xOnly = getRule().evaluate(makeBundle({ originalXUrlCount: 6 }))
+    const noLinks = getRule().evaluate(makeBundle())
+
+    expect(external.value).toBe(true)
+    expect(xOnly.value).toBe(true)
+    expect(noLinks.value).toBe(true)
+    expect(external.confidence).toBeGreaterThan(noLinks.confidence)
+    expect(xOnly.confidence).toBeCloseTo(noLinks.confidence, 10)
+  })
+
+  it('uses account newness only as positive confidence support', () => {
+    const fresh = getRule().evaluate(makeBundle({ accountAgeDays: 30 }))
+    const old = getRule().evaluate(makeBundle({ accountAgeDays: 2000 }))
+
+    expect(fresh.value).toBe(true)
+    expect(old.value).toBe(true)
+    expect(fresh.confidence).toBeGreaterThan(old.confidence)
+  })
+
+  it('does not let strong soft signals override a failed distinct-parent-author hard gate', () => {
+    const result = getRule().evaluate(
+      makeBundle({
+        parentAuthorIds: ['friend-a', 'friend-a', 'friend-b', 'friend-b', 'friend-c', 'friend-c'],
+        accountAgeDays: 30,
+        originalExternalUrlCount: 8,
+      }),
+    )
 
     expect(result.value).toBe(false)
   })
