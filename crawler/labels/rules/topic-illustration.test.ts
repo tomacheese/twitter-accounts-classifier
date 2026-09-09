@@ -100,6 +100,14 @@ describe('topicIllustrationRule', () => {
     expect(result.confidence).toBeCloseTo(0.5)
   })
 
+  it('is false for a bio crediting a different person as the illustrator ("イラスト提供：〇〇様")', () => {
+    expect(
+      topicIllustrationRule.evaluate(
+        makeBundle({ bio: 'イラスト提供：ねこ様。日常アカウントです' }),
+      ).value,
+    ).toBe(false)
+  })
+
   it('bio があればフォローグラフのサンプルが不足していても evaluable: true になる', () => {
     const result = topicIllustrationRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)

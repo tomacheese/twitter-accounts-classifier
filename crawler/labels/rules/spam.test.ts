@@ -482,4 +482,32 @@ describe('spamRule', () => {
     expect(withSignals.value).toBe(false)
     expect(withSignals.confidence).toBe(withoutSignals.confidence)
   })
+
+  it('is false with neutral evaluable=false when recentTweets were never fetched, instead of a confident false', () => {
+    const result = spamRule.evaluate(
+      makeBundle({
+        bio: null,
+        followersCount: 10,
+        followingCount: 20,
+        recentTweetsFetchStatus: null,
+      }),
+    )
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBe(0.5)
+  })
+
+  it('keeps a confident false when recentTweets were fetched successfully and no signal fires', () => {
+    const result = spamRule.evaluate(
+      makeBundle({
+        bio: null,
+        followersCount: 10,
+        followingCount: 20,
+        recentTweetsFetchStatus: 'success',
+      }),
+    )
+    expect(result.value).toBe(false)
+    expect(result.evaluable ?? true).toBe(true)
+    expect(result.confidence).toBe(1)
+  })
 })

@@ -167,6 +167,16 @@ describe('topicPoliticsRule', () => {
     ).toBe(false)
   })
 
+  it.each([
+    '改憲反対、戦争反対、移民反対です。自民党も公明党も支持しません',
+    '共産党には投票しません。政治には関心があります',
+  ])(
+    'does not treat a bio expressing political opinions/opposition without a self-identification suffix as party membership: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
   it('is true for a specific office title delimited by a full-width slash in a tag-listing bio', () => {
     expect(
       topicPoliticsRule.evaluate(makeBundle({ bio: '会社員／二児の父／○○市議会議員／広報担当' }))

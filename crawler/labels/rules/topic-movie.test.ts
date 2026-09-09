@@ -63,6 +63,13 @@ describe('topicMovieRule', () => {
     ).toBe(false)
   })
 
+  it('is false for a bio containing "ドラマ" only as a substring of "ドラマー" (drummer, unrelated to movie/drama viewership)', () => {
+    expect(
+      topicMovieRule.evaluate(makeBundle({ bio: 'ドラマー専門整体院。演奏家のケアが得意です' }))
+        .value,
+    ).toBe(false)
+  })
+
   it('is false for a slash-delimited tag-list bio where "Movie" is just a genre tag', () => {
     expect(topicMovieRule.evaluate(makeBundle({ bio: 'Illust/Design/Movie' })).value).toBe(false)
   })

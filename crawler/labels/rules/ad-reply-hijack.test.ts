@@ -50,6 +50,21 @@ function giveawayReplyTweet(i: number): AccountFeatureBundle['recentTweets'][num
   }
 }
 
+function entryReplyTweet(i: number): AccountFeatureBundle['recentTweets'][number] {
+  return {
+    id: `e${i}`,
+    fullText: `応募しました！このプレゼント企画当たりますように #${i}`,
+    createdAt: new Date(),
+    retweetCount: 0,
+    likeCount: 0,
+    isReply: true,
+    isRetweet: false,
+    isPromoted: false,
+    isPaidPromotion: false,
+    parentTweetFullText: `フォロー&リポストでプレゼント企画実施中！ #${i}`,
+  }
+}
+
 describe('adReplyHijackRule', () => {
   it("is true when most of an account's replies are ad/job-change pitches", () => {
     const tweets = [
@@ -167,6 +182,12 @@ describe('adReplyHijackRule', () => {
       recentTweets: tweets,
     })
     expect(result.evaluable).toBe(false)
+  })
+
+  it('is false for a giveaway hunter entering other brands’ real campaigns, not pitching its own', () => {
+    const tweets = [1, 2, 3, 4].map((i) => entryReplyTweet(i))
+    const result = adReplyHijackRule.evaluate(makeBundle(tweets))
+    expect(result.value).toBe(false)
   })
 
   it('is still true when the ad pitch targets tweets that never mention the replying account', () => {

@@ -32,7 +32,7 @@ function isNegatedDeclaration(bio: string): boolean {
 // ただし「画像は」「投稿しています」のような自身のコンテンツを指す明示的な表現を伴う場合は、
 // 実際に自己申告しているとみなす。
 const INSTITUTIONAL_CONTEXT_PATTERN =
-  /教授|研究者|代表取締役|\bCEO\b|公式(アカウント)?|メディア|事業|コンサル(ティング)?|規制派|反対派|賛成派|推進(派)?|アドバイザー|著書|委員|エンジニア|\bPdM\b|プロダクトマネージャー|プロダクトオーナー|プロダクト開発|CAMP|ウェビナー|セミナー|活用ノウハウ|解説|考察|紹介します|エバンジェリスト|evangelist|お仕事受付中|お仕事募集中|ジャーナリスト|記者|講師/i
+  /教授|研究者|代表取締役|\bCEO\b|公式(アカウント)?|メディア|事業|コンサル(ティング)?|規制派|反対派|賛成派|推進(派)?|アドバイザー|著書|委員|エンジニア|\bPdM\b|プロダクトマネージャー|プロダクトオーナー|プロダクト開発|CAMP|ウェビナー|セミナー|活用ノウハウ|解説|考察|紹介します|エバンジェリスト|evangelist|お仕事受付中|お仕事募集中|ジャーナリスト|記者|講師|部長|マネージャー|支援サービス|ポッドキャスト/i
 // 「〜を紹介します」は INSTITUTIONAL_CONTEXT_PATTERN の職業的文脈語(メディア・解説等)としても
 // 使われるが、「画像/イラスト/作品を紹介します」のように自身のコンテンツ名詞を目的語に取る場合は、
 // 「画像は」のような主題化(は)ではなく目的語化(を)であっても、実質的に自己申告と同じである。
@@ -61,14 +61,6 @@ function isPersonalContentDeclaration(bio: string): boolean {
 
 function isInstitutionalMention(bio: string): boolean {
   return INSTITUTIONAL_CONTEXT_PATTERN.test(bio) && !isPersonalContentDeclaration(bio)
-}
-
-// 「生成AIパスポート」等の検定・資格名は、宅建・FP・ソムリエのような
-// 他の資格と並べて経歴として列挙されるだけで、自身の投稿の生成元の宣言ではない。
-const CERTIFICATION_PATTERN = /(?:生成AI|AI生成)(?:パスポート|検定|資格試験)/
-
-function isCertificationMention(bio: string): boolean {
-  return CERTIFICATION_PATTERN.test(bio) && !isPersonalContentDeclaration(bio)
 }
 
 // 職業的な文脈と同じ「AIは話題・関心事であり、
@@ -105,7 +97,7 @@ const AI_OPPOSITION_PATTERN =
 // 職業的・関心事の文脈と同様に無効化する。
 // ただし自身のコンテンツを指す明示的な表現を伴う場合は例外とする。
 const THIRD_PARTY_REFERENCE_PATTERN =
-  /(?:生成AI|AI生成).{0,10}(?:して(?:る|いる)|使って(?:る|いる)|(?:が)?多い)方/
+  /(?:生成AI|AI生成).{0,10}(?:して(?:る|いる)|使って(?:る|いる)|(?:が)?多い|を?多く投稿(?:する|してる|している)?)方/
 
 // 「生成AIアカウント」は「〜している方」と異なり、
 // 自己申告(「生成AIアカウントです」)にも単独で使われる。
@@ -195,13 +187,22 @@ function isAiAsUsageTargetMention(bio: string): boolean {
 // 自身のコンテンツの生成元を宣言しているわけではない。
 // 前後どちらか一方だけの一致では通常の文中の読点なども誤って拾ってしまうため、
 // 両側が区切りである場合に限定している。
-const LIST_DELIMITER_CHARS = new Set(['/', '、', ',', '・', '|', '｜', '(', ')', '（', '）'])
+const LIST_DELIMITER_CHARS = new Set(['/', '、', ',', '・', '|', '｜', '(', ')', '（', '）', '\n'])
+
+// 改行のみで区切られた列挙 (前後に読点等の記号を伴わない) では、
+// trimEnd/trimStart が改行そのものを除去してしまい、区切り文字判定の対象から
+// 改行が消えてしまう。区切り文字としての改行を残すため、
+// 除去対象は半角スペース・タブのみに限定する。
+const HORIZONTAL_WHITESPACE_END_PATTERN = /[ \t]+$/
+const HORIZONTAL_WHITESPACE_START_PATTERN = /^[ \t]+/
 
 function isListEnumerationItem(bio: string): boolean {
   const match = BIO_DECLARATION_PATTERN.exec(bio)
   if (match === null) return false
-  const before = bio.slice(0, match.index).trimEnd()
-  const after = bio.slice(match.index + match[0].length).trimStart()
+  const before = bio.slice(0, match.index).replace(HORIZONTAL_WHITESPACE_END_PATTERN, '')
+  const after = bio
+    .slice(match.index + match[0].length)
+    .replace(HORIZONTAL_WHITESPACE_START_PATTERN, '')
   const beforeIsDelimiter = before.length === 0 || LIST_DELIMITER_CHARS.has(before.at(-1) ?? '')
   const afterIsDelimiter = after.length === 0 || LIST_DELIMITER_CHARS.has(after.at(0) ?? '')
   return beforeIsDelimiter && afterIsDelimiter && !isPersonalContentDeclaration(bio)
@@ -224,12 +225,24 @@ function isOppositionListHeader(bio: string): boolean {
   return OPPOSITION_LIST_HEADER_PATTERN.test(beforeMatch)
 }
 
+// 「生成AIパスポート」のような資格名は区切り文字を伴わない複合語であるため、
+// isListEnumerationItem とは別に、資格を示す接尾語が用語に直接連続している場合は
+// 資格の保有申告とみなし、自己申告から除外する。
+const CERTIFICATION_SUFFIX_PATTERN = /^(?:パスポート|検定|資格|試験)/
+
+function isCertificationNameMention(bio: string): boolean {
+  const match = BIO_DECLARATION_PATTERN.exec(bio)
+  if (match === null) return false
+  const afterMatch = bio.slice(match.index + match[0].length)
+  return CERTIFICATION_SUFFIX_PATTERN.test(afterMatch) && !isPersonalContentDeclaration(bio)
+}
+
 const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?作成した/i
 
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.11.0',
+  version: '1.12.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
@@ -238,10 +251,10 @@ export const aiGeneratedRule: LabelRule = {
       !isNegatedDeclaration(bio) &&
       !AI_OPPOSITION_PATTERN.test(bio) &&
       !isInstitutionalMention(bio) &&
-      !isCertificationMention(bio) &&
       !isTopicInterestMention(bio) &&
       !isThirdPartyReference(bio) &&
       !isListEnumerationItem(bio) &&
+      !isCertificationNameMention(bio) &&
       !isOppositionListHeader(bio) &&
       !isAiAsUsageTargetMention(bio)
 

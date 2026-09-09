@@ -27,9 +27,12 @@ describe('aiGeneratedRule precision regressions', () => {
     '手描き専門。生成AIの利用に反対の立場です。',
     '自作絵を載せています。生成AIへの使用は可、よろしくお願いします。',
     '画像は手描きです。生成AIへの利用は可',
-  ])('does not treat generative-AI usage restrictions or permissions as self-declaration: %s', (bio) => {
-    expect(aiGeneratedRule.evaluate(makeBundle(bio)).value).toBe(false)
-  })
+  ])(
+    'does not treat generative-AI usage restrictions or permissions as self-declaration: %s',
+    (bio) => {
+      expect(aiGeneratedRule.evaluate(makeBundle(bio)).value).toBe(false)
+    },
+  )
 
   it('preserves an independent AI-image posting declaration beside a usage restriction', () => {
     expect(

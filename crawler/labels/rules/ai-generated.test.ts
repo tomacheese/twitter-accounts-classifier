@@ -385,4 +385,31 @@ describe('aiGeneratedRule', () => {
   ])('is false for a bio describing a policy toward other accounts via %s', (_label, bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })
+
+  it.each([
+    [
+      'a department-manager career bio mentioning generative AI as a job topic',
+      '製造業の部長職。生成AI導入の社内推進を担当しています。',
+    ],
+    [
+      'a consulting-service bio describing generative-AI adoption as a client offering',
+      'AI導入支援サービスを提供しています。生成AIの最新情報もお届け。',
+    ],
+    [
+      'a podcaster bio covering generative AI as a media beat',
+      '生成AIについて話すポッドキャストを配信しています。',
+    ],
+  ])(
+    'is false for a bio mentioning generative AI via %s (business-context guard)',
+    (_label, bio) => {
+      expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('is false for a bio that lists generative AI as one item in a newline-separated tag list', () => {
+    const result = aiGeneratedRule.evaluate(
+      makeBundle({ bio: 'フリーランスDTP\nカメラ\n生成AI\nよろしくお願いします' }),
+    )
+    expect(result.value).toBe(false)
+  })
 })
