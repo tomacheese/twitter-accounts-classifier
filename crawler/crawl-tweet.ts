@@ -6,6 +6,7 @@ import { getCookieIssuerBaseUrl } from './config/env'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertAccount, type AccountProfileInput } from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
+import { requestAccountRelabelBulk } from './db/analysis-work-item-repository'
 import {
   createCookieIssuerClient,
   createOpenApiClient,
@@ -40,6 +41,12 @@ export interface ManualTweetCrawlDependencies {
   client: ManualCrawlOpenApiClient
   persistAccount: (input: AccountProfileInput) => Promise<void>
   persistTweets: (inputs: TweetInput[]) => Promise<void>
+  /** recent tweets 取得成功時に `Account.recentTweetsFetchStatus` 等を更新する。 */
+  recordRecentTweetsFetchSuccess: (accountId: string, fetchedAt: Date) => Promise<void>
+  /** recent tweets 取得失敗時に `Account.recentTweetsFetchStatus` 等を更新する。既存の fetchedAt は消さない。 */
+  recordRecentTweetsFetchFailure: (accountId: string, attemptedAt: Date) => Promise<void>
+  /** 既存ラベル有無でフィルタしない account_relabel の一括要求。 */
+  requestAccountRelabel: (accountIds: string[]) => Promise<void>
   recentTweetsPerAccount: number
   repliesPerTweet: number
   tweetDetailRateLimitBudget: TweetDetailRateLimitBudget
@@ -105,11 +112,24 @@ export async function runManualTweetCrawl(
   const profileTweets: TweetInput[] = []
 
   for (const authorId of [focalRaw.user.restId, ...replyAuthorIds]) {
+    let profile: AccountProfileInput
     try {
-      const profile = await fetchAccountProfile(userApi, authorId)
-      await deps.persistAccount(profile)
-      succeededAuthorIds.add(authorId)
+      profile = await fetchAccountProfile(userApi, authorId)
+    } catch (error) {
+      logger.error(
+        `Failed to fetch full profile for author ${authorId}, falling back to embedded profile data`,
+        error as Error,
+      )
+      continue
+    }
+    await deps.persistAccount(profile)
+    succeededAuthorIds.add(authorId)
 
+    // profile 取得自体が失敗した場合はここに到達しないため、
+    // recent tweets を一度も試みていないことと fetch 失敗を取り違えない。
+    const recentTweetsAttemptedAt = new Date()
+    let recentTweetsFetchSucceeded = false
+    try {
       const { tweets: recentTweets, authors } = await fetchRecentTweets(
         userApi,
         authorId,
@@ -117,11 +137,15 @@ export async function runManualTweetCrawl(
       )
       profileTweets.push(...recentTweets)
       for (const author of authors) extraAuthors.set(author.id, author)
+      recentTweetsFetchSucceeded = true
     } catch (error) {
-      logger.error(
-        `Failed to fetch full profile for author ${authorId}, falling back to embedded profile data`,
-        error as Error,
-      )
+      logger.error(`Failed to fetch recent tweets for author ${authorId}`, error as Error)
+      await deps.recordRecentTweetsFetchFailure(authorId, recentTweetsAttemptedAt)
+    }
+    // 成功ステータスの永続化自体が失敗した場合、それは fetch 失敗ではないため、
+    // 上記の catch で fetch 失敗として誤記録しないよう try/catch の外で呼ぶ。
+    if (recentTweetsFetchSucceeded) {
+      await deps.recordRecentTweetsFetchSuccess(authorId, new Date())
     }
   }
 
@@ -133,6 +157,11 @@ export async function runManualTweetCrawl(
   await deps.persistTweets(
     mergeTweetAdFlags([parentTweet, ...persistedReplyTweets, ...profileTweets]),
   )
+
+  // tweet と recent-tweets fetch status の永続化が完了した後にのみ enqueue する。
+  // 先に enqueue すると relabel worker が不完全な状態を評価し得る。
+  // 既存ラベル有無でフィルタしない: 新規アカウントも初回 relabel の対象にする。
+  await deps.requestAccountRelabel([...new Set([focalRaw.user.restId, ...replyAuthorIds])])
 
   return { repliesFound: replies.length, accountsProcessed: succeededAuthorIds.size }
 }
@@ -179,6 +208,23 @@ async function main(): Promise<void> {
         persistTweets: async (inputs) => {
           await upsertTweets(prisma, inputs)
         },
+        recordRecentTweetsFetchSuccess: async (accountId, fetchedAt) => {
+          await prisma.account.update({
+            where: { id: accountId },
+            data: {
+              lastRecentTweetsAttemptedAt: fetchedAt,
+              lastRecentTweetsFetchedAt: fetchedAt,
+              recentTweetsFetchStatus: 'success',
+            },
+          })
+        },
+        recordRecentTweetsFetchFailure: async (accountId, attemptedAt) => {
+          await prisma.account.update({
+            where: { id: accountId },
+            data: { lastRecentTweetsAttemptedAt: attemptedAt, recentTweetsFetchStatus: 'failed' },
+          })
+        },
+        requestAccountRelabel: (accountIds) => requestAccountRelabelBulk(prisma, accountIds),
         recentTweetsPerAccount: CRAWL_LIMITS.recentTweetsPerAccount,
         repliesPerTweet: CRAWL_LIMITS.repliesPerTweet,
         tweetDetailRateLimitBudget: new TweetDetailRateLimitBudget({ now: Date.now }),

@@ -62,6 +62,9 @@ function makeDeps(
     },
     persistAccount: vi.fn().mockResolvedValue(undefined),
     persistTweets: vi.fn().mockResolvedValue(undefined),
+    recordRecentTweetsFetchSuccess: vi.fn().mockResolvedValue(undefined),
+    recordRecentTweetsFetchFailure: vi.fn().mockResolvedValue(undefined),
+    requestAccountRelabel: vi.fn().mockResolvedValue(undefined),
     recentTweetsPerAccount: 20,
     repliesPerTweet: 30,
     tweetDetailRateLimitBudget: new TweetDetailRateLimitBudget({ now: () => 0 }),
@@ -223,5 +226,214 @@ describe('runManualTweetCrawl', () => {
     const persistedIds = vi.mocked(deps.persistTweets).mock.calls[0][0].map((t) => t.id)
     expect(persistedIds).toEqual(expect.arrayContaining(['replyTweet1', 'replyTweet1-child']))
     expect(result.repliesFound).toBe(1)
+  })
+
+  it('requests account_relabel for the focal author and every processed reply author, including new accounts, after persisting tweets', async () => {
+    const parentUser = rawUser('parent1')
+    const replyUser1 = rawUser('reply1', 'replier1')
+    const replyUser2 = rawUser('reply2', 'replier2')
+    const focal = rawTweet('tweet1', parentUser)
+    const reply1 = rawTweet('replyTweet1', replyUser1, 'tweet1')
+    const reply2 = rawTweet('replyTweet2', replyUser2, 'tweet1')
+
+    const callOrder: string[] = []
+    const persistTweets = vi.fn().mockImplementation(() => {
+      callOrder.push('persistTweets')
+      return Promise.resolve()
+    })
+    const requestAccountRelabel = vi.fn().mockImplementation(() => {
+      callOrder.push('requestAccountRelabel')
+      return Promise.resolve()
+    })
+
+    const deps = makeDeps({
+      client: {
+        getTweetApi: () => ({
+          getHomeTimeline: vi.fn(),
+          getHomeLatestTimeline: vi.fn(),
+          getSearchTimeline: vi.fn(),
+          getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [focal, reply1, reply2] } }),
+        }),
+        getUserApi: () => ({
+          getUserByRestId: vi
+            .fn()
+            .mockResolvedValueOnce({ data: parentUser })
+            .mockResolvedValueOnce({ data: replyUser1 })
+            .mockResolvedValueOnce({ data: replyUser2 }),
+          getUserByScreenName: vi.fn(),
+          getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+        }),
+      },
+      persistTweets,
+      requestAccountRelabel,
+    })
+
+    await runManualTweetCrawl(deps, 'tweet1')
+
+    expect(requestAccountRelabel).toHaveBeenCalledTimes(1)
+    const requestedIds = requestAccountRelabel.mock.calls[0][0] as string[]
+    expect(new Set(requestedIds)).toEqual(new Set(['parent1', 'reply1', 'reply2']))
+    expect(callOrder).toEqual(['persistTweets', 'requestAccountRelabel'])
+  })
+
+  it('records success recent-tweets fetch status for an author whose recent-tweets fetch succeeds', async () => {
+    const parentUser = rawUser('parent1')
+    const focal = rawTweet('tweet1', parentUser)
+
+    const recordRecentTweetsFetchSuccess = vi.fn().mockResolvedValue(undefined)
+    const recordRecentTweetsFetchFailure = vi.fn().mockResolvedValue(undefined)
+
+    const deps = makeDeps({
+      client: {
+        getTweetApi: () => ({
+          getHomeTimeline: vi.fn(),
+          getHomeLatestTimeline: vi.fn(),
+          getSearchTimeline: vi.fn(),
+          getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [focal] } }),
+        }),
+        getUserApi: () => ({
+          getUserByRestId: vi.fn().mockResolvedValue({ data: parentUser }),
+          getUserByScreenName: vi.fn(),
+          getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+        }),
+      },
+      recordRecentTweetsFetchSuccess,
+      recordRecentTweetsFetchFailure,
+    })
+
+    await runManualTweetCrawl(deps, 'tweet1')
+
+    expect(recordRecentTweetsFetchSuccess).toHaveBeenCalledWith('parent1', expect.any(Date))
+    expect(recordRecentTweetsFetchFailure).not.toHaveBeenCalled()
+  })
+
+  it('records failed recent-tweets fetch status when recent-tweets fetch fails after profile fetch succeeded', async () => {
+    const parentUser = rawUser('parent1')
+    const focal = rawTweet('tweet1', parentUser)
+
+    const recordRecentTweetsFetchSuccess = vi.fn().mockResolvedValue(undefined)
+    const recordRecentTweetsFetchFailure = vi.fn().mockResolvedValue(undefined)
+
+    const deps = makeDeps({
+      client: {
+        getTweetApi: () => ({
+          getHomeTimeline: vi.fn(),
+          getHomeLatestTimeline: vi.fn(),
+          getSearchTimeline: vi.fn(),
+          getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [focal] } }),
+        }),
+        getUserApi: () => ({
+          getUserByRestId: vi.fn().mockResolvedValue({ data: parentUser }),
+          getUserByScreenName: vi.fn(),
+          getUserTweetsAndReplies: vi.fn().mockRejectedValue(new Error('recent tweets failed')),
+        }),
+      },
+      recordRecentTweetsFetchSuccess,
+      recordRecentTweetsFetchFailure,
+    })
+
+    await runManualTweetCrawl(deps, 'tweet1')
+
+    expect(recordRecentTweetsFetchFailure).toHaveBeenCalledWith('parent1', expect.any(Date))
+    expect(recordRecentTweetsFetchSuccess).not.toHaveBeenCalled()
+  })
+
+  it('does not record a recent-tweets fetch failure when the profile fetch itself fails', async () => {
+    const parentUser = rawUser('parent1')
+    const focal = rawTweet('tweet1', parentUser)
+
+    const recordRecentTweetsFetchSuccess = vi.fn().mockResolvedValue(undefined)
+    const recordRecentTweetsFetchFailure = vi.fn().mockResolvedValue(undefined)
+
+    const deps = makeDeps({
+      client: {
+        getTweetApi: () => ({
+          getHomeTimeline: vi.fn(),
+          getHomeLatestTimeline: vi.fn(),
+          getSearchTimeline: vi.fn(),
+          getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [focal] } }),
+        }),
+        getUserApi: () => ({
+          getUserByRestId: vi.fn().mockRejectedValue(new Error('profile fetch failed')),
+          getUserByScreenName: vi.fn(),
+          getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+        }),
+      },
+      recordRecentTweetsFetchSuccess,
+      recordRecentTweetsFetchFailure,
+    })
+
+    await runManualTweetCrawl(deps, 'tweet1')
+
+    expect(recordRecentTweetsFetchFailure).not.toHaveBeenCalled()
+    expect(recordRecentTweetsFetchSuccess).not.toHaveBeenCalled()
+  })
+
+  it('records the recent-tweets success timestamp taken after the fetch resolves, not the pre-fetch attempted timestamp', async () => {
+    const parentUser = rawUser('parent1')
+    const focal = rawTweet('tweet1', parentUser)
+    const recordRecentTweetsFetchSuccess = vi.fn().mockResolvedValue(undefined)
+
+    vi.useFakeTimers()
+    const attemptedAt = new Date('2024-01-01T00:00:00.000Z')
+    vi.setSystemTime(attemptedAt)
+    const fetchedAt = new Date(attemptedAt.getTime() + 5000)
+
+    const deps = makeDeps({
+      client: {
+        getTweetApi: () => ({
+          getHomeTimeline: vi.fn(),
+          getHomeLatestTimeline: vi.fn(),
+          getSearchTimeline: vi.fn(),
+          getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [focal] } }),
+        }),
+        getUserApi: () => ({
+          getUserByRestId: vi.fn().mockResolvedValue({ data: parentUser }),
+          getUserByScreenName: vi.fn(),
+          getUserTweetsAndReplies: vi.fn().mockImplementation(() => {
+            vi.setSystemTime(fetchedAt)
+            return Promise.resolve({ data: { data: [] } })
+          }),
+        }),
+      },
+      recordRecentTweetsFetchSuccess,
+    })
+
+    try {
+      await runManualTweetCrawl(deps, 'tweet1')
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(recordRecentTweetsFetchSuccess).toHaveBeenCalledWith('parent1', fetchedAt)
+  })
+
+  it('propagates a recent-tweets success-status persistence failure without recording it as a fetch failure', async () => {
+    const parentUser = rawUser('parent1')
+    const focal = rawTweet('tweet1', parentUser)
+
+    const recordRecentTweetsFetchSuccess = vi.fn().mockRejectedValue(new Error('db write failed'))
+    const recordRecentTweetsFetchFailure = vi.fn().mockResolvedValue(undefined)
+
+    const deps = makeDeps({
+      client: {
+        getTweetApi: () => ({
+          getHomeTimeline: vi.fn(),
+          getHomeLatestTimeline: vi.fn(),
+          getSearchTimeline: vi.fn(),
+          getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [focal] } }),
+        }),
+        getUserApi: () => ({
+          getUserByRestId: vi.fn().mockResolvedValue({ data: parentUser }),
+          getUserByScreenName: vi.fn(),
+          getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+        }),
+      },
+      recordRecentTweetsFetchSuccess,
+      recordRecentTweetsFetchFailure,
+    })
+
+    await expect(runManualTweetCrawl(deps, 'tweet1')).rejects.toThrow('db write failed')
+    expect(recordRecentTweetsFetchFailure).not.toHaveBeenCalled()
   })
 })

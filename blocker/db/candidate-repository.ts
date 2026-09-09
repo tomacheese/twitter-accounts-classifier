@@ -3,9 +3,13 @@ import type { BlockRuleConfig } from '../config/load-config'
 
 // reply_farming は recent timeline 取得修正 (#267) によって判定入力が大きく変わり、
 // 現行閾値では正規の高頻度サポート/挨拶アカウントを誤検知し得る。
-// generic_reply_farming は shadow 観測専用で、精度レビュー前に block へ昇格させない。
-// どちらも明示的なコード変更・レビューなしには block 候補へ流さない fail-closed policy とする。
-const NON_BLOCKING_LABEL_KEYS = new Set(['reply_farming', 'generic_reply_farming'])
+// generic_reply_farming/contextual_reply_marketing は shadow 観測専用で、精度レビュー前に block へ昇格させない。
+// いずれも明示的なコード変更・レビューなしには block 候補へ流さない fail-closed policy とする。
+const NON_BLOCKING_LABEL_KEYS = new Set([
+  'reply_farming',
+  'generic_reply_farming',
+  'contextual_reply_marketing',
+])
 
 /**
  * ブロック候補として選定されたアカウント1件分の情報。
