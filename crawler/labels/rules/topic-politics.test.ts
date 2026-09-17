@@ -183,4 +183,74 @@ describe('topicPoliticsRule', () => {
         .value,
     ).toBe(true)
   })
+
+  it.each(['市長を務めています', '○○県知事です'])(
+    'is true for an administrative office self-identification: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it('is true for an administrative office title in a tag-delimited profile listing', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: '市長｜写真好き' })).value).toBe(true)
+  })
+
+  it('is true for an English administrative office bio', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: 'the Mayor of Springfield' })).value).toBe(
+      true,
+    )
+  })
+
+  it.each(['State mayor', 'Governor for the district'])(
+    'keeps "mayor"/"governor" self-identification positive when qualified by a state prefix or for/of/district: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it.each([
+    'my dad was basically a mayor',
+    'I hate every governor',
+    'I am a mayor',
+    'Writer | Governor | Father',
+  ])(
+    'does not treat a bare "mayor"/"governor" self-label without a state prefix or for/of/district qualifier as a current political office: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it.each([
+    '元市長です。現在は評論家として活動しています',
+    'Former state governor, now a lobbyist',
+  ])(
+    'does not treat a former administrative officeholder bio as a current political office: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it("does not treat a supporter bio naming an administrative office as the account holder's political office", () => {
+    expect(
+      topicPoliticsRule.evaluate(makeBundle({ bio: '地元の市長を応援しています' })).value,
+    ).toBe(false)
+  })
+
+  it('does not treat an aspirational administrative office mention as a current political office', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: '将来なりたいのは市長です' })).value).toBe(
+      false,
+    )
+  })
+
+  it('does not treat an administrative office named in a past-career listing as a current political office', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: '参議院議員、市長など歴任' })).value).toBe(
+      false,
+    )
+  })
+
+  it('does not treat "/" between an administrative office title naming other people as a self-identification', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: '市長/元知事の会合に出席' })).value).toBe(
+      false,
+    )
+  })
 })
