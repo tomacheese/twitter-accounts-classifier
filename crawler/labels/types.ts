@@ -1,6 +1,7 @@
 import type { FollowGraphLabelSignal } from './follow-graph-label-index'
 import type { ReplyHijackEvidenceDetails } from '../db/reply-hijack-evidence-repository'
 import type { SelfReplyPromoEvidence } from './self-reply-promo-index'
+import type { FollowChurnObservation } from '../db/follow-churn-observation'
 
 export interface AccountFeatureBundle {
   account: {
@@ -153,6 +154,12 @@ export interface AccountFeatureBundle {
    * この値を持たない bundle（多くのルール単体テストなど）では空オブジェクトとして扱う。
    */
   followGraphLabelSignals?: Record<string, FollowGraphLabelSignal | undefined>
+  /**
+   * このアカウントが `FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS` 日以内に行った、
+   * フォロー/アンフォローの状態変化の集計。
+   * この値を持たない bundle (多くのルール単体テストなど) では未観測として扱う。
+   */
+  followChurnObservation?: FollowChurnObservation
 }
 
 export interface LabelRuleResult {

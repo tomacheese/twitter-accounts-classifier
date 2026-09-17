@@ -5,6 +5,7 @@ import type { buildBioDuplicateIndex } from './bio-duplicate-index'
 import type { buildReplyHijackIndex } from './reply-hijack-index'
 import type { FollowGraphLabelIndex } from './follow-graph-label-index'
 import type { buildSelfReplyPromoIndex } from './self-reply-promo-index'
+import type { FollowChurnObservation } from '../db/follow-churn-observation'
 
 /**
  * Account と Tweet の DB 確定値(merge 後の状態)から AccountFeatureBundle を組み立てる。
@@ -18,6 +19,8 @@ import type { buildSelfReplyPromoIndex } from './self-reply-promo-index'
  * @param followGraphLabelIndex - アカウント横断で共有するフォローグラフラベルインデックス
  * @param selfReplyPromoIndex - アカウント横断で共有する self-reply promo chain インデックス
  * @param parentTweetTextById - リプライ先ツイート ID から本文を引くための共有マップ
+ * @param parentTweetAuthorIdById - リプライ先ツイート ID から投稿者 ID を引くための共有マップ
+ * @param followChurnObservation - 呼び出し元が事前に取得した、このアカウントの follow churn 集計
  * @returns アカウントの feature bundle
  */
 export function buildAccountFeatureBundle(
@@ -30,6 +33,7 @@ export function buildAccountFeatureBundle(
   selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,
   parentTweetTextById: Map<string, string>,
   parentTweetAuthorIdById = new Map<string, string>(),
+  followChurnObservation?: FollowChurnObservation,
 ): AccountFeatureBundle {
   // 複数の異なるテンプレ返信ネットワーク・リプライハイジャック群に属することがあるため、
   // 合計や平均ではなく最大値を最も強いシグナルとして採用する。
@@ -112,5 +116,6 @@ export function buildAccountFeatureBundle(
     replyHijackEvidence,
     followGraphLabelSignals: followGraphLabelIndex.signalsFor(account.id),
     selfReplyPromoEvidence: selfReplyPromoIndex.evidenceFor(account.id),
+    followChurnObservation,
   }
 }

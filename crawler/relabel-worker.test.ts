@@ -5,6 +5,7 @@ import type { AccountFeatureBundle, LabelRule } from './labels/types'
 import * as workItemRepository from './db/analysis-work-item-repository'
 import * as labelRepository from './db/label-repository'
 import * as tweetRepository from './db/tweet-repository'
+import * as followChurnObservationModule from './db/follow-churn-observation'
 import * as followGraphIndexModule from './labels/follow-graph-label-index'
 import * as replyCorpusModule from './db/reply-corpus'
 import * as bioCorpusModule from './db/bio-corpus'
@@ -33,6 +34,11 @@ describe('evaluateAccountRelabelItems', () => {
     vi.spyOn(workItemRepository, 'claimStillLeasedWorkItemIdsForUpdate').mockImplementation(
       (_tx, input) => Promise.resolve(input.workItemIds),
     )
+    // 個別のテストで上書きしない限り、follow churn の観測は無い前提にする。
+    vi.spyOn(
+      followChurnObservationModule,
+      'loadFollowChurnObservationsForAccounts',
+    ).mockResolvedValue(new Map())
   })
 
   it('永続化を lease の生存確認から work item 完了まで 1 本の transaction にまとめて行う', async () => {
@@ -997,6 +1003,11 @@ describe('runRelabelWorkerCycleOnce', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
+    // 個別のテストで上書きしない限り、follow churn の観測は無い前提にする。
+    vi.spyOn(
+      followChurnObservationModule,
+      'loadFollowChurnObservationsForAccounts',
+    ).mockResolvedValue(new Map())
     // 個別のテストで上書きしない限り、渡された work item は全て lease を保持し続けている前提にする。
     vi.spyOn(workItemRepository, 'claimStillLeasedWorkItemIdsForUpdate').mockImplementation(
       (_tx, input) => Promise.resolve(input.workItemIds),

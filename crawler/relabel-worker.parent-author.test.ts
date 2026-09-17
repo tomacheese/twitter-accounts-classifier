@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest'
 import type { PrismaClient, Tweet } from './generated/prisma'
 import * as labelRepository from './db/label-repository'
 import * as tweetRepository from './db/tweet-repository'
+import * as followChurnObservationModule from './db/follow-churn-observation'
 import * as workItemRepository from './db/analysis-work-item-repository'
 import { LabelRuleRegistry } from './labels/registry'
 import type { AccountFeatureBundle, LabelRule } from './labels/types'
@@ -40,6 +41,10 @@ it('relabel evaluation receives the resolved parent author id', async () => {
     },
     $transaction: vi.fn((fn: (tx: PrismaClient) => Promise<unknown>) => fn(prisma as never)),
   } as unknown as PrismaClient
+  vi.spyOn(
+    followChurnObservationModule,
+    'loadFollowChurnObservationsForAccounts',
+  ).mockResolvedValue(new Map())
   vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(
     new Map([
       [

@@ -50,6 +50,7 @@ import { crossTargetTemplatedReplyRule } from './rules/cross-target-templated-re
 import { replyHijackSwarmRule } from './rules/reply-hijack-swarm'
 import { scamLinkDomainRule } from './rules/scam-link-domain'
 import { bareLinkSpamRule } from './rules/bare-link-spam'
+import { bulkFollowUnfollowRule } from './rules/bulk-follow-unfollow'
 // irrelevant_reply は無効化する。
 // bigram 類似度では、話題に沿った通常のリプライと真に無関係なリプライを統計的に区別できないため。
 
@@ -110,4 +111,5 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   scamLinkDomainRule,
   bareLinkSpamRule,
   amazonAffiliatePrSpamRule,
+  bulkFollowUnfollowRule,
 ]
