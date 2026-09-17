@@ -8,6 +8,10 @@ import type { buildReplyHijackIndex } from '../labels/reply-hijack-index'
 import type { FollowGraphLabelIndex } from '../labels/follow-graph-label-index'
 import type { buildSelfReplyPromoIndex } from '../labels/self-reply-promo-index'
 import { buildAccountFeatureBundle } from '../labels/build-account-feature-bundle'
+import {
+  loadFollowChurnObservation,
+  FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS,
+} from './follow-churn-observation'
 import type { FollowListResult } from '../twitter/follows'
 import { upsertAccount, type AccountProfileInput } from './account-repository'
 import { upsertAccountRequestingRelabelIfChanged } from './account-relabel-on-change'
@@ -174,6 +178,14 @@ export async function persistAuthorResultAtomic(
           parentTweetAuthorIdById.set(id, context.accountId)
         }
       }
+      const followChurnSince = new Date(
+        Date.now() - FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+      )
+      const followChurnObservation = await loadFollowChurnObservation(
+        txClient,
+        params.profile.id,
+        followChurnSince,
+      )
       const bundle = buildAccountFeatureBundle(
         account,
         authorOwnTweets,
@@ -184,6 +196,7 @@ export async function persistAuthorResultAtomic(
         params.selfReplyPromoIndex,
         parentTweetTextById,
         parentTweetAuthorIdById,
+        followChurnObservation,
       )
       const appliedRules = params.registry.applyAll(bundle)
       const ruleResults = appliedRules.flatMap(({ rule, result }) => {

@@ -35,6 +35,11 @@ import { buildDuplicateReplyIndex as buildDuplicateReplyIndexImpl } from './labe
 import { buildBioDuplicateIndex } from './labels/bio-duplicate-index'
 import { buildReplyHijackIndex as buildReplyHijackIndexImpl } from './labels/reply-hijack-index'
 import { buildFollowGraphLabelIndex } from './labels/follow-graph-label-index'
+import {
+  loadFollowChurnObservationsForAccounts,
+  FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS,
+  type FollowChurnObservation,
+} from './db/follow-churn-observation'
 import { ALL_LABEL_RULES } from './labels/all-rules'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { initMonitoring, captureException } from './monitoring/sentry'
@@ -147,12 +152,17 @@ async function evaluateAccountRelabelItemGroup(
   const accountIds = group.map((item) => item.triggerId)
   let accounts: Account[]
   let tweetsByAccountId: Map<string, Tweet[]>
+  let followChurnObservationByAccountId: Map<string, FollowChurnObservation>
   let parentTweetTextById: Map<string, string>
   let parentTweetAuthorIdById: Map<string, string>
   try {
-    ;[accounts, tweetsByAccountId] = await Promise.all([
+    const followChurnSince = new Date(
+      Date.now() - FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+    )
+    ;[accounts, tweetsByAccountId, followChurnObservationByAccountId] = await Promise.all([
       prisma.account.findMany({ where: { id: { in: accountIds } } }),
       loadRecentTweetsForAccounts(prisma, accountIds, CRAWL_LIMITS.recentTweetsPerAccount),
+      loadFollowChurnObservationsForAccounts(prisma, accountIds, followChurnSince),
     ])
 
     const allRecentTweets = [...tweetsByAccountId.values()].flat()
@@ -212,6 +222,7 @@ async function evaluateAccountRelabelItemGroup(
         options.selfReplyPromoIndex,
         parentTweetTextById,
         parentTweetAuthorIdById,
+        followChurnObservationByAccountId.get(account.id),
       )
       const labels: AccountLabelBulkInput[] = []
       const appliedRules = options.registry.applyAll(bundle)

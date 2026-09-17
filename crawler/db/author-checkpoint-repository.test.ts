@@ -117,6 +117,7 @@ describe('persistAuthorResultAtomic', () => {
         ),
       },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
     }
     const prisma = {
       $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient)),
@@ -212,6 +213,7 @@ describe('persistAuthorResultAtomic', () => {
         ),
       },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
     }
     const prisma = {
       $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient)),
@@ -287,6 +289,7 @@ describe('persistAuthorResultAtomic', () => {
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
       accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
+      followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: queryRaw,
     }
     const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
@@ -367,6 +370,7 @@ describe('persistAuthorResultAtomic', () => {
       tweet: { findUnique: vi.fn().mockResolvedValue(null), upsert: tweetUpsert },
       accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }
     const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
@@ -438,6 +442,7 @@ describe('persistAuthorResultAtomic', () => {
         findMany: tweetFindMany,
       },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }
     const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
@@ -508,6 +513,7 @@ describe('persistAuthorResultAtomic', () => {
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
       },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }
     const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
@@ -554,6 +560,7 @@ describe('persistAuthorResultAtomic', () => {
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
       labelingFollowSample: { deleteMany: followSampleDeleteMany },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
+      followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }
     const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
@@ -611,6 +618,7 @@ describe('persistAuthorResultAtomic', () => {
         createMany: followSampleCreateMany,
       },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
+      followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }
     const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
@@ -655,6 +663,7 @@ describe('persistAuthorResultAtomic', () => {
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
       },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }
     const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
@@ -696,6 +705,7 @@ describe('persistAuthorResultAtomic', () => {
       },
       accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }
     const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
@@ -750,6 +760,7 @@ describe('persistAuthorResultAtomic', () => {
       },
       accountLabelLatest: { findMany: vi.fn().mockResolvedValue([{ accountId: 'context1' }]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+      followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }
     const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
@@ -922,6 +933,7 @@ it('crawl-time label evaluation receives the resolved parent author id', async (
       upsert: vi.fn().mockResolvedValue(upsertedReply),
     },
     crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
+    followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
   }
   const prisma = {
     $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient)),
