@@ -23,6 +23,16 @@ const JAPANESE_SPECIFIC_OFFICE_TITLE_PATTERN =
 // 自己申告以外の文脈でも現れるため、地域を示す state 接頭辞か for/of/district を伴う場合のみ対象とする。
 const ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN =
   /\bstate\s+(?:congressman|senator|politician)\b|\b(?:congressman|senator|politician)\s+(?:for|of|district)\b/gi
+// 市長・知事は「務めています」のように立法職の suffix 語彙にない自己申告表現でも現れるため、
+// 既存の suffix 語彙に「務めています」を追加する。
+// 読点・カンマ区切りは「市長、副市長、部長への説明会」のような宛先列挙にも使われ、
+// 自己申告と区別できないため、タグ区切り(｜∣／)のみを対象とする。
+const JAPANESE_ADMINISTRATIVE_OFFICE_TITLE_PATTERN =
+  /(?:市長|知事)(?:を)?(?:しています|です|として活動|として働いています|務めています)|(?:市長|知事)(?:を)?[｜∣／]/gi
+// congressman/senator/politician と同様に、裸の "mayor"/"governor" も他者評・比喩で現れうるため、
+// 立法職パターンと同じ state 接頭辞か for/of/district の修飾を課す。
+const ENGLISH_ADMINISTRATIVE_OFFICE_SELF_IDENTIFICATION_PATTERN =
+  /\bstate\s+(?:mayor|governor)\b|\b(?:mayor|governor)\s+(?:for|of|district)\b/gi
 
 // 「元衆議院議員」「前○○市議会議員」「Former state senator」のように
 // 「元/前/former」を伴う bio は現職ではなく過去の在職を述べているだけで、
@@ -99,14 +109,16 @@ export const topicPoliticsRule: LabelRule = {
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.7.0',
+  version: '1.8.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =
       bio !== null &&
       (matchesCurrentOffice(bio, PARTY_AFFILIATION_PATTERN) ||
         matchesCurrentOffice(bio, JAPANESE_SPECIFIC_OFFICE_TITLE_PATTERN) ||
-        matchesCurrentOffice(bio, ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN))
+        matchesCurrentOffice(bio, ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN) ||
+        matchesCurrentOffice(bio, JAPANESE_ADMINISTRATIVE_OFFICE_TITLE_PATTERN) ||
+        matchesCurrentOffice(bio, ENGLISH_ADMINISTRATIVE_OFFICE_SELF_IDENTIFICATION_PATTERN))
     return {
       value: keywordMatch,
       confidence: toConfidence(keywordMatch, keywordMatch ? 0.8 : 0),
