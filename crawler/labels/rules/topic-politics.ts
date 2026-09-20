@@ -7,7 +7,7 @@ import type { LabelRule } from '../types'
 // 誤検知を避けて具体的な政党名や公職名のみに限定している。
 // 英単語は無関係な語の内部に一致しないよう単語境界で判定している。
 const PARTY_AFFILIATION_PATTERN =
-  /(?:自民党|立憲民主党|公明党|共産党|日本維新の会|国民民主党|れいわ新選組|参政党)(?:\s*(?:所属|党員|公認|支部長))/gi
+  /(?:自民党|立憲民主党|公明党|共産党|日本維新の会|国民民主党|れいわ新選組|参政党)(?:\s*(?:所属(?!の?(?:国会|衆議院|参議院|県議会|市議会)?議員等)|党員|公認|支部長))/gi
 // 修飾語を伴わない裸の公職名も、congressman/senator/politician と同様に
 // 自己申告以外の文脈 (願望・他者評など) で文末に現れうるため、無条件の文末一致 ($) は対象としない。
 // 具体的な議席名 (市議会議員など) は、
@@ -25,10 +25,12 @@ const ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN =
   /\bstate\s+(?:congressman|senator|politician)\b|\b(?:congressman|senator|politician)\s+(?:for|of|district)\b/gi
 // 市長・知事は「務めています」のように立法職の suffix 語彙にない自己申告表現でも現れるため、
 // 既存の suffix 語彙に「務めています」を追加する。
+// 副市長・副知事は任命職であり description の「選挙で選ばれた」に当たらないため、
+// 直前が「副」の場合は対象外にしている。
 // 読点・カンマ区切りは「市長、副市長、部長への説明会」のような宛先列挙にも使われ、
 // 自己申告と区別できないため、タグ区切り(｜∣／)のみを対象とする。
 const JAPANESE_ADMINISTRATIVE_OFFICE_TITLE_PATTERN =
-  /(?:市長|知事)(?:を)?(?:しています|です|として活動|として働いています|務めています)|(?:市長|知事)(?:を)?[｜∣／]/gi
+  /(?<!副)(?:市長|知事)(?:を)?(?:しています|です|として活動|として働いています|務めています)|(?<!副)(?:市長|知事)(?:を)?[｜∣／]/gi
 // congressman/senator/politician と同様に、裸の "mayor"/"governor" も他者評・比喩で現れうるため、
 // 立法職パターンと同じ state 接頭辞か for/of/district の修飾を課す。
 const ENGLISH_ADMINISTRATIVE_OFFICE_SELF_IDENTIFICATION_PATTERN =
@@ -109,7 +111,7 @@ export const topicPoliticsRule: LabelRule = {
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.8.0',
+  version: '1.9.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =
