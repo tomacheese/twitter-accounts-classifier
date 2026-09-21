@@ -115,4 +115,34 @@ describe('topicFitnessRule', () => {
     const result = topicFitnessRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it.each([
+    '走るのは好きですが筋トレは全くしません',
+    'ジムには通っていません。筋トレはしない派です',
+    'I never do any workout',
+  ])('is false for a bio explicitly denying that the owner trains: %s', (bio) => {
+    expect(topicFitnessRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('keeps a bio positive when an unrelated denial appears far from the fitness keyword', () => {
+    expect(
+      topicFitnessRule.evaluate(
+        makeBundle({ bio: '毎日筋トレしています。お酒は飲みません。休日は読書' }),
+      ).value,
+    ).toBe(true)
+  })
+
+  it.each([
+    '筋トレしながら勉強しています',
+    '筋トレしなきゃダメだけど逃げがち',
+    '筋トレもしないと',
+    '筋トレはやらないよりはマシな程度',
+    'I never skip a workout',
+    "I don't miss a workout",
+  ])(
+    'keeps a bio positive when a nearby negation word does not deny the practice itself: %s',
+    (bio) => {
+      expect(topicFitnessRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
 })

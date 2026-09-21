@@ -253,4 +253,27 @@ describe('topicPoliticsRule', () => {
       false,
     )
   })
+
+  it.each([
+    '講演会には自民党所属国会議員等をお招きします',
+    '勉強会には自民党所属議員等が参加します',
+  ])(
+    'does not treat a party-affiliated legislator named as the audience of a bio as a self-declared party membership: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('keeps a party-affiliated legislator self-declaration positive when it carries a predicate', () => {
+    expect(
+      topicPoliticsRule.evaluate(makeBundle({ bio: '自民党所属の市議会議員です' })).value,
+    ).toBe(true)
+  })
+
+  it.each(['副市長です', '副知事をしています', '副市長｜写真好き'])(
+    'does not treat an appointed deputy office as an elected administrative office: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
 })

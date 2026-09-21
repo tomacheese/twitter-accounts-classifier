@@ -14,7 +14,7 @@ const AD_JOB_PITCH_PATTERN =
 // 後者は応募者側の一人称的な行動 (応募した・当選しますように等) を伴うため、
 // pr-disclosure.ts の懸賞応募除外と同じ考え方でこの表現を除外する。
 const CAMPAIGN_ENTRY_PATTERN =
-  /(応募し(まし|て)た|当た(りますように|りました)|抽選で.{0,10}(当たり|当選))/u
+  /(応募し(まし|て)た|応募(します|いたします|させていただきます)|当た(りますように|りました)|抽選で.{0,10}(当たり|当選))/u
 
 function isAdPitchReply(fullText: string): boolean {
   return AD_JOB_PITCH_PATTERN.test(fullText) && !CAMPAIGN_ENTRY_PATTERN.test(fullText)
@@ -36,7 +36,7 @@ export const adReplyHijackRule: LabelRule = {
   key: 'ad_reply_hijack',
   description:
     '無関係なツイートへの返信を乗っ取り、広告・転職勧誘・暗号資産のギブアウェイ/エアドロップ勧誘を宣伝している',
-  version: '1.5.0',
+  version: '1.5.1',
   evaluate(bundle) {
     const { screenName } = bundle.account
     // 親ツイートの投稿者情報はクロールデータに存在しないため、

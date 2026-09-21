@@ -198,4 +198,16 @@ describe('adReplyHijackRule', () => {
     const result = adReplyHijackRule.evaluate(makeBundle(tweets))
     expect(result.value).toBe(true)
   })
+
+  it.each(['応募させていただきます', '応募いたします', '応募します'])(
+    'is false for a giveaway hunter using the polite entry phrasing: %s',
+    (phrase) => {
+      const tweets = [1, 2, 3, 4].map((i) => ({
+        ...entryReplyTweet(i),
+        fullText: `素敵なプレゼント企画をありがとうございます！${phrase} #${i}`,
+      }))
+      const result = adReplyHijackRule.evaluate(makeBundle(tweets))
+      expect(result.value).toBe(false)
+    },
+  )
 })
