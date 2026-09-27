@@ -224,6 +224,7 @@ function toRawTweetResult(data: TweetApiUtilsData): RawTweetResult | null {
       favoriteCount: data.tweet.legacy.favoriteCount,
       replyCount: data.tweet.legacy.replyCount,
       quoteCount: data.tweet.legacy.quoteCount,
+      conversationIdStr: data.tweet.legacy.conversationIdStr,
       inReplyToStatusIdStr: data.tweet.legacy.inReplyToStatusIdStr ?? null,
       retweetedStatusIdStr: data.retweeted?.tweet.restId ?? null,
       entities: data.tweet.legacy.entities
@@ -231,6 +232,10 @@ function toRawTweetResult(data: TweetApiUtilsData): RawTweetResult | null {
             urls: data.tweet.legacy.entities.urls?.map((entry) => ({
               url: entry.url,
               expandedUrl: entry.expandedUrl,
+            })),
+            media: data.tweet.legacy.entities.media?.map((entry) => ({
+              type: entry.type,
+              sourceUserIdStr: entry.sourceUserIdStr,
             })),
           }
         : undefined,

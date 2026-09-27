@@ -19,7 +19,7 @@ import type { FollowChurnObservation } from '../db/follow-churn-observation'
  * @param followGraphLabelIndex - アカウント横断で共有するフォローグラフラベルインデックス
  * @param selfReplyPromoIndex - アカウント横断で共有する self-reply promo chain インデックス
  * @param parentTweetTextById - リプライ先ツイート ID から本文を引くための共有マップ
- * @param parentTweetAuthorIdById - リプライ先ツイート ID から投稿者 ID を引くための共有マップ
+ * @param parentTweetAuthorIdById - 親ツイート ID または conversation root ID から投稿者 ID を引く共有マップ
  * @param followChurnObservation - 呼び出し元が事前に取得した、このアカウントの follow churn 集計
  * @returns アカウントの feature bundle
  */
@@ -88,6 +88,7 @@ export function buildAccountFeatureBundle(
       retweetCount: tweet.retweetCount,
       likeCount: tweet.likeCount,
       isReply: tweet.isReply,
+      conversationId: tweet.conversationId,
       isRetweet: tweet.isRetweet,
       isAuthorReply: tweet.isAuthorReply,
       isPromoted: tweet.isPromoted,
@@ -95,6 +96,7 @@ export function buildAccountFeatureBundle(
       expandedUrls: tweet.expandedUrls,
       cardDestinationUrls: tweet.cardDestinationUrls,
       cardDestinationUrlsEvaluated: tweet.cardDestinationUrlsEvaluated,
+      hasMedia: tweet.hasMedia,
       hasAiGeneratedMedia: tweet.hasAiGeneratedMedia,
       aiGeneratedDetectionSource: tweet.aiGeneratedDetectionSource,
       foreignVideoSourceCount: tweet.foreignVideoSourceCount,
@@ -109,6 +111,10 @@ export function buildAccountFeatureBundle(
         tweet.inReplyToTweetId === null
           ? null
           : (parentTweetAuthorIdById.get(tweet.inReplyToTweetId) ?? null),
+      conversationRootAuthorId:
+        tweet.conversationId == null
+          ? null
+          : (parentTweetAuthorIdById.get(tweet.conversationId) ?? null),
     })),
     templatedReplyNetworkSize,
     bioDuplicateNetworkSize,

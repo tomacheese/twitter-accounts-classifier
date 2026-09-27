@@ -21,6 +21,7 @@ interface ExistingTweetSnapshot {
   retweetCount: number
   likeCount: number
   isReply: boolean
+  conversationId: string | null
   isRetweet: boolean
   inReplyToTweetId: string | null
   isPromoted: boolean
@@ -28,6 +29,7 @@ interface ExistingTweetSnapshot {
   expandedUrls: string[]
   cardDestinationUrls: string[]
   cardDestinationUrlsEvaluated: boolean
+  hasMedia: boolean | null
   hasAiGeneratedMedia: boolean | null
   aiGeneratedDetectionSource: string | null
   foreignVideoSourceCount: number | null
@@ -64,6 +66,7 @@ function hasBundleRelevantChange(
     existing.retweetCount !== merged.retweetCount ||
     existing.likeCount !== merged.likeCount ||
     existing.isReply !== merged.isReply ||
+    existing.conversationId !== merged.conversationId ||
     existing.isRetweet !== merged.isRetweet ||
     existing.inReplyToTweetId !== merged.inReplyToTweetId ||
     existing.isPromoted !== merged.isPromoted ||
@@ -71,6 +74,7 @@ function hasBundleRelevantChange(
     hasArrayChange(existing.expandedUrls, merged.expandedUrls) ||
     hasArrayChange(existing.cardDestinationUrls, merged.cardDestinationUrls) ||
     existing.cardDestinationUrlsEvaluated !== merged.cardDestinationUrlsEvaluated ||
+    existing.hasMedia !== merged.hasMedia ||
     existing.hasAiGeneratedMedia !== merged.hasAiGeneratedMedia ||
     existing.aiGeneratedDetectionSource !== merged.aiGeneratedDetectionSource ||
     existing.foreignVideoSourceCount !== merged.foreignVideoSourceCount ||
@@ -104,6 +108,7 @@ export async function upsertTweet(
       retweetCount: true,
       likeCount: true,
       isReply: true,
+      conversationId: true,
       isRetweet: true,
       inReplyToTweetId: true,
       isPromoted: true,
@@ -111,6 +116,7 @@ export async function upsertTweet(
       expandedUrls: true,
       cardDestinationUrls: true,
       cardDestinationUrlsEvaluated: true,
+      hasMedia: true,
       hasAiGeneratedMedia: true,
       aiGeneratedDetectionSource: true,
       foreignVideoSourceCount: true,
@@ -128,6 +134,7 @@ export async function upsertTweet(
     replyCount: input.replyCount,
     quoteCount: input.quoteCount,
     isReply: input.isReply,
+    conversationId: input.conversationId ?? existing?.conversationId ?? null,
     isRetweet: input.isRetweet,
     inReplyToTweetId: input.inReplyToTweetId,
     isPromoted: input.isPromoted || (existing?.isPromoted ?? false),
@@ -139,6 +146,12 @@ export async function upsertTweet(
     cardDestinationUrlsEvaluated:
       (input.cardDestinationUrlsEvaluated ?? false) ||
       (existing?.cardDestinationUrlsEvaluated ?? false),
+    hasMedia:
+      input.hasMedia === true || existing?.hasMedia === true
+        ? true
+        : input.hasMedia === false || existing?.hasMedia === false
+          ? false
+          : null,
     hasAiGeneratedMedia: input.hasAiGeneratedMedia ?? existing?.hasAiGeneratedMedia ?? null,
     aiGeneratedDetectionSource:
       input.aiGeneratedDetectionSource ?? existing?.aiGeneratedDetectionSource ?? null,
@@ -213,6 +226,7 @@ export async function loadRecentTweetsForAccounts(
         "replyCount",
         "quoteCount",
         "isReply",
+        "conversationId",
         "inReplyToTweetId",
         "isAuthorReply",
         "isRetweet",
@@ -222,6 +236,7 @@ export async function loadRecentTweetsForAccounts(
         "expandedUrls",
         "cardDestinationUrls",
         "cardDestinationUrlsEvaluated",
+        "hasMedia",
         "hasAiGeneratedMedia",
         "aiGeneratedDetectionSource",
         "quotedTweetId",

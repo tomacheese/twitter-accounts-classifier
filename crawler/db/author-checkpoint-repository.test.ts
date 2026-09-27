@@ -52,6 +52,8 @@ function baseTweet(id: string, accountId: string) {
     retweetedTweetId: null,
     isPromoted: false,
     isPaidPromotion: false,
+    hasMedia: null as boolean | null,
+    conversationId: null as string | null,
     hasAiGeneratedMedia: null as boolean | null,
     aiGeneratedDetectionSource: null as string | null,
     quotedTweetId: null,
@@ -425,11 +427,13 @@ describe('persistAuthorResultAtomic', () => {
         accountId: 'author1',
         fullText: 'reply text',
         inReplyToTweetId: 'parent1',
+        conversationId: 'root1',
       }),
     )
-    const tweetFindMany = vi
-      .fn()
-      .mockResolvedValue([{ id: 'parent1', fullText: '既に DB にある親ツイートの本文です' }])
+    const tweetFindMany = vi.fn().mockResolvedValue([
+      { id: 'parent1', fullText: '既に DB にある親ツイートの本文です', accountId: 'commenter1' },
+      { id: 'root1', fullText: '既に DB にある会話 root です', accountId: 'author1' },
+    ])
     const txClient = {
       account: {
         upsert: vi.fn().mockResolvedValue({}),
@@ -453,7 +457,13 @@ describe('persistAuthorResultAtomic', () => {
       username: 'someuser',
       authorId: 'author1',
       profile: profile('author1'),
-      recentTweets: [tweet('reply1', 'author1', { isReply: true, inReplyToTweetId: 'parent1' })],
+      recentTweets: [
+        tweet('reply1', 'author1', {
+          isReply: true,
+          inReplyToTweetId: 'parent1',
+          conversationId: 'root1',
+        }),
+      ],
       additionalOwnTweets: [],
       recentTweetsFallbackAuthors: [profile('author1')],
       followSample: null,
@@ -471,11 +481,12 @@ describe('persistAuthorResultAtomic', () => {
     })
 
     expect(tweetFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: { in: ['parent1'] } } }),
+      expect.objectContaining({ where: { id: { in: ['parent1', 'root1'] } } }),
     )
     expect(capturedBundle?.recentTweets[0].parentTweetFullText).toBe(
       '既に DB にある親ツイートの本文です',
     )
+    expect(capturedBundle?.recentTweets[0].conversationRootAuthorId).toBe('author1')
   })
 
   it('passes the post-update recentTweetsFetchStatus to label evaluation within the same cycle', async () => {

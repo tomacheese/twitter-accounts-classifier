@@ -46,6 +46,7 @@ function makeTweet(overrides: Partial<Tweet> = {}): Tweet {
     replyCount: 0,
     quoteCount: 0,
     isReply: false,
+    conversationId: null,
     inReplyToTweetId: null,
     isAuthorReply: false,
     isRetweet: false,
@@ -55,6 +56,7 @@ function makeTweet(overrides: Partial<Tweet> = {}): Tweet {
     expandedUrls: [],
     cardDestinationUrls: [],
     cardDestinationUrlsEvaluated: false,
+    hasMedia: null,
     hasAiGeneratedMedia: null,
     aiGeneratedDetectionSource: null,
     quotedTweetId: null,
@@ -105,6 +107,20 @@ describe('buildAccountFeatureBundle', () => {
       'https://example-shop.test/item/FICTIONAL',
     ])
     expect(bundle.recentTweets[0].cardDestinationUrlsEvaluated).toBe(true)
+  })
+
+  it('includes observed media presence in the rule bundle', () => {
+    const bundle = buildAccountFeatureBundle(
+      makeAccount(),
+      [makeTweet({ hasMedia: true })],
+      buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
+      buildReplyHijackIndex([]),
+      emptyFollowGraphLabelIndex,
+      buildSelfReplyPromoIndex([], []),
+      new Map(),
+    )
+    expect(bundle.recentTweets[0]?.hasMedia).toBe(true)
   })
 
   it('account の classification-relevant フィールドをそのまま反映する', () => {
@@ -169,6 +185,22 @@ describe('buildAccountFeatureBundle', () => {
     )
 
     expect(bundle.recentTweets[0].parentTweetFullText).toBe('これが親ツイートの本文です')
+  })
+
+  it('conversation root の投稿者を recentTweets に反映する', () => {
+    const bundle = buildAccountFeatureBundle(
+      makeAccount(),
+      [makeTweet({ isReply: true, conversationId: 'root-1' })],
+      buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
+      buildReplyHijackIndex([]),
+      emptyFollowGraphLabelIndex,
+      buildSelfReplyPromoIndex([], []),
+      new Map(),
+      new Map([['root-1', 'acct-1']]),
+    )
+
+    expect(bundle.recentTweets[0].conversationRootAuthorId).toBe('acct-1')
   })
 
   it('parentTweetTextById に該当がなければ parentTweetFullText を null にする', () => {

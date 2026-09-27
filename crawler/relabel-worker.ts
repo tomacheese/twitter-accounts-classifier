@@ -166,14 +166,11 @@ async function evaluateAccountRelabelItemGroup(
     ])
 
     const allRecentTweets = [...tweetsByAccountId.values()].flat()
-    const replyParentIds = [
+    const replyContextIds = [
       ...new Set(
         allRecentTweets
-          .filter(
-            (tweet): tweet is Tweet & { inReplyToTweetId: string } =>
-              tweet.inReplyToTweetId !== null,
-          )
-          .map((tweet) => tweet.inReplyToTweetId),
+          .flatMap((tweet) => [tweet.inReplyToTweetId, tweet.conversationId])
+          .filter((id): id is string => typeof id === 'string'),
       ),
     ]
     // labelLookupChunkSize は accountLabelLatest の chunk 済み IN 句と同じ値を流用し、
@@ -181,8 +178,8 @@ async function evaluateAccountRelabelItemGroup(
     const lookupChunkSize = getRelabelerLabelLookupChunkSize()
     parentTweetTextById = new Map()
     parentTweetAuthorIdById = new Map()
-    for (let i = 0; i < replyParentIds.length; i += lookupChunkSize) {
-      const chunk = replyParentIds.slice(i, i + lookupChunkSize)
+    for (let i = 0; i < replyContextIds.length; i += lookupChunkSize) {
+      const chunk = replyContextIds.slice(i, i + lookupChunkSize)
       const chunkResult = await findTweetContextsByIds(prisma, chunk)
       for (const [id, context] of chunkResult) {
         parentTweetTextById.set(id, context.fullText)

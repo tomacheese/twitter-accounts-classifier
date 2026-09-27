@@ -36,6 +36,12 @@ describe('topicAnimeRule', () => {
     )
   })
 
+  it('does not infer anime interest from an unrecognized title-only bio', () => {
+    expect(
+      topicAnimeRule.evaluate(makeBundle({ bio: '作品名A / 作品名B / キャラクター名C' })).value,
+    ).toBe(false)
+  })
+
   it('is false for an unrelated bio', () => {
     expect(
       topicAnimeRule.evaluate(makeBundle({ bio: '毎日ラーメンの写真を載せています' })).value,

@@ -86,6 +86,7 @@ model Tweet {
   replyCount                 Int
   quoteCount                 Int
   isReply                    Boolean  @default(false)
+  conversationId             String?
   inReplyToTweetId           String?
   isAuthorReply              Boolean  @default(false)
   isRetweet                  Boolean  @default(false)
@@ -97,6 +98,7 @@ model Tweet {
   // この列が存在する前に収集された行は Card 自体を評価していないため、
   // デフォルトを true ではなく false にして未評価の状態と実際の評価結果を区別している。
   cardDestinationUrlsEvaluated Boolean  @default(false)
+  hasMedia                    Boolean?
   // この列が存在する前に収集された行は判定自体が行われていないため、
   // デフォルトを false ではなく null にして未評価の状態と実際の判定結果を区別している。
   hasAiGeneratedMedia        Boolean?

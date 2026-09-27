@@ -8,8 +8,11 @@ function makeBundle(
     fullText: string
     isReply?: boolean
     isRetweet?: boolean
+    isAuthorReply?: boolean
     hoursAgo?: number
     createdAt?: Date
+    conversationId?: string | null
+    conversationRootAuthorId?: string | null
     inReplyToTweetId?: string | null
   }[],
   accountOverrides: Partial<AccountFeatureBundle['account']> = {},
@@ -36,6 +39,9 @@ function makeBundle(
       likeCount: 0,
       isReply: t.isReply ?? false,
       isRetweet: t.isRetweet ?? false,
+      isAuthorReply: t.isAuthorReply ?? false,
+      conversationId: t.conversationId ?? null,
+      conversationRootAuthorId: t.conversationRootAuthorId ?? null,
       isPromoted: false,
       isPaidPromotion: false,
       inReplyToTweetId: t.inReplyToTweetId === undefined ? null : t.inReplyToTweetId,
@@ -168,6 +174,35 @@ describe('crossTargetTemplatedReplyRule', () => {
     const result = crossTargetTemplatedReplyRule.evaluate(bundle)
 
     expect(result.value).toBe(false)
+  })
+
+  it('counts the account owner’s replies to distinct external conversations', () => {
+    const bundle = makeBundle(
+      Array.from({ length: 5 }, (_, i) => ({
+        fullText: TEMPLATE_TEXT,
+        isReply: true,
+        isAuthorReply: true,
+        hoursAgo: i,
+        inReplyToTweetId: `external-target-${i}`,
+      })),
+    )
+    expect(crossTargetTemplatedReplyRule.evaluate(bundle).value).toBe(true)
+  })
+
+  it('ignores replies inside the account’s own conversation when the root is outside the sample', () => {
+    const bundle = makeBundle(
+      Array.from({ length: 5 }, (_, i) => ({
+        fullText: TEMPLATE_TEXT,
+        isReply: true,
+        isAuthorReply: true,
+        conversationId: 'old-own-root',
+        conversationRootAuthorId: '1',
+        hoursAgo: i,
+        inReplyToTweetId: `commenter-${i}`,
+      })),
+    )
+
+    expect(crossTargetTemplatedReplyRule.evaluate(bundle).value).toBe(false)
   })
 
   it("does not count replies to the account's own past tweets as distinct targets", () => {

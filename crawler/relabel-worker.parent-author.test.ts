@@ -10,12 +10,14 @@ import { evaluateAccountRelabelItems } from './relabel-worker'
 
 it('relabel evaluation receives the resolved parent author id', async () => {
   let observedParentAuthorId: string | null | undefined
+  let observedConversationRootAuthorId: string | null | undefined
   const probeRule: LabelRule = {
     key: 'parent_author_probe',
     version: '1.0.0',
     description: 'test probe',
     evaluate(bundle: AccountFeatureBundle) {
       observedParentAuthorId = bundle.recentTweets[0]?.parentTweetAuthorId
+      observedConversationRootAuthorId = bundle.recentTweets[0]?.conversationRootAuthorId
       return { value: false, confidence: 1, reason: 'probe' }
     },
   }
@@ -57,6 +59,7 @@ it('relabel evaluation receives the resolved parent author id', async () => {
             createdAt: new Date('2026-08-29T00:00:00Z'),
             isReply: true,
             inReplyToTweetId: 'parent-1',
+            conversationId: 'root-1',
             isRetweet: false,
           },
         ] as Tweet[],
@@ -66,11 +69,12 @@ it('relabel evaluation receives the resolved parent author id', async () => {
   vi.spyOn(tweetRepository, 'findTweetTextsByIds').mockResolvedValue(
     new Map([['parent-1', 'parent text']]),
   )
-  const contextSpy = vi
-    .spyOn(tweetRepository, 'findTweetContextsByIds')
-    .mockResolvedValue(
-      new Map([['parent-1', { fullText: 'parent text', accountId: 'parent-author' }]]),
-    )
+  const contextSpy = vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(
+    new Map([
+      ['parent-1', { fullText: 'parent text', accountId: 'parent-author' }],
+      ['root-1', { fullText: 'root text', accountId: 'account-1' }],
+    ]),
+  )
   vi.spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts').mockResolvedValue()
   vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
     { id: 'wi-1', status: 'succeeded' },
@@ -93,6 +97,7 @@ it('relabel evaluation receives the resolved parent author id', async () => {
     leaseOwner: 'test-worker',
   })
 
-  expect(contextSpy).toHaveBeenCalledWith(prisma, ['parent-1'])
+  expect(contextSpy).toHaveBeenCalledWith(prisma, ['parent-1', 'root-1'])
   expect(observedParentAuthorId).toBe('parent-author')
+  expect(observedConversationRootAuthorId).toBe('account-1')
 })

@@ -167,8 +167,8 @@ export async function persistAuthorResultAtomic(
       const missingParentIds = [
         ...new Set(
           authorOwnTweets
-            .map((tweet) => tweet.inReplyToTweetId)
-            .filter((id): id is string => id !== null && !parentTweetTextById.has(id)),
+            .flatMap((tweet) => [tweet.inReplyToTweetId, tweet.conversationId])
+            .filter((id): id is string => typeof id === 'string' && !parentTweetTextById.has(id)),
         ),
       ]
       if (missingParentIds.length > 0) {

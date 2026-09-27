@@ -15,17 +15,17 @@ function hasUrl(tweet: { expandedUrls?: string[]; fullText: string }): boolean {
 export const bareLinkSpamRule: LabelRule = {
   key: 'bare_link_spam',
   description:
-    '自身の投稿の大半が、URL・メンション除去後のテキストが実質空になる、コメントなしリンクの連投である。リンク先ドメインを問わない汎用的な spam パターン',
-  version: '1.0.0',
+    '自身のメディアなし投稿の大半が、URL・メンション除去後のテキストが実質空になる、コメントなしリンクの連投である。リンク先ドメインを問わない汎用的な spam パターン',
+  version: '1.1.0',
   evaluate(bundle) {
-    const ownPosts = bundle.recentTweets.filter((t) => !t.isReply && !t.isRetweet)
+    const observedOwnPosts = bundle.recentTweets.filter((t) => !t.isReply && !t.isRetweet)
+    const ownPosts = observedOwnPosts.filter((t) => t.hasMedia === false)
     const bareLinkPosts = ownPosts.filter((t) => hasUrl(t) && !hasLinguisticContent(t.fullText))
 
     // 単発の閾値越えによる誤検知を避けるため、
     // 「一致が1件あるかどうか」より多いサンプル数を要求する。
     const hasEnoughSample = ownPosts.length >= MIN_SAMPLE
     const ratio = ownPosts.length > 0 ? bareLinkPosts.length / ownPosts.length : 0
-    const value = hasEnoughSample && ratio >= BARE_LINK_RATIO_THRESHOLD
     const evidenceScore = hasEnoughSample
       ? posteriorProbabilityAtLeast(
           bareLinkPosts.length,
@@ -35,7 +35,16 @@ export const bareLinkSpamRule: LabelRule = {
       : 0
 
     // recentTweets が未取得の場合、単に投稿数が少ないだけの陰性とは区別する。
-    const evaluable = hasEnoughSample && isRecentTweetsEvaluable(bundle)
+    const allObservedPostsWereMedia =
+      observedOwnPosts.length > 0 && observedOwnPosts.every((tweet) => tweet.hasMedia === true)
+    const allObservedMediaStatusKnown = observedOwnPosts.every(
+      (tweet) => tweet.hasMedia !== null && tweet.hasMedia !== undefined,
+    )
+    const evaluable =
+      isRecentTweetsEvaluable(bundle) &&
+      allObservedMediaStatusKnown &&
+      (hasEnoughSample || allObservedPostsWereMedia)
+    const value = evaluable && hasEnoughSample && ratio >= BARE_LINK_RATIO_THRESHOLD
     return {
       value,
       confidence: toConfidence(value, evidenceScore, evaluable),

@@ -37,6 +37,7 @@ const rawTweet: RawTweetResult = {
     favoriteCount: 10,
     replyCount: 1,
     quoteCount: 0,
+    conversationIdStr: 'conversation-1',
     inReplyToStatusIdStr: null,
     retweetedStatusIdStr: null,
   },
@@ -81,6 +82,7 @@ describe('toTweetInput', () => {
       replyCount: 1,
       quoteCount: 0,
       isReply: false,
+      conversationId: 'conversation-1',
       inReplyToTweetId: null,
       isAuthorReply: false,
       isRetweet: false,
@@ -90,6 +92,7 @@ describe('toTweetInput', () => {
       expandedUrls: [],
       cardDestinationUrls: [],
       cardDestinationUrlsEvaluated: false,
+      hasMedia: null,
       hasAiGeneratedMedia: null,
       aiGeneratedDetectionSource: null,
       foreignVideoSourceCount: null,
@@ -106,6 +109,35 @@ describe('toTweetInput', () => {
     expect(input.quotedTweetId).toBeNull()
     expect(input.quotedTweetAuthorId).toBeNull()
     expect(input.quotedTweetHasVideo).toBeNull()
+  })
+
+  it('maps a present empty media list to false and an absent media list to unknown', () => {
+    const noMedia = toTweetInput(
+      { ...rawTweet, legacy: { ...rawTweet.legacy, extendedEntities: { media: [] } } },
+      { source: 'profile', viewerAccountId: 'u1' },
+    )
+    const unknownMedia = toTweetInput(rawTweet, { source: 'profile', viewerAccountId: 'u1' })
+    expect(noMedia.hasMedia).toBe(false)
+    expect(unknownMedia.hasMedia).toBeNull()
+  })
+
+  it('detects media from entities when extendedEntities is absent', () => {
+    const withMedia = toTweetInput(
+      { ...rawTweet, legacy: { ...rawTweet.legacy, entities: { media: [{ type: 'photo' }] } } },
+      { source: 'profile', viewerAccountId: 'u1' },
+    )
+    expect(withMedia.hasMedia).toBe(true)
+  })
+
+  it('merges media presence without losing a previously observed true value', () => {
+    const merged = mergeTweetAdFlags([
+      { ...toTweetInput(rawTweet, { source: 'profile', viewerAccountId: 'u1' }), hasMedia: true },
+      {
+        ...toTweetInput(rawTweet, { source: 'recommended', viewerAccountId: 'u1' }),
+        hasMedia: false,
+      },
+    ])
+    expect(merged[0]?.hasMedia).toBe(true)
   })
 
   it('counts attached videos whose source account differs from the tweet author', () => {

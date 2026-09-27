@@ -76,6 +76,24 @@ describe('topicNsfwRule', () => {
     ).toBe(true)
   })
 
+  it('is false when an all-ages profile redirects adult content to another account by URL', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({
+          bio: '一般向けの絵を投稿。成人向け作品は別アカウントはこちら https://example.test/alt',
+        }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('is false when an all-ages profile links to its adult account with a descriptive label', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({ bio: '一般向けイラスト。🔞成人向け垢🔞→【https://example.test/alt】' }),
+      ).value,
+    ).toBe(false)
+  })
+
   it('is true for a bio linking an NSFW alt account alongside a "minors dni" notice', () => {
     expect(
       topicNsfwRule.evaluate(
@@ -158,6 +176,14 @@ describe('topicNsfwRule', () => {
     expect(
       topicNsfwRule.evaluate(makeBundle({ bio: 'アダルトグッズのレビューを投稿しています' })).value,
     ).toBe(true)
+  })
+
+  it('is false for an adult-products business account that mentions its product category only', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({ bio: '成人向け商品の公式ショップです。新商品を販売しています。' }),
+      ).value,
+    ).toBe(false)
   })
 
   it('is false for a fighting-game bio whose Master Rank number happens to contain "R18"', () => {

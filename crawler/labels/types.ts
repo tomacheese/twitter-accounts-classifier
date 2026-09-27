@@ -63,12 +63,15 @@ export interface AccountFeatureBundle {
      * 旧 fixture 互換のため任意。
      */
     cardDestinationUrlsEvaluated?: boolean
+    hasMedia?: boolean | null
     /**
      * このツイートが直接リプライしている先のツイート ID。リプライでない場合、
      * または親ツイート ID が不明な場合は `null`/未設定にする。
      * 任意項目にする理由は `professionalType` と同じ。
      */
     inReplyToTweetId?: string | null
+    /** X の conversation root tweet ID。旧収集データでは不明のため nullable。 */
+    conversationId?: string | null
     /**
      * このリプライの投稿者が、リプライ先ツイートの投稿者本人と同一か (自己リプライスレッドか)。
      * リプライでない場合は無関係。任意項目にする理由は `professionalType` と同じ。
@@ -112,6 +115,8 @@ export interface AccountFeatureBundle {
      */
     parentTweetFullText?: string | null
     parentTweetAuthorId?: string | null
+    /** conversation root tweet の投稿者 ID。root が未取得なら null。 */
+    conversationRootAuthorId?: string | null
   }[]
   /**
    * URL・メンション除去後、この投稿者自身のいずれかのリプライ本文と完全一致するリプライを投稿した、

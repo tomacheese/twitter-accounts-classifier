@@ -74,6 +74,33 @@ describe('topicMovieRule', () => {
     expect(topicMovieRule.evaluate(makeBundle({ bio: 'Illust/Design/Movie' })).value).toBe(false)
   })
 
+  it('is false when a movie title appears only inside a hashtag-only topic list', () => {
+    expect(
+      topicMovieRule.evaluate(makeBundle({ bio: '#ドラマ作品名 #音楽 #ゲーム #日常' })).value,
+    ).toBe(false)
+  })
+
+  it('keeps a movie topic when a hashtag list accompanies an explicit interest statement', () => {
+    expect(
+      topicMovieRule.evaluate(makeBundle({ bio: '映画好きです #音楽 #ゲーム #日常' })).value,
+    ).toBe(true)
+  })
+
+  it('keeps a movie topic from strong follow-graph evidence when the bio only lists hashtags', () => {
+    const bundle = {
+      ...makeBundle({ bio: '#ドラマ作品名 #音楽 #ゲーム #日常' }),
+      followGraphLabelSignals: {
+        topic_movie: {
+          followeeLabeledCount: 10,
+          followeeTotalCount: 15,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    }
+    expect(topicMovieRule.evaluate(bundle).value).toBe(true)
+  })
+
   it('is true for a comma-separated hobby enumeration mentioning movies', () => {
     expect(topicMovieRule.evaluate(makeBundle({ bio: '映画、旅行、読書が趣味です' })).value).toBe(
       true,

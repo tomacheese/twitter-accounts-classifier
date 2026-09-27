@@ -15,6 +15,15 @@ const NEGATION_WINDOW_LENGTH = 30
 const NEGATION_PATTERN =
   /しません|していません|しておりません|おりません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|不要|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|✖|🆖|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
 
+// 無断転載の禁止は投稿生成元ではなく、作品の利用条件を示す。
+const UNRELATED_REPOST_NOTICE_PATTERN = /(?:無断)?転載(?:禁止|NG)|\bno\s+reposts?\b/gi
+
+function hasRelevantNegation(context: string): boolean {
+  const withoutRepostNotice = context.replaceAll(UNRELATED_REPOST_NOTICE_PATTERN, ' ')
+  NEGATION_PATTERN.lastIndex = 0
+  return NEGATION_PATTERN.test(withoutRepostNotice)
+}
+
 function isNegatedDeclaration(bio: string): boolean {
   const match = BIO_DECLARATION_PATTERN.exec(bio)
   if (match === null) return false
@@ -23,7 +32,7 @@ function isNegatedDeclaration(bio: string): boolean {
     match.index + match[0].length,
     match.index + match[0].length + NEGATION_WINDOW_LENGTH,
   )
-  return NEGATION_PATTERN.test(beforeMatch) || NEGATION_PATTERN.test(afterMatch)
+  return hasRelevantNegation(beforeMatch) || hasRelevantNegation(afterMatch)
 }
 
 // 生成AIを研究者・教授・メディア・コンサル・事業として職業的に語る bio は、
@@ -32,12 +41,14 @@ function isNegatedDeclaration(bio: string): boolean {
 // ただし「画像は」「投稿しています」のような自身のコンテンツを指す明示的な表現を伴う場合は、
 // 実際に自己申告しているとみなす。
 const INSTITUTIONAL_CONTEXT_PATTERN =
-  /教授|研究者|代表取締役|\bCEO\b|公式(アカウント)?|メディア|事業|コンサル(ティング)?|規制派|反対派|賛成派|推進(派)?|アドバイザー|著書|委員|エンジニア|\bPdM\b|プロダクトマネージャー|プロダクトオーナー|プロダクト開発|CAMP|ウェビナー|セミナー|活用ノウハウ|解説|考察|紹介します|エバンジェリスト|evangelist|お仕事受付中|お仕事募集中|ジャーナリスト|記者|講師|部長|マネージャー|支援サービス|ポッドキャスト/i
+  /教授|研究者|代表取締役|\bCEO\b|公式(アカウント)?|メディア|事業|コンサル(ティング)?|規制派|反対派|賛成派|推進(派)?|アドバイザー|著書|委員|エンジニア|\bPdM\b|プロダクトマネージャー|プロダクトオーナー|プロダクト開発|CAMP|ウェビナー|セミナー|活用ノウハウ|解説|考察|紹介します|エバンジェリスト|evangelist|お仕事受付中|お仕事募集中|ジャーナリスト|記者|講師|部長|マネージャー|支援サービス|ポッドキャスト|受託開発|AI開発会社|生成AI事業|AI導入支援|生成AIエージェンシー|\bagency\b|\bclient work\b/i
+const AI_OCCUPATIONAL_CONTEXT_PATTERN =
+  /(?:生成AI|AI生成|AI-generated).{0,32}(?:会社|企業|事業|業務|勤務|採用|人事|所属|リーダー|コミュニティ|運営|品質保証|品質管理|検証|テスト|テンプレ|売上|受託|募集)|(?:会社|企業|事業|業務|勤務|採用|人事|所属|リーダー|コミュニティ|運営|品質保証|品質管理|検証|テスト|テンプレ|売上|受託|募集).{0,32}(?:生成AI|AI生成|AI-generated)/i
 // 「〜を紹介します」は INSTITUTIONAL_CONTEXT_PATTERN の職業的文脈語(メディア・解説等)としても
 // 使われるが、「画像/イラスト/作品を紹介します」のように自身のコンテンツ名詞を目的語に取る場合は、
 // 「画像は」のような主題化(は)ではなく目的語化(を)であっても、実質的に自己申告と同じである。
 const PERSONAL_CONTENT_DECLARATION_PATTERN =
-  /画像は|イラストは|作品(です|を投稿)|ヘッダーは|アイコンは|保管庫|ポートレート|(?:画像|イラスト|作品)を紹介(?:します|しています)|-generated (images?|art|content|portraits?)|images? are AI/i
+  /画像は|イラストは|作品(です|を投稿)|ヘッダーは|アイコンは|保管庫|ポートレート|(?:画像|イラスト|作品)を紹介(?:します|しています)|(?:生成AI|AI生成|AIで生成).{0,16}(?:画像|イラスト|作品|音楽|楽曲|動画|小説).{0,12}(?:投稿|公開|配信|発信|販売)|AI-generated music.{0,12}(?:publish|post|upload|stream)|-generated (images?|art|content|portraits?)|images? are AI/i
 
 // 「投稿して(います|ます)」は画像/イラストなどのコンテンツ名詞を伴わない限り、
 // 単に何らかの記事を投稿している意味でしかなく、AI生成物の自己申告にはならない。
@@ -60,7 +71,10 @@ function isPersonalContentDeclaration(bio: string): boolean {
 }
 
 function isInstitutionalMention(bio: string): boolean {
-  return INSTITUTIONAL_CONTEXT_PATTERN.test(bio) && !isPersonalContentDeclaration(bio)
+  return (
+    (INSTITUTIONAL_CONTEXT_PATTERN.test(bio) || AI_OCCUPATIONAL_CONTEXT_PATTERN.test(bio)) &&
+    !isPersonalContentDeclaration(bio)
+  )
 }
 
 // 職業的な文脈と同じ「AIは話題・関心事であり、
@@ -68,10 +82,22 @@ function isInstitutionalMention(bio: string): boolean {
 // 業務効率化のための言及にも適用したもの。`isInstitutionalMention` と同様、
 // 自身のコンテンツを指す明示的な表現を伴う場合のみ宣言として扱う。
 const TOPIC_INTEREST_CONTEXT_PATTERN =
-  /情報収集|実?活用|遊び|勉強中|興味|関心|ウォッチ|ウォチ|先端技術|追って|学ぼう|学ぶ|半導体|銘柄|効率化|業務改善|著作権問題|オタク|マニア/i
+  /情報収集|実?活用|遊び|勉強中|興味|関心|ウォッチ|ウォチ|先端技術|追って|学ぼう|学ぶ|半導体|銘柄|効率化|業務改善|著作権問題|オタク|マニア|音楽.{0,12}(?:生成AI|AI生成)|(?:生成AI|AI生成).{0,12}音楽/i
+const AI_HOBBY_CONTEXT_PATTERN =
+  /(?:生成AI|AI生成|AI-generated).{0,24}(?:趣味|好きなもの|遊んで|ローカル|自宅)|(?:趣味|遊んで|ローカル|自宅).{0,24}(?:生成AI|AI生成|AI-generated)|好きなもの.{0,80}(?:生成AI|AI生成|AI-generated)/i
 
 function isTopicInterestMention(bio: string): boolean {
-  return TOPIC_INTEREST_CONTEXT_PATTERN.test(bio) && !isPersonalContentDeclaration(bio)
+  return (
+    (TOPIC_INTEREST_CONTEXT_PATTERN.test(bio) || AI_HOBBY_CONTEXT_PATTERN.test(bio)) &&
+    !isPersonalContentDeclaration(bio)
+  )
+}
+
+const AI_TOPIC_DISCUSSION_PATTERN =
+  /(?:生成AI|AI生成|AI-generated).{0,28}(?:意見|見解|議論|論点|賛成|反対|話題|について|解説|考察|opinion|view|debate)|(?:意見|見解|議論|論点|賛成|反対|話題|について|解説|考察|opinion|view|debate).{0,28}(?:生成AI|AI生成|AI-generated)/i
+
+function isAiTopicDiscussion(bio: string): boolean {
+  return AI_TOPIC_DISCUSSION_PATTERN.test(bio) && !isPersonalContentDeclaration(bio)
 }
 
 // 生成AIに反対するアカウント(アンチAI活動家や、
@@ -241,8 +267,9 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
-  description: 'プロフィールで AI 生成コンテンツを投稿していることを自己申告している',
-  version: '1.12.0',
+  description:
+    'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及だけでは該当しない',
+  version: '1.13.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
@@ -252,6 +279,7 @@ export const aiGeneratedRule: LabelRule = {
       !AI_OPPOSITION_PATTERN.test(bio) &&
       !isInstitutionalMention(bio) &&
       !isTopicInterestMention(bio) &&
+      !isAiTopicDiscussion(bio) &&
       !isThirdPartyReference(bio) &&
       !isListEnumerationItem(bio) &&
       !isCertificationNameMention(bio) &&

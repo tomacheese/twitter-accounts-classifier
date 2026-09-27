@@ -1,0 +1,2 @@
+ALTER TABLE "Tweet"
+ADD COLUMN "hasMedia" BOOLEAN;
