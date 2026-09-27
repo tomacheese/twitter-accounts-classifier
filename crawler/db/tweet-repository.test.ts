@@ -25,6 +25,8 @@ const sampleTweet: TweetInput = {
   retweetedTweetId: null,
   isPromoted: false,
   isPaidPromotion: false,
+  hasMedia: null,
+  conversationId: null,
   hasAiGeneratedMedia: false,
   aiGeneratedDetectionSource: null,
   foreignVideoSourceCount: null,
@@ -96,6 +98,8 @@ describe('upsertTweet bundle-relevant change detection', () => {
     const existing = {
       isPromoted: false,
       isPaidPromotion: false,
+      hasMedia: null,
+      conversationId: null,
       expandedUrls: [],
       cardDestinationUrls: [],
       cardDestinationUrlsEvaluated: false,

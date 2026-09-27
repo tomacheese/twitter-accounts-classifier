@@ -9,7 +9,8 @@ const KEYWORD_SCORE = 0.8
 
 export const topicAnimeRule: LabelRule = {
   key: 'topic_anime',
-  description: 'プロフィールの直接証拠、またはフォロー関係からアニメ/漫画との強い関連が示される',
+  description:
+    'プロフィールに「アニメ」「漫画」等の直接証拠があるか、フォロー関係からアニメ/漫画との強い関連が示される。作品名だけの列挙は直接証拠に含めない',
   version: '1.2.0',
   usesFollowGraphSignal: true,
   evaluate(bundle) {

@@ -52,7 +52,7 @@ function page(
 }
 
 describe('convertTimelineResponse', () => {
-  it('preserves X URL entities including expandedUrl', async () => {
+  it('preserves X URL and media entities', async () => {
     const result = await convertTimelineResponse(
       Promise.resolve({
         data: {
@@ -78,6 +78,7 @@ describe('convertTimelineResponse', () => {
                         indices: [0, 23],
                       },
                     ],
+                    media: [{ type: 'photo' }],
                   },
                 },
                 contentDisclosure: {},
@@ -111,6 +112,7 @@ describe('convertTimelineResponse', () => {
         expandedUrl: 'https://www.amazon.co.jp/dp/TEST?tag=sample-22',
       },
     ])
+    expect(result.data.data[0]?.legacy.entities?.media).toEqual([{ type: 'photo' }])
   })
 
   it('extracts unified_card browser destination URLs onto the raw tweet', async () => {

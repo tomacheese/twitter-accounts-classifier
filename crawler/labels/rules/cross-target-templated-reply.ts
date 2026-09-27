@@ -99,7 +99,7 @@ export const crossTargetTemplatedReplyRule: LabelRule = {
   key: 'cross_target_templated_reply',
   description:
     '同一または実質同一の定型リプライを、短時間のうちに複数の異なる親ツイートへ反復投稿している。インプレッション獲得目的のアカウントが異なるバズ投稿へ同じ賞賛文・誘導文を大量に返信する典型パターン',
-  version: '1.3.0',
+  version: '1.4.0',
   evaluate(bundle) {
     // 自分自身の過去ツイートへの返信はスレッド内の連投であり、
     // 異なる他者への反復投稿という本ルールの検出対象ではないため除外する
@@ -110,6 +110,13 @@ export const crossTargetTemplatedReplyRule: LabelRule = {
       const targetTweetId = tweet.inReplyToTweetId
       if (targetTweetId === null || targetTweetId === undefined) continue
       if (ownTweetIds.has(targetTweetId)) continue
+      if (
+        tweet.conversationId != null &&
+        (ownTweetIds.has(tweet.conversationId) ||
+          tweet.conversationRootAuthorId === bundle.account.id)
+      ) {
+        continue
+      }
       const normalized = normalizeReplyText(tweet.fullText)
       if (normalized === '') continue
       const group = groups.get(normalized) ?? []

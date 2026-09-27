@@ -52,10 +52,22 @@ function isVibeListItem(bio: string, match: RegExpExecArray): boolean {
   return suffixCount >= MIN_VIBE_LIST_SUFFIX_COUNT
 }
 
+function isHashtagListOnlyBio(bio: string, match: RegExpExecArray): boolean {
+  const hashtags = [...bio.matchAll(/#[^\s#]+/g)]
+  if (hashtags.length < 3) return false
+  const matchIsInHashtag = hashtags.some((hashtag) => {
+    const start = hashtag.index
+    return match.index >= start && match.index < start + hashtag[0].length
+  })
+  const prose = bio.replaceAll(/#[^\s#]+/g, '').replaceAll(/[|,，、/・:：.。!！\-\s]/g, '')
+  return matchIsInHashtag && prose.length === 0
+}
+
 export const topicMovieRule: LabelRule = {
   key: 'topic_movie',
-  description: 'プロフィールの直接証拠、またはフォロー関係から映画・ドラマとの強い関連が示される',
-  version: '1.5.0',
+  description:
+    'プロフィールの直接証拠、またはフォロー関係から映画・ドラマとの強い関連が示される。映画・ドラマ名がハッシュタグだけの列挙に現れる場合は直接証拠に含めない',
+  version: '1.6.0',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
@@ -63,7 +75,8 @@ export const topicMovieRule: LabelRule = {
     const keywordMatch =
       match !== null &&
       !isSlashDelimitedTagListItem(bio ?? '', match) &&
-      !isVibeListItem(bio ?? '', match)
+      !isVibeListItem(bio ?? '', match) &&
+      !isHashtagListOnlyBio(bio ?? '', match)
     const followGraph = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_movie)
     const value = keywordMatch || followGraph.matched
     const evidenceScore = combineAlternatives([

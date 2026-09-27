@@ -52,6 +52,17 @@ function hasGenuineSolicitation(bio: string): boolean {
 // 単発のツイート本文勧誘は日常的な相互フォロー依頼等との区別が難しいため、
 // bio 版と同水準の誤検知対策として、同一アカウント内で複数回繰り返された場合のみを独立シグナルとする。
 const TWEET_SOLICITATION_MIN_REPEATS = 2
+const GIVEAWAY_RETWEET_PATTERN =
+  /懸賞|プレゼント|当選|応募|抽選|当たる|(?:キャンペーン|企画).{0,16}(?:応募|参加|RT|リポスト|当選|プレゼント|抽選)|(?:応募|参加|RT|リポスト|当選|プレゼント|抽選).{0,16}(?:キャンペーン|企画)/
+
+function isGiveawayFocusedRetweetSample(
+  tweets: { fullText: string; isRetweet: boolean }[],
+): boolean {
+  const retweets = tweets.filter((tweet) => tweet.isRetweet)
+  if (retweets.length < 5) return false
+  const giveawayRetweets = retweets.filter((tweet) => GIVEAWAY_RETWEET_PATTERN.test(tweet.fullText))
+  return giveawayRetweets.length / retweets.length >= 0.6
+}
 
 // リツイートの本文はアカウント自身の発言ではないため、
 // 引用元が勧誘文言を含んでいても対象から除く。
@@ -79,8 +90,8 @@ export const spamRule: LabelRule = {
   key: 'spam',
   description:
     'プロフィールで出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある。' +
-    'bio に勧誘文言が無くても、リツイート主体の釣り的タイムラインと大量フォロー傾向の両方が同時に強く出ている場合は、それ自体を独立したエンゲージメント水増しの証拠として扱う',
-  version: '1.13.0',
+    'bio に勧誘文言が無くても、リツイート主体の釣り的タイムラインと大量フォロー傾向の両方が同時に強く出ている場合は、それ自体を独立したエンゲージメント水増しの証拠として扱う。懸賞応募に集中したリツイートは、それだけでは spam とみなさない',
+  version: '1.14.0',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
     const hasSolicitation = bio !== null && hasGenuineSolicitation(bio)
@@ -95,6 +106,7 @@ export const spamRule: LabelRule = {
     const retweetRatio =
       sampled.length > 0 ? sampled.filter((t) => t.isRetweet).length / sampled.length : 0
     const hasBaitRetweetPattern = sampled.length >= 5 && retweetRatio >= 0.8
+    const isGiveawayFocused = isGiveawayFocusedRetweetSample(sampled)
 
     const hasMassFollowingPattern = isMassFollowingPattern(followingCount, followersCount)
 
@@ -102,7 +114,8 @@ export const spamRule: LabelRule = {
     // 単一シグナルだけの誤検知を防ぐガードとして維持する。
     // 一方、リツイート主体の釣り的タイムラインと大量フォローが両方同時に強く出ているアカウントは、
     // 単一シグナルの正当な挙動とは考えにくいため、bio 勧誘文言が無くても独立に検出対象とする。
-    const hasStrongEngagementInflation = hasBaitRetweetPattern && hasMassFollowingPattern
+    const hasStrongEngagementInflation =
+      hasBaitRetweetPattern && hasMassFollowingPattern && !isGiveawayFocused
     const value =
       hasStrongEngagementInflation ||
       (hasAnySolicitation && (hasBaitRetweetPattern || hasMassFollowingPattern))
@@ -157,7 +170,7 @@ export const spamRule: LabelRule = {
     return {
       value,
       confidence: toConfidence(value, finalEvidenceScore, evaluable),
-      reason: `bio solicitation=${hasSolicitation}, tweetSolicitationCount=${tweetSolicitationCount}, retweetRatio=${retweetRatio.toFixed(2)} (n=${sampled.length}), followingCount=${followingCount}, followersCount=${followersCount}, lowEffortSignalCount=${lowEffortSignalCount}`,
+      reason: `bio solicitation=${hasSolicitation}, tweetSolicitationCount=${tweetSolicitationCount}, retweetRatio=${retweetRatio.toFixed(2)} (n=${sampled.length}), giveawayFocused=${isGiveawayFocused}, followingCount=${followingCount}, followersCount=${followersCount}, lowEffortSignalCount=${lowEffortSignalCount}`,
       evaluable,
     }
   },

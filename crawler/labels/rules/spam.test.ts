@@ -230,6 +230,84 @@ describe('spamRule', () => {
     expect(result.value).toBe(true)
   })
 
+  it('is false for giveaway-focused retweets and mass following without solicitation', () => {
+    const tweets: AccountFeatureBundle['recentTweets'] = Array.from({ length: 8 }, (_, index) => ({
+      id: `giveaway-${index}`,
+      fullText: `RT @brand: 懸賞プレゼント応募企画 ${index}`,
+      createdAt: new Date(),
+      retweetCount: 0,
+      likeCount: 0,
+      isReply: false,
+      isRetweet: true,
+      isPromoted: false,
+      isPaidPromotion: false,
+    }))
+    const result = spamRule.evaluate(
+      makeBundle(
+        {
+          bio: '懸賞に応募しています',
+          followersCount: 10,
+          followingCount: 800,
+          recentTweetsFetchStatus: 'success',
+        },
+        tweets,
+      ),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('recognizes retweeted campaign entries as giveaway activity', () => {
+    const tweets: AccountFeatureBundle['recentTweets'] = Array.from({ length: 8 }, (_, index) => ({
+      id: `campaign-entry-${index}`,
+      fullText: `RT @brand: フォロー&RTでキャンペーン応募 抽選でプレゼント ${index}`,
+      createdAt: new Date(),
+      retweetCount: 0,
+      likeCount: 0,
+      isReply: false,
+      isRetweet: true,
+      isPromoted: false,
+      isPaidPromotion: false,
+    }))
+    const result = spamRule.evaluate(
+      makeBundle(
+        {
+          bio: '日常アカウントです',
+          followersCount: 10,
+          followingCount: 800,
+          recentTweetsFetchStatus: 'success',
+        },
+        tweets,
+      ),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('keeps a clear solicitation label when giveaway retweets coexist with solicitation in the bio', () => {
+    const tweets: AccountFeatureBundle['recentTweets'] = Array.from({ length: 8 }, (_, index) => ({
+      id: `giveaway-solicitation-${index}`,
+      fullText: `RT @brand: 懸賞プレゼント応募企画 ${index}`,
+      createdAt: new Date(),
+      retweetCount: 0,
+      likeCount: 0,
+      isReply: false,
+      isRetweet: true,
+      isPromoted: false,
+      isPaidPromotion: false,
+    }))
+    const result = spamRule.evaluate(
+      makeBundle(
+        {
+          bio: '稼げる副業を紹介します',
+          followersCount: 10,
+          followingCount: 800,
+          recentTweetsFetchStatus: 'success',
+        },
+        tweets,
+      ),
+    )
+    expect(result.value).toBe(true)
+  })
+
   it('is false for mass-following alone (no bait retweet ratio) without a solicitation bio', () => {
     const result = spamRule.evaluate(
       makeBundle({ bio: '日常アカウントです', followersCount: 10, followingCount: 800 }),

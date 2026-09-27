@@ -35,6 +35,7 @@ function tweet(
     likeCount: 0,
     isReply: false,
     isRetweet: false,
+    hasMedia: false,
     isPromoted: false,
     isPaidPromotion: false,
     expandedUrls: [],
@@ -83,6 +84,46 @@ describe('bareLinkSpamRule', () => {
       ]),
     )
     expect(result.value).toBe(true)
+  })
+
+  it('excludes media-only posts from the link spam cohort', () => {
+    const result = bareLinkSpamRule.evaluate(
+      makeBundle([
+        ...Array.from({ length: 5 }, (_, index) => ({
+          ...bareLinkTweet(`media-${index}`),
+          hasMedia: true,
+        })),
+        ...Array.from({ length: 5 }, (_, index) => bareLinkTweet(`link-${index}`)),
+      ]),
+    )
+    expect(result.value).toBe(true)
+    expect(result.reason).toContain('n=5/5')
+  })
+
+  it('does not label an account whose observed link-only posts all have media', () => {
+    const result = bareLinkSpamRule.evaluate(
+      makeBundle(
+        Array.from({ length: 5 }, (_, index) => ({
+          ...bareLinkTweet(`media-${index}`),
+          hasMedia: true,
+        })),
+      ),
+    )
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(true)
+  })
+
+  it('does not treat posts with unknown media status as link-only evidence', () => {
+    const result = bareLinkSpamRule.evaluate(
+      makeBundle(
+        Array.from({ length: 5 }, (_, index) => bareLinkTweet(`unknown-${index}`)).map((item) => ({
+          ...item,
+          hasMedia: null,
+        })),
+      ),
+    )
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
   })
 
   it('is false when most of own posts have a caption alongside the link', () => {

@@ -27,6 +27,7 @@ export interface RawTweetResult {
     favoriteCount: number
     replyCount: number
     quoteCount: number
+    conversationIdStr?: string | null
     inReplyToStatusIdStr: string | null
     retweetedStatusIdStr: string | null
     isPromoted?: boolean
@@ -37,6 +38,7 @@ export interface RawTweetResult {
     cardDestinationUrlsEvaluated?: boolean
     entities?: {
       urls?: { url: string; expandedUrl?: string }[]
+      media?: { type: string; sourceUserIdStr?: string | null }[]
     }
     extendedEntities?: {
       media?: { type: string; sourceUserIdStr?: string | null }[]
@@ -89,12 +91,14 @@ export interface NormalizedTweet {
   replyCount: number
   quoteCount: number
   isReply: boolean
+  conversationId?: string | null
   inReplyToTweetId: string | null
   isAuthorReply: boolean
   isRetweet: boolean
   retweetedTweetId: string | null
   isPromoted: boolean
   isPaidPromotion: boolean
+  hasMedia?: boolean | null
   expandedUrls?: string[]
   cardDestinationUrls?: string[]
   cardDestinationUrlsEvaluated?: boolean
@@ -148,6 +152,12 @@ function mergeForeignVideoSourceCount(
   return Math.max(current, previous)
 }
 
+function mergeHasMedia(current: boolean | null | undefined, previous: boolean | null | undefined) {
+  if (current === true || previous === true) return true
+  if (current === false || previous === false) return false
+  return null
+}
+
 /**
  * 同一ツイートが複数の取得経路で観測された際、
  * 広告開示メタデータや引用先の `legacy` を保持しているのは一部の経路だけということがあり得るため、
@@ -173,6 +183,7 @@ export function mergeTweetAdFlags(tweets: NormalizedTweet[]): NormalizedTweet[] 
       cardDestinationUrlsEvaluated:
         (tweet.cardDestinationUrlsEvaluated ?? false) ||
         (existing?.cardDestinationUrlsEvaluated ?? false),
+      hasMedia: mergeHasMedia(tweet.hasMedia, existing?.hasMedia),
       foreignVideoSourceCount: mergeForeignVideoSourceCount(
         tweet.foreignVideoSourceCount,
         existing?.foreignVideoSourceCount,
@@ -213,6 +224,8 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
           media.sourceUserIdStr !== raw.user.restId,
       ).length ?? 0)
     : null
+  const media = raw.legacy.extendedEntities?.media ?? raw.legacy.entities?.media
+  const hasMedia = media === undefined ? null : media.length > 0
 
   return {
     id: raw.restId,
@@ -224,6 +237,7 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
     replyCount: raw.legacy.replyCount,
     quoteCount: raw.legacy.quoteCount,
     isReply,
+    conversationId: raw.legacy.conversationIdStr ?? null,
     inReplyToTweetId: raw.legacy.inReplyToStatusIdStr,
     isAuthorReply: isReply && raw.user.restId === context.viewerAccountId,
     isRetweet,
@@ -233,6 +247,7 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
     expandedUrls,
     cardDestinationUrls: raw.legacy.cardDestinationUrls ?? [],
     cardDestinationUrlsEvaluated: raw.legacy.cardDestinationUrlsEvaluated ?? false,
+    hasMedia,
     hasAiGeneratedMedia: raw.legacy.hasAiGeneratedMedia ?? null,
     aiGeneratedDetectionSource: raw.legacy.aiGeneratedDetectionSource ?? null,
     foreignVideoSourceCount,

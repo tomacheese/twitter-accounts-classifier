@@ -61,6 +61,21 @@ describe('topicFitnessRule', () => {
     ).toBe(false)
   })
 
+  it('does not classify combat-sports spectators using follow-graph evidence alone', () => {
+    const bundle = {
+      ...makeBundle({ bio: '格闘技観戦が趣味です' }),
+      followGraphLabelSignals: {
+        topic_fitness: {
+          followeeLabeledCount: 10,
+          followeeTotalCount: 15,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    }
+    expect(topicFitnessRule.evaluate(bundle).value).toBe(false)
+  })
+
   it('bio・ツイートにキーワードを含まず、フォローグラフシグナルがしきい値を満たす場合は value: true・confidence が 0.5 超になる', () => {
     const bundle = {
       ...makeBundle({}),

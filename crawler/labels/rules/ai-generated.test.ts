@@ -119,6 +119,109 @@ describe('aiGeneratedRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it('is false for a generative AI development agency description without an explicit content declaration', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: 'AIエージェント開発の受託も募集中です' })).value,
+    ).toBe(false)
+  })
+
+  it('is false for a company recruiting bio about generative AI as a business area', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: '生成AI専門の会社で採用を担当しています' })).value,
+    ).toBe(false)
+  })
+
+  it('is false for generative AI community leadership without a content declaration', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: '架空の生成AI研究会リーダー。コミュニティ運営' }))
+        .value,
+    ).toBe(false)
+  })
+
+  it('is false for quality assurance and verification work about generative AI', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: '生成AIの品質保証・検証をしています' })).value,
+    ).toBe(false)
+  })
+
+  it('keeps an explicit content declaration when the bio also prohibits unauthorized reposts', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: 'AI-generated images. 無断転載禁止。' })).value,
+    ).toBe(true)
+  })
+
+  it('is false for an AI policy opinion that links to an external article', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({ bio: '生成AIの是非についての見解はこちら https://example.test/opinion' }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('keeps an explicit content declaration when the bio also links to an AI policy opinion', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({
+          bio: 'AI-generated images. 生成AIの是非についての見解 https://example.test/opinion',
+        }),
+      ).value,
+    ).toBe(true)
+  })
+
+  it('does not treat a music-generation hobby as a declaration of posted AI content', () => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio: '音楽生成AIに興味があります' })).value).toBe(
+      false,
+    )
+  })
+
+  it('does not treat AI use in note-writing work as a declaration of AI-generated posts', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({ bio: '生成AIとテンプレで売上につながる時短育成noteを販売' }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('is false for a bio describing generative AI as a discussion topic', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: '日常と生成AI、LLMに関する話題を投稿' })).value,
+    ).toBe(false)
+  })
+
+  it('is false for hobby use of generative AI without a posting declaration', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: '完全に趣味垢。今は生成AIで遊んでる' })).value,
+    ).toBe(false)
+  })
+
+  it('is false for generative AI image creation mentioned among general interests', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({ bio: '好きなもの: 猫、ゲーム、競馬、生成AIの画像作成' }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('is false for local image generation used to explore prompts without sharing output', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({ bio: '画像生成AIがローカルで使えたのでプロンプトを考えています' }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('keeps a self-declaration that explicitly says generated images are posted', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: '趣味で生成AI画像を投稿しています' })).value,
+    ).toBe(true)
+  })
+
+  it('keeps an explicit declaration of publishing AI-generated music', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: '生成AIで作った音楽を配信しています' })).value,
+    ).toBe(true)
+  })
+
   it('is false for a researcher/professor bio that mentions generative AI via a book title, not a self-declaration', () => {
     const result = aiGeneratedRule.evaluate(
       makeBundle({
