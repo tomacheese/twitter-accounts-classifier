@@ -249,6 +249,24 @@ function priorityRateLimitRetry(
     })
 }
 
+/**
+ * 投稿者単位の API 呼び出しでは、短い quota reset を待って再試行する。
+ * @param deps - wait を注入する crawl dependencies
+ * @param trackRetryWait - account phase の待ち時間を記録する tracker
+ * @param operation - 実行する API 呼び出し
+ * @returns 成功した API 応答
+ */
+function authorApiRetry<T>(
+  deps: CrawlDependencies,
+  trackRetryWait: (ms: number) => void,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return priorityRateLimitRetry(
+    deps,
+    trackRetryWait,
+  )(() => withTwitterRetry(operation, retryOptions(deps, trackRetryWait)))
+}
+
 /** measurePhaseDuration の結果。 */
 export interface PhaseDurationResult<T> {
   value: T
@@ -726,16 +744,14 @@ export async function runAuthorUnitPhase(
 
       profile = hasValidEmbeddedProfile
         ? embeddedProfile
-        : await withTwitterRetry(
-            () => fetchAccountProfile(userApi, authorId),
-            retryOptions(deps, trackAuthorRetryWait),
+        : await authorApiRetry(deps, trackAuthorRetryWait, () =>
+            fetchAccountProfile(userApi, authorId),
           )
 
       recentTweetsAttemptedAt = new Date()
       const { tweets: recentTweets, authors: fallbackAuthors } = await guardTimelineFetch(() =>
-        withTwitterRetry(
-          () => fetchRecentTweets(userApi, authorId, deps.limits.recentTweetsPerAccount),
-          retryOptions(deps, trackAuthorRetryWait),
+        authorApiRetry(deps, trackAuthorRetryWait, () =>
+          fetchRecentTweets(userApi, authorId, deps.limits.recentTweetsPerAccount),
         ),
       )
       const recentTweetsFetchedAt = new Date()

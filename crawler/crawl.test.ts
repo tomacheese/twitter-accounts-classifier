@@ -2774,6 +2774,61 @@ describe('runCrawlCycle', () => {
     },
   )
 
+  it('waits for a short rate-limit reset when fetching author data', async () => {
+    const author = rawUser('author1', '')
+    const tweet = rawTweet('tweet1', author)
+    const resetAt = Math.ceil((Date.now() + 5000) / 1000)
+    const rateLimitError = responseError(
+      429,
+      new Headers({
+        'X-Rate-Limit-Limit': '500',
+        'X-Rate-Limit-Remaining': '0',
+        'X-Rate-Limit-Reset': String(resetAt),
+      }),
+    )
+    const getUserByRestId = vi
+      .fn()
+      .mockRejectedValueOnce(rateLimitError)
+      .mockResolvedValue({ data: author })
+    const getUserTweetsAndReplies = vi
+      .fn()
+      .mockRejectedValueOnce(rateLimitError)
+      .mockResolvedValue({ data: { data: [] } })
+    const deps = makeDeps({
+      createOpenApiClient: vi.fn().mockResolvedValue({
+        client: {
+          getTweetApi: () => ({
+            getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: [tweet] } }),
+            getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+          }),
+          getUserApi: () => ({
+            getUserByRestId,
+            getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+            getUserTweetsAndReplies,
+          }),
+          getUserListApi: () => ({
+            getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+          getBlocksApi: () => ({
+            getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+          }),
+        },
+      }),
+    })
+
+    await runCrawlCycle(deps)
+
+    expect(getUserByRestId).toHaveBeenCalledTimes(2)
+    expect(getUserTweetsAndReplies).toHaveBeenCalledTimes(2)
+    expect(deps.sleep).toHaveBeenCalledTimes(2)
+    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
+      expect.objectContaining({ retryWaitMs: expect.any(Number) }),
+    )
+  })
+
   it('treats a 404 ResponseError as an expected unavailable account', async () => {
     const author = rawUser('author1')
     const tweet = rawTweet('tweet1', author)
