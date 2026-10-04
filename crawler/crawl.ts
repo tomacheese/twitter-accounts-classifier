@@ -261,10 +261,7 @@ function authorApiRetry<T>(
   trackRetryWait: (ms: number) => void,
   operation: () => Promise<T>,
 ): Promise<T> {
-  return priorityRateLimitRetry(
-    deps,
-    trackRetryWait,
-  )(() => withTwitterRetry(operation, retryOptions(deps, trackRetryWait)))
+  return priorityRateLimitRetry(deps, trackRetryWait)(operation)
 }
 
 /** measurePhaseDuration の結果。 */
