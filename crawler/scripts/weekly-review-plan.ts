@@ -5,7 +5,8 @@ import { PrismaWeeklyReviewPlanningDataSource } from '../weekly-review/prisma-re
 import { PrismaWeeklyReviewRunPlanStore } from '../weekly-review/prisma-review-plan-run-store'
 import { runWeeklyReviewPlanCli } from '../weekly-review/weekly-review-plan-cli'
 
-export const PLANNING_TRANSACTION_TIMEOUT_MS = 120_000
+// 直列クエリが cold cache で長時間化し得るため、長めの timeout を与える。
+export const PLANNING_TRANSACTION_TIMEOUT_MS = 600_000
 export const PLANNING_TRANSACTION_MAX_WAIT_MS = 10_000
 
 /**
