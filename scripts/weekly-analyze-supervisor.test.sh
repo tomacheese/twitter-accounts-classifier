@@ -114,7 +114,21 @@ cat > "$STALE_SHIMS/tmux" <<'SCRIPT'
 #!/bin/sh
 if [ "${1:-}" = new-session ]; then
   printf '%s\n' "$*" > "$TMUX_ARGS"
-  printf '%s\n' "${DATABASE_URL:-}" > "$TMUX_DATABASE_URL"
+  # 実 tmux は引数のコマンドをクライアント環境なしで起動するため、引数から組み立てて再現する
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      *'DATABASE_URL=$(cat'*)
+        script="$1"
+        file="$3"
+        shift 3
+        env -u DATABASE_URL /bin/sh -c "$script" sh "$file" /bin/sh -c \
+          'printf "%s\n" "${DATABASE_URL:-}" > "$TMUX_DATABASE_URL"'
+        [ ! -e "$file" ] || : > "$TMUX_DATABASE_URL.leftover"
+        break
+        ;;
+    esac
+    shift
+  done
 fi
 if [ "${1:-}" = has-session ]; then
   count=0
@@ -139,8 +153,13 @@ grep -q 'exceeded staleAfterAt=' "$STALE_CASE/repo/logs/weekly-analyze.log" || \
   fail 'stale timeout was not recorded in the supervisor log'
 grep -Fq -- "-e PATH=$STALE_SHIMS:" "$TMUX_ARGS" || \
   fail 'tmux session did not receive the cron-repaired PATH explicitly'
-grep -Fq -- '-e DATABASE_URL -e WEEKLY_ANALYSIS_RUN_ID=run1' "$TMUX_ARGS" || \
-  fail 'tmux session did not inherit the weekly-review DATABASE_URL by variable name'
+grep -Fq -- '-e WEEKLY_ANALYSIS_RUN_ID=run1' "$TMUX_ARGS" || \
+  fail 'tmux session did not receive WEEKLY_ANALYSIS_RUN_ID'
+if grep -Fq -- '-e DATABASE_URL' "$TMUX_ARGS"; then
+  fail 'tmux -e DATABASE_URL without a value does not forward the variable'
+fi
+[ ! -e "$TMUX_DATABASE_URL.leftover" ] || \
+  fail 'DATABASE_URL temp file was not removed by the session wrapper'
 grep -Fq -- '-e WEEKLY_REVIEW_PLAN_FILE=' "$TMUX_ARGS" || \
   fail 'tmux session did not receive the review plan file path'
 grep -Fq -- '-e WEEKLY_REVIEW_RESULT_FILE=' "$TMUX_ARGS" || \
