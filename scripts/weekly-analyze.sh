@@ -81,6 +81,7 @@ WORKTREE_DIR="$(pwd)/.worktrees/weekly-crawl-review-$RUN_ID"
 WORKTREE_BRANCH="weekly-crawl-review-$RUN_ID"
 DIAGNOSTICS_DIR="$(pwd)/logs/weekly-analysis-runs/$RUN_ID"
 TMUX_SESSION_STARTED=0
+DATABASE_URL_FILE=""
 TMUX_PANE_PID=""
 TMUX_CLEANED=0
 
@@ -123,6 +124,7 @@ cleanup_tmux_review_processes() {
 # 放置しないよう、終了時に status を確認しまだ running であれば失敗として終端させる。
 finalize_run_on_unexpected_exit() {
   EXIT_CODE=$?
+  [ -z "$DATABASE_URL_FILE" ] || rm -f "$DATABASE_URL_FILE"
   cleanup_tmux_review_processes || \
     echo "[weekly-analyze] failed to terminate weekly-review tmux processes during supervisor exit" >&2
   if ! cleanup_run_backends; then
@@ -312,11 +314,16 @@ export WEEKLY_REVIEW_PLAN_FILE="$REVIEW_PLAN_FILE"
 export WEEKLY_REVIEW_RESULT_FILE="$REVIEW_RESULT_FILE"
 
 echo "[weekly-analyze] starting weekly crawl review at $(date -Iseconds) in tmux session $SESSION_NAME"
+# tmux の -e は NAME=value 形式しか受け付けず、値なしの -e NAME はクライアント環境を引き継がない。
+# 値を引数に載せると ps に接続文字列が露出するため、0600 の一時ファイル経由で渡す。
+DATABASE_URL_FILE="$(umask 077 && mktemp)"
+printf '%s' "$DATABASE_URL" > "$DATABASE_URL_FILE"
 "$TMUX_BIN" new-session -d -s "$SESSION_NAME" -c "$WORKTREE_DIR" \
-  -e "PATH=$PATH" -e DATABASE_URL -e "WEEKLY_ANALYSIS_RUN_ID=$RUN_ID" \
+  -e "PATH=$PATH" -e "WEEKLY_ANALYSIS_RUN_ID=$RUN_ID" \
   -e "WEEKLY_REVIEW_PLAN_FILE=$REVIEW_PLAN_FILE" \
   -e "WEEKLY_REVIEW_RESULT_FILE=$REVIEW_RESULT_FILE" -e "PGAPPNAME=$PGAPPNAME" \
-  "$CLAUDE_BIN" --agent weekly-review-coordinator --permission-mode auto \
+  sh -c 'DATABASE_URL=$(cat "$1") || exit 1; rm -f "$1"; export DATABASE_URL; shift; exec "$@"' \
+  sh "$DATABASE_URL_FILE" "$CLAUDE_BIN" --agent weekly-review-coordinator --permission-mode auto \
   --add-dir="$DIAGNOSTICS_DIR" \
   "Run the weekly review from the precomputed review plan. Use the weekly-crawl-review skill and make any needed fixes."
 TMUX_SESSION_STARTED=1
