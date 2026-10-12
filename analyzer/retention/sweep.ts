@@ -36,18 +36,12 @@ async function sweepWorkItems(
   prisma: PrismaClient,
   now: Date,
 ): Promise<{ deletedWorkItemCount: number }> {
-  const eligibleWorkItems = await prisma.analysisWorkItem.findMany({
+  // id IN で列挙すると PostgreSQL のバインド変数上限を超え得るため、述語を直接渡す。
+  const workItemResult = await prisma.analysisWorkItem.deleteMany({
     where: {
       status: { in: TERMINAL_WORK_ITEM_STATUSES },
       updatedAt: { lt: daysBefore(now, WORK_ITEM_RETENTION_DAYS) },
     },
-    select: { id: true },
-  })
-  if (eligibleWorkItems.length === 0) return { deletedWorkItemCount: 0 }
-
-  const eligibleWorkItemIds = eligibleWorkItems.map((workItem) => workItem.id)
-  const workItemResult = await prisma.analysisWorkItem.deleteMany({
-    where: { id: { in: eligibleWorkItemIds } },
   })
 
   return { deletedWorkItemCount: workItemResult.count }
