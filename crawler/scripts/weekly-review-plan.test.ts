@@ -19,7 +19,7 @@ describe('runPlanningTransaction', () => {
     const options = transaction.mock.calls[0]?.[1] as Record<string, unknown>
     expect(options).toEqual({
       isolationLevel: 'RepeatableRead',
-      timeout: 120_000,
+      timeout: 600_000,
       maxWait: PLANNING_TRANSACTION_MAX_WAIT_MS,
     })
   })
