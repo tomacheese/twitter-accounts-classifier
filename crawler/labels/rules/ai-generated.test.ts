@@ -515,4 +515,21 @@ describe('aiGeneratedRule', () => {
     )
     expect(result.value).toBe(false)
   })
+
+  it.each([
+    ['dislike of generative AI', '犬と暮らしています。生成AI苦手です。'],
+    ['a qualification list ending in a topic pairing', '簿記2級、ビジ法2級、生成AI×著作権法'],
+    ['an English-spelled podcast operator', '生成AIが好きで、Podcast作ったりしてます！'],
+    ['a contract-development offer with a topic hashtag', 'Web開発 / 受託もDMにて募集 / #生成AI'],
+  ])('is false for a bio mentioning generative AI via %s', (_label, bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('stays true for an explicit self-declaration even when a podcast is also mentioned', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({ bio: 'AI生成のイラストを投稿しています。Podcastもやっています。' }),
+      ).value,
+    ).toBe(true)
+  })
 })

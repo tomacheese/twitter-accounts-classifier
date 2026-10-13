@@ -276,4 +276,18 @@ describe('topicPoliticsRule', () => {
       expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
     },
   )
+
+  it.each(['自民党党員ではありません', '共産党党員じゃないです', '公明党所属ではなく無所属です'])(
+    'does not treat a denial of party membership as a self-declaration (%s)',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('keeps a party membership statement positive when a later sentence uses a denial', () => {
+    expect(
+      topicPoliticsRule.evaluate(makeBundle({ bio: '自民党党員です。選挙の話題ではありません' }))
+        .value,
+    ).toBe(true)
+  })
 })

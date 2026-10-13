@@ -11,9 +11,16 @@ const JAPANESE_SCRIPT_PATTERN = /[぀-ヿ一-鿿]/
 // 絵文字を多用するが実際の文字を含む正当な非日本語投稿とは Letter の有無で区別できる。
 const LETTER_PATTERN = /\p{L}/u
 
+// ハッシュタグは本文の言語と無関係に作品名などの日本語を含みうるため、言語判定の対象から除く。
+const HASHTAG_PATTERN = /[#＃][^\s#＃]+/g
+
+function languageBody(text: string): string {
+  return stripUrlMentionAndRetweetPrefix(text).replaceAll(HASHTAG_PATTERN, ' ')
+}
+
 // 装飾記号のみで構成される投稿は、日本語か否かに関わらず言語のシグナルを持たない空サンプルにすぎない。
 function hasScriptContent(text: string): boolean {
-  return LETTER_PATTERN.test(stripUrlMentionAndRetweetPrefix(text))
+  return LETTER_PATTERN.test(languageBody(text))
 }
 
 const MIN_SAMPLE_PER_SIDE = 3
@@ -21,14 +28,16 @@ const SCRIPT_MISMATCH_THRESHOLD = 0.7
 
 function japaneseScriptRatio(texts: string[]): number {
   if (texts.length === 0) return 0
-  return texts.filter((text) => JAPANESE_SCRIPT_PATTERN.test(text)).length / texts.length
+  return (
+    texts.filter((text) => JAPANESE_SCRIPT_PATTERN.test(languageBody(text))).length / texts.length
+  )
 }
 
 export const replyLanguageMismatchRule: LabelRule = {
   key: 'reply_language_mismatch',
   description:
     '自身のツイートは特定の言語体系にほぼ偏っているが、リプライ(自身のリプライを自己リツイートしているものを含む)では無関係な対象読者向けに突然言語が切り替わる。エンゲージメント稼ぎボットネットワークの特徴',
-  version: '1.4.0',
+  version: '1.4.1',
   evaluate(bundle) {
     const { screenName } = bundle.account
     // リンクのみの投稿はスクリプト比率が常に0になり、

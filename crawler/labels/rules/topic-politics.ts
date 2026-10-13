@@ -47,6 +47,13 @@ const NEGATION_PREFIX_WINDOW_LENGTH = 10
 const FORMER_OFFICE_HOLDER_PATTERN = /(?:元|前)[^\s、,。！?・\p{Script=Hiragana}]{0,6}$/u
 const OTHER_NEGATION_PREFIX_PATTERN = /非\s*$|\bformer\s*$/i
 
+// 「党員ではありません」のように、一致直後の「ではない」系の否定は所属の否定を述べている。
+const TRAILING_DENIAL_PATTERN = /^\s*(?:では|じゃ)(?:あり|ない|なく)/
+
+function isDeniedMention(bio: string, matchEndIndex: number): boolean {
+  return TRAILING_DENIAL_PATTERN.test(bio.slice(matchEndIndex, matchEndIndex + 6))
+}
+
 function isNegatedOfficeMention(bio: string, matchIndex: number): boolean {
   const beforeMatch = bio.slice(Math.max(0, matchIndex - NEGATION_PREFIX_WINDOW_LENGTH), matchIndex)
   return (
@@ -96,6 +103,7 @@ function matchesCurrentOffice(bio: string, pattern: RegExp): boolean {
   while ((match = pattern.exec(bio)) !== null) {
     if (
       !isNegatedOfficeMention(bio, match.index) &&
+      !isDeniedMention(bio, match.index + match[0].length) &&
       !isAspirationMention(bio, match.index) &&
       !isPastCareerListingMention(bio, match.index + match[0].length)
     ) {
@@ -111,7 +119,7 @@ export const topicPoliticsRule: LabelRule = {
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.9.0',
+  version: '1.9.1',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =
