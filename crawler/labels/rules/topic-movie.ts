@@ -63,8 +63,8 @@ function isHashtagListOnlyBio(bio: string, match: RegExpExecArray): boolean {
   return matchIsInHashtag && prose.length === 0
 }
 
-// 最初の一致だけで除外判定すると、「Design/Movie/Illust。映画が好きです」のように
-// タグ列挙の後に本物の自己申告が続く bio を見逃すため、除外されない一致が1件でもあれば true とする。
+// 最初の一致だけで除外判定すると、タグ列挙の後に続く本物の自己申告を見逃す。
+// そのため、除外されない一致が1件でもあれば true とする。
 function hasNonExcludedMovieMatch(bio: string): boolean {
   MOVIE_PATTERN.lastIndex = 0
   let match: RegExpExecArray | null
