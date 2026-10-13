@@ -223,6 +223,7 @@ describe('topicNsfwRule', () => {
     '日常垢です。NSFW（@alice_sub）',
     '雑多垢です。R18弟@alice_sub',
     '雑多垢です。R-18はサブサイトにて公開しています',
+    '雑多垢です。R18はpixivにて公開しています',
     '家族みんなでやってます @alice_R18 @bob_nsfw',
     '日常垢です。18禁もの投稿用(未成年の方はご遠慮ください)→@alice_sub',
     '家族設定 お母さん　ほげ（R18）(a)alice_sub',
@@ -238,5 +239,16 @@ describe('topicNsfwRule', () => {
       topicNsfwRule.evaluate(makeBundle({ bio: 'R18イラストを投稿しています。連絡は @alice_sub' }))
         .value,
     ).toBe(true)
+  })
+
+  it.each([
+    'NSFW drawings and art',
+    'R18イラストを描いています。未成年の方はフォロー厳禁',
+    'R18絵を描いています。無断転載禁止',
+    'R-18あり。苦手な方はブロックしてください',
+    'NSFWアカです。未成年NG',
+    'R18です@alice_sub',
+  ])('is true for a self-declaration that is not a rejection or redirect (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
   })
 })

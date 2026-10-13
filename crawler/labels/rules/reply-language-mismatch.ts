@@ -12,7 +12,7 @@ const JAPANESE_SCRIPT_PATTERN = /[぀-ヿ一-鿿]/
 const LETTER_PATTERN = /\p{L}/u
 
 // ハッシュタグは本文の言語と無関係に作品名などの日本語を含みうるため、言語判定の対象から除く。
-const HASHTAG_PATTERN = /[#＃][^\s#＃]+/g
+const HASHTAG_PATTERN = /[#＃][\p{L}\p{N}_]+/gu
 
 function languageBody(text: string): string {
   return stripUrlMentionAndRetweetPrefix(text).replaceAll(HASHTAG_PATTERN, ' ')

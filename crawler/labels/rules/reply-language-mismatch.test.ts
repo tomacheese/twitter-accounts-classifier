@@ -196,4 +196,15 @@ describe('replyLanguageMismatchRule', () => {
       true,
     )
   })
+
+  it('keeps Japanese body text that directly follows a hashtag without whitespace', () => {
+    const own = Array.from({ length: 3 }, () =>
+      tweet({ fullText: 'Look #tag。今日も絵を描きました' }),
+    )
+    const replies = Array.from({ length: 3 }, () =>
+      tweet({ fullText: '@bob nice one!', isReply: true }),
+    )
+    const result = replyLanguageMismatchRule.evaluate(makeBundle({}, [...own, ...replies]))
+    expect(result.reason).toContain('ownJapaneseRatio=1.00')
+  })
 })

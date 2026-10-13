@@ -532,4 +532,11 @@ describe('aiGeneratedRule', () => {
       ).value,
     ).toBe(true)
   })
+
+  it('stays true for an explicit self-declaration that mentions an unrelated dislike', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: 'AI生成イラストを投稿しています。虫が苦手です' }))
+        .value,
+    ).toBe(true)
+  })
 })

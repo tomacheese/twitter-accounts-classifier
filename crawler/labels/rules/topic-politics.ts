@@ -7,7 +7,7 @@ import type { LabelRule } from '../types'
 // 誤検知を避けて具体的な政党名や公職名のみに限定している。
 // 英単語は無関係な語の内部に一致しないよう単語境界で判定している。
 const PARTY_AFFILIATION_PATTERN =
-  /(?:自民党|立憲民主党|公明党|共産党|日本維新の会|国民民主党|れいわ新選組|参政党)(?:\s*(?:所属(?!の?(?:国会|衆議院|参議院|県議会|市議会)?議員等)|党員|公認|支部長))/gi
+  /(?:自民党|立憲民主党|公明党|共産党|日本維新の会|国民民主党|れいわ新選組|参政党)(?:\s*(?:所属(?!の?(?:国会|衆議院|参議院|県議会|市議会)?議員等)|党員|員|公認|支部長))/gi
 // 修飾語を伴わない裸の公職名も、congressman/senator/politician と同様に
 // 自己申告以外の文脈 (願望・他者評など) で文末に現れうるため、無条件の文末一致 ($) は対象としない。
 // 具体的な議席名 (市議会議員など) は、
@@ -44,14 +44,15 @@ const ENGLISH_ADMINISTRATIVE_OFFICE_SELF_IDENTIFICATION_PATTERN =
 // 直前の短い非ひらがな区間(地名相当)まで許容して判定する。
 // ひらがなを挟む場合は「前から」のような無関係な文脈とみなし対象外にする。
 const NEGATION_PREFIX_WINDOW_LENGTH = 10
-const FORMER_OFFICE_HOLDER_PATTERN = /(?:元|前)[^\s、,。！?・\p{Script=Hiragana}]{0,6}$/u
+const FORMER_OFFICE_HOLDER_PATTERN =
+  /(?<!\p{Script=Han})(?:元|前(?!橋))[・\s]*[^\s、,。！?・\p{Script=Hiragana}]{0,6}$/u
 const OTHER_NEGATION_PREFIX_PATTERN = /非\s*$|\bformer\s*$/i
 
 // 「党員ではありません」のように、一致直後の「ではない」系の否定は所属の否定を述べている。
-const TRAILING_DENIAL_PATTERN = /^\s*(?:では|じゃ)(?:あり|ない|なく)/
+const TRAILING_DENIAL_PATTERN = /^\s*(?:では|じゃ)(?:ありません|ない|なく)/
 
 function isDeniedMention(bio: string, matchEndIndex: number): boolean {
-  return TRAILING_DENIAL_PATTERN.test(bio.slice(matchEndIndex, matchEndIndex + 6))
+  return TRAILING_DENIAL_PATTERN.test(bio.slice(matchEndIndex, matchEndIndex + 10))
 }
 
 function isNegatedOfficeMention(bio: string, matchIndex: number): boolean {
@@ -119,7 +120,7 @@ export const topicPoliticsRule: LabelRule = {
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.9.1',
+  version: '1.9.2',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =

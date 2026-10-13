@@ -179,4 +179,10 @@ describe('topicMovieRule', () => {
     const result = topicMovieRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it('is true when a genuine self-declaration follows a slash-delimited tag listing', () => {
+    expect(
+      topicMovieRule.evaluate(makeBundle({ bio: 'Design/Movie/Illust。映画が好きです' })).value,
+    ).toBe(true)
+  })
 })
