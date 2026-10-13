@@ -8,7 +8,7 @@ import type { LabelRule } from '../types'
 // 部分文字列になるため、topic-nsfw.ts の「アダルト」除外と同様に
 // 否定先読みで個別に除外している。
 const MOVIE_PATTERN =
-  /\b(movie|movies|film|cinema|moviegoer|cinephile)\b|映画|ドラマ(?!チック|ー)|洋画|邦画|映画館|映画鑑賞/i
+  /\b(movie|movies|film|cinema|moviegoer|cinephile)\b|映画|ドラマ(?!チック|ー)|洋画|邦画|映画館|映画鑑賞/gi
 
 const KEYWORD_SCORE = 0.8
 
@@ -63,20 +63,32 @@ function isHashtagListOnlyBio(bio: string, match: RegExpExecArray): boolean {
   return matchIsInHashtag && prose.length === 0
 }
 
+// 最初の一致だけで除外判定すると、タグ列挙の後に続く本物の自己申告を見逃す。
+// そのため、除外されない一致が1件でもあれば true とする。
+function hasNonExcludedMovieMatch(bio: string): boolean {
+  MOVIE_PATTERN.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = MOVIE_PATTERN.exec(bio)) !== null) {
+    if (
+      !isSlashDelimitedTagListItem(bio, match) &&
+      !isVibeListItem(bio, match) &&
+      !isHashtagListOnlyBio(bio, match)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 export const topicMovieRule: LabelRule = {
   key: 'topic_movie',
   description:
     'プロフィールの直接証拠、またはフォロー関係から映画・ドラマとの強い関連が示される。映画・ドラマ名がハッシュタグだけの列挙に現れる場合は直接証拠に含めない',
-  version: '1.6.0',
+  version: '1.6.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
-    const match = bio === null ? null : MOVIE_PATTERN.exec(bio)
-    const keywordMatch =
-      match !== null &&
-      !isSlashDelimitedTagListItem(bio ?? '', match) &&
-      !isVibeListItem(bio ?? '', match) &&
-      !isHashtagListOnlyBio(bio ?? '', match)
+    const keywordMatch = bio !== null && hasNonExcludedMovieMatch(bio)
     const followGraph = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_movie)
     const value = keywordMatch || followGraph.matched
     const evidenceScore = combineAlternatives([

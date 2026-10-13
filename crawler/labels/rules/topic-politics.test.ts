@@ -276,4 +276,33 @@ describe('topicPoliticsRule', () => {
       expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
     },
   )
+
+  it.each(['自民党党員ではありません', '共産党党員じゃないです', '公明党所属ではなく無所属です'])(
+    'does not treat a denial of party membership as a self-declaration (%s)',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('keeps a party membership statement positive when a later sentence uses a denial', () => {
+    expect(
+      topicPoliticsRule.evaluate(makeBundle({ bio: '自民党党員です。選挙の話題ではありません' }))
+        .value,
+    ).toBe(true)
+  })
+
+  it.each(['自民党員です', '立憲民主党員です', '自民党党員ではありますが活動は控えめです'])(
+    'is true for a bio declaring party membership (%s)',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it.each(['弘前市議会議員です', '前橋市議会議員です', '元・衆議院議員です', '元 市議会議員です'])(
+    'handles place names and separators around the former-office marker (%s)',
+    (bio) => {
+      const expected = !bio.startsWith('元')
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(expected)
+    },
+  )
 })
