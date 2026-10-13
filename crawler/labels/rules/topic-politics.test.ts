@@ -301,7 +301,7 @@ describe('topicPoliticsRule', () => {
   it.each(['弘前市議会議員です', '前橋市議会議員です', '元・衆議院議員です', '元 市議会議員です'])(
     'handles place names and separators around the former-office marker (%s)',
     (bio) => {
-      const expected = bio.startsWith('元') ? false : true
+      const expected = !bio.startsWith('元')
       expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(expected)
     },
   )
