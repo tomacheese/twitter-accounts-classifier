@@ -515,4 +515,76 @@ describe('aiGeneratedRule', () => {
     )
     expect(result.value).toBe(false)
   })
+
+  it.each([
+    [
+      'a usage-prohibition notice naming training',
+      '編集者です。投稿画像の無断転載及び無断使用、生成AIへの学習等を固く禁じます。',
+    ],
+    [
+      'a notice prohibiting generative-AI training without a destination particle',
+      '雑多ジャンル / 感想頂けたら嬉しい / 生成AI学習及び無断転載禁止',
+    ],
+    [
+      'an advocacy bio addressing generative-AI users',
+      '無断学習の法整備を求めています。生成AIユーザーには口が悪いです。無断学習やその被害に関する情報発信が中心',
+    ],
+    [
+      'a policy of blocking accounts that omit disclosure',
+      '雑談とライブ。生成AIを明記せずにツイートしているアカウントはブロックしています',
+    ],
+    ['a coding-assistant mention', '元トレーダー。最近はBotのコードはほぼ生成AIで書いてる'],
+    [
+      'a hobby verb "いじくってます"',
+      'MBTI少しかじってます / 画像生成AIをいじくってます / (サービスA、サービスBなど)',
+    ],
+    [
+      'a casual "もやってます" mention',
+      '主にゲームでポスト / 最近は生成AIもやってます。無言フォロー大歓迎です。',
+    ],
+    [
+      'a career-history mention',
+      '東京でSIer。仮想化とクラウドを経てAIとARに渡り生成AIへ。子育ての話が中心。',
+    ],
+  ])('is false for a bio with %s', (_label, bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('is true for a bio that declares posting generated illustrations', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: 'AI生成のイラストを投稿しています' })).value,
+    ).toBe(true)
+  })
+
+  it.each([
+    ['an immediate negation "ではない"', '手描きです。AI生成ではない'],
+    ['an immediate negation "なし"', '手描き中心です。AI生成なし'],
+    ['a "non-" prefix', 'Handmade, non-AI-generated art'],
+    ['a personal name that merely starts with "Ai"', 'Created by Aiden, a hobby web dev'],
+  ])('is false for a bio with %s', (_label, bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('is true when "なし" appears only after a self-declaration sentence', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: 'AI生成のイラストを投稿しています。質問箱なし' }))
+        .value,
+    ).toBe(true)
+  })
+
+  it('is true for a creator bio that follows other generative-AI users', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({ bio: 'AI生成しています。勉強のために生成AIユーザーさんをフォローします。' }),
+      ).value,
+    ).toBe(true)
+  })
+
+  it('is false for a bio refusing follows from generative-AI users', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({ bio: '雑談垢です。生成AIユーザーさんもフォローはごめんなさい。' }),
+      ).value,
+    ).toBe(false)
+  })
 })

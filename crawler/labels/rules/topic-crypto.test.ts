@@ -142,4 +142,27 @@ describe('topicCryptoRule', () => {
     const result = topicCryptoRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it.each([
+    'No BitCoin or Crypto. Politics and local news only.',
+    'NG: NFT and crypto and blockchain. Illustrator.',
+    'No NFT / Crypto / Web3 talk here',
+  ])('is false for a bio rejecting a whole list of crypto terms (%s)', (bio) => {
+    expect(topicCryptoRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    'Linux admin, nftables and firewall notes',
+    'Cryptozoology fan and cryptology student',
+    'Front-end dev using web3js samples',
+  ])('is false for a bio whose word merely starts with a crypto term (%s)', (bio) => {
+    expect(topicCryptoRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('is true for a bio listing crypto after an unrelated negation', () => {
+    expect(
+      topicCryptoRule.evaluate(makeBundle({ bio: 'No spam please. Bitcoin and NFT collector.' }))
+        .value,
+    ).toBe(true)
+  })
 })

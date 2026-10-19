@@ -44,7 +44,7 @@ const ENGLISH_ADMINISTRATIVE_OFFICE_SELF_IDENTIFICATION_PATTERN =
 // 直前の短い非ひらがな区間(地名相当)まで許容して判定する。
 // ひらがなを挟む場合は「前から」のような無関係な文脈とみなし対象外にする。
 const NEGATION_PREFIX_WINDOW_LENGTH = 10
-const FORMER_OFFICE_HOLDER_PATTERN = /(?:元|前)[^\s、,。！?・\p{Script=Hiragana}]{0,6}$/u
+const FORMER_OFFICE_HOLDER_PATTERN = /(?:元|前)\s?[^\s、,。！?・\p{Script=Hiragana}]{0,6}$/u
 const OTHER_NEGATION_PREFIX_PATTERN = /非\s*$|\bformer\s*$/i
 
 function isNegatedOfficeMention(bio: string, matchIndex: number): boolean {
@@ -111,7 +111,7 @@ export const topicPoliticsRule: LabelRule = {
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.9.0',
+  version: '1.9.1',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =

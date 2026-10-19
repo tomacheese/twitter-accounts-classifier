@@ -276,4 +276,36 @@ describe('topicPoliticsRule', () => {
       expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
     },
   )
+
+  it('is false for a tag-separated bio whose "元" is followed by a half-width space before the office title', () => {
+    expect(
+      topicPoliticsRule.evaluate(
+        makeBundle({
+          bio: '（株）サンプル研究所 所長｜元 大臣、元 衆議院議員｜https://t.co/exampleXXXX',
+        }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('is false for a bio mentioning that a think tank advises members of a party', () => {
+    expect(
+      topicPoliticsRule.evaluate(
+        makeBundle({
+          bio: 'サンプル政策センターの地方組織です。自民党所属国会議員等に政策提言を実施しています。',
+        }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('is false for a former office holder written with a half-width space and the full-width list separator', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: '会長｜元　市議会議員｜' })).value).toBe(
+      false,
+    )
+  })
+
+  it('is true for a current office holder after a "元" mention in an unrelated phrase', () => {
+    expect(
+      topicPoliticsRule.evaluate(makeBundle({ bio: '元気に活動中。市議会議員をしています' })).value,
+    ).toBe(true)
+  })
 })

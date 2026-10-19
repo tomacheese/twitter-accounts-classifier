@@ -2,10 +2,11 @@ import { rampScore, toConfidence } from '../confidence'
 import { stripUrlMentionAndRetweetPrefix } from '../text-similarity'
 import type { LabelRule } from '../types'
 
-// 完全な言語判定ではなく日本語スクリプト(ひらがな/カタカナ/漢字)の有無のみを判定する。
+// 完全な言語判定ではなく日本語スクリプト(ひらがな/カタカナ)の有無のみを判定する。
+// 漢字を含めると中国語の投稿を日本語と誤認するため、仮名の有無で判定している。
 // 既存のトピック系ルール群(topic_tech、topic_finance など)と同様、
 // このプロジェクトが対象とするのは日本語 Twitter であるため。
-const JAPANESE_SCRIPT_PATTERN = /[぀-ヿ一-鿿]/
+const JAPANESE_SCRIPT_PATTERN = /[぀-ヿ]/
 
 // 丸囲み文字や矢印・星などの装飾記号は Unicode 上も文字(Letter)ではなく記号(Symbol)に分類されるため、
 // 絵文字を多用するが実際の文字を含む正当な非日本語投稿とは Letter の有無で区別できる。
@@ -28,7 +29,7 @@ export const replyLanguageMismatchRule: LabelRule = {
   key: 'reply_language_mismatch',
   description:
     '自身のツイートは特定の言語体系にほぼ偏っているが、リプライ(自身のリプライを自己リツイートしているものを含む)では無関係な対象読者向けに突然言語が切り替わる。エンゲージメント稼ぎボットネットワークの特徴',
-  version: '1.4.0',
+  version: '1.5.0',
   evaluate(bundle) {
     const { screenName } = bundle.account
     // リンクのみの投稿はスクリプト比率が常に0になり、

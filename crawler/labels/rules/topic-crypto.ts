@@ -6,7 +6,7 @@ import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 // cryptocurrency のような正当な語は除外しないよう否定先読みを用いている。
 // 日本語は単語境界の概念が同様には成り立たないため部分一致のままとしている。
 const CRYPTO_PATTERN =
-  /\b(crypto(?!graph)|bitcoin|nft|web3|blockchain)|仮想通貨|ビットコイン|ブロックチェーン/gi
+  /\b(crypto(?!graph|zoolog|log)|bitcoin|nft(?!ables)|web3(?!js)|blockchain)|仮想通貨|ビットコイン|ブロックチェーン/gi
 
 // イラストレーターが自作の無断 NFT 化を拒否する目的で bio に NFT 等の語を書くことが多く、
 // これを関心事の申告と誤認してしまう。禁止マーカーが用語の直後に来ることが多いため、
@@ -19,6 +19,11 @@ const REJECTION_WINDOW_LENGTH = 15
 const STRONG_REJECTION_PATTERN = /🚫|🈲|❌|禁止|お断り|お断わり/
 const WEAK_REJECTION_WINDOW_LENGTH = 4
 const WEAK_REJECTION_PATTERN = /\bNG\b|\bno\b|\bnot\b/i
+
+// 「NO BitCoin or Crypto」のように拒否語の後ろに用語が列挙される形では、
+// 2 番目以降の用語が狭い window の外に出て申告と誤認されるため、直前の列挙全体を拒否語から辿る。
+const REJECTION_LIST_CONTINUATION_PATTERN =
+  /(?:\bNG\b|\bno\b|\bnot\b)[\s:：]*[\p{L}\p{N}]+(?:\s*(?:or|and|\/|,|、|や|と)\s*[\p{L}\p{N}]+)*\s*(?:or|and|\/|,|、|や|と)\s*$/iu
 
 function isRejectedMention(bio: string, match: RegExpMatchArray): boolean {
   const index = match.index ?? 0
@@ -38,7 +43,11 @@ function isRejectedMention(bio: string, match: RegExpMatchArray): boolean {
     index + match[0].length,
     index + match[0].length + WEAK_REJECTION_WINDOW_LENGTH,
   )
-  return WEAK_REJECTION_PATTERN.test(weakBeforeMatch) || WEAK_REJECTION_PATTERN.test(weakAfterMatch)
+  return (
+    WEAK_REJECTION_PATTERN.test(weakBeforeMatch) ||
+    WEAK_REJECTION_PATTERN.test(weakAfterMatch) ||
+    REJECTION_LIST_CONTINUATION_PATTERN.test(bio.slice(Math.max(0, index - 40), index))
+  )
 }
 
 // 最初の一致だけを見ると、先に来た拒否表現につられて後方の正当な申告を見逃す。
@@ -53,7 +62,7 @@ const KEYWORD_SCORE = 0.8
 export const topicCryptoRule: LabelRule = {
   key: 'topic_crypto',
   description: 'プロフィールの直接証拠、またはフォロー関係から暗号資産/web3 との強い関連が示される',
-  version: '1.3.3',
+  version: '1.3.4',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
