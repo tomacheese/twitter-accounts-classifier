@@ -295,4 +295,40 @@ describe('topicNsfwRule', () => {
   it('is true for an English NSFW artist whose bio contains "posting"', () => {
     expect(topicNsfwRule.evaluate(makeBundle({ bio: 'NSFW artist posting lewd' })).value).toBe(true)
   })
+
+  it.each([
+    'イラストを描いています。R18目的のフォローは厳禁です',
+    '雑多垢です。18禁アカウント：@alice_sub',
+    '雑多垢です。18禁もの投稿用→@alice_sub',
+    '日常垢です。NSFW（@alice_sub）',
+    '雑多垢です。R18弟@alice_sub',
+    '雑多垢です。R-18はサブサイトにて公開しています',
+    '雑多垢です。R18はpixivにて公開しています',
+    '家族みんなでやってます @alice_R18 @bob_nsfw',
+    '日常垢です。18禁もの投稿用(未成年の方はご遠慮ください)→@alice_sub',
+    '家族設定 お母さん　ほげ（R18）(a)alice_sub',
+    '投資家です。初18禁ゲーム：架空タイトル｜アプリ：架空ゲーム',
+    '年中無休のネットカフェ。映画・アニメ・アダルト無料で見放題！',
+    'お絵描きしています。NSFWや近しい表現はサブアカウントにて対応します。',
+  ])('is false for a bio that rejects or redirects adult content (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('stays true for a self-declaration even when a redirect handle appears elsewhere', () => {
+    expect(
+      topicNsfwRule.evaluate(makeBundle({ bio: 'R18イラストを投稿しています。連絡は @alice_sub' }))
+        .value,
+    ).toBe(true)
+  })
+
+  it.each([
+    'NSFW drawings and art',
+    'R18イラストを描いています。未成年の方はフォロー厳禁',
+    'R18絵を描いています。無断転載禁止',
+    'R-18あり。苦手な方はブロックしてください',
+    'NSFWアカです。未成年NG',
+    'R18です@alice_sub',
+  ])('is true for a self-declaration that is not a rejection or redirect (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
 })

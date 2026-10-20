@@ -186,4 +186,39 @@ describe('replyLanguageMismatchRule', () => {
     )
     expect(result.value).toBe(false)
   })
+
+  it('ignores Japanese hashtags attached to otherwise non-Japanese posts', () => {
+    const own = Array.from({ length: 3 }, () =>
+      tweet({ fullText: 'Look at this new drawing #たいとる #アニメ' }),
+    )
+    const replies = Array.from({ length: 3 }, () =>
+      tweet({ fullText: '@bob nice one!', isReply: true }),
+    )
+    const result = replyLanguageMismatchRule.evaluate(makeBundle({}, [...own, ...replies]))
+    expect(result.value).toBe(false)
+    expect(result.reason).toContain('ownJapaneseRatio=0.00')
+  })
+
+  it('still flags a Japanese-body account whose replies switch to another language with hashtags', () => {
+    const own = Array.from({ length: 3 }, () =>
+      tweet({ fullText: '今日も絵を描きました #drawing' }),
+    )
+    const replies = Array.from({ length: 3 }, () =>
+      tweet({ fullText: '@bob great work #たいとる', isReply: true }),
+    )
+    expect(replyLanguageMismatchRule.evaluate(makeBundle({}, [...own, ...replies])).value).toBe(
+      true,
+    )
+  })
+
+  it('keeps Japanese body text that directly follows a hashtag without whitespace', () => {
+    const own = Array.from({ length: 3 }, () =>
+      tweet({ fullText: 'Look #tag。今日も絵を描きました' }),
+    )
+    const replies = Array.from({ length: 3 }, () =>
+      tweet({ fullText: '@bob nice one!', isReply: true }),
+    )
+    const result = replyLanguageMismatchRule.evaluate(makeBundle({}, [...own, ...replies]))
+    expect(result.reason).toContain('ownJapaneseRatio=1.00')
+  })
 })
