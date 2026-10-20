@@ -4,7 +4,7 @@ import type { LabelRule } from '../types'
 // 「生成AI」と「AI生成」の両方の語順を含めているのは、
 // AI 語順のみでは標準的な語順である「生成AI」の自己申告を見逃してしまうため。
 const BIO_DECLARATION_PATTERN =
-  /AI(で)?生成|生成AI|generated (by|using) AI|AI-generated|人工知能(で)?生成|created (by|with|using) AI/i
+  /AI(で)?生成|生成AI|generated (by|using) AI\b|AI-generated|人工知能(で)?生成|created (by|with|using) AI\b/i
 
 // 宣言パターンは用語の有無のみを判定し、否定表現を考慮しないため、
 // 「一切AI生成はしません」のような否定を伴う bio を誤って true と判定してしまう。
@@ -24,6 +24,11 @@ const USAGE_CONDITION_NOTICE_PATTERN = new RegExp(
   'gi',
 )
 
+// 「AI生成なし」「non-AI-generated」のような直結した否定は、
+// 窓内の広い語彙に加えると「質問なし」のような無関係な語まで拾うため、直接隣接する場合に限る。
+const IMMEDIATE_NEGATION_BEFORE_PATTERN = /\bnon-?$/i
+const IMMEDIATE_NEGATION_AFTER_PATTERN = /^\s*(?:は|も)?(?:ではない|じゃない|なし|無し)/
+
 function hasRelevantNegation(context: string): boolean {
   const withoutUsageNotice = context.replaceAll(USAGE_CONDITION_NOTICE_PATTERN, ' ')
   NEGATION_PATTERN.lastIndex = 0
@@ -38,7 +43,12 @@ function isNegatedDeclaration(bio: string): boolean {
     match.index + match[0].length,
     match.index + match[0].length + NEGATION_WINDOW_LENGTH,
   )
-  return hasRelevantNegation(beforeMatch) || hasRelevantNegation(afterMatch)
+  return (
+    hasRelevantNegation(beforeMatch) ||
+    hasRelevantNegation(afterMatch) ||
+    IMMEDIATE_NEGATION_BEFORE_PATTERN.test(beforeMatch) ||
+    IMMEDIATE_NEGATION_AFTER_PATTERN.test(afterMatch)
+  )
 }
 
 // 生成AIを研究者・教授・メディア・コンサル・事業として職業的に語る bio は、
@@ -88,9 +98,9 @@ function isInstitutionalMention(bio: string): boolean {
 // 業務効率化のための言及にも適用したもの。`isInstitutionalMention` と同様、
 // 自身のコンテンツを指す明示的な表現を伴う場合のみ宣言として扱う。
 const TOPIC_INTEREST_CONTEXT_PATTERN =
-  /情報収集|実?活用|遊び|勉強中|興味|関心|ウォッチ|ウォチ|先端技術|追って|学ぼう|学ぶ|半導体|銘柄|効率化|業務改善|著作権問題|オタク|マニア|音楽.{0,12}(?:生成AI|AI生成)|(?:生成AI|AI生成).{0,12}音楽/i
+  /情報収集|実?活用|コード.{0,12}(?:生成AI|AI生成)|(?:生成AI|AI生成).{0,12}コード|(?:渡り|経て).{0,20}(?:生成AI|AI生成)|遊び|勉強中|興味|関心|ウォッチ|ウォチ|先端技術|追って|学ぼう|学ぶ|半導体|銘柄|効率化|業務改善|著作権問題|オタク|マニア|音楽.{0,12}(?:生成AI|AI生成)|(?:生成AI|AI生成).{0,12}音楽/i
 const AI_HOBBY_CONTEXT_PATTERN =
-  /(?:生成AI|AI生成|AI-generated).{0,24}(?:趣味|好きなもの|遊んで|ローカル|自宅)|(?:趣味|遊んで|ローカル|自宅).{0,24}(?:生成AI|AI生成|AI-generated)|好きなもの.{0,80}(?:生成AI|AI生成|AI-generated)/i
+  /(?:生成AI|AI生成|AI-generated).{0,24}(?:趣味|好きなもの|遊んで|いじ(?:く)?って|ローカル|自宅)|(?:生成AI|AI生成)も?(?:やって|触って|試して)|(?:趣味|遊んで|ローカル|自宅).{0,24}(?:生成AI|AI生成|AI-generated)|好きなもの.{0,80}(?:生成AI|AI生成|AI-generated)/i
 
 function isTopicInterestMention(bio: string): boolean {
   return (
@@ -129,7 +139,7 @@ const AI_OPPOSITION_PATTERN =
 // 職業的・関心事の文脈と同様に無効化する。
 // ただし自身のコンテンツを指す明示的な表現を伴う場合は例外とする。
 const THIRD_PARTY_REFERENCE_PATTERN =
-  /(?:生成AI|AI生成).{0,10}(?:して(?:る|いる)|使って(?:る|いる)|(?:が)?多い|を?多く投稿(?:する|してる|している)?)方/
+  /(?:生成AI|AI生成).{0,10}(?:して(?:る|いる)|使って(?:る|いる)|(?:が)?多い|を?多く投稿(?:する|してる|している)?)方|(?:生成AI|AI生成)(?:ユーザー|利用者|使用者)(?:さん|の方)?(?:は|も|には)?.{0,12}(?:ごめん|お断り|ブロック|禁止|苦手|口(?:が)?悪|嫌|破滅|ミュート)|(?:生成AI|AI生成).{0,20}アカウント(?:は|を)?ブロック/
 
 // 「生成AIアカウント」は「〜している方」と異なり、
 // 自己申告(「生成AIアカウントです」)にも単独で使われる。
@@ -168,7 +178,8 @@ function isThirdPartyReference(bio: string): boolean {
 
 // 「生成AIへの利用」「AI生成等への画像利用」は、生成AIを投稿手段ではなく
 // 著作物の利用先・許諾対象として述べる文法であり、それ単独では自己申告ではない。
-const AI_AS_USAGE_DESTINATION_PATTERN = /(?:生成AI|AI生成)(?:等)?への(?:画像)?(?:利用|使用)/gi
+const AI_AS_USAGE_DESTINATION_PATTERN =
+  /(?:生成AI|AI生成)(?:等)?(?:への(?:画像)?(?:利用|使用|学習)|学習)/gi
 const AI_USAGE_OF_PATTERN = /(?:生成AI|AI生成)(?:等)?の(?:利用|使用)/gi
 const USAGE_PERMISSION_CUE_WINDOW_LENGTH = 15
 const USAGE_PERMISSION_CUE_PATTERN =
@@ -275,7 +286,7 @@ export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description:
     'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及や、改行で区切った列挙の一項目としての記載だけでは該当しない。AI 語に直接係る否定 (AI生成禁止・生成AI不使用など) は自己申告を打ち消すが、二次利用・転載・学習などの利用条件表記は打ち消さない。アイコンのみの AI 生成申告は自己申告として扱う',
-  version: '1.14.0',
+  version: '1.15.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =

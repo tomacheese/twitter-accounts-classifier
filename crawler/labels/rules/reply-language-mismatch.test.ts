@@ -173,6 +173,20 @@ describe('replyLanguageMismatchRule', () => {
     expect(result.value).toBe(true)
   })
 
+  it('is false when only Chinese-script posts (han characters without kana) differ from English replies', () => {
+    const result = replyLanguageMismatchRule.evaluate(
+      makeBundle({ screenName: 'example_user' }, [
+        tweet({ fullText: '今日新作发布 欢迎关注' }),
+        tweet({ fullText: '新年快乐 谢谢大家' }),
+        tweet({ fullText: '最新作品 请多关照' }),
+        tweet({ fullText: '@alice Thanks a lot!', isReply: true }),
+        tweet({ fullText: '@bob Nice to see you!', isReply: true }),
+        tweet({ fullText: '@carol Love this one', isReply: true }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+  })
+
   it('ignores Japanese hashtags attached to otherwise non-Japanese posts', () => {
     const own = Array.from({ length: 3 }, () =>
       tweet({ fullText: 'Look at this new drawing #たいとる #アニメ' }),
