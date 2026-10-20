@@ -120,7 +120,7 @@ export const topicPoliticsRule: LabelRule = {
   description: 'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.9.2',
+  version: '1.9.3',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =
