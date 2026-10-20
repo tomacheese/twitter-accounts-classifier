@@ -20,7 +20,8 @@ const MIN_SAMPLE = 3
 // 通常のリツイート消費型の人間(他者を転載するのが大半で、
 // 稀に返信する程度)もこのガードを素通りしてしまう。
 // 真のリプライハイジャック・スウォームは返信に特化したアーキタイプである。
-const REPLY_RATIO_THRESHOLD = 0.5
+const REPLY_RATIO_THRESHOLD = 0.6
+const REPLY_RATIO_RAMP_WIDTH = 1 - REPLY_RATIO_THRESHOLD
 
 /**
  * 「一斉提灯リプライ」スウォームに参加したアカウントを検出する。5アカウント以上が、
@@ -37,7 +38,7 @@ export const replyHijackSwarmRule: LabelRule = {
   key: 'reply_hijack_swarm',
   description:
     '別々のアカウントが1件ずつ、似た言い回しの低努力リプライを1つの高エンゲージメントツイートに乗せてインプレッションを稼ぐ「一斉提灯リプライ」ネットワークの一員であり、かつ自身のアカウントもオリジナル投稿がほぼない低努力アカウントである',
-  version: '1.6.0',
+  version: '1.7.0',
   evaluate(bundle) {
     const size = bundle.replyHijackSwarmSize ?? 0
     const isSwarmMember = size >= MIN_DISTINCT_AUTHORS
@@ -59,7 +60,7 @@ export const replyHijackSwarmRule: LabelRule = {
       'higher-is-positive',
     )
     const replyRatioScore = hasEnoughSample
-      ? rampScore(replyRatio, REPLY_RATIO_THRESHOLD, 0.5, 'higher-is-positive')
+      ? rampScore(replyRatio, REPLY_RATIO_THRESHOLD, REPLY_RATIO_RAMP_WIDTH, 'higher-is-positive')
       : 0
     const evidenceScore = combineRequired([sizeScore, replyRatioScore])
 

@@ -11,10 +11,10 @@ import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 // こちらは同一アカウントによる言い換えの繰り返しであるため。
 const MIN_REPLIES_TO_SAME_TARGET = 8
 const WINDOW_HOURS = 24
-const SIMILARITY_THRESHOLD = 0.05
-// 実況やキャンペーン参加の短文連投は、言い換えが少なくても偶然の字面一致で
-// 0.05 を超えやすい。本文が短いグループに限りコピペ・微修正の連投とみなせる
-// 高い類似度のみを陽性の根拠にし、通常閾値は長文の言い換え・翻訳連投向けに残す。
+const SIMILARITY_THRESHOLD = 0.1
+// 実況やキャンペーン参加の短文連投は、偶然の字面一致で通常閾値を超えやすい。
+// そのため本文が短いグループでは、コピペ・微修正とみなせる高い類似度のみを陽性の根拠にする。
+// 通常閾値は長文の言い換え・翻訳連投向けに残す。
 const SHORT_REPLY_MEDIAN_LENGTH_THRESHOLD = 18
 const SHORT_REPLY_SIMILARITY_THRESHOLD = 0.3
 const SIMILARITY_RAMP_WIDTH = 0.12
@@ -33,7 +33,7 @@ export const replyFloodingRule: LabelRule = {
   key: 'reply_flooding',
   description:
     '同一相手への返信を短時間のうちに大量投稿しており、その文面が言い換えや翻訳違いを含めて内容的に酷似している。1つのバズったツイートに大量の言い換えリプライを浴びせてインプレッションを稼ぐ「インプレゾンビ」の典型パターン',
-  version: '1.6.0',
+  version: '1.7.0',
   evaluate(bundle) {
     // 先頭の @メンション(会話相手)でグルーピングすると、
     // 通常の相互会話との区別ができない。一人との往復チャットや口論でも、

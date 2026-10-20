@@ -98,8 +98,29 @@ describe('genericReplyFarmingRule', () => {
     expect(getRule()).toBeDefined()
   })
 
-  it('bumps the version to reflect the added low-frequency branch', () => {
-    expect(getRule().version).toBe('0.2.0')
+  it('exposes the current rule version', () => {
+    expect(getRule().version).toBe('0.2.1')
+  })
+
+  it('does not count replies inside the account’s own post conversation toward high-frequency farming', () => {
+    const bundle = makeBundle()
+    const recentTweets = bundle.recentTweets.map((tweet, index) =>
+      index < 12 ? { ...tweet, conversationRootAuthorId: 'acct-1' } : tweet,
+    )
+
+    const result = getRule().evaluate({ ...bundle, recentTweets })
+
+    expect(result.value).toBe(false)
+  })
+
+  it('keeps detecting when conversation root metadata points to other authors', () => {
+    const bundle = makeBundle()
+    const recentTweets = bundle.recentTweets.map((tweet) => ({
+      ...tweet,
+      conversationRootAuthorId: 'other-author',
+    }))
+
+    expect(getRule().evaluate({ ...bundle, recentTweets }).value).toBe(true)
   })
 
   it('detects high-volume generic context-aware external replies', () => {

@@ -111,4 +111,12 @@ describe('topicMusicRule', () => {
     const result = topicMusicRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it('is false for a bio that only names a fictional artist', () => {
+    expect(
+      topicMusicRule.evaluate(
+        makeBundle({ bio: 'Alice Example の大ファンです。ライブ遠征が生きがい' }),
+      ).value,
+    ).toBe(false)
+  })
 })

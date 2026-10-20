@@ -122,4 +122,18 @@ describe('topicFinanceRule', () => {
     const result = topicFinanceRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it.each(['Trading card collector and deck builder', 'Real estate broker in a fictional city'])(
+    'is false for a non-finance use of a finance word: %s',
+    (bio) => {
+      expect(topicFinanceRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it.each(['Day trading and options', 'Insurance broker and stock trading card game fan'])(
+    'is true when a finance word remains outside the excluded phrases: %s',
+    (bio) => {
+      expect(topicFinanceRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
 })

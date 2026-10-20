@@ -7,18 +7,19 @@ import type { LabelRule } from '../types'
 // 「ドラマ」だけは「ドラマチック」「ドラマー (drummer)」という無関係な頻出語の
 // 部分文字列になるため、topic-nsfw.ts の「アダルト」除外と同様に
 // 否定先読みで個別に除外している。
+// 「Cinema 4D (3DCG ソフト)」「film photographer (写真家)」も映画への関心ではないため同様に除外している。
 const MOVIE_PATTERN =
-  /\b(movie|movies|film|cinema|moviegoer|cinephile)\b|映画|ドラマ(?!チック|ー)|洋画|邦画|映画館|映画鑑賞/gi
+  /\b(movie|movies|film(?!\s+photograph)|cinema(?!\s*4d\b)|moviegoer|cinephile)\b|映画|ドラマ(?!チック|ー)|洋画|邦画|映画館|映画鑑賞/gi
 
 const KEYWORD_SCORE = 0.8
 
 // 「Illust/Design/Movie」のような区切り文字付きタグ列挙は、
 // 作品ジャンルのカテゴリラベルであり本人の映画への関心の自己申告ではない。
 // 一方「映画、旅行、読書」のような読点区切りの趣味列挙は自己申告として扱いたいため、
-// 区切り文字の種類で判別する: `/` `|` はタグ文化の bio で使われる区切りであり、
+// 区切り文字の種類で判別する: `/` `|` とその全角はタグ文化の bio で使われる区切りであり、
 // 読点や通常の文中カンマとは性質が異なる。
-const LIST_DELIMITER_PATTERN = /[/|]/g
-const LIST_DELIMITER_CHARS = new Set(['/', '|'])
+const LIST_DELIMITER_PATTERN = /[/|／｜]/g
+const LIST_DELIMITER_CHARS = new Set(['/', '|', '／', '｜'])
 const MIN_LIST_DELIMITER_COUNT = 2
 
 function isSlashDelimitedTagListItem(bio: string, match: RegExpExecArray): boolean {
@@ -52,14 +53,35 @@ function isVibeListItem(bio: string, match: RegExpExecArray): boolean {
   return suffixCount >= MIN_VIBE_LIST_SUFFIX_COUNT
 }
 
+// 全角の＃も同じタグ列挙として扱わないと、全角表記だけ除外をすり抜ける。
+const HASHTAG_PATTERN = /[#＃][^\s#＃]+/g
+
+// テレビ番組ジャンルのタグ列挙に紛れた「ドラマ」は、映画への関心の自己申告ではない。
+// 映画の語彙が別にあれば他の一致で陽性になるため、ドラマの一致だけを除外する。
+const TV_PROGRAM_TAG_PATTERN = /バラエティ|お笑い|テレビ|番組|\bTV\b/i
+const MIN_TV_PROGRAM_TAG_COUNT = 2
+
+function isTvProgramTagListDrama(bio: string, match: RegExpExecArray): boolean {
+  if (!match[0].includes('ドラマ')) return false
+  const hashtags = [...bio.matchAll(HASHTAG_PATTERN)]
+  const containing = hashtags.find(
+    (hashtag) => match.index >= hashtag.index && match.index < hashtag.index + hashtag[0].length,
+  )
+  if (!containing) return false
+  const tvTagCount = hashtags.filter(
+    (hashtag) => hashtag !== containing && TV_PROGRAM_TAG_PATTERN.test(hashtag[0]),
+  ).length
+  return tvTagCount >= MIN_TV_PROGRAM_TAG_COUNT
+}
+
 function isHashtagListOnlyBio(bio: string, match: RegExpExecArray): boolean {
-  const hashtags = [...bio.matchAll(/#[^\s#]+/g)]
+  const hashtags = [...bio.matchAll(HASHTAG_PATTERN)]
   if (hashtags.length < 3) return false
   const matchIsInHashtag = hashtags.some((hashtag) => {
     const start = hashtag.index
     return match.index >= start && match.index < start + hashtag[0].length
   })
-  const prose = bio.replaceAll(/#[^\s#]+/g, '').replaceAll(/[|,，、/・:：.。!！\-\s]/g, '')
+  const prose = bio.replaceAll(HASHTAG_PATTERN, '').replaceAll(/[|,，、/・:：.。!！\-\s]/g, '')
   return matchIsInHashtag && prose.length === 0
 }
 
@@ -72,7 +94,8 @@ function hasNonExcludedMovieMatch(bio: string): boolean {
     if (
       !isSlashDelimitedTagListItem(bio, match) &&
       !isVibeListItem(bio, match) &&
-      !isHashtagListOnlyBio(bio, match)
+      !isHashtagListOnlyBio(bio, match) &&
+      !isTvProgramTagListDrama(bio, match)
     ) {
       return true
     }
@@ -83,8 +106,8 @@ function hasNonExcludedMovieMatch(bio: string): boolean {
 export const topicMovieRule: LabelRule = {
   key: 'topic_movie',
   description:
-    'プロフィールの直接証拠、またはフォロー関係から映画・ドラマとの強い関連が示される。映画・ドラマ名がハッシュタグだけの列挙に現れる場合は直接証拠に含めない',
-  version: '1.6.1',
+    'プロフィールの直接証拠、またはフォロー関係から映画・ドラマとの強い関連が示される。映画・ドラマ名がハッシュタグだけの列挙に現れる場合や、テレビ番組ジャンルのタグ列挙にドラマが 1 件だけ含まれる場合は直接証拠に含めない',
+  version: '1.6.2',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account

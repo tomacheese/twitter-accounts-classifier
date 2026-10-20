@@ -19,6 +19,7 @@ const CONFIDENCE_BY_DETECTION_SOURCE: Record<string, number> = {
   ContentDisclosureAiGeneratedDisclosure: 0.75,
 }
 const UNKNOWN_SOURCE_CONFIDENCE = 0.6
+const MIN_TWEETS_FOR_EVALUATION = 2
 
 /**
  * フラグが立った1件のツイートについて、その検出出典から confidence を求める。
@@ -33,14 +34,29 @@ function confidenceForSource(source: string | null | undefined): number {
 
 export const tweetAiGeneratedMediaRule: LabelRule = {
   key: 'tweet_ai_generated_media',
-  description: 'X の投稿ごとの AI 生成メディア開示 (contentDisclosure) が直近ツイートに1件以上ある',
-  version: '1.0.1',
+  description:
+    'X の投稿ごとの AI 生成メディア開示 (contentDisclosure) が直近ツイートに1件以上ある。保存ツイートが 2 件未満の場合は根拠不足として判定対象外にする (C2PA 由来の開示は除く)',
+  version: '1.1.0',
   evaluate(bundle) {
     if (!isRecentTweetsEvaluable(bundle)) {
       return {
         value: false,
         confidence: 0.5,
         reason: 'recentTweets not evaluable',
+        evaluable: false,
+      }
+    }
+
+    // 保存ツイートが 1 件以下では根拠不足のため、フラグが立っていても陽性にしない。
+    // ただし C2PA は改ざん検知可能な来歴で単独でも十分な根拠になるため対象外とする。
+    const hasC2paEvidence = bundle.recentTweets.some(
+      (t) => t.hasAiGeneratedMedia === true && t.aiGeneratedDetectionSource === 'C2paClient',
+    )
+    if (bundle.recentTweets.length < MIN_TWEETS_FOR_EVALUATION && !hasC2paEvidence) {
+      return {
+        value: false,
+        confidence: 0.5,
+        reason: `too few recentTweets (n=${bundle.recentTweets.length})`,
         evaluable: false,
       }
     }

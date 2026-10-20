@@ -81,6 +81,10 @@ function codePointLength(text: string): number {
   return text.match(/./gu)?.length ?? 0
 }
 
+// 懸賞・キャンペーンへの定型的な応募返信は、プロフィール誘導ではなく応募の意思表示であるため根拠にしない。
+const CAMPAIGN_ENTRY_PATTERN =
+  /(?:応募(?:し(?:まし)?た|します|いたします|させていただきます)|当(?:た|選)りますように|当選しますように|当選しました|当たりました)/u
+
 function hasSelfPositioning(text: string): boolean {
   return SELF_POSITIONING_PATTERNS.some((pattern) => pattern.test(text))
 }
@@ -140,8 +144,9 @@ export const contextualReplyMarketingRule: LabelRule = {
   description:
     '大量投稿ボットではない低頻度アカウントが、異なる外部投稿者の投稿へ文脈に沿った長めの共感/称賛リプライを置きつつ、' +
     '「自分も」「〜として」「自分の立場では」等の自己ポジショニングを反復してプロフィール流入を狙う行動を検出する。' +
+    '同一会話に集中する一致や、懸賞・キャンペーンへの定型的な応募返信は自己ポジショニングの根拠にしない。' +
     'AI/LLM 利用そのものは推定しない',
-  version: '0.3.0',
+  version: '0.4.0',
   excludeFromStaleScan: true,
   evaluate(bundle) {
     const sampled = bundle.recentTweets
@@ -178,9 +183,14 @@ export const contextualReplyMarketingRule: LabelRule = {
         ? normalizedExternalReplies.filter((text) => /[?？]/u.test(text)).length /
           normalizedExternalReplies.length
         : 0
-    const selfPositioningCount = normalizedExternalReplies.filter((text) =>
-      hasSelfPositioning(text),
-    ).length
+    // 同一の会話に集中する一致は議論への参加であるため、会話ごとに最大1件として数える。
+    const selfPositioningConversations = new Set<string>()
+    for (const [index, text] of normalizedExternalReplies.entries()) {
+      if (!hasSelfPositioning(text) || CAMPAIGN_ENTRY_PATTERN.test(text)) continue
+      const reply = externalReplies[index]
+      selfPositioningConversations.add(reply.conversationId ?? reply.inReplyToTweetId ?? '')
+    }
+    const selfPositioningCount = selfPositioningConversations.size
     const selfPositioningRatio =
       normalizedExternalReplies.length > 0
         ? selfPositioningCount / normalizedExternalReplies.length
@@ -199,8 +209,7 @@ export const contextualReplyMarketingRule: LabelRule = {
     const tweetsPerDay = averageTweetsPerDay(bundle.account.tweetCount, accountAge)
     const recentTweetsPerDay = recentObservedTweetsPerDay(sampled)
     const isVerifiedBusiness =
-      bundle.account.verifiedType === 'Business' ||
-      bundle.account.professionalType === 'Business'
+      bundle.account.verifiedType === 'Business' || bundle.account.professionalType === 'Business'
 
     const hasEnoughSample = sampled.length >= MIN_SAMPLE
     const evaluable = hasEnoughSample && parentAuthorCoverage >= PARENT_AUTHOR_COVERAGE_THRESHOLD

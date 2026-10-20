@@ -15,13 +15,19 @@ const NEGATION_WINDOW_LENGTH = 30
 const NEGATION_PATTERN =
   /しません|していません|しておりません|おりません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|不要|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|✖|🆖|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
 
-// 無断転載の禁止は投稿生成元ではなく、作品の利用条件を示す。
-const UNRELATED_REPOST_NOTICE_PATTERN = /(?:無断)?転載(?:禁止|NG)|\bno\s+reposts?\b/gi
+// 転載・二次利用・学習などの利用条件表記は作品の扱いを示すもので、AI 語に直接係る否定ではない。
+// 「生成AI使用禁止」のような AI 語に直接係る述語は対象外とするため、単独の「利用」「使用」は含めない。
+// 窓の長さで結果が変わらないよう、否定判定の前に表記ごと取り除く。
+const USAGE_CONDITION_ITEM = '(?:無断)?(?:二次(?:利用|創作|配布)|転載|加工|学習|保存|引用|トレース)'
+const USAGE_CONDITION_NOTICE_PATTERN = new RegExp(
+  String.raw`${USAGE_CONDITION_ITEM}(?:[・/、,]${USAGE_CONDITION_ITEM})*(?:禁止|NG|不可)|\bno\s+reposts?\b`,
+  'gi',
+)
 
 function hasRelevantNegation(context: string): boolean {
-  const withoutRepostNotice = context.replaceAll(UNRELATED_REPOST_NOTICE_PATTERN, ' ')
+  const withoutUsageNotice = context.replaceAll(USAGE_CONDITION_NOTICE_PATTERN, ' ')
   NEGATION_PATTERN.lastIndex = 0
-  return NEGATION_PATTERN.test(withoutRepostNotice)
+  return NEGATION_PATTERN.test(withoutUsageNotice)
 }
 
 function isNegatedDeclaration(bio: string): boolean {
@@ -268,8 +274,8 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description:
-    'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及だけでは該当しない',
-  version: '1.13.1',
+    'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及や、改行で区切った列挙の一項目としての記載だけでは該当しない。AI 語に直接係る否定 (AI生成禁止・生成AI不使用など) は自己申告を打ち消すが、二次利用・転載・学習などの利用条件表記は打ち消さない。アイコンのみの AI 生成申告は自己申告として扱う',
+  version: '1.14.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =

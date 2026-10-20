@@ -142,4 +142,58 @@ describe('topicCryptoRule', () => {
     const result = topicCryptoRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it.each([
+    [6, 20, true],
+    [5, 20, false],
+    [5, 15, true],
+    [4, 15, false],
+  ])(
+    'follow graph boundary: %i labeled of %i followees gives value=%s',
+    (labeled, total, expected) => {
+      const bundle = {
+        ...makeBundle({}),
+        followGraphLabelSignals: {
+          topic_crypto: {
+            followeeLabeledCount: labeled,
+            followeeTotalCount: total,
+            followerLabeledCount: 0,
+            followerTotalCount: 0,
+          },
+        },
+      }
+      expect(topicCryptoRule.evaluate(bundle).value).toBe(expected)
+    },
+  )
+
+  it('is not evaluable and false when the followee sample is one short of the minimum', () => {
+    const result = topicCryptoRule.evaluate({
+      ...makeBundle({}),
+      followGraphLabelSignals: {
+        topic_crypto: {
+          followeeLabeledCount: 14,
+          followeeTotalCount: 14,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    })
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+  })
+
+  it('is evaluable at exactly the minimum followee sample', () => {
+    const result = topicCryptoRule.evaluate({
+      ...makeBundle({}),
+      followGraphLabelSignals: {
+        topic_crypto: {
+          followeeLabeledCount: 0,
+          followeeTotalCount: 15,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    })
+    expect(result.evaluable).toBe(true)
+  })
 })

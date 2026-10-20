@@ -58,7 +58,7 @@ describe('evaluateAccountRelabelItems', () => {
           [
             { id: 'reply-1', isReply: true, inReplyToTweetId: 'target-1' },
             { id: 'reply-2', isReply: true, inReplyToTweetId: 'target-1' },
-            { id: 'post-1', isReply: false, inReplyToTweetId: null },
+            { id: 'reply-3', isReply: true, inReplyToTweetId: 'target-2' },
           ] as Tweet[],
         ],
       ]),
@@ -197,7 +197,7 @@ describe('evaluateAccountRelabelItems', () => {
           [
             { id: 'reply-1', isReply: true, inReplyToTweetId: 'target-1' },
             { id: 'reply-2', isReply: true, inReplyToTweetId: 'target-1' },
-            { id: 'post-1', isReply: false, inReplyToTweetId: null },
+            { id: 'reply-3', isReply: true, inReplyToTweetId: 'target-2' },
           ] as Tweet[],
         ],
       ]),

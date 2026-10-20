@@ -210,4 +210,22 @@ describe('adReplyHijackRule', () => {
       expect(result.value).toBe(false)
     },
   )
+
+  it('does not count a bare 副業 mention as an ad pitch', () => {
+    const replies = Array.from({ length: 4 }, (_, i) => ({
+      ...replyTweet(i, false),
+      fullText: `@someone 私も副業で似たことをやっています ${i}`,
+    }))
+
+    expect(adReplyHijackRule.evaluate(makeBundle(replies)).value).toBe(false)
+  })
+
+  it('still counts 副業 when it co-occurs with another ad term', () => {
+    const replies = Array.from({ length: 4 }, (_, i) => ({
+      ...replyTweet(i, false),
+      fullText: `@someone 副業の案件情報を無料相談で紹介しています ${i}`,
+    }))
+
+    expect(adReplyHijackRule.evaluate(makeBundle(replies)).value).toBe(true)
+  })
 })

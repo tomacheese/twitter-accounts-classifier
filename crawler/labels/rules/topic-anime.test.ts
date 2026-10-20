@@ -103,4 +103,25 @@ describe('topicAnimeRule', () => {
     const result = topicAnimeRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it.each(['マンガを描くのが好きです', 'まんがと日常の記録', '少女まんが好き'])(
+    'is true for a bio with the kana spelling of manga: %s',
+    (bio) => {
+      expect(topicAnimeRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it.each(['マンガン電池の研究をしています', 'まんがいち遅れたらごめんなさい'])(
+    'is false for an unrelated word containing the kana spelling: %s',
+    (bio) => {
+      expect(topicAnimeRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('is false for a bio that only names a fictional series or fandom', () => {
+    expect(
+      topicAnimeRule.evaluate(makeBundle({ bio: '『星降る学園』の大ファンです。考察クラスタ' }))
+        .value,
+    ).toBe(false)
+  })
 })

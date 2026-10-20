@@ -8,7 +8,9 @@ const FITNESS_PATTERN =
   /筋トレ|フィットネス|ボディメイク|ジム通い|パーソナルトレーニング|自重トレ|\b(?:fitness|workout|gym\s*rat)\b/i
 const COMBAT_SPORTS_SPECTATOR_PATTERN =
   /(?:格闘技|ボクシング|キックボクシング|総合格闘技|MMA|プロレス)(?:観戦|ファン|観る|見る)|(?:観戦|ファン|観る|見る).{0,10}(?:格闘技|ボクシング|キックボクシング|総合格闘技|MMA|プロレス)/i
-const FITNESS_PRACTICE_PATTERN = /練習|トレーニング|ジム|筋トレ|運動|選手|トレーナー|workout|gym/i
+// 「好きな選手」「ジムの試合」のような観戦文脈で頻出する「選手」「ジム」は、
+// 観戦除外を無効にしてしまうため実践の根拠に含めない。
+const FITNESS_PRACTICE_PATTERN = /練習|トレーニング|筋トレ|運動|トレーナー|workout|gym/i
 
 // 「筋トレは全くしません」のように語を挙げたうえで実践を否定する bio は、
 // フィットネスとの関連を示さないため、語の直後・直前の否定表現で除外する。
@@ -37,8 +39,8 @@ const KEYWORD_SCORE = 0.8
 export const topicFitnessRule: LabelRule = {
   key: 'topic_fitness',
   description:
-    'プロフィールの直接証拠、またはフォロー関係から運動・トレーニングとの強い関連が示される。競技の観戦だけは含めない',
-  version: '1.2.0',
+    'プロフィールの直接証拠、またはフォロー関係から運動・トレーニングとの強い関連が示される。トレーニングを伴わない競技の観戦だけは含めない',
+  version: '1.2.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account

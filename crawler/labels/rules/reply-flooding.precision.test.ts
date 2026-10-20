@@ -83,10 +83,10 @@ describe('replyFloodingRule precision regressions', () => {
     }
   })
 
-  it('keeps the low similarity threshold for long paraphrased or translated replies', () => {
+  it('keeps a lowered but still moderate threshold for long paraphrased or translated replies', () => {
     const similaritySpy = vi
       .spyOn(textSimilarity, 'averagePairwiseSimilarity')
-      .mockReturnValue(0.07)
+      .mockReturnValue(0.12)
 
     try {
       const bundle = makeBundle(
@@ -112,6 +112,23 @@ describe('replyFloodingRule precision regressions', () => {
         })),
       )
       expect(replyFloodingRule.evaluate(bundle).value).toBe(true)
+    } finally {
+      similaritySpy.mockRestore()
+    }
+  })
+
+  it('does not flag long individual replies whose similarity only slightly exceeds the former threshold', () => {
+    const similaritySpy = vi
+      .spyOn(textSimilarity, 'averagePairwiseSimilarity')
+      .mockReturnValue(0.07)
+
+    try {
+      const bundle = makeBundle(
+        Array.from({ length: 8 }, (_, index) => ({
+          fullText: `@target この企画の写真はとても素敵で、細部まで何度も見返したくなります ${index}`,
+        })),
+      )
+      expect(replyFloodingRule.evaluate(bundle).value).toBe(false)
     } finally {
       similaritySpy.mockRestore()
     }

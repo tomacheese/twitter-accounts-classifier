@@ -305,4 +305,37 @@ describe('topicPoliticsRule', () => {
       expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(expected)
     },
   )
+  it.each([
+    '自民党所属の友人が多いです',
+    '自民党所属の議員を応援しています',
+    '立憲民主党所属の知人と食事に行きました',
+  ])(
+    'does not treat a third-party mention after the affiliation as a self-declaration: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it.each([
+    '自民党所属の会社員、友人募集中',
+    '自民党所属の者です 皆様を応援',
+    '自民党所属の市議会議員 地域を応援します',
+  ])('keeps a self-declaration when a third-party word is separated by punctuation: %s', (bio) => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it.each([
+    '夢は世界平和です。参議院議員をしています',
+    '前田太郎。自民党党員です',
+    '元町在住。市議会議員をしています',
+    '田中元気です。自民党員です',
+  ])('keeps a current declaration unaffected by names, places or distant wishes: %s', (bio) => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it('keeps detecting a jokingly claimed office title because text alone cannot tell it from a real one', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: 'Governor of Example Land' })).value).toBe(
+      true,
+    )
+  })
 })

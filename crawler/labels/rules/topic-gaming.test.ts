@@ -96,4 +96,10 @@ describe('topicGamingRule', () => {
     const result = topicGamingRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it('is false for a bio that mentions a game interest without any gaming keyword', () => {
+    expect(
+      topicGamingRule.evaluate(makeBundle({ bio: 'RPG と対戦アクションが好きです。夜型' })).value,
+    ).toBe(false)
+  })
 })

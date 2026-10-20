@@ -46,4 +46,10 @@ describe('verifiedBusinessRule', () => {
     const result = verifiedBusinessRule.evaluate(makeBundle({ isBlueVerified: true }))
     expect(result.value).toBe(false)
   })
+
+  it('follows the observed verifiedType as-is when the API value is missing', () => {
+    const result = verifiedBusinessRule.evaluate(makeBundle({ verifiedType: null }))
+    expect(result.value).toBe(false)
+    expect(result.confidence).toBe(1)
+  })
 })

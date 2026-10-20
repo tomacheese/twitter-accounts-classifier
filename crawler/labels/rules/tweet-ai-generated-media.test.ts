@@ -48,9 +48,41 @@ describe('tweetAiGeneratedMediaRule', () => {
     expect(result.confidence).toBe(0)
   })
 
-  it('is false for an account with no recent tweets', () => {
+  it('is not evaluable for an account with no recent tweets', () => {
     const result = tweetAiGeneratedMediaRule.evaluate(makeBundle([]))
     expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+  })
+
+  it('is true with a single flagged tweet when the evidence is C2PA', () => {
+    const result = tweetAiGeneratedMediaRule.evaluate(
+      makeBundle([tweet({ hasAiGeneratedMedia: true, aiGeneratedDetectionSource: 'C2paClient' })]),
+    )
+    expect(result.value).toBe(true)
+    expect(result.evaluable).not.toBe(false)
+  })
+
+  it('is not evaluable with a single flagged tweet from a non-C2PA source', () => {
+    const result = tweetAiGeneratedMediaRule.evaluate(
+      makeBundle([
+        tweet({
+          hasAiGeneratedMedia: true,
+          aiGeneratedDetectionSource: 'ContentDisclosureAiGeneratedDisclosure',
+        }),
+      ]),
+    )
+    expect(result).toMatchObject({ value: false, evaluable: false })
+  })
+
+  it('is evaluable and true with exactly two tweets when one is flagged', () => {
+    const result = tweetAiGeneratedMediaRule.evaluate(
+      makeBundle([
+        tweet({ hasAiGeneratedMedia: true, aiGeneratedDetectionSource: 'C2paClient' }),
+        tweet({ id: 't2' }),
+      ]),
+    )
+    expect(result.value).toBe(true)
+    expect(result.evaluable).not.toBe(false)
   })
 
   it('is evaluable=false when recentTweets was never fetched', () => {
@@ -63,15 +95,20 @@ describe('tweetAiGeneratedMediaRule', () => {
     expect(result).toMatchObject({ value: false, confidence: 0.5, evaluable: false })
   })
 
-  it('is an evaluable negative when recentTweets fetch succeeded with no tweets', () => {
-    const result = tweetAiGeneratedMediaRule.evaluate(makeBundle([], 'success'))
+  it('is an evaluable negative when recentTweets fetch succeeded with unflagged tweets', () => {
+    const result = tweetAiGeneratedMediaRule.evaluate(
+      makeBundle([tweet({}), tweet({ id: 't2' })], 'success'),
+    )
     expect(result).toMatchObject({ value: false, confidence: 0 })
     expect(result.evaluable).not.toBe(false)
   })
 
   it('is true with high confidence when the detection source is C2paClient', () => {
     const result = tweetAiGeneratedMediaRule.evaluate(
-      makeBundle([tweet({ hasAiGeneratedMedia: true, aiGeneratedDetectionSource: 'C2paClient' })]),
+      makeBundle([
+        tweet({ hasAiGeneratedMedia: true, aiGeneratedDetectionSource: 'C2paClient' }),
+        tweet({ id: 't2' }),
+      ]),
     )
     expect(result.value).toBe(true)
     expect(result.confidence).toBe(1)
@@ -81,6 +118,7 @@ describe('tweetAiGeneratedMediaRule', () => {
     const result = tweetAiGeneratedMediaRule.evaluate(
       makeBundle([
         tweet({ hasAiGeneratedMedia: true, aiGeneratedDetectionSource: 'UserDeclared' }),
+        tweet({ id: 't2' }),
       ]),
     )
     expect(result.value).toBe(true)
@@ -94,6 +132,7 @@ describe('tweetAiGeneratedMediaRule', () => {
           hasAiGeneratedMedia: true,
           aiGeneratedDetectionSource: 'ContentDisclosureAiGeneratedDisclosure',
         }),
+        tweet({ id: 't2' }),
       ]),
     )
     expect(result.value).toBe(true)
@@ -102,7 +141,10 @@ describe('tweetAiGeneratedMediaRule', () => {
 
   it('is true with a conservative fallback confidence when the source is unknown', () => {
     const result = tweetAiGeneratedMediaRule.evaluate(
-      makeBundle([tweet({ hasAiGeneratedMedia: true, aiGeneratedDetectionSource: null })]),
+      makeBundle([
+        tweet({ hasAiGeneratedMedia: true, aiGeneratedDetectionSource: null }),
+        tweet({ id: 't2' }),
+      ]),
     )
     expect(result.value).toBe(true)
     expect(result.confidence).toBe(0.6)

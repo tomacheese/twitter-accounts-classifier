@@ -42,14 +42,29 @@ function tweet(
   }
 }
 
+function scam(id: string) {
+  return tweet({ id, expandedUrls: ['https://1link.jp/fictional'] })
+}
+
 describe('scamLinkDomainRule', () => {
   it('is true for an original tweet with an exact indicator hostname match', () => {
     const result = scamLinkDomainRule.evaluate(
       makeBundle([tweet({ expandedUrls: ['https://1link.jp/fictional'] })]),
     )
     expect(result.value).toBe(true)
-    expect(result.confidence).toBe(1)
+    expect(result.confidence).toBeCloseTo(0.75)
     expect(result.reason).toContain('host=1link.jp')
+  })
+
+  it('raises confidence as more tweets carry matching links', () => {
+    const one = scamLinkDomainRule.evaluate(makeBundle([scam('a')])).confidence
+    const two = scamLinkDomainRule.evaluate(makeBundle([scam('a'), scam('b')])).confidence
+    const three = scamLinkDomainRule.evaluate(
+      makeBundle([scam('a'), scam('b'), scam('c')]),
+    ).confidence
+    expect(two).toBeGreaterThan(one)
+    expect(three).toBeGreaterThan(two)
+    expect(three).toBeLessThan(1)
   })
 
   it('is true for a subdomain of an indicator hostname', () => {
