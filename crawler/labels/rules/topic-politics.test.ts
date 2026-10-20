@@ -340,6 +340,8 @@ describe('topicPoliticsRule', () => {
   it.each([
     '自民党所属の友人が多いです',
     '自民党所属の議員を応援しています',
+    '自民党所属の議員を強く応援しています',
+    '自民党所属の議員が好きです',
     '立憲民主党所属の知人と食事に行きました',
   ])(
     'does not treat a third-party mention after the affiliation as a self-declaration: %s',

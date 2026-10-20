@@ -731,4 +731,49 @@ describe('contextualReplyMarketingRule', () => {
     expect(getRule().evaluate(makeBundle({ replyTexts: controlTexts })).value).toBe(true)
     expect(getRule().evaluate(makeBundle({ replyTexts: entryTexts })).value).toBe(false)
   })
+
+  it('keeps the ratio at 1.0 when every conversation has several self-positioning replies', () => {
+    const replyTexts = Array.from(
+      { length: 30 },
+      (_, index) => `${SELF_POSITIONING_REPLY_TEXTS[index % 6]}補足${index}`,
+    )
+    const base = makeBundle({ replyTexts })
+    const bundle = {
+      ...base,
+      recentTweets: base.recentTweets.map((tweet, index) =>
+        index < 30 ? { ...tweet, conversationId: `conv-${Math.floor(index / 3)}` } : tweet,
+      ),
+    }
+
+    const result = getRule().evaluate(bundle)
+
+    expect(result.reason).toContain('selfPositioningRatio=1.00')
+    expect(result.value).toBe(true)
+  })
+
+  it('does not add up self-positioning replies that share one conversation', () => {
+    const replyTexts = Array.from(
+      { length: 20 },
+      (_, index) => `${SELF_POSITIONING_REPLY_TEXTS[index % 6]}補足${index}`,
+    )
+    const base = makeBundle({ replyTexts })
+    const bundle = {
+      ...base,
+      recentTweets: base.recentTweets.map((tweet, index) =>
+        index < 20 ? { ...tweet, conversationId: 'conv-shared' } : tweet,
+      ),
+    }
+
+    expect(getRule().evaluate(bundle).value).toBe(false)
+  })
+
+  it('keeps a genuine marketing reply that mentions entering a campaign but guides to the profile', () => {
+    const mixedTexts = Array.from(
+      { length: 6 },
+      (_, index) =>
+        `自分も投資の仕事をしています。先日キャンペーンに応募しました。詳しい相談はプロフィールからどうぞ。毎日の暮らしに役立つ話をまとめています。番号${index}`,
+    )
+
+    expect(getRule().evaluate(makeBundle({ replyTexts: mixedTexts })).value).toBe(true)
+  })
 })

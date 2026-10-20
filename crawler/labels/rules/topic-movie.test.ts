@@ -189,6 +189,7 @@ describe('topicMovieRule', () => {
   it.each([
     '3DCG デザイナー。Cinema 4D と Blender を使っています',
     'Wedding film photographer based in a fictional town',
+    'Film-photographer based in a fictional town',
   ])('is false for a non-movie use of a movie word: %s', (bio) => {
     expect(topicMovieRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })

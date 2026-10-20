@@ -4,6 +4,7 @@ import type { AccountFeatureBundle } from '../types'
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 function makeBundle(
@@ -236,6 +237,10 @@ describe('botRule', () => {
   })
 
   it('lowers confidence when replyRatio only marginally clears the threshold, even if other signals are strong', () => {
+    // 生涯平均の投稿頻度が閾値へ近づくと、低労力シグネチャの補強値が証拠量を上回り
+    // 返信比率の差が確信度に表れなくなるため、現在時刻を固定して比較する。
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-06-01T00:00:00Z'))
     const strong = makeVelocityBundle({ replyRatioOverride: 0 })
     const marginal = makeVelocityBundle({ replyRatioOverride: 0.049 })
     const strongResult = botRule.evaluate(strong)

@@ -10,7 +10,7 @@ import type { LabelRule } from '../types'
 // 除外しなければ業種を問わずあらゆる企業アカウントを金融関心ありと誤判定してしまうため。
 // trading card と real estate broker は金融ではないため別途除外している。
 const FINANCE_PATTERN =
-  /\b(trading(?!\s+cards?\b)|invest(?!ig)|(?<!real\s+estate\s+)broker|finance|financial)|証券|株式(?!会社)|資産運用/i
+  /\b(trading(?!\s+cards?\b)|invest(?!ig)|(?<!real[\s-]+estate[\s-]+)broker|finance|financial)|証券|株式(?!会社)|資産運用/i
 
 const KEYWORD_SCORE = 0.8
 
@@ -18,7 +18,7 @@ export const topicFinanceRule: LabelRule = {
   key: 'topic_finance',
   description:
     'プロフィールの直接証拠、またはフォロー関係から金融/トレーディングとの強い関連が示される。trading card・real estate broker は含めない',
-  version: '1.3.2',
+  version: '1.3.3',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account

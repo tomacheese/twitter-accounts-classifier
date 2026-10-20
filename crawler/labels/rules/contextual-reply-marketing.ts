@@ -82,8 +82,10 @@ function codePointLength(text: string): number {
 }
 
 // 懸賞・キャンペーンへの定型的な応募返信は、プロフィール誘導ではなく応募の意思表示であるため根拠にしない。
+// ただしプロフィールへの誘導を併記する返信は、応募の言及を混ぜた勧誘でありうるため除外しない。
 const CAMPAIGN_ENTRY_PATTERN =
   /(?:応募(?:し(?:まし)?た|します|いたします|させていただきます)|当(?:た|選)りますように|当選しますように|当選しました|当たりました)/u
+const PROFILE_GUIDANCE_PATTERN = /プロフ(?:ィール)?(?:から|を|欄|へ|に|は)/u
 
 function hasSelfPositioning(text: string): boolean {
   return SELF_POSITIONING_PATTERNS.some((pattern) => pattern.test(text))
@@ -144,9 +146,9 @@ export const contextualReplyMarketingRule: LabelRule = {
   description:
     '大量投稿ボットではない低頻度アカウントが、異なる外部投稿者の投稿へ文脈に沿った長めの共感/称賛リプライを置きつつ、' +
     '「自分も」「〜として」「自分の立場では」等の自己ポジショニングを反復してプロフィール流入を狙う行動を検出する。' +
-    '同一会話に集中する一致や、懸賞・キャンペーンへの定型的な応募返信は自己ポジショニングの根拠にしない。' +
+    '同一会話に集中する一致や、プロフィール誘導を伴わない懸賞・キャンペーンへの定型的な応募返信は自己ポジショニングの根拠にしない。' +
     'AI/LLM 利用そのものは推定しない',
-  version: '0.4.0',
+  version: '0.4.1',
   excludeFromStaleScan: true,
   evaluate(bundle) {
     const sampled = bundle.recentTweets
@@ -184,17 +186,21 @@ export const contextualReplyMarketingRule: LabelRule = {
           normalizedExternalReplies.length
         : 0
     // 同一の会話に集中する一致は議論への参加であるため、会話ごとに最大1件として数える。
+    // 比率の分母も同じ単位 (外部リプライの重複しない会話数) にそろえる。
+    // 会話を特定できないリプライは無関係なものを併合しないよう、それぞれ独自の鍵を持たせる。
+    const conversationKeys = externalReplies.map(
+      (reply, index) => reply.conversationId ?? reply.inReplyToTweetId ?? `reply-${index}`,
+    )
     const selfPositioningConversations = new Set<string>()
     for (const [index, text] of normalizedExternalReplies.entries()) {
-      if (!hasSelfPositioning(text) || CAMPAIGN_ENTRY_PATTERN.test(text)) continue
-      const reply = externalReplies[index]
-      selfPositioningConversations.add(reply.conversationId ?? reply.inReplyToTweetId ?? '')
+      if (!hasSelfPositioning(text)) continue
+      if (CAMPAIGN_ENTRY_PATTERN.test(text) && !PROFILE_GUIDANCE_PATTERN.test(text)) continue
+      selfPositioningConversations.add(conversationKeys[index])
     }
     const selfPositioningCount = selfPositioningConversations.size
+    const distinctConversations = new Set(conversationKeys).size
     const selfPositioningRatio =
-      normalizedExternalReplies.length > 0
-        ? selfPositioningCount / normalizedExternalReplies.length
-        : 0
+      distinctConversations > 0 ? selfPositioningCount / distinctConversations : 0
     const genericReactionRatio =
       normalizedExternalReplies.length > 0
         ? normalizedExternalReplies.filter((text) => hasGenericReaction(text)).length /

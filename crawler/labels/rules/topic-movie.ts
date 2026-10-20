@@ -9,7 +9,7 @@ import type { LabelRule } from '../types'
 // 否定先読みで個別に除外している。
 // 「Cinema 4D (3DCG ソフト)」「film photographer (写真家)」も映画への関心ではないため同様に除外している。
 const MOVIE_PATTERN =
-  /\b(movie|movies|film(?!\s+photograph)|cinema(?!\s*4d\b)|moviegoer|cinephile)\b|映画|ドラマ(?!チック|ー)|洋画|邦画|映画館|映画鑑賞/gi
+  /\b(movie|movies|film(?![\s-]+photograph)|cinema(?!\s*4d\b)|moviegoer|cinephile)\b|映画|ドラマ(?!チック|ー)|洋画|邦画|映画館|映画鑑賞/gi
 
 const KEYWORD_SCORE = 0.8
 
@@ -107,7 +107,7 @@ export const topicMovieRule: LabelRule = {
   key: 'topic_movie',
   description:
     'プロフィールの直接証拠、またはフォロー関係から映画・ドラマとの強い関連が示される。映画・ドラマ名がハッシュタグだけの列挙に現れる場合や、テレビ番組ジャンルのタグ列挙にドラマが 1 件だけ含まれる場合は直接証拠に含めない',
-  version: '1.6.2',
+  version: '1.6.3',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account

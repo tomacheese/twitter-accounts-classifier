@@ -403,4 +403,27 @@ describe('topicNsfwRule', () => {
         .value,
     ).toBe(true)
   })
+
+  it.each([
+    'R18の話題は禁止です',
+    'NSFWコンテンツは禁止です',
+    'NSFW投稿は全部ブロックします',
+    'NSFWの投稿は嫌なのでブロックします',
+  ])('is false for an explicit prohibition with a direct-object noun (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each(['R18絵あり、無断転載禁止', 'R18イラスト投稿、未成年はブロック'])(
+    'stays true when the restriction is unrelated to the NSFW word (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it.each(['Minors DNI, NSFW artist', 'NSFW artist, minors DNI'])(
+    'stays true when "DNI" addresses minors on either side of the NSFW word (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
 })
