@@ -6,8 +6,9 @@ import type { AccountFeatureBundle, LabelRule } from '../types'
 // 転職勧誘単体より支配的な手口であるため。
 // 英単語は他のトピック系ルールと同様に単語境界でマッチさせ、
 // 無関係な単語の内部にはマッチしないようにしている。
+// 単独の「副業」は、働き方の話題への正当な返信にも現れる一般語であるため広告語に含めない。
 const AD_JOB_PITCH_PATTERN =
-  /転職(エージェント|活動|相談|しませんか|しよう)|求人|副業|案件情報|PR案件|広告案件|アフィリ|セミナー情報|無料相談|エアドロ(ップ)?|無料配布|プレゼント企画|\bgiveaway\b|\bairdrop\b|\bclaim\s*now\b|\bconnect\s*wallet\b|\bfree\s*mint\b/i
+  /転職(エージェント|活動|相談|しませんか|しよう)|求人|案件情報|PR案件|広告案件|アフィリ|セミナー情報|無料相談|エアドロ(ップ)?|無料配布|プレゼント企画|\bgiveaway\b|\bairdrop\b|\bclaim\s*now\b|\bconnect\s*wallet\b|\bfree\s*mint\b/i
 
 // 「プレゼント企画」は自ら偽の景品企画を宣伝する乗っ取り投稿だけでなく、
 // 他者の正規のキャンペーンに応募する定型的な参加リプライにも現れる。
@@ -35,8 +36,8 @@ function escapeForRegExp(screenName: string): string {
 export const adReplyHijackRule: LabelRule = {
   key: 'ad_reply_hijack',
   description:
-    '無関係なツイートへの返信を乗っ取り、広告・転職勧誘・暗号資産のギブアウェイ/エアドロップ勧誘を宣伝している',
-  version: '1.5.1',
+    '無関係なツイートへの返信を乗っ取り、広告・転職勧誘・暗号資産のギブアウェイ/エアドロップ勧誘を宣伝している。単独の「副業」は広告語に数えない',
+  version: '1.6.1',
   evaluate(bundle) {
     const { screenName } = bundle.account
     // 親ツイートの投稿者情報はクロールデータに存在しないため、

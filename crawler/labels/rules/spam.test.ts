@@ -24,6 +24,22 @@ function makeBundle(
   }
 }
 
+function retweets(count: number, giveawayCount: number): AccountFeatureBundle['recentTweets'] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `boundary-${index}`,
+    fullText:
+      index < giveawayCount
+        ? `RT @brand: 懸賞プレゼント応募企画 ${index}`
+        : `RT @brand: 日常 ${index}`,
+    createdAt: new Date(),
+    retweetCount: 0,
+    likeCount: 0,
+    isReply: false,
+    isRetweet: true,
+    isPromoted: false,
+    isPaidPromotion: false,
+  }))
+}
 describe('spamRule', () => {
   it('is true for a dating-solicitation bio with a mass-following pattern', () => {
     const result = spamRule.evaluate(
@@ -587,5 +603,68 @@ describe('spamRule', () => {
     expect(result.value).toBe(false)
     expect(result.evaluable ?? true).toBe(true)
     expect(result.confidence).toBe(1)
+  })
+
+  describe('rejection word boundary', () => {
+    const massFollowing = { followersCount: 10, followingCount: 800 }
+
+    it('does not treat "ng" inside an English word as a rejection', () => {
+      const result = spamRule.evaluate(
+        makeBundle({ bio: '稼げる情報を配信中 Following everyone back', ...massFollowing }),
+      )
+      expect(result.value).toBe(true)
+    })
+
+    it('still treats a standalone NG as a rejection', () => {
+      expect(
+        spamRule.evaluate(makeBundle({ bio: '稼げる系はNGです', ...massFollowing })).value,
+      ).toBe(false)
+      expect(spamRule.evaluate(makeBundle({ bio: '稼げる系は NG', ...massFollowing })).value).toBe(
+        false,
+      )
+    })
+  })
+
+  describe('giveaway and mass-following boundaries', () => {
+    const base = { bio: '日常アカウントです', recentTweetsFetchStatus: 'success' as const }
+
+    it('treats 5 retweets with 3/5 giveaway ratio as giveaway-focused (false)', () => {
+      const result = spamRule.evaluate(
+        makeBundle({ ...base, followersCount: 10, followingCount: 800 }, retweets(5, 3)),
+      )
+      expect(result.value).toBe(false)
+    })
+
+    it('does not treat 5 retweets with 2/5 giveaway ratio as giveaway-focused (true)', () => {
+      const result = spamRule.evaluate(
+        makeBundle({ ...base, followersCount: 10, followingCount: 800 }, retweets(5, 2)),
+      )
+      expect(result.value).toBe(true)
+    })
+
+    it('does not treat fewer than 5 retweets as giveaway-focused', () => {
+      const tweets = [...retweets(4, 4), { ...retweets(1, 0)[0], id: 'own', isRetweet: false }]
+      const result = spamRule.evaluate(
+        makeBundle({ ...base, followersCount: 10, followingCount: 800 }, tweets),
+      )
+      expect(result.value).toBe(true)
+    })
+
+    it('does not label giveaway participants without solicitation even at the following boundary', () => {
+      const result = spamRule.evaluate(
+        makeBundle({ ...base, followersCount: 0, followingCount: 500 }, retweets(10, 10)),
+      )
+      expect(result.value).toBe(false)
+    })
+
+    it('is false at following 499 and true at 500 with a solicitation bio', () => {
+      const solicitation = { bio: '稼げる情報を配信', followersCount: 0 }
+      expect(spamRule.evaluate(makeBundle({ ...solicitation, followingCount: 499 })).value).toBe(
+        false,
+      )
+      expect(spamRule.evaluate(makeBundle({ ...solicitation, followingCount: 500 })).value).toBe(
+        true,
+      )
+    })
   })
 })

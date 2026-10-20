@@ -28,7 +28,7 @@ const SOLICITATION_PATTERN = new RegExp(
 // window は列挙 1〜2 個分を見込める長さを確保している。
 const REJECTION_WINDOW_LENGTH = 60
 const REJECTION_PATTERN =
-  /お断り|お断わり|御断り|拒否|NG|ダメ|禁止|お控え|ご遠慮|しないで|通報|ブロック|スルー|無視|要らん|要りません|要らない|いりません|いらない|不要|結構です|興味(が)?(あり|有り)?ません|対応(は)?していません|受け?付け?(?:は)?(?:して)?(?:い|おり)?ません|🆖|❌|✗/i
+  /お断り|お断わり|御断り|拒否|(?<![a-z])ng(?![a-z])|ダメ|禁止|お控え|ご遠慮|しないで|通報|ブロック|スルー|無視|要らん|要りません|要らない|いりません|いらない|不要|結構です|興味(が)?(あり|有り)?ません|対応(は)?していません|受け?付け?(?:は)?(?:して)?(?:い|おり)?ません|🆖|❌|✗/i
 
 function isRejectedMatch(normalized: string, match: RegExpMatchArray): boolean {
   const index = match.index ?? 0
@@ -89,9 +89,9 @@ function isMassFollowingPattern(followingCount: number, followersCount: number):
 export const spamRule: LabelRule = {
   key: 'spam',
   description:
-    'プロフィールで出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある。' +
+    'プロフィール、またはツイート本文で 2 回以上繰り返された出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある。' +
     'bio に勧誘文言が無くても、リツイート主体の釣り的タイムラインと大量フォロー傾向の両方が同時に強く出ている場合は、それ自体を独立したエンゲージメント水増しの証拠として扱う。懸賞応募に集中したリツイートは、それだけでは spam とみなさない',
-  version: '1.14.0',
+  version: '1.14.1',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
     const hasSolicitation = bio !== null && hasGenuineSolicitation(bio)

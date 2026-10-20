@@ -91,7 +91,7 @@ export const genericReplyFarmingRule: LabelRule = {
     '多数の異なる外部投稿へ、汎用的な評価・共感や抽象的な関心の締めを高頻度に繰り返す行動、' +
     'および非日本語プロフィールが外部投稿へ低頻度に日本語の文脈追随型の返信を繰り返す行動を検出する shadow ラベル。' +
     'AI/LLM 利用そのものは推定しない',
-  version: '0.2.0',
+  version: '0.2.1',
   excludeFromStaleScan: true,
   evaluate(bundle) {
     const sampled = bundle.recentTweets
@@ -99,10 +99,16 @@ export const genericReplyFarmingRule: LabelRule = {
     const resolvedReplyTweets = replyTweets.filter(
       (tweet) => tweet.inReplyToTweetId && tweet.parentTweetAuthorId,
     )
+    // 自分の投稿が拡散した際のコメントへの返信は、親ツイートの投稿者が他者でも farming ではない。
+    const isInOwnConversation = (tweet: { conversationRootAuthorId?: string | null }): boolean =>
+      tweet.conversationRootAuthorId === bundle.account.id
     const externalReplies = resolvedReplyTweets.filter(
-      (tweet) => tweet.parentTweetAuthorId !== bundle.account.id,
+      (tweet) => tweet.parentTweetAuthorId !== bundle.account.id && !isInOwnConversation(tweet),
     )
-    const replyRatio = sampled.length > 0 ? replyTweets.length / sampled.length : 0
+    const replyRatio =
+      sampled.length > 0
+        ? replyTweets.filter((tweet) => !isInOwnConversation(tweet)).length / sampled.length
+        : 0
     const parentAuthorCoverage =
       replyTweets.length > 0 ? resolvedReplyTweets.length / replyTweets.length : 1
     const externalReplyRatio =

@@ -10,8 +10,9 @@ const KEYWORD_SCORE = 0.8
 
 export const topicGamingRule: LabelRule = {
   key: 'topic_gaming',
-  description: 'プロフィールの直接証拠、またはフォロー関係からゲームとの強い関連が示される',
-  version: '1.1.1',
+  description:
+    'プロフィールの直接証拠、またはフォロー関係からゲームとの強い関連が示される。bio にキーワードがないゲーム関心はキーワード判定の対象外とし、フォロー関係の判定に任せる',
+  version: '1.1.2',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account

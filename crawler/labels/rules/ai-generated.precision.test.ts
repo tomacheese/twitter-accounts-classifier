@@ -52,3 +52,52 @@ describe('aiGeneratedRule precision regressions', () => {
     expect(aiGeneratedRule.evaluate(makeBundle(bio)).value).toBe(true)
   })
 })
+
+describe('aiGeneratedRule usage-condition notices (negation window)', () => {
+  it.each([
+    '生成AIでイラストを作っています。二次利用禁止',
+    'AI生成イラストを投稿しています。無断学習禁止です',
+    'AI生成の作品を投稿しています ⚠️無断転載・二次利用・学習禁止⚠️',
+    'AI-generated images. No reposts. 無断学習NG',
+    'AI生成イラストを投稿しています。二次創作NG、商用利用は要相談',
+  ])('does not negate a self-declaration beside usage conditions: %s', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle(bio)).value).toBe(true)
+  })
+
+  it('keeps the same result when the bio is shortened around the usage condition', () => {
+    expect(aiGeneratedRule.evaluate(makeBundle('AI生成画像を投稿。二次利用禁止')).value).toBe(true)
+    expect(aiGeneratedRule.evaluate(makeBundle('AI生成画像を投稿。AI生成禁止')).value).toBe(false)
+  })
+
+  it.each(['AI生成禁止', '生成AI使用禁止です', '❌生成AI', '手描き専門。AI生成NGです。'])(
+    'still negates a prohibition that directly governs the AI term: %s',
+    (bio) => {
+      expect(aiGeneratedRule.evaluate(makeBundle(bio)).value).toBe(false)
+    },
+  )
+})
+
+describe('aiGeneratedRule hobby and work mentions', () => {
+  it.each([
+    '趣味で生成AIを遊んでいます',
+    '音楽生成AIで曲を作って遊んでいます',
+    'ノート作成業務で生成AIを活用しています',
+    'フリーランスDTP\nカメラ\n生成AI\nよろしくお願いします',
+    'イラスト\n生成AI\nゲーム実況',
+    '写真、\n生成AI\nカフェ巡り',
+  ])('is false for a hobby, work or newline-separated mention: %s', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle(bio)).value).toBe(false)
+  })
+
+  it('keeps an icon-only AI-generated declaration as a self-declaration', () => {
+    expect(aiGeneratedRule.evaluate(makeBundle('アイコンはAI生成です')).value).toBe(true)
+  })
+
+  it('does not change for an opinion link bio', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle('生成AIについての見解はこちら https://example.com/opinion'),
+      ).value,
+    ).toBe(false)
+  })
+})

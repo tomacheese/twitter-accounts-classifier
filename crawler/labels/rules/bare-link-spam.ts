@@ -15,10 +15,13 @@ function hasUrl(tweet: { expandedUrls?: string[]; fullText: string }): boolean {
 export const bareLinkSpamRule: LabelRule = {
   key: 'bare_link_spam',
   description:
-    '自身のメディアなし投稿の大半が、URL・メンション除去後のテキストが実質空になる、コメントなしリンクの連投である。リンク先ドメインを問わない汎用的な spam パターン',
-  version: '1.1.0',
+    '自身のメディアなし投稿の大半が、URL・メンション除去後のテキストが実質空になる、コメントなしリンクの連投である。メディア有無が不明な投稿は評価対象から除く。リンク先ドメインを問わない汎用的な spam パターン',
+  version: '1.2.0',
   evaluate(bundle) {
-    const observedOwnPosts = bundle.recentTweets.filter((t) => !t.isReply && !t.isRetweet)
+    // hasMedia が不明な投稿は動画・画像付きか判別できないため、母集団から除く。
+    const observedOwnPosts = bundle.recentTweets.filter(
+      (t) => !t.isReply && !t.isRetweet && t.hasMedia !== null && t.hasMedia !== undefined,
+    )
     const ownPosts = observedOwnPosts.filter((t) => t.hasMedia === false)
     const bareLinkPosts = ownPosts.filter((t) => hasUrl(t) && !hasLinguisticContent(t.fullText))
 
@@ -37,13 +40,8 @@ export const bareLinkSpamRule: LabelRule = {
     // recentTweets が未取得の場合、単に投稿数が少ないだけの陰性とは区別する。
     const allObservedPostsWereMedia =
       observedOwnPosts.length > 0 && observedOwnPosts.every((tweet) => tweet.hasMedia === true)
-    const allObservedMediaStatusKnown = observedOwnPosts.every(
-      (tweet) => tweet.hasMedia !== null && tweet.hasMedia !== undefined,
-    )
     const evaluable =
-      isRecentTweetsEvaluable(bundle) &&
-      allObservedMediaStatusKnown &&
-      (hasEnoughSample || allObservedPostsWereMedia)
+      isRecentTweetsEvaluable(bundle) && (hasEnoughSample || allObservedPostsWereMedia)
     const value = evaluable && hasEnoughSample && ratio >= BARE_LINK_RATIO_THRESHOLD
     return {
       value,

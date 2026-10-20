@@ -9,8 +9,9 @@ import type { LabelRule } from '../types'
  */
 export const verifiedBusinessRule: LabelRule = {
   key: 'verified_business',
-  description: 'X の組織認証（ゴールドバッジ）を保持している企業/ブランドアカウント',
-  version: '1.0.0',
+  description:
+    'X の組織認証（ゴールドバッジ）を保持している企業/ブランドアカウント。API の観測差は DB だけでは一時欠落かバッジ喪失か判別できないため、観測値をそのまま反映する',
+  version: '1.0.1',
   evaluate(bundle) {
     const { verifiedType } = bundle.account
     const value = verifiedType === 'Business'

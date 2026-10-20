@@ -113,7 +113,20 @@ describe('bareLinkSpamRule', () => {
     expect(result.evaluable).toBe(true)
   })
 
-  it('does not treat posts with unknown media status as link-only evidence', () => {
+  it('evaluates only posts with known media status when some are unknown', () => {
+    const result = bareLinkSpamRule.evaluate(
+      makeBundle([
+        ...Array.from({ length: 5 }, (_, index) => bareLinkTweet(`known-${index}`)),
+        { ...bareLinkTweet('unknown-1'), hasMedia: null },
+        { ...bareLinkTweet('unknown-2'), hasMedia: undefined },
+      ]),
+    )
+    expect(result.value).toBe(true)
+    expect(result.evaluable).toBe(true)
+    expect(result.reason).toContain('n=5/5')
+  })
+
+  it('stays not evaluable when every post has unknown media status', () => {
     const result = bareLinkSpamRule.evaluate(
       makeBundle(
         Array.from({ length: 5 }, (_, index) => bareLinkTweet(`unknown-${index}`)).map((item) => ({

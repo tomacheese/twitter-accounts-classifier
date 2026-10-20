@@ -612,7 +612,8 @@ describe('contextualReplyMarketingRule', () => {
     const result = getRule().evaluate(
       makeBundle({
         replyTexts: GENITIVE_THIRD_PARTY_REPLY_TEXTS.map(
-          (text) => text + ' この話は第三者の経験として聞いた内容です。本人自身の経験ではありません。',
+          (text) =>
+            text + ' この話は第三者の経験として聞いた内容です。本人自身の経験ではありません。',
         ),
         originalCount: 1,
         parentAuthorIds,
@@ -680,13 +681,9 @@ describe('contextualReplyMarketingRule', () => {
   it('does not label a stable community account that naturally uses 自分も/私も with a small friend group', () => {
     const communityReplyTexts = Array.from(
       { length: 19 },
-      (_, index) =>
-        `分かる、自分も似たようなことがあったよ。番号${index}の件、無理せずいこうね。`,
+      (_, index) => `分かる、自分も似たようなことがあったよ。番号${index}の件、無理せずいこうね。`,
     )
-    const parentAuthorIds = Array.from(
-      { length: 19 },
-      (_, index) => `friend-${(index % 3) + 1}`,
-    )
+    const parentAuthorIds = Array.from({ length: 19 }, (_, index) => `friend-${(index % 3) + 1}`)
     const result = getRule().evaluate(
       makeBundle({
         replyTexts: communityReplyTexts,
@@ -698,5 +695,85 @@ describe('contextualReplyMarketingRule', () => {
     )
 
     expect(result.value).toBe(false)
+  })
+
+  it('does not count self-positioning replies concentrated on a single parent tweet', () => {
+    const replyTexts = [...SELF_POSITIONING_REPLY_TEXTS, ...PLAIN_EMPATHY_REPLY_TEXTS]
+    const control = makeBundle({ replyTexts })
+    expect(getRule().evaluate(control).value).toBe(true)
+
+    const concentrated = {
+      ...control,
+      recentTweets: control.recentTweets.map((tweet, index) =>
+        index < 3 ? { ...tweet, inReplyToTweetId: 'shared-parent' } : tweet,
+      ),
+    }
+
+    expect(getRule().evaluate(concentrated).value).toBe(false)
+  })
+
+  it('keeps counting self-positioning replies that spread across different parent tweets', () => {
+    const replyTexts = [...SELF_POSITIONING_REPLY_TEXTS, ...PLAIN_EMPATHY_REPLY_TEXTS]
+
+    expect(getRule().evaluate(makeBundle({ replyTexts })).value).toBe(true)
+  })
+
+  it('does not treat templated sweepstakes entry replies as self-positioning evidence', () => {
+    const entryTexts = Array.from(
+      { length: 6 },
+      (_, index) =>
+        `素敵なキャンペーンですね。自分も応募しました。当たりますように。結果の発表を楽しみにしています。毎日の暮らしに役立ちそうな賞品で、友人にも紹介したいと思いました。番号${index}`,
+    )
+    const controlTexts = entryTexts.map((text) =>
+      text.replace('応募しました。当たりますように。', '参加したくなりました。'),
+    )
+
+    expect(getRule().evaluate(makeBundle({ replyTexts: controlTexts })).value).toBe(true)
+    expect(getRule().evaluate(makeBundle({ replyTexts: entryTexts })).value).toBe(false)
+  })
+
+  it('keeps the ratio at 1.0 when every conversation has several self-positioning replies', () => {
+    const replyTexts = Array.from(
+      { length: 30 },
+      (_, index) => `${SELF_POSITIONING_REPLY_TEXTS[index % 6]}補足${index}`,
+    )
+    const base = makeBundle({ replyTexts })
+    const bundle = {
+      ...base,
+      recentTweets: base.recentTweets.map((tweet, index) =>
+        index < 30 ? { ...tweet, conversationId: `conv-${Math.floor(index / 3)}` } : tweet,
+      ),
+    }
+
+    const result = getRule().evaluate(bundle)
+
+    expect(result.reason).toContain('selfPositioningRatio=1.00')
+    expect(result.value).toBe(true)
+  })
+
+  it('does not add up self-positioning replies that share one conversation', () => {
+    const replyTexts = Array.from(
+      { length: 20 },
+      (_, index) => `${SELF_POSITIONING_REPLY_TEXTS[index % 6]}補足${index}`,
+    )
+    const base = makeBundle({ replyTexts })
+    const bundle = {
+      ...base,
+      recentTweets: base.recentTweets.map((tweet, index) =>
+        index < 20 ? { ...tweet, conversationId: 'conv-shared' } : tweet,
+      ),
+    }
+
+    expect(getRule().evaluate(bundle).value).toBe(false)
+  })
+
+  it('keeps a genuine marketing reply that mentions entering a campaign but guides to the profile', () => {
+    const mixedTexts = Array.from(
+      { length: 6 },
+      (_, index) =>
+        `自分も投資の仕事をしています。先日キャンペーンに応募しました。詳しい相談はプロフィールからどうぞ。毎日の暮らしに役立つ話をまとめています。番号${index}`,
+    )
+
+    expect(getRule().evaluate(makeBundle({ replyTexts: mixedTexts })).value).toBe(true)
   })
 })

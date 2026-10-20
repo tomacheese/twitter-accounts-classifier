@@ -113,4 +113,35 @@ describe('replyHijackSwarmRule', () => {
     expect(result.evaluable).toBe(false)
     expect(result.confidence).toBeCloseTo(0.5)
   })
+
+  it('is false when replies are 5 of 10 sampled tweets, below the 0.6 boundary', () => {
+    const tweets = [
+      ...Array.from({ length: 5 }, () => tweet(true)),
+      ...Array.from({ length: 5 }, () => tweet(false)),
+    ]
+    const result = replyHijackSwarmRule.evaluate(makeBundle(10, tweets))
+
+    expect(result.value).toBe(false)
+  })
+
+  it('is true when replies are exactly 6 of 10 sampled tweets', () => {
+    const tweets = [
+      ...Array.from({ length: 6 }, () => tweet(true)),
+      ...Array.from({ length: 4 }, () => tweet(false)),
+    ]
+    const result = replyHijackSwarmRule.evaluate(makeBundle(10, tweets))
+
+    expect(result.value).toBe(true)
+  })
+
+  it('saturates the reply-ratio evidence at a replyRatio of 1.0', () => {
+    const boundary = [
+      ...Array.from({ length: 6 }, () => tweet(true)),
+      ...Array.from({ length: 4 }, () => tweet(false)),
+    ]
+    const atBoundary = replyHijackSwarmRule.evaluate(makeBundle(10, boundary))
+    const replyOnly = replyHijackSwarmRule.evaluate(makeBundle(10, replyOnlyTweets(10)))
+
+    expect(replyOnly.confidence).toBeGreaterThan(atBoundary.confidence)
+  })
 })

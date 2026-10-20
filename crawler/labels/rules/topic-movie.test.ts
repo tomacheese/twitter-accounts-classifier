@@ -185,4 +185,49 @@ describe('topicMovieRule', () => {
       topicMovieRule.evaluate(makeBundle({ bio: 'Design/Movie/Illust。映画が好きです' })).value,
     ).toBe(true)
   })
+
+  it.each([
+    '3DCG デザイナー。Cinema 4D と Blender を使っています',
+    'Wedding film photographer based in a fictional town',
+    'Film-photographer based in a fictional town',
+  ])('is false for a non-movie use of a movie word: %s', (bio) => {
+    expect(topicMovieRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('is true for a 4DX theatre format that only shares the Cinema 4D prefix', () => {
+    expect(topicMovieRule.evaluate(makeBundle({ bio: 'Cinema 4DX fan' })).value).toBe(true)
+  })
+
+  it('is true for cinema and film outside the excluded phrases', () => {
+    expect(topicMovieRule.evaluate(makeBundle({ bio: 'Cinema lover and film critic' })).value).toBe(
+      true,
+    )
+  })
+
+  it.each(['Illust／Design／Movie', 'Illust｜Design｜Movie', '＃Illust ＃Design ＃Movie'])(
+    'is false for a full-width delimited tag list: %s',
+    (bio) => {
+      expect(topicMovieRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('is false when a drama appears once in a TV program genre hashtag list', () => {
+    expect(
+      topicMovieRule.evaluate(makeBundle({ bio: '#バラエティ #お笑い #日曜ドラマ 平日は会社員' }))
+        .value,
+    ).toBe(false)
+  })
+
+  it('is true when the TV program tag list is accompanied by a movie word', () => {
+    expect(
+      topicMovieRule.evaluate(makeBundle({ bio: '#バラエティ #お笑い #日曜ドラマ 映画も好き' }))
+        .value,
+    ).toBe(true)
+  })
+
+  it('is true for a plain drama declaration next to unrelated hashtags', () => {
+    expect(
+      topicMovieRule.evaluate(makeBundle({ bio: 'ドラマが好き #バラエティ #お笑い' })).value,
+    ).toBe(true)
+  })
 })

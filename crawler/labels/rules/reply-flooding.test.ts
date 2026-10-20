@@ -95,9 +95,7 @@ describe('replyFloodingRule', () => {
   })
 
   it('keeps an exchange at the calibrated similarity threshold positive', () => {
-    const similaritySpy = vi
-      .spyOn(textSimilarity, 'averagePairwiseSimilarity')
-      .mockReturnValue(0.05)
+    const similaritySpy = vi.spyOn(textSimilarity, 'averagePairwiseSimilarity').mockReturnValue(0.1)
 
     try {
       const result = replyFloodingRule.evaluate(
@@ -117,10 +115,10 @@ describe('replyFloodingRule', () => {
     }
   })
 
-  it('keeps an unrounded score below the threshold negative when its reason would round to 0.050', () => {
+  it('keeps an unrounded score below the threshold negative when its reason would round to 0.100', () => {
     const similaritySpy = vi
       .spyOn(textSimilarity, 'averagePairwiseSimilarity')
-      .mockReturnValue(0.0496)
+      .mockReturnValue(0.0996)
 
     try {
       const result = replyFloodingRule.evaluate(
@@ -325,7 +323,9 @@ describe('replyFloodingRule', () => {
   })
 
   it('uses the ordinary (non-raised) similarity threshold once the median reply length reaches the short-reply cutoff', () => {
-    const similaritySpy = vi.spyOn(textSimilarity, 'averagePairwiseSimilarity').mockReturnValue(0.1)
+    const similaritySpy = vi
+      .spyOn(textSimilarity, 'averagePairwiseSimilarity')
+      .mockReturnValue(0.12)
 
     try {
       const result = replyFloodingRule.evaluate(

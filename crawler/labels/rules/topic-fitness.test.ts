@@ -160,4 +160,34 @@ describe('topicFitnessRule', () => {
       expect(topicFitnessRule.evaluate(makeBundle({ bio })).value).toBe(true)
     },
   )
+
+  it('does not let a spectator-context 選手 or ジム word cancel the spectator exclusion', () => {
+    const bundle = {
+      ...makeBundle({ bio: 'ボクシング観戦が趣味。好きな選手の試合をジムのイベントで観ます' }),
+      followGraphLabelSignals: {
+        topic_fitness: {
+          followeeLabeledCount: 10,
+          followeeTotalCount: 20,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    }
+    expect(topicFitnessRule.evaluate(bundle).value).toBe(false)
+  })
+
+  it('keeps the follow graph signal when spectating comes with actual training', () => {
+    const bundle = {
+      ...makeBundle({ bio: 'ボクシング観戦が趣味。自分もトレーニングしています' }),
+      followGraphLabelSignals: {
+        topic_fitness: {
+          followeeLabeledCount: 10,
+          followeeTotalCount: 20,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    }
+    expect(topicFitnessRule.evaluate(bundle).value).toBe(true)
+  })
 })

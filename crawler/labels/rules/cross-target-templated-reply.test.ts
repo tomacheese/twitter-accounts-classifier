@@ -205,6 +205,36 @@ describe('crossTargetTemplatedReplyRule', () => {
     expect(crossTargetTemplatedReplyRule.evaluate(bundle).value).toBe(false)
   })
 
+  it('ignores replies in the account’s own conversation even when conversationId is missing', () => {
+    const bundle = makeBundle(
+      Array.from({ length: 5 }, (_, i) => ({
+        fullText: TEMPLATE_TEXT,
+        isReply: true,
+        conversationId: null,
+        conversationRootAuthorId: '1',
+        hoursAgo: i,
+        inReplyToTweetId: `commenter-${i}`,
+      })),
+    )
+
+    expect(crossTargetTemplatedReplyRule.evaluate(bundle).value).toBe(false)
+  })
+
+  it('still counts replies whose conversation metadata is missing entirely', () => {
+    const bundle = makeBundle(
+      Array.from({ length: 5 }, (_, i) => ({
+        fullText: TEMPLATE_TEXT,
+        isReply: true,
+        conversationId: null,
+        conversationRootAuthorId: null,
+        hoursAgo: i,
+        inReplyToTweetId: `external-${i}`,
+      })),
+    )
+
+    expect(crossTargetTemplatedReplyRule.evaluate(bundle).value).toBe(true)
+  })
+
   it("does not count replies to the account's own past tweets as distinct targets", () => {
     const bundle = makeBundle([
       ...Array.from({ length: 5 }, (_, i) => ({

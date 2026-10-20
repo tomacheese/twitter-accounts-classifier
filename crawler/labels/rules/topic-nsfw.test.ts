@@ -223,6 +223,14 @@ describe('topicNsfwRule', () => {
     ).toBe(false)
   })
 
+  it('is true when a blog mention follows a genuine declaration', () => {
+    expect(
+      topicNsfwRule.evaluate(
+        makeBundle({ bio: 'R18イラストを投稿しています。ブログも書いています。' }),
+      ).value,
+    ).toBe(true)
+  })
+
   it('is false for denying 18+ talk with a negated verb', () => {
     expect(
       topicNsfwRule.evaluate(makeBundle({ bio: '日常と趣味の垢です。18禁な話はしてません。' }))
@@ -331,4 +339,91 @@ describe('topicNsfwRule', () => {
   ])('is true for a self-declaration that is not a rejection or redirect (%s)', (bio) => {
     expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
   })
+  it.each([
+    'R18絵あり、無断転載禁止',
+    'R18絵あり無断転載禁止',
+    'R-18あり、苦手な方はブロックしてください',
+    'R-18あり苦手な方はブロックしてください',
+    'NSFW artist, minors DNI',
+    'NSFW art account minors DNI',
+    'R18イラストを描いています。未成年はフォローしないでね。DNI',
+    'DNI if you are a minor. NSFW artist',
+  ])('stays true for a self-declaration followed by unrelated refusal wording (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it.each(['R18リプ禁止', 'R-18G 禁止', 'R18の方はブロック'])(
+    'is false when a short refusal noun precedes the prohibition (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it.each([
+    'NSFWも描きます、フォローいただけると嬉しいです',
+    'R18絵を描いてます、ご依頼いただければ対応',
+  ])('stays true when unrelated request wording follows a self-declaration (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it.each(['NSFW DNI', 'R18は禁止', 'NSFW投稿は禁止です', 'NSFW系はブロックします', 'DNI NSFW'])(
+    'is false when the adult keyword itself is refused (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it.each(['成人向け英会話を教えています', '2018禁煙に成功した'])(
+    'is false for look-alike words that are not adult content (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it.each([
+    'R18の二次創作をもらうのが好きです',
+    'NSFWのファンアートを頂くことがあります',
+    'R-18絵をいただけると嬉しいです',
+  ])('is false when adult content is only received from others (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    'R18は → https://example.com/alice_sub',
+    'NSFW→https://example.com/alice_sub',
+    'R18垢 x.com/alice_sub',
+    '18禁はこちら https://example.com/alice_sub',
+  ])('is false for a bio that only redirects to an adult account by URL (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('stays true for a company account that distributes adult videos', () => {
+    expect(
+      topicNsfwRule.evaluate(makeBundle({ bio: 'アダルト動画を配信する会社の公式アカウントです' }))
+        .value,
+    ).toBe(true)
+  })
+
+  it.each([
+    'R18の話題は禁止です',
+    'NSFWコンテンツは禁止です',
+    'NSFW投稿は全部ブロックします',
+    'NSFWの投稿は嫌なのでブロックします',
+  ])('is false for an explicit prohibition with a direct-object noun (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each(['R18絵あり、無断転載禁止', 'R18イラスト投稿、未成年はブロック'])(
+    'stays true when the restriction is unrelated to the NSFW word (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it.each(['Minors DNI, NSFW artist', 'NSFW artist, minors DNI'])(
+    'stays true when "DNI" addresses minors on either side of the NSFW word (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
 })

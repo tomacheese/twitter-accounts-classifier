@@ -149,7 +149,7 @@ describe('persistAuthorResultAtomic', () => {
       recentTweets: [
         tweet('reply-b-1', 'author1', { isReply: true, inReplyToTweetId: 'target-b' }),
         tweet('reply-a-1', 'author1', { isReply: true, inReplyToTweetId: 'target-a' }),
-        tweet('post-1', 'author1'),
+        tweet('reply-a-2', 'author1', { isReply: true, inReplyToTweetId: 'target-c' }),
       ],
       additionalOwnTweets: [],
       recentTweetsFallbackAuthors: [],
