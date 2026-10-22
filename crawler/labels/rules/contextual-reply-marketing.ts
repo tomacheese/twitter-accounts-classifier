@@ -84,7 +84,7 @@ function codePointLength(text: string): number {
 // 懸賞・キャンペーンへの定型的な応募返信は、プロフィール誘導ではなく応募の意思表示であるため根拠にしない。
 // ただしプロフィールへの誘導を併記する返信は、応募の言及を混ぜた勧誘でありうるため除外しない。
 const CAMPAIGN_ENTRY_PATTERN =
-  /(?:応募(?:し(?:まし)?た|します|いたします|させていただきます)|当(?:た|選)りますように|当選しますように|当選しました|当たりました)/u
+  /(?:応募(?:し(?:まし)?た|します|いたします|させていただきます)|当(?:た|選)りますように|当選しますように|当選しました|当たりました|当(?:た|選)ったら|参加(?:します|いたします|させていただきます))/u
 const PROFILE_GUIDANCE_PATTERN = /プロフ(?:ィール)?(?:から|を|欄|へ|に|は)/u
 
 function hasSelfPositioning(text: string): boolean {
@@ -148,7 +148,7 @@ export const contextualReplyMarketingRule: LabelRule = {
     '「自分も」「〜として」「自分の立場では」等の自己ポジショニングを反復してプロフィール流入を狙う行動を検出する。' +
     '同一会話に集中する一致や、プロフィール誘導を伴わない懸賞・キャンペーンへの定型的な応募返信は自己ポジショニングの根拠にしない。' +
     'AI/LLM 利用そのものは推定しない',
-  version: '0.4.1',
+  version: '0.4.2',
   excludeFromStaleScan: true,
   evaluate(bundle) {
     const sampled = bundle.recentTweets

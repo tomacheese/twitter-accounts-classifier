@@ -18,7 +18,7 @@ const PARTY_AFFILIATION_PATTERN =
 // 「国会議員、官庁、...向け」のような対象・宛先の列挙にも使われるため、
 // タグ区切りだけでの一致対象からは外し、述語を伴う自己申告のみ対象とする。
 const JAPANESE_SPECIFIC_OFFICE_TITLE_PATTERN =
-  /(?:衆議院議員|参議院議員|県議会議員|市議会議員|国会議員)(?:を)?(?:しています|です|として活動|として働いています)|(?:衆議院議員|参議院議員|県議会議員|市議会議員)(?:を)?[、,｜∣／]/gi
+  /(?:衆議院議員|参議院議員|[県都道府区市町村]議会議員|国会議員)(?:を)?(?:しています|です|として活動|として働いています|務めています)|(?:衆議院議員|参議院議員|[県都道府区市町村]議会議員)(?:を)?[、,｜∣／]/gi
 // 修飾語を伴わない裸の "congressman"/"senator"/"politician" は自嘲や他者評など
 // 自己申告以外の文脈でも現れるため、地域を示す state 接頭辞か for/of/district を伴う場合のみ対象とする。
 const ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN =
@@ -45,7 +45,7 @@ const ENGLISH_ADMINISTRATIVE_OFFICE_SELF_IDENTIFICATION_PATTERN =
 // ひらがなを挟む場合は「前から」のような無関係な文脈とみなし対象外にする。
 const NEGATION_PREFIX_WINDOW_LENGTH = 10
 const FORMER_OFFICE_HOLDER_PATTERN =
-  /(?<!\p{Script=Han})(?:元|前(?!橋))[・\s]*[^\s、,。！?・\p{Script=Hiragana}]{0,6}$/u
+  /(?<!\p{Script=Han})(?:元|前(?!橋))[・\s]*[^\s、,。！?・（()）｜∣/／【】「」\p{Script=Hiragana}]{0,6}$/u
 const OTHER_NEGATION_PREFIX_PATTERN = /非\s*$|\bformer\s*$/i
 
 // 「党員ではありません」のように、一致直後の「ではない」系の否定は所属の否定を述べている。
@@ -123,7 +123,7 @@ export const topicPoliticsRule: LabelRule = {
     'プロフィールで政党への所属や選挙で選ばれた公職者であることを示している。「Governor of」のような冗談の肩書きは文字列だけでは公職名の自称と区別できないため、区別せず該当とする',
   // 政治的意見に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.10.1',
+  version: '1.11.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =

@@ -372,4 +372,25 @@ describe('topicPoliticsRule', () => {
       true,
     )
   })
+
+  it.each([
+    '前田太郎（自民党所属）',
+    '前田太郎｜自民党員',
+    '元木花子/自民党所属',
+    '都議会議員です',
+    '区議会議員をしています',
+    '衆議院議員を務めています',
+  ])(
+    'is true for a current declaration that the former-holder or seat lists used to miss: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it.each(['元都議会議員です', '前区議会議員です', 'ゲーム内の村長です', '私が町長です'])(
+    'is still false for a former holder or a nickname that only resembles a head-of-municipality title: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
 })
