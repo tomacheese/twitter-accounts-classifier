@@ -112,4 +112,19 @@ describe('topicIllustrationRule', () => {
     const result = topicIllustrationRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it("is false for a bio that only says it retweets others' illustrations", () => {
+    expect(
+      topicIllustrationRule.evaluate(
+        makeBundle({ bio: 'お出かけの記録を載せています。アニメのイラストもよくRTします' }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('stays true for a bio that declares drawing illustrations and welcomes retweets', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: 'イラストを描いています。RT歓迎です' }))
+        .value,
+    ).toBe(true)
+  })
 })

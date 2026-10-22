@@ -426,4 +426,40 @@ describe('topicNsfwRule', () => {
       expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
     },
   )
+
+  it.each([
+    'ゲームが好き。R18と宣伝アカウントはフォロバしません',
+    'NSFW works @alice_sub',
+    'sub: @alice_sub (NSFW)',
+    'ファンアートタグ #example R18絵 #example2 担当絵師@alice_art',
+    'ゲーム好き\nR18 https://t.co/exampleXXXX',
+  ])('is false for a rejection, redirect or commissioned-artist mention (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    'R18イラストを描きます。フォロバします',
+    'NSFW art account. DM @alice_sub for commissions',
+    'R18 art, commissions open',
+  ])('stays true for a genuine self-declaration near similar wording (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it.each([
+    'R18イラストを描いています。近況報告もします',
+    'R18作品も投稿させていただいてます',
+    'R18あり 未成年NG',
+    'R18 18歳未満NG',
+    'R18 閲覧禁止(未成年)',
+    'R18あり 固定なし',
+  ])('stays true for a poster whose notice wording resembles a rejection (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it.each(['R18は即報告します', 'R18投稿はお断りです'])(
+    'is still false for an explicit report or rejection of NSFW (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
 })
