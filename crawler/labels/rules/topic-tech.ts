@@ -22,16 +22,23 @@ const TECH_PATTERN = new RegExp(
   'i',
 )
 
+// フォロー対象として職種を挙げる文は本人の職業の申告ではない。
+// 「エンジニアフォロー歓迎」は本人の申告なので除外しない。
+const FOLLOW_TARGET_PATTERN =
+  /(?:開発者|エンジニア|プログラマ)(?:さん|の方|など|等)*(?:を|も)?(?:主に|メインに|中心に)*フォロー(?!歓迎|募集|大歓迎)/g
+
 const KEYWORD_SCORE = 0.8
 
 export const topicTechRule: LabelRule = {
   key: 'topic_tech',
-  description: 'プロフィールの直接証拠、またはフォロー関係から技術/ソフトウェア開発との強い関連が示される',
-  version: '1.3.1',
+  description:
+    'プロフィールの直接証拠、またはフォロー関係から技術/ソフトウェア開発との強い関連が示される',
+  version: '1.3.2',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
-    const keywordMatch = bio !== null && TECH_PATTERN.test(bio)
+    const keywordMatch =
+      bio !== null && TECH_PATTERN.test(bio.replaceAll(FOLLOW_TARGET_PATTERN, ''))
     const followGraph = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_tech)
     const value = keywordMatch || followGraph.matched
     const evidenceScore = combineAlternatives([
