@@ -611,4 +611,30 @@ describe('aiGeneratedRule', () => {
         .value,
     ).toBe(true)
   })
+
+  it.each([
+    ['an opposition stance ending in 否定派', '猫が好き。きのこ派。生成AIイラスト否定派'],
+    ['a pro-AI stance as a list item', '趣味は散歩\n生成AI推進\nアイコン画像はテスト用'],
+    ['gratitude for having met generative AI', '無言フォロー歓迎。生成AIに出会えてよかった'],
+    ['an exhibition event name', 'アプリを開発中。生成AIなんでも展示会に出展しました'],
+    ['an institute name containing AI-Generated', 'AI-Generated Image Research Lab'],
+  ])('is false for a bio mentioning generative AI via %s', (_label, bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    'AI生成イラストを投稿しています。転載しないでください',
+    'AI生成イラストを投稿しています。DMは返しません',
+    'AI生成の絵を毎日投稿。コメント不要です',
+    '生成AIを使って絵を作っています。コミッション不可',
+  ])('stays true when an unrelated negation follows in another sentence (%s)', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it.each(['AI生成はしません。絵を描いています', '絵を描いています。AI生成イラストは投稿しません'])(
+    'is false when the negation is in the same sentence as the AI term (%s)',
+    (bio) => {
+      expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
 })

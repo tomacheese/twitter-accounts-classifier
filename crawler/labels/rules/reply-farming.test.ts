@@ -4,7 +4,7 @@ import type { AccountFeatureBundle } from '../types'
 
 function makeBundle(
   tweetsPerDay: number,
-  tweets: { isReply?: boolean; isRetweet?: boolean }[],
+  tweets: { isReply?: boolean; isRetweet?: boolean; ownConversation?: boolean }[],
 ): AccountFeatureBundle {
   const ageDays = 100
   return {
@@ -30,6 +30,7 @@ function makeBundle(
       isRetweet: t.isRetweet ?? false,
       isPromoted: false,
       isPaidPromotion: false,
+      conversationRootAuthorId: t.ownConversation === true ? '1' : null,
     })),
   }
 }
@@ -192,5 +193,18 @@ describe('replyFarmingRule', () => {
     const result = replyFarmingRule.evaluate(bundle)
 
     expect(result.value).toBe(false)
+  })
+
+  it('is false when most replies are inside conversations rooted at the account itself', () => {
+    const bundle = makeBundle(340, [
+      { isReply: true, ownConversation: true },
+      { isReply: true, ownConversation: true },
+      { isReply: true, ownConversation: true },
+      { isReply: true, ownConversation: true },
+      { isReply: true },
+      { isReply: true },
+    ])
+
+    expect(replyFarmingRule.evaluate(bundle).value).toBe(false)
   })
 })
