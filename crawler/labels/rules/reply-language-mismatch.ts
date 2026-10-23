@@ -62,8 +62,8 @@ export const replyLanguageMismatchRule: LabelRule = {
       text.slice(selfRetweetPrefix.length).trimStart().startsWith('@')
     const replies = bundle.recentTweets.filter(
       (t) =>
-        // 自分の投稿に寄せられたコメントへの返信は、相手の言語に合わせるのが自然なため対象から除く。
         (t.isReply || (t.isRetweet && isSelfRetweetedReply(t.fullText))) &&
+        // 自分の投稿に寄せられたコメントへの返信は、相手の言語に合わせるのが自然なため対象から除く。
         t.conversationRootAuthorId !== bundle.account.id &&
         hasScriptContent(t.fullText),
     )

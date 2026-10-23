@@ -391,4 +391,8 @@ describe('topicPoliticsRule', () => {
       expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
     },
   )
+
+  it('is false for a neighborhood association 区長 (地区の区長)', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: '地区の区長です' })).value).toBe(false)
+  })
 })

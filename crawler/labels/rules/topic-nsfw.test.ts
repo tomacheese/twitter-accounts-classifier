@@ -466,4 +466,12 @@ describe('topicNsfwRule', () => {
       expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
     },
   )
+
+  it.each([
+    'アダルト絵を描いています。政治には興味ありません',
+    'R18絵を投稿。リプは見ません',
+    '無修正写真集を投稿しています',
+  ])('stays true when an unrelated refusal follows a genuine declaration (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
 })

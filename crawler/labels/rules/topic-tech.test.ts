@@ -157,4 +157,8 @@ describe('topicTechRule', () => {
     const bio = 'ゲーム開発者です。漫画家さんをフォローしています'
     expect(topicTechRule.evaluate(makeBundle({ bio })).value).toBe(true)
   })
+
+  it('stays true for a developer bio that says follows are welcome', () => {
+    expect(topicTechRule.evaluate(makeBundle({ bio: 'エンジニアフォロー歓迎' })).value).toBe(true)
+  })
 })

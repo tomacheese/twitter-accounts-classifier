@@ -30,7 +30,7 @@ const ENGLISH_OFFICE_SELF_IDENTIFICATION_PATTERN =
 // 読点・カンマ区切りは「市長、副市長、部長への説明会」のような宛先列挙にも使われ、
 // 自己申告と区別できないため、タグ区切り(｜∣／)のみを対象とする。
 const JAPANESE_ADMINISTRATIVE_OFFICE_TITLE_PATTERN =
-  /(?<!副)(?:市長|町長|区長|知事)(?:を)?(?:しています|です|として活動|として働いています|務めています)|(?<!副)(?:市長|町長|区長|知事)(?:を)?[｜∣／]/gi
+  /(?<!副)(?<!地区の)(?<!地)(?:市長|町長|区長|知事)(?:を)?(?:しています|です|として活動|として働いています|務めています)|(?<!副)(?<!地区の)(?<!地)(?:市長|町長|区長|知事)(?:を)?[｜∣／]/gi
 // congressman/senator/politician と同様に、裸の "mayor"/"governor" も他者評・比喩で現れうるため、
 // 立法職パターンと同じ state 接頭辞か for/of/district の修飾を課す。
 const ENGLISH_ADMINISTRATIVE_OFFICE_SELF_IDENTIFICATION_PATTERN =

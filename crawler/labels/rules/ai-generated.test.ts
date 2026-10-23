@@ -637,4 +637,12 @@ describe('aiGeneratedRule', () => {
       expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
     },
   )
+
+  it('stays true when an unrelated institute word appears next to a self-declaration', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({ bio: 'AI-generated art creator. Studied at institute of design' }),
+      ).value,
+    ).toBe(true)
+  })
 })

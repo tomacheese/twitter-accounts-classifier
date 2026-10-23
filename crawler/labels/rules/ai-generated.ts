@@ -19,7 +19,7 @@ const NEGATION_PATTERN =
 // 「生成AI使用禁止」のような AI 語に直接係る述語は対象外とするため、単独の「利用」「使用」は含めない。
 // 窓の長さで結果が変わらないよう、否定判定の前に表記ごと取り除く。
 const USAGE_CONDITION_ITEM = '(?:無断)?(?:二次(?:利用|創作|配布)|転載|加工|学習|保存|引用|トレース)'
-// 転載・DM・コメント・コミッションなどへの注意書きも、AI 語に係る否定ではないため同様に取り除く。
+// 連絡手段への注意書きは AI 語に係る否定ではない。
 const CONTACT_NOTICE_PATTERN_SOURCE =
   '(?:転載|DM|コメント|リプ(?:ライ)?|返信|質問|コミッション|依頼)[はをもが]?(?:しないで|しません|は返しません|不要|不可|お断り)'
 const USAGE_CONDITION_NOTICE_PATTERN = new RegExp(
@@ -285,7 +285,8 @@ function isCertificationNameMention(bio: string): boolean {
 
 // 研究所名に AI-generated が含まれるだけの bio は、
 // 英語の自己申告表現と区別できないため個別に除外している。
-const RESEARCH_ORG_NAME_PATTERN = /\b(?:research (?:lab|institute)|laboratory|institute)\b/i
+const RESEARCH_ORG_NAME_PATTERN =
+  /AI-generated\s+\S+(?:\s+\S+)?\s+(?:research\s+)?(?:lab(?:oratory)?|institute)\b/i
 
 const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?作成した/i
 
