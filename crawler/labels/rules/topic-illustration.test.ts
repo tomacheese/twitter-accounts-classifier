@@ -112,4 +112,17 @@ describe('topicIllustrationRule', () => {
     const result = topicIllustrationRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it.each(['SRPGが好きなおじさんです。推し絵師⇒【ねこ】', '好きな絵師：ねこ先生'])(
+    'is false for a bio that only names another artist as a favorite (%s)',
+    (bio) => {
+      expect(topicIllustrationRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('stays true for a self-declared artist who also names a favorite artist', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: '絵師です。推し絵師はねこ先生' })).value,
+    ).toBe(true)
+  })
 })
