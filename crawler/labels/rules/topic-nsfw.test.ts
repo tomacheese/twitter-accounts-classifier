@@ -426,4 +426,25 @@ describe('topicNsfwRule', () => {
       expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
     },
   )
+
+  it.each([
+    '創作垢です【一般◯】【R-18×】',
+    'イラスト垢 R18❌',
+    '海外のアダルトクリエイターを研究しています',
+    'adult 成人向けコンテンツの分析・調査が仕事',
+  ])('is false when NSFW is refused with a mark or only researched (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    'R18×R18 描きます',
+    'R18×百合 描いてます',
+    '成人向け×ゲーム 作ってます',
+    'アダルト漫画を描いています、研究よりも創作派',
+    'アダルト絵を描いてます、分析好き',
+    'R18×イラスト 描いてます',
+    '成人向け絵を描きます、分析も好き',
+  ])('stays true for a genuine declaration that merely sits near unrelated words (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
 })

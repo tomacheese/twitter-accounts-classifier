@@ -66,7 +66,15 @@ describe('aiGeneratedRule usage-condition notices (negation window)', () => {
 
   it('keeps the same result when the bio is shortened around the usage condition', () => {
     expect(aiGeneratedRule.evaluate(makeBundle('AI生成画像を投稿。二次利用禁止')).value).toBe(true)
-    expect(aiGeneratedRule.evaluate(makeBundle('AI生成画像を投稿。AI生成禁止')).value).toBe(false)
+  })
+
+  it('does not let a prohibition in another sentence negate the declaration', () => {
+    expect(aiGeneratedRule.evaluate(makeBundle('AI生成画像を投稿。AI生成禁止')).value).toBe(true)
+  })
+
+  it('negates a prohibition that sits in the same sentence as the declaration', () => {
+    expect(aiGeneratedRule.evaluate(makeBundle('AI生成禁止。画像を投稿')).value).toBe(false)
+    expect(aiGeneratedRule.evaluate(makeBundle('画像を投稿。AI生成禁止')).value).toBe(false)
   })
 
   it.each(['AI生成禁止', '生成AI使用禁止です', '❌生成AI', '手描き専門。AI生成NGです。'])(

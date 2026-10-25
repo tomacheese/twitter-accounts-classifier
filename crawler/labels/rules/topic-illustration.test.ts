@@ -112,4 +112,31 @@ describe('topicIllustrationRule', () => {
     const result = topicIllustrationRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it('小説書きの bio で pixiv の記載だけなら false', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: 'サークル主宰の小説書きです pixiv→リンク' }))
+        .value,
+    ).toBe(false)
+  })
+
+  it('小説書きでもイラスト系の語を併記していれば true', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: '小説とイラストを描きます pixiv→リンク' }))
+        .value,
+    ).toBe(true)
+  })
+
+  it('小説の語がなければ pixiv の記載だけで true', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: '趣味垢です pixiv→リンク' })).value,
+    ).toBe(true)
+  })
+
+  it('ノベルティの語だけでは小説書きとみなさず pixiv の記載で true', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: 'ノベルティ制作の担当です pixiv→リンク' }))
+        .value,
+    ).toBe(true)
+  })
 })

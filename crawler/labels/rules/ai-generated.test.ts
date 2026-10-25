@@ -150,6 +150,46 @@ describe('aiGeneratedRule', () => {
     ).toBe(true)
   })
 
+  it('keeps a content declaration when a prohibition appears only in the next sentence', () => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio: '画像はAI生成です。リプ禁止' })).value).toBe(
+      true,
+    )
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio: 'リプ禁止。画像はAI生成です' })).value).toBe(
+      true,
+    )
+  })
+
+  it('is still false when the prohibition is in the same sentence as the AI term', () => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio: '画像はAI生成禁止です' })).value).toBe(false)
+  })
+
+  it('is false for an English news account about generative AI trends', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({
+          bio: 'Weekly notes on trends and news in generative AI for beginners.',
+        }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it.each([
+    'Updates on AI-generated art I create daily',
+    'Insights about AI-generated music by me',
+  ])(
+    'stays true when the news word is followed by the account own AI-generated creations (%s)',
+    (bio) => {
+      expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it('stays true when an English bio declares its own AI-generated posts alongside news', () => {
+    expect(
+      aiGeneratedRule.evaluate(makeBundle({ bio: 'Daily news. All images are AI-generated.' }))
+        .value,
+    ).toBe(true)
+  })
+
   it('is false for an AI policy opinion that links to an external article', () => {
     expect(
       aiGeneratedRule.evaluate(

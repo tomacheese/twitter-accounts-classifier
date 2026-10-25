@@ -37,7 +37,7 @@ const REPLY_RATIO_RAMP_WIDTH = 1 - REPLY_RATIO_THRESHOLD
 export const replyHijackSwarmRule: LabelRule = {
   key: 'reply_hijack_swarm',
   description:
-    '別々のアカウントが1件ずつ、似た言い回しの低努力リプライを1つの高エンゲージメントツイートに乗せてインプレッションを稼ぐ「一斉提灯リプライ」ネットワークの一員であり、かつ自身のアカウントもオリジナル投稿がほぼない低努力アカウントである',
+    '別々のアカウントが1件ずつ、似た言い回しの低努力リプライを1つの高エンゲージメントツイートに乗せてインプレッションを稼ぐ「一斉提灯リプライ」ネットワークの一員であり、かつ自身の直近の投稿の大半がリプライである低努力アカウントである',
   version: '1.7.0',
   evaluate(bundle) {
     const size = bundle.replyHijackSwarmSize ?? 0

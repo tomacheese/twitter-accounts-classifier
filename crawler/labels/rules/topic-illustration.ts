@@ -9,6 +9,11 @@ import type { LabelRule } from '../types'
 // 日本語は本プロジェクトの topic_* ルール群の慣例に倣い部分一致としている。
 const ILLUSTRATION_PATTERN = /イラスト|絵師|絵描き|\billustrator\b|pixiv/i
 
+// pixiv は小説の投稿先でもあるため、小説書きの bio では pixiv の記載だけで絵の申告とはみなさない。
+const PIXIV_ONLY_PATTERN = /pixiv/i
+const NOVEL_WRITER_PATTERN = /小説|ノベル(?!ティ)|\bnovel(?!ty)/i
+const DRAWING_WORD_PATTERN = /イラスト|絵師|絵描き|絵を|描[くきい]|\billustrator\b/i
+
 // 「イラスト提供：〇〇様」は、アカウント本人ではなく別の絵師にイラストを
 // 依頼・提供してもらったことを示すクレジット表記であり、
 // 本人が描いて発信している申告ではないため除外する。
@@ -20,14 +25,19 @@ export const topicIllustrationRule: LabelRule = {
   key: 'topic_illustration',
   description:
     'プロフィールの直接証拠、またはフォロー関係からイラスト制作/投稿との強い関連が示される',
-  version: '1.2.0',
+  version: '1.3.0',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =
       bio !== null &&
       ILLUSTRATION_PATTERN.test(bio) &&
-      !ILLUSTRATION_CREDIT_TO_OTHERS_PATTERN.test(bio)
+      !ILLUSTRATION_CREDIT_TO_OTHERS_PATTERN.test(bio) &&
+      !(
+        PIXIV_ONLY_PATTERN.test(bio) &&
+        NOVEL_WRITER_PATTERN.test(bio) &&
+        !DRAWING_WORD_PATTERN.test(bio)
+      )
     const followGraph = hasFollowGraphTopicSignal(
       bundle.followGraphLabelSignals?.topic_illustration,
     )

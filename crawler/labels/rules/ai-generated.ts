@@ -12,6 +12,8 @@ const BIO_DECLARATION_PATTERN =
 // 禁止マーカー(🚫/🈲/❌/NG)は用語の後ろではなく前に書かれることが多いため、
 // 確認範囲は前後に十分な幅を持たせている。
 const NEGATION_WINDOW_LENGTH = 30
+// 別の文に書かれた禁止語は AI 語に係らないため、文の区切りで窓を打ち切る。
+const SENTENCE_BOUNDARY_PATTERN = /[。！？!?\n]/
 const NEGATION_PATTERN =
   /しません|していません|しておりません|おりません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|不要|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|✖|🆖|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
 
@@ -35,20 +37,27 @@ function hasRelevantNegation(context: string): boolean {
   return NEGATION_PATTERN.test(withoutUsageNotice)
 }
 
-function isNegatedDeclaration(bio: string): boolean {
-  const match = BIO_DECLARATION_PATTERN.exec(bio)
-  if (match === null) return false
-  const beforeMatch = bio.slice(Math.max(0, match.index - NEGATION_WINDOW_LENGTH), match.index)
-  const afterMatch = bio.slice(
-    match.index + match[0].length,
-    match.index + match[0].length + NEGATION_WINDOW_LENGTH,
-  )
+function isNegatedMatch(bio: string, match: RegExpExecArray): boolean {
+  const beforeMatch =
+    bio
+      .slice(Math.max(0, match.index - NEGATION_WINDOW_LENGTH), match.index)
+      .split(SENTENCE_BOUNDARY_PATTERN)
+      .at(-1) ?? ''
+  const afterMatch =
+    bio
+      .slice(match.index + match[0].length, match.index + match[0].length + NEGATION_WINDOW_LENGTH)
+      .split(SENTENCE_BOUNDARY_PATTERN)[0] ?? ''
   return (
     hasRelevantNegation(beforeMatch) ||
     hasRelevantNegation(afterMatch) ||
     IMMEDIATE_NEGATION_BEFORE_PATTERN.test(beforeMatch) ||
     IMMEDIATE_NEGATION_AFTER_PATTERN.test(afterMatch)
   )
+}
+
+function isNegatedDeclaration(bio: string): boolean {
+  const match = BIO_DECLARATION_PATTERN.exec(bio)
+  return match !== null && isNegatedMatch(bio, match)
 }
 
 // 生成AIを研究者・教授・メディア・コンサル・事業として職業的に語る bio は、
@@ -112,8 +121,16 @@ function isTopicInterestMention(bio: string): boolean {
 const AI_TOPIC_DISCUSSION_PATTERN =
   /(?:生成AI|AI生成)\s*[×✕]\s*(?:著作権|法|マーケ|ビジネス|教育|医療|業務|仕事)|(?:生成AI|AI生成|AI-generated).{0,28}(?:意見|見解|議論|論点|賛成|反対|話題|について|解説|考察|opinion|view|debate)|(?:意見|見解|議論|論点|賛成|反対|話題|について|解説|考察|opinion|view|debate).{0,28}(?:生成AI|AI生成|AI-generated)/i
 
+// 既存の話題判定を広げると「AI-generated content」の自己申告まで落とすため、
+// ニュース語が AI 語に直接係る形だけを別に除外する。
+const AI_NEWS_FEED_PATTERN =
+  /\b(?:trends?|news|innovations?|updates?|insights?)\b\s+(?:in|on|about|of|for)\s+(?:generative AI|AI-generated)(?!\s+(?:art|images?|illustrations?|music|videos?|works?|pictures?|photos?|portraits?))/i
+
 function isAiTopicDiscussion(bio: string): boolean {
-  return AI_TOPIC_DISCUSSION_PATTERN.test(bio) && !isPersonalContentDeclaration(bio)
+  return (
+    (AI_TOPIC_DISCUSSION_PATTERN.test(bio) && !isPersonalContentDeclaration(bio)) ||
+    AI_NEWS_FEED_PATTERN.test(bio)
+  )
 }
 
 // 生成AIに反対するアカウント(アンチAI活動家や、
@@ -285,8 +302,8 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description:
-    'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及や、改行で区切った列挙の一項目としての記載だけでは該当しない。AI 語に直接係る否定 (AI生成禁止・生成AI不使用など) は自己申告を打ち消すが、二次利用・転載・学習などの利用条件表記は打ち消さない。アイコンのみの AI 生成申告は自己申告として扱う',
-  version: '1.15.0',
+    'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及や、改行で区切った列挙の一項目としての記載だけでは該当しない。AI 語と同じ文に書かれた否定 (AI生成禁止・生成AI不使用など) は自己申告を打ち消すが、別の文の禁止語は打ち消さない。また、二次利用・転載・学習などの利用条件表記は打ち消さない。アイコンのみの AI 生成申告は自己申告として扱う',
+  version: '1.16.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
