@@ -57,27 +57,33 @@ function hasGenuineCryptoMention(bio: string): boolean {
   return matches.some((match) => !isRejectedMention(bio, match))
 }
 
+// フォロー関係だけでは偶然の群集一致と区別できないため、直近投稿の語との併用を要求している。
 const KEYWORD_SCORE = 0.8
 
 export const topicCryptoRule: LabelRule = {
   key: 'topic_crypto',
-  description: 'プロフィールの直接証拠、またはフォロー関係から暗号資産/web3 との強い関連が示される',
-  version: '1.3.4',
+  description:
+    'プロフィールの直接証拠、またはフォロー関係と直近投稿の語の併用から暗号資産/web3 との強い関連が示される。フォロー関係だけでは該当しない',
+  version: '1.4.0',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch = bio !== null && hasGenuineCryptoMention(bio)
     const followGraph = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_crypto)
-    const value = keywordMatch || followGraph.matched
+    const tweetKeywordMatch = bundle.recentTweets.some((tweet) =>
+      hasGenuineCryptoMention(tweet.fullText),
+    )
+    const followGraphMatched = followGraph.matched && tweetKeywordMatch
+    const value = keywordMatch || followGraphMatched
     const evidenceScore = combineAlternatives([
       keywordMatch ? KEYWORD_SCORE : 0,
-      followGraph.evidenceScore,
+      followGraphMatched ? followGraph.evidenceScore : 0,
     ])
     const evaluable = bio !== null || followGraph.evaluable
     return {
       value,
       confidence: toConfidence(value, evidenceScore, evaluable),
-      reason: `bio crypto-keyword match=${keywordMatch}, follow-graph match=${followGraph.matched}`,
+      reason: `bio crypto-keyword match=${keywordMatch}, follow-graph match=${followGraphMatched}`,
       evaluable,
     }
   },

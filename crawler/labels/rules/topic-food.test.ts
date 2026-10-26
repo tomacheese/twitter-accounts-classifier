@@ -32,8 +32,22 @@ describe('topicFoodRule', () => {
   })
 
   it('is true for a bio mentioning 料理', () => {
+    expect(topicFoodRule.evaluate(makeBundle({ bio: '料理と読書が趣味です' })).value).toBe(true)
+  })
+
+  it('is false for a single 料理 inside a hobby list of three or more items', () => {
     expect(
       topicFoodRule.evaluate(makeBundle({ bio: '好きなもの アニメ・ゲーム・洋服・料理' })).value,
+    ).toBe(false)
+  })
+
+  it('is true for a two-item list that includes 料理', () => {
+    expect(topicFoodRule.evaluate(makeBundle({ bio: '好きなもの 読書・料理' })).value).toBe(true)
+  })
+
+  it('is true for several food words even inside a long list', () => {
+    expect(
+      topicFoodRule.evaluate(makeBundle({ bio: '好きなもの ゲーム・料理・グルメ・散歩' })).value,
     ).toBe(true)
   })
 

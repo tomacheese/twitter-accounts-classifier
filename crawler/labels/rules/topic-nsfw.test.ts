@@ -373,6 +373,25 @@ describe('topicNsfwRule', () => {
     },
   )
 
+  it.each([
+    '全年齢から成人向けまで描きます。ご依頼は DM へ',
+    '制作サイトです。全年齢〜成人向けまで幅広くお受けします',
+    '一般向け・アダルトまで対応する架空スタジオ',
+    'Commissions open, all ages to adult content welcome',
+  ])(
+    'is false for a site introduction or commission range that only lists adult content (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it.each([
+    '全年齢向けも描きますが、成人向けイラストを投稿しています',
+    '成人向けまで描くイラストレーターです。R18 作品を投稿中',
+  ])('stays true for a first-person posting statement next to a range wording (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
   it.each(['成人向け英会話を教えています', '2018禁煙に成功した'])(
     'is false for look-alike words that are not adult content (%s)',
     (bio) => {

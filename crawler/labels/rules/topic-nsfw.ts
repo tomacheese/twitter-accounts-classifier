@@ -67,7 +67,9 @@ const JP_REJECT_OR_REDIRECT_PATTERNS = [
   /(?:公式|販売|ショップ|事業).{0,16}(?:アダルトグッズ|成人向け商品|大人向け商品)/i,
 ]
 
+// 「全年齢から成人向けまで」のような対応範囲の提示は、投稿していることの一人称の申告ではないため抑制する。
 const ANTI_NSFW_PATTERNS = [
+  /(?:全年齢|一般向け)(?:向け)?\s*(?:から|[〜～~・/／]|と)\s*(?:NSFW|R-?18|18禁|成人向け|アダルト|無修正)/i,
   /(?:\bNSFW\b|\bR-?18\b)[\s,/・:：-]{0,3}(?:(?:accounts?|accts?|content|users?)\s{1,2})?\bDNI\b/i,
   /\bDNI\b[\s:：/・-]{0,3}(?:\bNSFW\b|\bR-?18\b)/i,
   /\b(?:not|never)\b[^|｜\n]{0,20}\b(?:support|post|do|draw|share)\b[^|｜\n]{0,40}(?:\bNSFW\b|\bR-?18\b)/i,
@@ -106,10 +108,10 @@ function overlaps(a: MatchSpan, b: MatchSpan): boolean {
 export const topicNsfwRule: LabelRule = {
   key: 'topic_nsfw',
   description:
-    'プロフィールでアダルト/NSFW コンテンツを投稿していることを自己申告している。別アカウントへの誘導 (URL 形式を含む)、他者から受け取る側の言及、成人向け商品の販売だけでは該当しない。NSFW 語を禁止・拒否の対象として宣言するだけの bio も該当しない',
+    'プロフィールでアダルト/NSFW コンテンツを投稿していることを自己申告している。別アカウントへの誘導 (URL 形式を含む)、他者から受け取る側の言及、成人向け商品の販売、「全年齢から成人向けまで」のような対応範囲の提示だけでは該当しない。NSFW 語を禁止・拒否の対象として宣言するだけの bio も該当しない',
   // 性的指向に関わる機微カテゴリであり、
   // フォローグラフからの推測だけで確定させることは避け、自己申告の bio のみを根拠とする。
-  version: '1.14.0',
+  version: '1.14.1',
   evaluate(bundle) {
     const { bio } = bundle.account
     if (bio === null) {

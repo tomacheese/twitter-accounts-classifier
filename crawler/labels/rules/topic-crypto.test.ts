@@ -2,6 +2,20 @@ import { describe, expect, it } from 'vitest'
 import { topicCryptoRule } from './topic-crypto'
 import type { AccountFeatureBundle } from '../types'
 
+function makeTweet(fullText: string): AccountFeatureBundle['recentTweets'][number] {
+  return {
+    id: 't1',
+    fullText,
+    createdAt: new Date(),
+    retweetCount: 0,
+    likeCount: 0,
+    isReply: false,
+    isRetweet: false,
+    isPromoted: false,
+    isPaidPromotion: false,
+  }
+}
+
 function makeBundle(
   accountOverrides: Partial<AccountFeatureBundle['account']>,
 ): AccountFeatureBundle {
@@ -88,7 +102,7 @@ describe('topicCryptoRule', () => {
     ).toBe(true)
   })
 
-  it('bio・ツイートにキーワードを含まず、フォローグラフシグナルがしきい値を満たす場合は value: true・confidence が 0.5 超になる', () => {
+  it('フォローグラフシグナルだけでは value: false のままになる', () => {
     const bundle = {
       ...makeBundle({}),
       followGraphLabelSignals: {
@@ -101,8 +115,49 @@ describe('topicCryptoRule', () => {
       },
     }
     const result = topicCryptoRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+  })
+
+  it('フォローグラフシグナルが直近投稿のキーワードと併用される場合は value: true・confidence が 0.5 超になる', () => {
+    const bundle = {
+      ...makeBundle({}),
+      recentTweets: [makeTweet('今日のビットコインの値動きをまとめました')],
+      followGraphLabelSignals: {
+        topic_crypto: {
+          followeeLabeledCount: 5,
+          followeeTotalCount: 15,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    }
+    const result = topicCryptoRule.evaluate(bundle)
     expect(result.value).toBe(true)
     expect(result.confidence).toBeGreaterThan(0.5)
+  })
+
+  it('フォローグラフシグナルが満たされても直近投稿の語が拒否文脈なら value: false になる', () => {
+    const bundle = {
+      ...makeBundle({}),
+      recentTweets: [makeTweet('NFT 化は禁止です')],
+      followGraphLabelSignals: {
+        topic_crypto: {
+          followeeLabeledCount: 5,
+          followeeTotalCount: 15,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    }
+    expect(topicCryptoRule.evaluate(bundle).value).toBe(false)
+  })
+
+  it('直近投稿のキーワードだけでフォローグラフシグナルが無い場合は value: false になる', () => {
+    const bundle = {
+      ...makeBundle({ bio: '日常アカウントです' }),
+      recentTweets: [makeTweet('ビットコインが上がった')],
+    }
+    expect(topicCryptoRule.evaluate(bundle).value).toBe(false)
   })
 
   it('フォローグラフシグナルがしきい値未満の場合は value: false のままになる', () => {
@@ -172,10 +227,11 @@ describe('topicCryptoRule', () => {
     [5, 15, true],
     [4, 15, false],
   ])(
-    'follow graph boundary: %i labeled of %i followees gives value=%s',
+    'follow graph with a tweet keyword boundary: %i labeled of %i followees gives value=%s',
     (labeled, total, expected) => {
       const bundle = {
         ...makeBundle({}),
+        recentTweets: [makeTweet('ビットコインの話')],
         followGraphLabelSignals: {
           topic_crypto: {
             followeeLabeledCount: labeled,

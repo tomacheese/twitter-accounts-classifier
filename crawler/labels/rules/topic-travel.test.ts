@@ -46,6 +46,22 @@ describe('topicTravelRule', () => {
     )
   })
 
+  it('is false for a single 旅行 inside a hobby list of three or more items', () => {
+    expect(
+      topicTravelRule.evaluate(makeBundle({ bio: '好きなもの アニメ・ゲーム・洋服・旅行' })).value,
+    ).toBe(false)
+  })
+
+  it('is true for a two-item list that includes 旅行', () => {
+    expect(topicTravelRule.evaluate(makeBundle({ bio: '好きなもの 読書・旅行' })).value).toBe(true)
+  })
+
+  it('is true for several travel words even inside a long list', () => {
+    expect(
+      topicTravelRule.evaluate(makeBundle({ bio: '好きなもの ゲーム・旅行・一人旅・散歩' })).value,
+    ).toBe(true)
+  })
+
   it('is false for an unrelated bio', () => {
     expect(
       topicTravelRule.evaluate(makeBundle({ bio: '毎日ラーメンの写真を載せています' })).value,

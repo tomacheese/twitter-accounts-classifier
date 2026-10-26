@@ -1,5 +1,6 @@
 import { combineAlternatives, toConfidence } from '../confidence'
 import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
+import { hasProminentTopicMention } from '../hobby-list-mention'
 import type { LabelRule } from '../types'
 
 // 英単語は無関係な語の内部に一致しないよう単語境界で判定し、
@@ -18,12 +19,13 @@ const KEYWORD_SCORE = 0.8
 
 export const topicTravelRule: LabelRule = {
   key: 'topic_travel',
-  description: 'プロフィールの直接証拠、またはフォロー関係から旅行との強い関連が示される',
-  version: '1.1.1',
+  description:
+    'プロフィールの直接証拠、またはフォロー関係から旅行との強い関連が示される。趣味の羅列 (3 項目以上) に混じった 1 語だけでは直接証拠に含めない',
+  version: '1.2.0',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
-    const keywordMatch = bio !== null && TRAVEL_PATTERN.test(bio)
+    const keywordMatch = bio !== null && hasProminentTopicMention(bio, TRAVEL_PATTERN)
     const followGraph = hasFollowGraphTopicSignal(bundle.followGraphLabelSignals?.topic_travel)
     const value = keywordMatch || followGraph.matched
     const evidenceScore = combineAlternatives([
