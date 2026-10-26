@@ -221,4 +221,14 @@ describe('replyLanguageMismatchRule', () => {
     const result = replyLanguageMismatchRule.evaluate(makeBundle({}, [...own, ...replies]))
     expect(result.reason).toContain('ownJapaneseRatio=1.00')
   })
+
+  it('ignores replies posted inside a conversation rooted at the account itself', () => {
+    const own = Array.from({ length: 3 }, () => tweet({ fullText: '今日も絵を描きました' }))
+    const replies = Array.from({ length: 3 }, () =>
+      tweet({ fullText: '@bob great work!', isReply: true, conversationRootAuthorId: '1' }),
+    )
+    const result = replyLanguageMismatchRule.evaluate(makeBundle({}, [...own, ...replies]))
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+  })
 })

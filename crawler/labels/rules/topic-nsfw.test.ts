@@ -462,4 +462,52 @@ describe('topicNsfwRule', () => {
       expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
     },
   )
+
+  it.each([
+    'Hello 健全垢です。現メイン垢R18は(@alice_sub)',
+    'Artist. Minor | NSFW ACCOUNTS DNI',
+    'Artist. NSFW CONTENT DNI',
+    'イラスト置き場。R18絵や他の作品はPixivにあります',
+    'お絵描き。R18(少数)はPixiv https://t.co/exampleXXXX',
+    '日常ポスト。アイコンは@alice_draw(※R18有)に描いて頂きました',
+    '応援垢。副業、勧誘、投資、アダルト系、お金配り、ネットビジネス全く興味ありません',
+  ])('is false for a redirect, rejection, or third-party mention (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    'R18絵を投稿します。Pixivにも置いています',
+    'NSFW artist. Minors DNI',
+    'R18イラスト描きです。アダルト系依頼も受けます',
+  ])('stays true for a genuine self-declaration near the new suppression words (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it.each([
+    'R18は見ません',
+    'R18の絵は描きません',
+    'R18は苦手です',
+    'R18はご遠慮ください',
+    'NSFWは別垢で',
+    '成人向けプログラミング教室を運営しています',
+    '成人向け教育サービスの会社員です',
+    '無修正の写真だけ載せます',
+  ])('is false for a refusal, an unlinked redirect, or an unrelated usage (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each(['R18絵を投稿します', '無修正動画を紹介しています'])(
+    'stays true for a genuine declaration near the new guards (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it.each([
+    'アダルト絵を描いています。政治には興味ありません',
+    'R18絵を投稿。リプは見ません',
+    '無修正写真集を投稿しています',
+  ])('stays true when an unrelated refusal follows a genuine declaration (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
 })

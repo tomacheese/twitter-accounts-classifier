@@ -205,6 +205,7 @@ describe('adReplyHijackRule', () => {
     '応募します',
     '参加させていただきます',
     '参加します',
+    '当選しましたら投稿します',
   ])('is false for a giveaway hunter using the polite entry phrasing: %s', (phrase) => {
     const tweets = [1, 2, 3, 4].map((i) => ({
       ...entryReplyTweet(i),

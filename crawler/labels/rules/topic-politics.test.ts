@@ -387,10 +387,33 @@ describe('topicPoliticsRule', () => {
     },
   )
 
-  it.each(['元都議会議員です', '前区議会議員です', 'ゲーム内の村長です', '私が町長です'])(
+  it.each(['元都議会議員です', '前区議会議員です', 'ゲーム内の村長です'])(
     'is still false for a former holder or a nickname that only resembles a head-of-municipality title: %s',
     (bio) => {
       expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
     },
   )
+
+  it.each([
+    '区議会議員です',
+    '都議会議員をしています',
+    '府議会議員です',
+    '町議会議員です',
+    '町長です',
+    '区長をしています',
+    '参政党の党員です',
+  ])('is true for a self-declared office holder or party member (%s)', (bio) => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it.each(['元区議会議員です', '前町長です', '参政党の党員の祖父がいます', '副町長です'])(
+    'is false for a former, third-party, or appointed office mention (%s)',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('is false for a neighborhood association 区長 (地区の区長)', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: '地区の区長です' })).value).toBe(false)
+  })
 })

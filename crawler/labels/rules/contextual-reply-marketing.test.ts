@@ -791,4 +791,15 @@ describe('contextualReplyMarketingRule', () => {
       expect(getRule().evaluate(makeBundle({ replyTexts: entryTexts })).value).toBe(false)
     },
   )
+  it('ignores replies posted inside conversations rooted at the account itself', () => {
+    const bundle = makeBundle()
+    expect(getRule().evaluate(bundle).value).toBe(true)
+    const ownConversation = {
+      ...bundle,
+      recentTweets: bundle.recentTweets.map((tweet) =>
+        tweet.isReply ? { ...tweet, conversationRootAuthorId: bundle.account.id } : tweet,
+      ),
+    }
+    expect(getRule().evaluate(ownConversation).value).toBe(false)
+  })
 })

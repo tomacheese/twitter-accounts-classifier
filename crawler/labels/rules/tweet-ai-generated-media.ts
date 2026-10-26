@@ -37,7 +37,7 @@ export const tweetAiGeneratedMediaRule: LabelRule = {
   key: 'tweet_ai_generated_media',
   description:
     'X の投稿ごとの AI 生成メディア開示 (contentDisclosure) が直近ツイートに1件以上ある。保存ツイートが 2 件未満の場合は根拠不足として判定対象外にする (C2PA 由来の開示は除く)',
-  version: '1.1.1',
+  version: '1.2.0',
   evaluate(bundle) {
     if (!isRecentTweetsEvaluable(bundle)) {
       return {
@@ -65,9 +65,23 @@ export const tweetAiGeneratedMediaRule: LabelRule = {
     const flagged = bundle.recentTweets.filter((t) => t.hasAiGeneratedMedia === true)
     const value = flagged.length > 0
 
-    const confidence = value
+    // hasAiGeneratedMedia が null の行は判定自体が行われていないため、陰性の根拠に数えない。
+    const evaluatedCount = bundle.recentTweets.filter(
+      (t) => t.hasAiGeneratedMedia !== null && t.hasAiGeneratedMedia !== undefined,
+    ).length
+    if (!value && evaluatedCount < MIN_TWEETS_FOR_EVALUATION) {
+      return {
+        value: false,
+        confidence: 0.5,
+        reason: `too few evaluated recentTweets (n=${evaluatedCount} of ${bundle.recentTweets.length})`,
+        evaluable: false,
+      }
+    }
+
+    const evidenceScore = value
       ? Math.max(...flagged.map((t) => confidenceForSource(t.aiGeneratedDetectionSource)))
-      : toConfidence(false, 0)
+      : 0
+    const confidence = toConfidence(value, evidenceScore)
 
     const sources = [...new Set(flagged.map((t) => t.aiGeneratedDetectionSource ?? 'unknown'))]
 

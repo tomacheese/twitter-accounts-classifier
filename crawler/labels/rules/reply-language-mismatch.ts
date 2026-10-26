@@ -38,7 +38,7 @@ export const replyLanguageMismatchRule: LabelRule = {
   key: 'reply_language_mismatch',
   description:
     '自身のツイートは特定の言語体系にほぼ偏っているが、リプライ(自身のリプライを自己リツイートしているものを含む)では無関係な対象読者向けに突然言語が切り替わる。エンゲージメント稼ぎボットネットワークの特徴',
-  version: '1.5.0',
+  version: '1.6.0',
   evaluate(bundle) {
     const { screenName } = bundle.account
     // リンクのみの投稿はスクリプト比率が常に0になり、
@@ -63,6 +63,8 @@ export const replyLanguageMismatchRule: LabelRule = {
     const replies = bundle.recentTweets.filter(
       (t) =>
         (t.isReply || (t.isRetweet && isSelfRetweetedReply(t.fullText))) &&
+        // 自分の投稿に寄せられたコメントへの返信は、相手の言語に合わせるのが自然なため対象から除く。
+        t.conversationRootAuthorId !== bundle.account.id &&
         hasScriptContent(t.fullText),
     )
 

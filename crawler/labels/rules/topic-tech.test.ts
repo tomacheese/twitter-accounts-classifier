@@ -147,4 +147,18 @@ describe('topicTechRule', () => {
     const result = topicTechRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it('is false when developers are only mentioned as accounts the user follows', () => {
+    const bio = '漫画家さんやゲーム開発者さんをメインにフォローしています。趣味は映画'
+    expect(topicTechRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('stays true for a developer who also mentions following others', () => {
+    const bio = 'ゲーム開発者です。漫画家さんをフォローしています'
+    expect(topicTechRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it('stays true for a developer bio that says follows are welcome', () => {
+    expect(topicTechRule.evaluate(makeBundle({ bio: 'エンジニアフォロー歓迎' })).value).toBe(true)
+  })
 })

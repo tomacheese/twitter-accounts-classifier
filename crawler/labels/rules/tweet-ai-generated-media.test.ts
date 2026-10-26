@@ -43,9 +43,24 @@ function tweet(
 
 describe('tweetAiGeneratedMediaRule', () => {
   it('is false when no recent tweet has AI-generated media', () => {
-    const result = tweetAiGeneratedMediaRule.evaluate(makeBundle([tweet({}), tweet({ id: 't2' })]))
+    const result = tweetAiGeneratedMediaRule.evaluate(
+      makeBundle([
+        tweet({ hasAiGeneratedMedia: false }),
+        tweet({ id: 't2', hasAiGeneratedMedia: false }),
+      ]),
+    )
     expect(result.value).toBe(false)
     expect(result.confidence).toBe(1)
+  })
+
+  it('is not evaluable when the tweets were never evaluated for AI-generated media', () => {
+    const result = tweetAiGeneratedMediaRule.evaluate(
+      makeBundle([
+        tweet({ hasAiGeneratedMedia: null }),
+        tweet({ id: 't2', hasAiGeneratedMedia: null }),
+      ]),
+    )
+    expect(result).toMatchObject({ value: false, confidence: 0.5, evaluable: false })
   })
 
   it('is not evaluable for an account with no recent tweets', () => {
@@ -97,7 +112,10 @@ describe('tweetAiGeneratedMediaRule', () => {
 
   it('is an evaluable negative when recentTweets fetch succeeded with unflagged tweets', () => {
     const result = tweetAiGeneratedMediaRule.evaluate(
-      makeBundle([tweet({}), tweet({ id: 't2' })], 'success'),
+      makeBundle(
+        [tweet({ hasAiGeneratedMedia: false }), tweet({ id: 't2', hasAiGeneratedMedia: false })],
+        'success',
+      ),
     )
     expect(result).toMatchObject({ value: false, confidence: 1 })
     expect(result.evaluable).not.toBe(false)
