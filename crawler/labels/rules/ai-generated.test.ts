@@ -743,4 +743,46 @@ describe('aiGeneratedRule', () => {
   ])('stays true when a negation word belongs to a different sentence (%s)', (bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(true)
   })
+
+  it.each([
+    '私の投稿は全部AI生成です(嘘)。よろしく',
+    'AI生成イラストを投稿しています、というのは冗談です',
+    '全部AI生成で作ってます。ネタ垢です',
+  ])('is false when the declaration is a joke (%s)', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('stays true when the bio denies that it is a joke', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({ bio: 'AI生成イラストを投稿しています。嘘じゃないです' }),
+      ).value,
+    ).toBe(true)
+  })
+
+  it.each([
+    '映像制作会社の広報担当です。生成AIを使った作品も公開しています',
+    '制作スタッフです。弊社でも生成AI作品を発信しています',
+  ])('is false when a production-company staffer mentions company gen-AI work (%s)', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('stays true for a freelancer who declares their own AI work next to a company mention', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({ bio: '元制作会社勤務。個人で生成AIのイラストを投稿しています' }),
+      ).value,
+    ).toBe(true)
+  })
+
+  it.each([
+    ['AI生成イラストを投稿しています。無断学習禁止', true],
+    ['AI生成イラストを投稿しています。AIへの無断学習は禁止です', true],
+    ['AI生成イラスト投稿。DM不可', true],
+    ['AI生成イラスト投稿。転載禁止・AI学習禁止', true],
+    ['AI生成イラストは載せません', false],
+    ['AI生成は不使用です', false],
+  ])('keeps the result when the text is shortened or reordered (%s)', (bio, expected) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(expected)
+  })
 })
