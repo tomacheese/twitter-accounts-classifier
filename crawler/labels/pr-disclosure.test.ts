@@ -56,6 +56,11 @@ describe('hasPrDisclosure', () => {
     expect(hasPrDisclosure('これ便利でした！ #PR', { isQuote: true })).toBe(true)
   })
 
+  it('does not treat RT inside an English word as a sweepstakes word', () => {
+    expect(hasPrDisclosure('new sport shoes #PR', { isQuote: true })).toBe(true)
+    expect(hasPrDisclosure('RT to enter #PR', { isQuote: true })).toBe(false)
+  })
+
   it('treats a body of exactly 40 characters as short and 41 as not short', () => {
     expect(hasPrDisclosure(entry(40), { isQuote: true })).toBe(false)
     expect(hasPrDisclosure(entry(41), { isQuote: true })).toBe(true)

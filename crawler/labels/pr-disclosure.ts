@@ -34,7 +34,7 @@ const CAMPAIGN_ENTRY_PATTERN =
 // 引用でない投稿や、本文が長い投稿は商品紹介の可能性が高く、除外しない。
 const SHORT_QUOTE_MAX_BODY_LENGTH = 40
 const SWEEPSTAKES_ENTRY_WORD_PATTERN =
-  /応募|参加|エントリー|懸賞|プレゼント|キャンペーン|企画|RT|リポスト/iu
+  /応募|参加|エントリー|懸賞|プレゼント|キャンペーン|企画|(?<![a-z])rt(?![a-z])|リポスト/iu
 
 function isShortSweepstakesQuote(fullText: string): boolean {
   const body = fullText

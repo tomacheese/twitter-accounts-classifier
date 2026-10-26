@@ -57,12 +57,12 @@ describe('relabelGrownBioClusters', () => {
 
   it('閾値を跨いだクラスタの既存ラベル付きアカウントへ要求する', async () => {
     const { prisma } = createFakePrisma()
-    await relabelGrownBioClusters(prisma, [...corpus(BIO, 4, 'a'), ...corpus(OTHER_BIO, 2, 'b')])
+    await relabelGrownBioClusters(prisma, [...corpus(BIO, 5, 'a'), ...corpus(OTHER_BIO, 2, 'b')])
     vi.mocked(filterAccountIdsWithExistingLabels).mockImplementation((_prisma, ids) =>
       Promise.resolve(new Set(ids.slice(0, 3))),
     )
     const requested = await relabelGrownBioClusters(prisma, [
-      ...corpus(BIO, 5, 'a'),
+      ...corpus(BIO, 6, 'a'),
       ...corpus(OTHER_BIO, 2, 'b'),
     ])
     expect(requested).toBe(3)
@@ -71,25 +71,25 @@ describe('relabelGrownBioClusters', () => {
 
   it('跨いでいない更新では要求しない', async () => {
     const { prisma } = createFakePrisma()
-    await relabelGrownBioClusters(prisma, corpus(BIO, 3, 'a'))
-    expect(await relabelGrownBioClusters(prisma, corpus(BIO, 4, 'a'))).toBe(0)
+    await relabelGrownBioClusters(prisma, corpus(BIO, 4, 'a'))
+    expect(await relabelGrownBioClusters(prisma, corpus(BIO, 5, 'a'))).toBe(0)
     expect(requestAccountRelabelBulk).not.toHaveBeenCalled()
   })
 
   it('再実行しても同じクラスタを重複要求しない', async () => {
     const { prisma } = createFakePrisma()
-    await relabelGrownBioClusters(prisma, corpus(BIO, 4, 'a'))
     await relabelGrownBioClusters(prisma, corpus(BIO, 5, 'a'))
-    expect(await relabelGrownBioClusters(prisma, corpus(BIO, 5, 'a'))).toBe(0)
+    await relabelGrownBioClusters(prisma, corpus(BIO, 6, 'a'))
+    expect(await relabelGrownBioClusters(prisma, corpus(BIO, 6, 'a'))).toBe(0)
     expect(requestAccountRelabelBulk).toHaveBeenCalledTimes(1)
   })
 
   it('上限を超えるクラスタは要求せず、次サイクルで再び対象になる', async () => {
     const { prisma } = createFakePrisma()
-    await relabelGrownBioClusters(prisma, corpus(BIO, 4, 'a'))
-    expect(await relabelGrownBioClusters(prisma, corpus(BIO, 5, 'a'), 4)).toBe(0)
+    await relabelGrownBioClusters(prisma, corpus(BIO, 5, 'a'))
+    expect(await relabelGrownBioClusters(prisma, corpus(BIO, 6, 'a'), 5)).toBe(0)
     expect(requestAccountRelabelBulk).not.toHaveBeenCalled()
-    expect(await relabelGrownBioClusters(prisma, corpus(BIO, 5, 'a'), 5)).toBe(5)
+    expect(await relabelGrownBioClusters(prisma, corpus(BIO, 6, 'a'), 6)).toBe(6)
   })
 
   it('既定の上限は正の値である', () => {

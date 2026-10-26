@@ -3,7 +3,7 @@ import type { LabelRule } from '../types'
 import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 
 // 「直近」を件数ではなく期間で定義する。投稿頻度の高いアカウントでも古いプロモ履歴が件数で押し出されないようにする。
-// 30 日では出稿が断続的な広告主の陽性が大きく外れるため 90 日とする。件数の DB 集計と共有する。
+// 出稿が断続的な広告主も拾える長さにし、件数の DB 集計と共有する。
 export const PROMOTED_RECENT_WINDOW_DAYS = 90
 const DAY_MS = 24 * 60 * 60 * 1000
 

@@ -49,7 +49,7 @@ export const replyHijackSwarmRule: LabelRule = {
     // fetchStatus による判定と AND で組み合わせる。
     const hasEnoughSample = sampled.length >= MIN_SAMPLE && isRecentTweetsEvaluable(bundle)
     // スウォーム非参加は recentTweets に依存せず確定するため、サンプル不足でも判定不能にしない。
-    // replyHijackSwarmSize が未算出の場合は確定できないので従来どおり扱う。
+    // 未算出の場合は非参加を確定できず、サンプル数による判定に任せる。
     const isConfirmedNonMember = bundle.replyHijackSwarmSize != null && !isSwarmMember
     // 自分の投稿に寄せられたコメントへの返信は自分の投稿の延長であり、返信特化の根拠にしない。
     const replyRatio =

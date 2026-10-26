@@ -87,7 +87,6 @@ function isMassFollowingPattern(followingCount: number, followersCount: number):
 }
 
 // 独立経路 (bio 勧誘なし) は単一シグナルの誤検知を避けるため標本の厚みと返信率を要求する。
-// 値は本番影響評価で確定するまでの暫定値であり、保守的に厳しめに置いている。
 const STRONG_INFLATION_MIN_SAMPLE = 10
 const STRONG_INFLATION_MAX_REPLY_RATE = 0.1
 

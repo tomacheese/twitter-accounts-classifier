@@ -5,6 +5,9 @@ import { MIN_NETWORK_SIZE } from '../labels/rules/bio-duplicate-network'
 import { requestAccountRelabelBulk } from './analysis-work-item-repository'
 import { filterAccountIdsWithExistingLabels } from './label-repository'
 
+// ルールは自分を除いた人数で判定するため、クラスタ総数では 1 多い値が閾値になる。
+const CLUSTER_SIZE_THRESHOLD = MIN_NETWORK_SIZE + 1
+
 export const MAX_CLUSTER_RELABEL_REQUESTS_PER_CYCLE = 500
 
 // bio 本文を DB に残さないため、正規化 bio はハッシュ化して保存する。
@@ -13,7 +16,7 @@ function toClusterKey(normalizedBio: string): string {
 }
 
 /**
- * 前サイクルの永続サイズと今サイクルのサイズを比較し、MIN_NETWORK_SIZE を跨いだクラスタの
+ * 前サイクルのサイズと比較して閾値を跨いだクラスタを検出する。
  * 既存ラベル付きアカウントへ account_relabel を要求したうえで、サイズを永続化する。
  * 永続サイズが空の初回は比較対象がないため、要求せず永続化だけ行う。
  * @param prisma - Prisma クライアント
@@ -41,7 +44,7 @@ export async function relabelGrownBioClusters(
   if (previous.size > 0) {
     for (const [key, accountIds] of clusters) {
       const before = previous.get(key) ?? 0
-      if (before >= MIN_NETWORK_SIZE || accountIds.length < MIN_NETWORK_SIZE) continue
+      if (before >= CLUSTER_SIZE_THRESHOLD || accountIds.length < CLUSTER_SIZE_THRESHOLD) continue
       const labeled = [...(await filterAccountIdsWithExistingLabels(prisma, accountIds))]
       if (requested + labeled.length > limit) {
         // 一部だけ要求すると残りを次サイクルで拾えないため、クラスタ単位で全件か 0 件にする。

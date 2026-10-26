@@ -24,7 +24,7 @@ function hasScriptContent(text: string): boolean {
   return LETTER_PATTERN.test(languageBody(text))
 }
 
-// 下限を 5 以上に上げると保存済みの陽性の過半が評価不能になるため、返信側と同じ 3 件に留める。
+// 自分側の下限は返信側と揃え、評価不能を増やさない。
 const MIN_OWN_POSTS = 3
 const MIN_REPLIES = 3
 const SCRIPT_MISMATCH_THRESHOLD = 0.7

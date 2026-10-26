@@ -64,8 +64,8 @@ async function fetchWithCrawlPolicy<T>(
 }
 
 /**
- * account 本体・fallback authorを含む再取得済みツイートを永続化し、
- * `upsertTweet` の変化検知で 動画出典数が実際に変化したツイートが1件でもあれば relabel を要求する。
+ * account 本体・fallback author を含む再取得済みツイートを永続化し、
+ * `upsertTweet` の変化検知で動画出典数が実際に変化したツイートが 1 件でもあれば relabel を要求する。
  * 変化がなければ何もしない。
  * @param deps - 永続化に使う依存関係
  * @param accountId - backfill 対象の account ID
