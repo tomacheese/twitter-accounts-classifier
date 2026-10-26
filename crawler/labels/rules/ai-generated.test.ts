@@ -785,4 +785,20 @@ describe('aiGeneratedRule', () => {
   ])('keeps the result when the text is shortened or reordered (%s)', (bio, expected) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(expected)
   })
+
+  it.each([
+    'AI生成イラストを投稿しています。ネタバレ注意',
+    'AI生成イラストを投稿しています ろうそく好き',
+    'AI生成イラストを投稿しています 無断転載は禁止',
+    'AI生成イラストを投稿しています 二次利用もNG',
+  ])('stays true when an unrelated word or usage notice follows the declaration (%s)', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it.each(['AI生成イラストを投稿しています ネタです', 'AI生成イラストを投稿 うそ'])(
+    'stays false for a joke declaration (%s)',
+    (bio) => {
+      expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
 })

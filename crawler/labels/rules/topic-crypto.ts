@@ -1,4 +1,5 @@
 import { combineAlternatives, toConfidence } from '../confidence'
+import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 import type { LabelRule } from '../types'
 import { hasFollowGraphTopicSignal } from '../follow-graph-topic-signal'
 
@@ -64,7 +65,7 @@ export const topicCryptoRule: LabelRule = {
   key: 'topic_crypto',
   description:
     'プロフィールの直接証拠、またはフォロー関係と直近投稿の語の併用から暗号資産/web3 との強い関連が示される。フォロー関係だけでは該当しない',
-  version: '1.4.0',
+  version: '1.4.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
@@ -79,7 +80,11 @@ export const topicCryptoRule: LabelRule = {
       keywordMatch ? KEYWORD_SCORE : 0,
       followGraphMatched ? followGraph.evidenceScore : 0,
     ])
-    const evaluable = bio !== null || followGraph.evaluable
+    // フォロー関係が一致しているのに直近投稿が未取得・失敗の場合、
+    // 否定できたのではなく併用条件を確認できないだけなので判定不能とする。
+    const awaitingTweetEvidence =
+      followGraph.matched && !keywordMatch && !tweetKeywordMatch && !isRecentTweetsEvaluable(bundle)
+    const evaluable = !awaitingTweetEvidence && (bio !== null || followGraph.evaluable)
     return {
       value,
       confidence: toConfidence(value, evidenceScore, evaluable),

@@ -5,6 +5,9 @@ const SEGMENT_PATTERN = /[^。.\n|｜!！?？]+/g
 const ITEM_DELIMITER_PATTERN = /[、,，・/／]/
 const MIN_HOBBY_LIST_ITEMS = 3
 const MIN_DISTINCT_MENTIONS = 2
+// 2 個以下のハッシュタグは羅列とみなさない。
+const HASHTAG_PATTERN = /[#＃][^\s#＃]+/g
+const MIN_HASHTAG_LIST_ITEMS = 3
 
 /**
  * 話題語の一致が、複数語または趣味の羅列ではない位置での記載として際立っているかを返す。
@@ -14,7 +17,12 @@ const MIN_DISTINCT_MENTIONS = 2
  */
 export function hasProminentTopicMention(bio: string, pattern: RegExp): boolean {
   const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`
-  const matches = [...bio.matchAll(new RegExp(pattern.source, flags))]
+  const allMatches = [...bio.matchAll(new RegExp(pattern.source, flags))]
+  const hashtagSpans = [...bio.matchAll(HASHTAG_PATTERN)]
+  const isInHashtagList = (index: number): boolean =>
+    hashtagSpans.length >= MIN_HASHTAG_LIST_ITEMS &&
+    hashtagSpans.some((tag) => index >= tag.index && index < tag.index + tag[0].length)
+  const matches = allMatches.filter((match) => !isInHashtagList(match.index))
   if (matches.length === 0) return false
   const distinct = new Set(matches.map((match) => match[0].toLowerCase()))
   if (distinct.size >= MIN_DISTINCT_MENTIONS) return true

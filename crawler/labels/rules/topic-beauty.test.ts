@@ -142,4 +142,17 @@ describe('topicBeautyRule', () => {
     const result = topicBeautyRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it.each(['ゲームのキャラメイクが好きです', 'メイクドラマを楽しむ日々'])(
+    'is false for a bio using メイク inside an unrelated compound (%s)',
+    (bio) => {
+      expect(topicBeautyRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('stays true for ヘアメイク', () => {
+    expect(
+      topicBeautyRule.evaluate(makeBundle({ bio: 'ヘアメイクの仕事をしています' })).value,
+    ).toBe(true)
+  })
 })

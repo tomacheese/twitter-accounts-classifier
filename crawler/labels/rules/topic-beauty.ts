@@ -4,8 +4,9 @@ import type { LabelRule } from '../types'
 
 // 素の "beauty" は美容と無関係な慣用句や宣伝文句 (旅先の景観、ジュエリーの謳い文句など) にも
 // 頻出するため対象外とし、より限定的な複合語のみに一致させている。
-// メイクへの否定後読みは、ヘアメイクへの一致を保ったまま誤検知の多いリメイクの部分一致を除外するため。
-const BEAUTY_PATTERN = /コスメ|美容|(?<!リ)メイク|スキンケア|\b(cosmetics?|skincare|makeup)\b/i
+// メイクへの否定先読み・後読みは、誤検知の多いリメイクやキャラメイクを除外するため。
+const BEAUTY_PATTERN =
+  /コスメ|美容|(?<!リ|キャラ)メイク(?!ドラマ|マネー)|スキンケア|\b(cosmetics?|skincare|makeup)\b/i
 
 // 素の「美容」は「美容系の優待株」のような株式投資セクターの呼称としても使われ、
 // この場合は投資対象への言及であって美容そのものへの関心を示さない。
@@ -38,7 +39,7 @@ export const topicBeautyRule: LabelRule = {
   key: 'topic_beauty',
   description:
     'プロフィールの直接証拠、またはフォロー関係から美容・コスメ・スキンケアとの強い関連が示される',
-  version: '1.0.2',
+  version: '1.0.3',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account

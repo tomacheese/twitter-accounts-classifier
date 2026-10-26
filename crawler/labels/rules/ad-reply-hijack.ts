@@ -18,8 +18,16 @@ const AD_JOB_PITCH_PATTERN =
 const CAMPAIGN_ENTRY_PATTERN =
   /(応募し(まし|て)た|応募(します|いたします|させていただきます)|参加(します|いたします|させていただきます)|当選しましたら|当た(りますように|りました)|抽選で.{0,10}(当たり|当選))/u
 
+// 番組の視聴者が「プレゼント企画も大好き」のように感想として述べる表現は、
+// 景品企画を宣伝する勧誘ではないため除外する。
+const CAMPAIGN_FONDNESS_PATTERN = /プレゼント企画[^\n。]{0,6}(?:大好き|大好物|好き|楽しみ)/u
+
 function isAdPitchReply(fullText: string): boolean {
-  return AD_JOB_PITCH_PATTERN.test(fullText) && !CAMPAIGN_ENTRY_PATTERN.test(fullText)
+  return (
+    AD_JOB_PITCH_PATTERN.test(fullText) &&
+    !CAMPAIGN_ENTRY_PATTERN.test(fullText) &&
+    !CAMPAIGN_FONDNESS_PATTERN.test(fullText)
+  )
 }
 
 const MIN_REPLY_SAMPLE = 3
@@ -38,7 +46,7 @@ export const adReplyHijackRule: LabelRule = {
   key: 'ad_reply_hijack',
   description:
     '無関係なツイートへの返信を乗っ取り、広告・転職勧誘・暗号資産のギブアウェイ/エアドロップ勧誘を宣伝している。単独の「副業」は広告語に数えない',
-  version: '1.8.0',
+  version: '1.8.1',
   evaluate(bundle) {
     const { screenName } = bundle.account
     // 親ツイートの投稿者情報はクロールデータに存在しないため、

@@ -20,6 +20,11 @@ const DRAWING_WORD_PATTERN = /イラスト|絵師|絵描き|絵を|描[くきい
 // 本人が描いて発信している申告ではないため除外する。
 const ILLUSTRATION_CREDIT_TO_OTHERS_PATTERN = /イラスト.{0,4}提供.{0,15}(様|さん|氏)/
 
+// 「ヘッダーのイラストは〇〇さん」のように、ヘッダーやアイコンの制作者を示す表記は、
+// 他の記述まで打ち消さないよう、その部分だけを取り除いてからキーワードを判定する。
+const ILLUSTRATION_HEADER_CREDIT_PATTERN =
+  /(?:ヘッダー?|アイコン|header|icon)(?:の?イラスト)?(?:は|[:：])[^\n。]{0,20}(?:さん|様|氏)/gi
+
 // 他者のイラストをリツイートしていると述べるだけの bio は、
 // 本人が描いて発信している申告ではないため除外する。
 const ILLUSTRATION_RETWEET_ONLY_PATTERN =
@@ -31,13 +36,13 @@ export const topicIllustrationRule: LabelRule = {
   key: 'topic_illustration',
   description:
     'プロフィールの直接証拠、またはフォロー関係からイラスト制作/投稿との強い関連が示される',
-  version: '1.5.0',
+  version: '1.5.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =
       bio !== null &&
-      ILLUSTRATION_PATTERN.test(bio) &&
+      ILLUSTRATION_PATTERN.test(bio.replaceAll(ILLUSTRATION_HEADER_CREDIT_PATTERN, ' ')) &&
       !ILLUSTRATION_CREDIT_TO_OTHERS_PATTERN.test(bio) &&
       !ILLUSTRATION_RETWEET_ONLY_PATTERN.test(bio) &&
       !(
