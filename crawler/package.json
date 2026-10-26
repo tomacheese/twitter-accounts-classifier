@@ -13,6 +13,7 @@
     "benchmark:relabel": "tsx scripts/relabel-benchmark.ts",
     "backfill:recent-tweets": "tsx scripts/recent-tweets-backfill.ts",
     "backfill:card-destination-urls": "tsx scripts/card-destination-url-backfill.ts",
+    "backfill:foreign-video-sources": "tsx scripts/foreign-video-source-backfill.ts",
     "lint": "eslint .",
     "format": "prettier --check .",
     "typecheck": "tsc --noEmit",
