@@ -306,4 +306,21 @@ describe('buildAccountFeatureBundle', () => {
 
     expect(bundle.selfReplyPromoEvidence?.exactDestinationRoots).toBe(3)
   })
+
+  it('期間内のプロモーション付きツイート件数を promotedTweetCountInWindow に反映する', () => {
+    const args = [
+      [] as Tweet[],
+      buildDuplicateReplyIndex([]),
+      buildBioDuplicateIndex([]),
+      buildReplyHijackIndex([]),
+      emptyFollowGraphLabelIndex,
+      buildSelfReplyPromoIndex([], []),
+      new Map<string, string>(),
+    ] as const
+    const withCount = buildAccountFeatureBundle(makeAccount(), ...args, new Map(), undefined, 4)
+    const withoutCount = buildAccountFeatureBundle(makeAccount(), ...args)
+
+    expect(withCount.promotedTweetCountInWindow).toBe(4)
+    expect(withoutCount.promotedTweetCountInWindow).toBeUndefined()
+  })
 })

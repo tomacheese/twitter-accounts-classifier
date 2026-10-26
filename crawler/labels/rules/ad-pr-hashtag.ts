@@ -7,18 +7,22 @@ import { hasPrDisclosure } from '../pr-disclosure'
 // ヒューリスティックな #PR ハッシュタグ検出と異なりサンプル数で信頼度を割り引く理由がない。
 // そのため 1 件でも true があれば陽性とみなす。
 
+function isQuote(t: { quotedTweetAuthorId?: string | null }): boolean {
+  return t.quotedTweetAuthorId !== null && t.quotedTweetAuthorId !== undefined
+}
+
 export const adPrHashtagRule: LabelRule = {
   key: 'ad_pr_hashtag',
   description:
-    '日本の Twitter で慣習的に使われる「#PR」ハッシュタグ、または X 公式の有償パートナーシップ開示機能のいずれかで、広告ツイートであることを適切に開示している',
-  version: '1.5.0',
+    '日本の Twitter で慣習的に使われる「#PR」ハッシュタグ、または X 公式の有償パートナーシップ開示機能のいずれかで、広告ツイートであることを適切に開示している。懸賞応募の短い引用ツイートに付く主催者指定の「#PR」は開示とみなさない',
+  version: '1.5.1',
   evaluate(bundle) {
     // このラベルはアカウント自身の投稿における開示を主張するものであるため、
     // リツイート(他者が書いた本文に `RT @...` を付与したもの)は対象から除外する。
     // 除外しない場合、他者の「#PR」付き投稿をリツイートしただけで、
     // リツイートしたアカウント自身が開示していると誤判定されてしまう。
     const sampled = bundle.recentTweets.filter((t) => !t.isRetweet)
-    const hasPrHashtag = sampled.some((t) => hasPrDisclosure(t.fullText))
+    const hasPrHashtag = sampled.some((t) => hasPrDisclosure(t.fullText, { isQuote: isQuote(t) }))
     const hasPaidPromotionDisclosure = sampled.some((t) => t.isPaidPromotion)
 
     const value = hasPrHashtag || hasPaidPromotionDisclosure

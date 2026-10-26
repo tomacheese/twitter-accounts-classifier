@@ -4,6 +4,7 @@ import {
   upsertTweet,
   upsertTweets,
   loadRecentTweetsForAccounts,
+  loadPromotedTweetCountsForAccounts,
   findMissingTweetIds,
   findTweetTextsByIds,
   type TweetInput,
@@ -510,5 +511,44 @@ describe('findTweetContextsByIds', () => {
     })
     expect(result.get('t1')).toEqual({ fullText: '本文1', accountId: 'author-1' })
     expect(result.has('missing')).toBe(false)
+  })
+})
+
+describe('loadPromotedTweetCountsForAccounts', () => {
+  const since = new Date('2026-01-01T00:00:00Z')
+
+  it('accountIds が空の場合は DB へ問い合わせず空 Map を返す', async () => {
+    const queryRaw = vi.fn()
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const result = await loadPromotedTweetCountsForAccounts(prisma, [], since)
+
+    expect(result).toEqual(new Map())
+    expect(queryRaw).not.toHaveBeenCalled()
+  })
+
+  it('account ごとの件数を 1 回の queryRaw で集計し、該当の無い account はキーを持たない', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([
+      { accountId: 'u1', count: 2 },
+      { accountId: 'u2', count: 1 },
+    ])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    const result = await loadPromotedTweetCountsForAccounts(prisma, ['u1', 'u2', 'u3'], since)
+
+    expect(queryRaw).toHaveBeenCalledTimes(1)
+    const call = queryRaw.mock.calls[0] as [string[], ...unknown[]]
+    const sql = call[0].join('?')
+    expect(sql).toContain('"isPromoted" = true')
+    expect(sql).toContain('"createdAt" >=')
+    expect(sql).toContain('GROUP BY "accountId"')
+    expect(call.slice(1)).toEqual([['u1', 'u2', 'u3'], since])
+    expect(result).toEqual(
+      new Map([
+        ['u1', 2],
+        ['u2', 1],
+      ]),
+    )
+    expect(result.has('u3')).toBe(false)
   })
 })

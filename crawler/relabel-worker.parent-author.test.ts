@@ -47,6 +47,7 @@ it('relabel evaluation receives the resolved parent author id', async () => {
     followChurnObservationModule,
     'loadFollowChurnObservationsForAccounts',
   ).mockResolvedValue(new Map())
+  vi.spyOn(tweetRepository, 'loadPromotedTweetCountsForAccounts').mockResolvedValue(new Map())
   vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(
     new Map([
       [

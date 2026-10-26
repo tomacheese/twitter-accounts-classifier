@@ -12,6 +12,7 @@ import * as labelRepository from './label-repository'
 import * as evidenceRepository from './reply-hijack-evidence-repository'
 import * as workItemRepository from './analysis-work-item-repository'
 import { getPrismaClient } from './client'
+import * as tweetRepository from './tweet-repository'
 import { persistAuthorResultAtomic } from './author-checkpoint-repository'
 
 function profile(id: string, overrides: Partial<{ bio: string | null }> = {}) {
@@ -84,6 +85,11 @@ function emptyRegistryParams() {
     selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
   }
 }
+
+beforeEach(() => {
+  // 個別のテストで上書きしない限り、期間内のプロモ投稿の DB 集計は 0 件の前提にする。
+  vi.spyOn(tweetRepository, 'loadPromotedTweetCountsForAccounts').mockResolvedValue(new Map())
+})
 
 afterEach(() => {
   vi.restoreAllMocks()
