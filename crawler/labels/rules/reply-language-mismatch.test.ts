@@ -237,7 +237,7 @@ describe('replyLanguageMismatchRule', () => {
   })
 
   it('is not evaluable when own posts are fewer than the own-side minimum even if replies are plentiful', () => {
-    const own = Array.from({ length: 4 }, () => tweet({ fullText: 'Good night everyone' }))
+    const own = Array.from({ length: 2 }, () => tweet({ fullText: 'Good night everyone' }))
     const replies = Array.from({ length: 5 }, () =>
       tweet({ fullText: '@bob 今日もありがとう', isReply: true }),
     )

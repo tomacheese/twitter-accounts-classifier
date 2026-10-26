@@ -84,20 +84,20 @@ describe('adPromotedRule', () => {
 
     it('is false for a promoted tweet older than the window', () => {
       const result = adPromotedRule.evaluate(
-        makeBundle([tweet({ id: 'p', isPromoted: true, createdAt: daysAgo(31) })]),
+        makeBundle([tweet({ id: 'p', isPromoted: true, createdAt: daysAgo(91) })]),
       )
       expect(result.value).toBe(false)
     })
 
-    it('includes the 30-day boundary and excludes just beyond it', () => {
+    it('includes the 90-day boundary and excludes just beyond it', () => {
       expect(
         adPromotedRule.evaluate(
-          makeBundle([tweet({ isPromoted: true, createdAt: daysAgo(30, 60_000) })]),
+          makeBundle([tweet({ isPromoted: true, createdAt: daysAgo(90, 60_000) })]),
         ).value,
       ).toBe(true)
       expect(
         adPromotedRule.evaluate(
-          makeBundle([tweet({ isPromoted: true, createdAt: daysAgo(30, -60_000) })]),
+          makeBundle([tweet({ isPromoted: true, createdAt: daysAgo(90, -60_000) })]),
         ).value,
       ).toBe(false)
     })

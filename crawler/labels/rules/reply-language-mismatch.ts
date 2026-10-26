@@ -24,8 +24,8 @@ function hasScriptContent(text: string): boolean {
   return LETTER_PATTERN.test(languageBody(text))
 }
 
-// 自分側の投稿が少ないと、数件の外国語投稿だけで偏りを断定してしまうため、返信側より多く要求する。
-const MIN_OWN_POSTS = 5
+// 下限を 5 以上に上げると保存済みの陽性の過半が評価不能になるため、返信側と同じ 3 件に留める。
+const MIN_OWN_POSTS = 3
 const MIN_REPLIES = 3
 const SCRIPT_MISMATCH_THRESHOLD = 0.7
 

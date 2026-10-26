@@ -3,14 +3,14 @@ import type { LabelRule } from '../types'
 import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 
 // 「直近」を件数ではなく期間で定義する。投稿頻度の高いアカウントでも古いプロモ履歴が件数で押し出されないようにする。
-// 日数は本番影響評価で確定するまでの暫定値であり、件数の DB 集計と共有する。
-export const PROMOTED_RECENT_WINDOW_DAYS = 30
+// 30 日では出稿が断続的な広告主の陽性が大きく外れるため 90 日とする。件数の DB 集計と共有する。
+export const PROMOTED_RECENT_WINDOW_DAYS = 90
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export const adPromotedRule: LabelRule = {
   key: 'ad_promoted',
   description:
-    'Twitter 公式の有償プロモーション(「プロモツイート」)が付与されたツイートが直近 30 日以内に1件以上ある。直近ツイートの取得件数上限を超えた期間内のプロモツイートも、DB 集計値で数える',
+    'Twitter 公式の有償プロモーション(「プロモツイート」)が付与されたツイートが直近 90 日以内に1件以上ある。直近ツイートの取得件数上限を超えた期間内のプロモツイートも、DB 集計値で数える',
   version: '1.3.0',
   evaluate(bundle) {
     const since = Date.now() - PROMOTED_RECENT_WINDOW_DAYS * DAY_MS
