@@ -7,7 +7,8 @@ import type { LabelRule } from '../types'
 // 別軸のシグナルとして扱っている。
 // 英単語は無関係な複合語の内部に一致しないよう単語境界で判定し、
 // 日本語は本プロジェクトの topic_* ルール群の慣例に倣い部分一致としている。
-const ILLUSTRATION_PATTERN = /イラスト|絵師|絵描き|\billustrator\b|pixiv/i
+// 「推し絵師」「好きな絵師」は別の絵師への言及にすぎず、本人の制作申告ではない。
+const ILLUSTRATION_PATTERN = /イラスト|(?<!推し|好きな)絵師|絵描き|\billustrator\b|pixiv/i
 
 // 「イラスト提供：〇〇様」は、アカウント本人ではなく別の絵師にイラストを
 // 依頼・提供してもらったことを示すクレジット表記であり、
@@ -25,7 +26,7 @@ export const topicIllustrationRule: LabelRule = {
   key: 'topic_illustration',
   description:
     'プロフィールの直接証拠、またはフォロー関係からイラスト制作/投稿との強い関連が示される',
-  version: '1.2.1',
+  version: '1.4.0',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account

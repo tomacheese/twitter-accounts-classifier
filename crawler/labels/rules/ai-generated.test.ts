@@ -685,4 +685,22 @@ describe('aiGeneratedRule', () => {
       ).value,
     ).toBe(true)
   })
+
+  it.each([
+    'AI生成画像は使っていません',
+    'AI生成の作品は扱いません',
+    'AI生成画像は載せません',
+    'AI生成イラストは使ってません',
+  ])('is false when the bio denies AI-generated content with a verb-form negation (%s)', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    'AI生成イラストを投稿しています。フォロバ不要です',
+    'AI生成イラストを投稿しています。リクエスト不可',
+    'I post AI-generated art. Do not repost without credit',
+    'AI生成画像を投稿しています。商用利用禁止です',
+  ])('stays true when a negation word belongs to a different sentence (%s)', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
 })

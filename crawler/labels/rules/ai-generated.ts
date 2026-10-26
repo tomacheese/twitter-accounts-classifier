@@ -13,18 +13,18 @@ const BIO_DECLARATION_PATTERN =
 // 確認範囲は前後に十分な幅を持たせている。
 const NEGATION_WINDOW_LENGTH = 30
 const NEGATION_PATTERN =
-  /しません|していません|しておりません|おりません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|不要|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|✖|🆖|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
+  /しません|していません|しておりません|おりません|使っていません|使ってません|使いません|載せません|載せてません|扱いません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|不要|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|✖|🆖|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
 
 // 転載・二次利用・学習などの利用条件表記は作品の扱いを示すもので、AI 語に直接係る否定ではない。
 // 「生成AI使用禁止」のような AI 語に直接係る述語は対象外とするため、単独の「利用」「使用」は含めない。
 // 窓の長さで結果が変わらないよう、否定判定の前に表記ごと取り除く。
 const USAGE_CONDITION_ITEM =
-  '(?:(?:無断)?(?:二次(?:利用|創作|配布)|転載|加工|学習|保存|引用|トレース|再配布|リクエスト|DM|依頼))'
+  '(?:(?:無断)?(?:二次(?:利用|創作|配布)|転載|転用|加工|学習|保存|引用|トレース|再配布|商用(?:利用)?|リクエスト|DM|依頼|フォロバ|無言フォロー))'
 // 連絡手段への注意書きは AI 語に係る否定ではない。
 const CONTACT_NOTICE_PATTERN_SOURCE =
   '(?:転載|DM|コメント|リプ(?:ライ)?|返信|質問|コミッション|依頼)[はをもが]?(?:しないで|しません|は返しません|不要|不可|お断り)'
 const USAGE_CONDITION_NOTICE_PATTERN = new RegExp(
-  String.raw`${USAGE_CONDITION_ITEM}(?:[・/、,]${USAGE_CONDITION_ITEM})*(?:禁止|NG|不可|不要)|\bno\s+(?:reposts?|hate|dms?|spam)\b|${CONTACT_NOTICE_PATTERN_SOURCE}`,
+  String.raw`${USAGE_CONDITION_ITEM}(?:[・/、,]${USAGE_CONDITION_ITEM})*(?:禁止|NG|不可|不要)|\b(?:no|do not)\s+(?:reposts?|hate|dms?|spam)\b|${CONTACT_NOTICE_PATTERN_SOURCE}`,
   'gi',
 )
 
@@ -294,8 +294,8 @@ const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?�
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description:
-    'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及や、改行で区切った列挙の一項目としての記載だけでは該当しない。AI 語に直接係る否定 (AI生成禁止・生成AI不使用など) は自己申告を打ち消すが、二次利用・転載・学習などの利用条件表記は打ち消さない。アイコンのみの AI 生成申告は自己申告として扱う',
-  version: '1.18.0',
+    'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及や、改行や記号 (スラッシュ・読点・中黒・括弧など) で区切った列挙の一項目、または AI 語のみの bio としての記載だけでは該当しない。AI 語に直接係る否定 (AI生成禁止・生成AI不使用など) は自己申告を打ち消すが、二次利用・転載・学習などの利用条件表記は打ち消さない。アイコンのみの AI 生成申告は自己申告として扱う',
+  version: '1.19.0',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =

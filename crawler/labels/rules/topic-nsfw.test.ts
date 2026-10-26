@@ -510,4 +510,28 @@ describe('topicNsfwRule', () => {
   ])('stays true when an unrelated refusal follows a genuine declaration (%s)', (bio) => {
     expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
   })
+
+  it.each([
+    'フォローはご自由に。No spam/NSFW follows.',
+    'イラストを描いています。R18は苦手です。',
+    '雑多垢です。成人済み。R18/@alice_sub',
+    'ある歌手のファンです。アダルトラバッパーです。',
+    '勧誘、投資、アダルト系、お金配り、ネットビジネスには全く興味ありません',
+  ])('is false for a bio that only rejects, dislikes, or redirects the NSFW word (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    'R18絵も描きます。苦手な方はブロックしてください',
+    'NSFW垢です。興味がある方だけどうぞ',
+    'R18垢です。そういうのが苦手な人、特定の作品に興味ない人はご遠慮を',
+    'NSFW垢です (リアルは興味なし)',
+    'R18苦手な方は自衛をお願いします。二次創作の雑多垢です',
+    'Do Not Repost/NSFW Sometimes',
+  ])(
+    'stays true for a self-declaration that happens to mention dislike or interest (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
 })
