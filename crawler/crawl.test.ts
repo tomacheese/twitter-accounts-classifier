@@ -174,6 +174,7 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
       .mockResolvedValue(new Map([['verified_blue_individual', 'ld1']])),
     loadReplyCorpus: vi.fn().mockResolvedValue([]),
     loadBioCorpus: vi.fn().mockResolvedValue([]),
+    relabelGrownBioClusters: vi.fn().mockResolvedValue(0),
     loadSelfReplyPromoCorpus: vi.fn().mockResolvedValue({ selfReplyCorpus: [], rootCorpus: [] }),
     loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
     persistAuthorResultAtomic: vi
@@ -1519,6 +1520,79 @@ describe('runCrawlCycle', () => {
       expect.objectContaining({ status: 'success', warnings: [] }),
     )
     expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'success')
+  })
+
+  it('logs and records a warning when persisting an extra author fails, then continues with the next extra author', async () => {
+    const authorOk = rawUser('author-ok')
+    const authorBad1 = rawUser('author-bad1', '')
+    const authorBad2 = rawUser('author-bad2', '')
+    const tweets = [
+      rawTweet('tweet-ok', authorOk),
+      rawTweet('tweet-bad1', authorBad1),
+      rawTweet('tweet-bad2', authorBad2),
+    ]
+    const loggerError = vi
+      .spyOn(Logger.configure('crawl'), 'error')
+      .mockImplementation(() => undefined)
+    const getUserByRestId = vi.fn().mockImplementation(({ userId }: { userId: string }) => {
+      if (userId === 'author-ok') return Promise.resolve({ data: authorOk })
+      return Promise.reject(new Error('User not found'))
+    })
+    const persistAccount = vi.fn().mockImplementation((input: { id: string }) => {
+      if (input.id === 'author-bad1') return Promise.reject(new Error('persist boom'))
+      return Promise.resolve()
+    })
+
+    try {
+      const deps = makeDeps({
+        persistAccount,
+        createOpenApiClient: vi.fn().mockResolvedValue({
+          client: {
+            getTweetApi: () => ({
+              getHomeTimeline: vi.fn().mockResolvedValue({ data: { data: tweets } }),
+              getHomeLatestTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getSearchTimeline: vi.fn().mockResolvedValue({ data: { data: [] } }),
+              getTweetDetail: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            }),
+            getUserApi: () => ({
+              getUserByRestId,
+              getUserByScreenName: vi.fn().mockResolvedValue({ data: rawUser('viewer1', 'v') }),
+              getUserTweetsAndReplies: vi.fn().mockResolvedValue({ data: { data: [] } }),
+            }),
+            getUserListApi: () => ({
+              getFollowing: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+              getFollowers: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
+            getBlocksApi: () => ({
+              getBlocks: vi.fn().mockResolvedValue({ data: [], nextCursor: undefined }),
+            }),
+          },
+        }),
+      })
+
+      await runCrawlCycle(deps)
+
+      expect(persistAccount).toHaveBeenCalledWith(expect.objectContaining({ id: 'author-bad1' }))
+      expect(persistAccount).toHaveBeenCalledWith(expect.objectContaining({ id: 'author-bad2' }))
+      expect(deps.persistTweets).toHaveBeenCalled()
+      expect(loggerError).toHaveBeenCalledWith(
+        'Failed to persist extra author author-bad1, skipping to next author',
+        expect.objectContaining({ message: 'persist boom' }),
+      )
+      expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          warnings: [
+            expect.objectContaining({
+              type: 'author_processing_failed',
+              authorId: 'author-bad1',
+              errorMessage: 'persist boom',
+            }),
+          ],
+        }),
+      )
+    } finally {
+      loggerError.mockRestore()
+    }
   })
 
   it('passes a timeline-only promoted tweet to persistAuthorResultAtomic as an additionalOwnTweet for its author', async () => {
