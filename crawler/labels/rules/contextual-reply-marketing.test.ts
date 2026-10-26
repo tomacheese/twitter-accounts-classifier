@@ -776,4 +776,19 @@ describe('contextualReplyMarketingRule', () => {
 
     expect(getRule().evaluate(makeBundle({ replyTexts: mixedTexts })).value).toBe(true)
   })
+
+  it.each(['当たったら毎日のご褒美にしたいです。', 'モニターに参加します。使用感はポストします。'])(
+    'does not treat a conditional prize-entry reply as self-positioning evidence (%s)',
+    (entryPhrase) => {
+      const entryTexts = Array.from(
+        { length: 6 },
+        (_, index) =>
+          `素敵なキャンペーンですね。家族も私も好きなのでよく買っています。${entryPhrase}結果の発表を楽しみにしています。毎日の暮らしに役立ちそうな賞品で、友人にも紹介したいと思いました。番号${index}`,
+      )
+      const controlTexts = entryTexts.map((text) => text.replace(entryPhrase, ''))
+
+      expect(getRule().evaluate(makeBundle({ replyTexts: controlTexts })).value).toBe(true)
+      expect(getRule().evaluate(makeBundle({ replyTexts: entryTexts })).value).toBe(false)
+    },
+  )
 })

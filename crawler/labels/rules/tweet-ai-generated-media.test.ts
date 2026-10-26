@@ -45,7 +45,7 @@ describe('tweetAiGeneratedMediaRule', () => {
   it('is false when no recent tweet has AI-generated media', () => {
     const result = tweetAiGeneratedMediaRule.evaluate(makeBundle([tweet({}), tweet({ id: 't2' })]))
     expect(result.value).toBe(false)
-    expect(result.confidence).toBe(0)
+    expect(result.confidence).toBe(1)
   })
 
   it('is not evaluable for an account with no recent tweets', () => {
@@ -99,7 +99,7 @@ describe('tweetAiGeneratedMediaRule', () => {
     const result = tweetAiGeneratedMediaRule.evaluate(
       makeBundle([tweet({}), tweet({ id: 't2' })], 'success'),
     )
-    expect(result).toMatchObject({ value: false, confidence: 0 })
+    expect(result).toMatchObject({ value: false, confidence: 1 })
     expect(result.evaluable).not.toBe(false)
   })
 

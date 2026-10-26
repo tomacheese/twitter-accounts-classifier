@@ -14,20 +14,26 @@ const ILLUSTRATION_PATTERN = /イラスト|絵師|絵描き|\billustrator\b|pixi
 // 本人が描いて発信している申告ではないため除外する。
 const ILLUSTRATION_CREDIT_TO_OTHERS_PATTERN = /イラスト.{0,4}提供.{0,15}(様|さん|氏)/
 
+// 他者のイラストをリツイートしていると述べるだけの bio は、
+// 本人が描いて発信している申告ではないため除外する。
+const ILLUSTRATION_RETWEET_ONLY_PATTERN =
+  /イラスト[^\n。]{0,12}(?:RT|リツイート|リポスト)(?:します|しています|してます|しがち)/i
+
 const KEYWORD_SCORE = 0.8
 
 export const topicIllustrationRule: LabelRule = {
   key: 'topic_illustration',
   description:
     'プロフィールの直接証拠、またはフォロー関係からイラスト制作/投稿との強い関連が示される',
-  version: '1.2.0',
+  version: '1.2.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
     const keywordMatch =
       bio !== null &&
       ILLUSTRATION_PATTERN.test(bio) &&
-      !ILLUSTRATION_CREDIT_TO_OTHERS_PATTERN.test(bio)
+      !ILLUSTRATION_CREDIT_TO_OTHERS_PATTERN.test(bio) &&
+      !ILLUSTRATION_RETWEET_ONLY_PATTERN.test(bio)
     const followGraph = hasFollowGraphTopicSignal(
       bundle.followGraphLabelSignals?.topic_illustration,
     )

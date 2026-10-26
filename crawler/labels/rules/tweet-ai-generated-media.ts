@@ -1,3 +1,4 @@
+import { toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 
@@ -36,7 +37,7 @@ export const tweetAiGeneratedMediaRule: LabelRule = {
   key: 'tweet_ai_generated_media',
   description:
     'X の投稿ごとの AI 生成メディア開示 (contentDisclosure) が直近ツイートに1件以上ある。保存ツイートが 2 件未満の場合は根拠不足として判定対象外にする (C2PA 由来の開示は除く)',
-  version: '1.1.0',
+  version: '1.1.1',
   evaluate(bundle) {
     if (!isRecentTweetsEvaluable(bundle)) {
       return {
@@ -66,7 +67,7 @@ export const tweetAiGeneratedMediaRule: LabelRule = {
 
     const confidence = value
       ? Math.max(...flagged.map((t) => confidenceForSource(t.aiGeneratedDetectionSource)))
-      : 0
+      : toConfidence(false, 0)
 
     const sources = [...new Set(flagged.map((t) => t.aiGeneratedDetectionSource ?? 'unknown'))]
 
