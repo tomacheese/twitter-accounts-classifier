@@ -83,10 +83,27 @@ describe('replyFloodingRule precision regressions', () => {
     }
   })
 
-  it('keeps a lowered but still moderate threshold for long paraphrased or translated replies', () => {
+  it('rejects long individual replies only slightly above the former threshold', () => {
     const similaritySpy = vi
       .spyOn(textSimilarity, 'averagePairwiseSimilarity')
       .mockReturnValue(0.12)
+
+    try {
+      const bundle = makeBundle(
+        Array.from({ length: 8 }, (_, index) => ({
+          fullText: `@target この作品はとても印象的で、細部まで何度も見返したくなります ${index}`,
+        })),
+      )
+      expect(replyFloodingRule.evaluate(bundle).value).toBe(false)
+    } finally {
+      similaritySpy.mockRestore()
+    }
+  })
+
+  it('keeps a moderate threshold for long paraphrased or translated replies', () => {
+    const similaritySpy = vi
+      .spyOn(textSimilarity, 'averagePairwiseSimilarity')
+      .mockReturnValue(0.16)
 
     try {
       const bundle = makeBundle(

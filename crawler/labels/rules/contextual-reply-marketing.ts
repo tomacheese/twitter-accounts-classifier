@@ -1,4 +1,5 @@
 import { combineRequired, rampScore, toConfidence } from '../confidence'
+import { isCampaignEntryText } from '../campaign-entry-pattern'
 import type { LabelRule } from '../types'
 
 // 大量生産型ではない低頻度アカウントを対象とするため、
@@ -80,12 +81,6 @@ function normalizeReplyText(text: string): string {
 function codePointLength(text: string): number {
   return text.match(/./gu)?.length ?? 0
 }
-
-// 懸賞・キャンペーンへの定型的な応募返信は、プロフィール誘導ではなく応募の意思表示であるため根拠にしない。
-// ただしプロフィールへの誘導を併記する返信は、応募の言及を混ぜた勧誘でありうるため除外しない。
-const CAMPAIGN_ENTRY_PATTERN =
-  /(?:応募(?:し(?:まし)?た|します|いたします|させていただきます)|当(?:た|選)りますように|当選しますように|当選しました|当たりました|当(?:た|選)ったら|参加(?:します|いたします|させていただきます))/u
-const PROFILE_GUIDANCE_PATTERN = /プロフ(?:ィール)?(?:から|を|欄|へ|に|は)/u
 
 function hasSelfPositioning(text: string): boolean {
   return SELF_POSITIONING_PATTERNS.some((pattern) => pattern.test(text))
@@ -197,7 +192,7 @@ export const contextualReplyMarketingRule: LabelRule = {
     const selfPositioningConversations = new Set<string>()
     for (const [index, text] of normalizedExternalReplies.entries()) {
       if (!hasSelfPositioning(text)) continue
-      if (CAMPAIGN_ENTRY_PATTERN.test(text) && !PROFILE_GUIDANCE_PATTERN.test(text)) continue
+      if (isCampaignEntryText(text)) continue
       selfPositioningConversations.add(conversationKeys[index])
     }
     const selfPositioningCount = selfPositioningConversations.size

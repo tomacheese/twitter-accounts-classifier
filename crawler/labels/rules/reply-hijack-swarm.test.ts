@@ -144,4 +144,32 @@ describe('replyHijackSwarmRule', () => {
 
     expect(replyOnly.confidence).toBeGreaterThan(atBoundary.confidence)
   })
+
+  it('is false when most replies are comments under the account’s own posts', () => {
+    const tweets = Array.from({ length: 10 }, (_, i) => ({
+      ...tweet(true),
+      conversationRootAuthorId: i < 6 ? '1' : null,
+    }))
+    const result = replyHijackSwarmRule.evaluate(makeBundle(10, tweets))
+
+    expect(result.value).toBe(false)
+  })
+
+  it('is evaluable with a confident false for a small sample when the swarm size confirms non-membership', () => {
+    const result = replyHijackSwarmRule.evaluate(makeBundle(2, replyOnlyTweets(1)))
+
+    expect(result).toMatchObject({ value: false, evaluable: true })
+  })
+
+  it('stays not evaluable for a small sample when the swarm size is unknown', () => {
+    const result = replyHijackSwarmRule.evaluate(makeBundle(undefined, replyOnlyTweets(1)))
+
+    expect(result).toMatchObject({ value: false, evaluable: false })
+  })
+
+  it('stays not evaluable for a small sample of a swarm member', () => {
+    const result = replyHijackSwarmRule.evaluate(makeBundle(10, replyOnlyTweets(1)))
+
+    expect(result).toMatchObject({ value: false, evaluable: false })
+  })
 })

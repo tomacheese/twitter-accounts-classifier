@@ -37,8 +37,8 @@ const REPLY_RATIO_RAMP_WIDTH = 1 - REPLY_RATIO_THRESHOLD
 export const replyHijackSwarmRule: LabelRule = {
   key: 'reply_hijack_swarm',
   description:
-    '別々のアカウントが1件ずつ、似た言い回しの低努力リプライを1つの高エンゲージメントツイートに乗せてインプレッションを稼ぐ「一斉提灯リプライ」ネットワークの一員であり、かつ自身の直近ツイートの過半数がリプライである低努力アカウントである',
-  version: '1.7.0',
+    '別々のアカウントが1件ずつ、似た言い回しの低努力リプライを1つの高エンゲージメントツイートに乗せてインプレッションを稼ぐ「一斉提灯リプライ」ネットワークの一員であり、かつ自身の直近ツイートの過半数が他者の会話へのリプライである(自分の投稿へのコメント返信は含まない)低努力アカウントである',
+  version: '1.8.0',
   evaluate(bundle) {
     const size = bundle.replyHijackSwarmSize ?? 0
     const isSwarmMember = size >= MIN_DISTINCT_AUTHORS
@@ -48,8 +48,15 @@ export const replyHijackSwarmRule: LabelRule = {
     // 取得済みで実際に投稿が少ないケースを区別できないため、
     // fetchStatus による判定と AND で組み合わせる。
     const hasEnoughSample = sampled.length >= MIN_SAMPLE && isRecentTweetsEvaluable(bundle)
+    // スウォーム非参加は recentTweets に依存せず確定するため、サンプル不足でも判定不能にしない。
+    // replyHijackSwarmSize が未算出の場合は確定できないので従来どおり扱う。
+    const isConfirmedNonMember = bundle.replyHijackSwarmSize != null && !isSwarmMember
+    // 自分の投稿に寄せられたコメントへの返信は自分の投稿の延長であり、返信特化の根拠にしない。
     const replyRatio =
-      sampled.length > 0 ? sampled.filter((t) => t.isReply).length / sampled.length : 0
+      sampled.length > 0
+        ? sampled.filter((t) => t.isReply && t.conversationRootAuthorId !== bundle.account.id)
+            .length / sampled.length
+        : 0
     const looksReplyFocused = hasEnoughSample && replyRatio >= REPLY_RATIO_THRESHOLD
 
     const value = isSwarmMember && looksReplyFocused
@@ -66,9 +73,9 @@ export const replyHijackSwarmRule: LabelRule = {
 
     return {
       value,
-      confidence: toConfidence(value, evidenceScore, hasEnoughSample),
+      confidence: toConfidence(value, evidenceScore, hasEnoughSample || isConfirmedNonMember),
       reason: `replyHijackSwarmSize=${size}, replyRatio=${replyRatio.toFixed(2)} (n=${sampled.length})`,
-      evaluable: hasEnoughSample,
+      evaluable: hasEnoughSample || isConfirmedNonMember,
     }
   },
 }

@@ -99,7 +99,7 @@ describe('genericReplyFarmingRule', () => {
   })
 
   it('exposes the current rule version', () => {
-    expect(getRule().version).toBe('0.2.1')
+    expect(getRule().version).toBe('0.3.0')
   })
 
   it('does not count replies inside the account’s own post conversation toward high-frequency farming', () => {
@@ -111,6 +111,17 @@ describe('genericReplyFarmingRule', () => {
     const result = getRule().evaluate({ ...bundle, recentTweets })
 
     expect(result.value).toBe(false)
+  })
+
+  it('drops own-conversation replies from the reply population before computing ratios', () => {
+    const bundle = makeBundle()
+    const recentTweets = bundle.recentTweets.map((tweet, index) =>
+      index < 10 ? { ...tweet, conversationRootAuthorId: 'acct-1' } : tweet,
+    )
+
+    const result = getRule().evaluate({ ...bundle, recentTweets })
+
+    expect(result.reason).toContain('replyRatio=0.50')
   })
 
   it('keeps detecting when conversation root metadata points to other authors', () => {

@@ -48,6 +48,8 @@ describe('replyLanguageMismatchRule', () => {
         tweet({ fullText: 'Good night x lovers' }),
         tweet({ fullText: 'Good night sweet friends' }),
         tweet({ fullText: 'Almost bedtime, see you all tomorrow' }),
+        tweet({ fullText: 'Good night again everyone' }),
+        tweet({ fullText: 'Back online, hello world' }),
         tweet({
           fullText: 'RT @example_user: @alice その説は盲点だった…',
           isRetweet: true,
@@ -136,7 +138,7 @@ describe('replyLanguageMismatchRule', () => {
     expect(result.value).toBe(false)
   })
 
-  it('is not evaluable when either side has fewer samples than MIN_SAMPLE_PER_SIDE', () => {
+  it('is not evaluable when either side has fewer samples than the per-side minimum', () => {
     const result = replyLanguageMismatchRule.evaluate(makeBundle({}, []))
     expect(result.evaluable).toBe(false)
     expect(result.confidence).toBeCloseTo(0.5)
@@ -164,6 +166,8 @@ describe('replyLanguageMismatchRule', () => {
         tweet({ fullText: 'Good night 🌙✨' }),
         tweet({ fullText: 'Sweet dreams 💤💤' }),
         tweet({ fullText: 'See you tomorrow ☀️🌸' }),
+        tweet({ fullText: 'Hello again 🌈' }),
+        tweet({ fullText: 'Coffee time ☕' }),
         tweet({ fullText: '@a おはようございます！', isReply: true }),
         tweet({ fullText: '@b よろしくお願いします', isReply: true }),
         tweet({ fullText: '@c ありがとうございます', isReply: true }),
@@ -200,7 +204,7 @@ describe('replyLanguageMismatchRule', () => {
   })
 
   it('still flags a Japanese-body account whose replies switch to another language with hashtags', () => {
-    const own = Array.from({ length: 3 }, () =>
+    const own = Array.from({ length: 5 }, () =>
       tweet({ fullText: '今日も絵を描きました #drawing' }),
     )
     const replies = Array.from({ length: 3 }, () =>
@@ -230,5 +234,47 @@ describe('replyLanguageMismatchRule', () => {
     const result = replyLanguageMismatchRule.evaluate(makeBundle({}, [...own, ...replies]))
     expect(result.value).toBe(false)
     expect(result.evaluable).toBe(false)
+  })
+
+  it('is not evaluable when own posts are fewer than the own-side minimum even if replies are plentiful', () => {
+    const own = Array.from({ length: 4 }, () => tweet({ fullText: 'Good night everyone' }))
+    const replies = Array.from({ length: 5 }, () =>
+      tweet({ fullText: '@bob 今日もありがとう', isReply: true }),
+    )
+    const result = replyLanguageMismatchRule.evaluate(makeBundle({}, [...own, ...replies]))
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+  })
+
+  it('ignores replies made mid-thread to another person’s reply (individual dialogue)', () => {
+    const own = Array.from({ length: 5 }, () => tweet({ fullText: 'Good night everyone' }))
+    const replies = Array.from({ length: 3 }, (_, i) =>
+      tweet({
+        fullText: '@bob 今日もありがとう',
+        isReply: true,
+        conversationId: 'root1',
+        inReplyToTweetId: `mid${i}`,
+        parentTweetAuthorId: 'bob-id',
+      }),
+    )
+    const result = replyLanguageMismatchRule.evaluate(makeBundle({}, [...own, ...replies]))
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+  })
+
+  it('still counts direct replies to a conversation root', () => {
+    const own = Array.from({ length: 5 }, () => tweet({ fullText: 'Good night everyone' }))
+    const replies = Array.from({ length: 3 }, () =>
+      tweet({
+        fullText: '@bob 今日もありがとう',
+        isReply: true,
+        conversationId: 'root1',
+        inReplyToTweetId: 'root1',
+        parentTweetAuthorId: 'bob-id',
+      }),
+    )
+    expect(replyLanguageMismatchRule.evaluate(makeBundle({}, [...own, ...replies])).value).toBe(
+      true,
+    )
   })
 })
