@@ -25,6 +25,7 @@ import {
 } from './db/analysis-work-item-repository'
 import { loadReplyCorpus } from './db/reply-corpus'
 import { loadBioCorpus } from './db/bio-corpus'
+import { relabelGrownBioClusters } from './db/bio-duplicate-cluster-size-repository'
 import { loadSelfReplyPromoCorpus } from './db/self-reply-promo-corpus'
 import { LabelRuleRegistry } from './labels/registry'
 import { ALL_LABEL_RULES } from './labels/all-rules'
@@ -164,6 +165,7 @@ export interface CrawlDependencies {
   ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
   loadReplyCorpus: (watermark: Date) => Promise<ReplyHijackCorpusEntry[]>
   loadBioCorpus: (watermark: Date) => Promise<BioCorpusEntry[]>
+  relabelGrownBioClusters: (corpus: BioCorpusEntry[]) => Promise<number>
   loadSelfReplyPromoCorpus: (watermark: Date) => ReturnType<typeof loadSelfReplyPromoCorpus>
   loadFollowGraphLabelIndex: (
     labelDefinitionIds: Map<string, string>,
@@ -1086,7 +1088,20 @@ export async function runAuthorUnitPhase(
 
   for (const [id, profile] of extraAuthors) {
     if (succeededAuthorIds.has(id)) continue
-    await deps.persistAccount(profile)
+    try {
+      await deps.persistAccount(profile)
+    } catch (error) {
+      // 1 件の行起因の失敗でサイクル全体を止めず、warning として残して残りの author を処理する。
+      const message = `Failed to persist extra author ${id}, skipping to next author`
+      logger.error(message, error as Error)
+      warnings.push({
+        type: 'author_processing_failed',
+        message,
+        authorId: id,
+        errorMessage: toErrorMessage(error),
+        appVersion: APP_VERSION,
+      })
+    }
   }
 
   // author 単位の transaction 内でも同じ id の Tweet を書き込むことがあるが、
@@ -2099,6 +2114,11 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
         : 'success'
     await deps.finishCrawlRun(crawlRunId, new Date(), runStatus)
     try {
+      await deps.relabelGrownBioClusters(await deps.loadBioCorpus(new Date()))
+    } catch (error) {
+      logger.error('Failed to relabel grown bio duplicate clusters', error as Error)
+    }
+    try {
       await deps.clearCrawlAccountCheckpoints(crawlRunId)
     } catch (error) {
       logger.error(
@@ -2217,6 +2237,7 @@ async function main(): Promise<void> {
     ensureLabelDefinitions: (registry) => ensureLabelDefinitionsForRules(prisma, registry.getAll()),
     loadReplyCorpus: (watermark) => loadReplyCorpus(prisma, watermark),
     loadBioCorpus: (watermark) => loadBioCorpus(prisma, watermark),
+    relabelGrownBioClusters: (corpus) => relabelGrownBioClusters(prisma, corpus),
     loadSelfReplyPromoCorpus: (watermark) => loadSelfReplyPromoCorpus(prisma, watermark),
     loadFollowGraphLabelIndex: (labelDefinitionIds, accountIds) =>
       buildFollowGraphLabelIndex(prisma, labelDefinitionIds, { accountIds }),

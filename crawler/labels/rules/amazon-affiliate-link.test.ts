@@ -57,6 +57,53 @@ describe('amazonAffiliateLinkRule', () => {
     ).toBe(true)
   })
 
+  it('is false for a single bare amzn.to link without product context', () => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([
+        tweet({ fullText: '友達に教えてもらった', expandedUrls: ['https://amzn.to/fictional'] }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+    expect(result.confidence).toBeGreaterThan(0.5)
+  })
+
+  it('is true for amzn.to links in two separate tweets even without product context', () => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([
+        tweet({ id: 't1', fullText: 'これ', expandedUrls: ['https://amzn.to/fictionalA'] }),
+        tweet({ id: 't2', fullText: 'あれ', expandedUrls: ['https://amzn.to/fictionalB'] }),
+      ]),
+    )
+    expect(result.value).toBe(true)
+  })
+
+  it('does not count a retweeted amzn.to link toward the repeat threshold', () => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([
+        tweet({ id: 't1', fullText: 'これ', expandedUrls: ['https://amzn.to/fictionalA'] }),
+        tweet({
+          id: 't2',
+          fullText: 'あれ',
+          isRetweet: true,
+          expandedUrls: ['https://amzn.to/fictionalB'],
+        }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('keeps a tagged Amazon link positive without product context', () => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([
+        tweet({
+          fullText: 'これ',
+          expandedUrls: ['https://www.amazon.co.jp/dp/FICTIONAL?tag=fictional-22'],
+        }),
+      ]),
+    )
+    expect(result.value).toBe(true)
+  })
+
   it('is false for a plain Amazon product URL, with high confidence since no affiliate evidence was found', () => {
     const result = amazonAffiliateLinkRule.evaluate(
       makeBundle([tweet({ expandedUrls: ['https://www.amazon.co.jp/dp/FICTIONAL'] })]),

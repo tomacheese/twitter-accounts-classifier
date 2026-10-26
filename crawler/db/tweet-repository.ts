@@ -263,6 +263,33 @@ export async function loadRecentTweetsForAccounts(
 }
 
 /**
+ * 複数 account の、指定時刻以降に投稿されたプロモーション付きツイートの件数を 1 ラウンドトリップで集計する。
+ * @param prisma - Prisma クライアント
+ * @param accountIds - 集計対象の account ID 一覧
+ * @param since - この時刻以降に投稿されたツイートのみを数える
+ * @returns account ID から件数へのマップ。該当ツイートが無い account はキーを持たない
+ */
+export async function loadPromotedTweetCountsForAccounts(
+  prisma: PrismaClient,
+  accountIds: string[],
+  since: Date,
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>()
+  if (accountIds.length === 0) return counts
+
+  const rows = await prisma.$queryRaw<{ accountId: string; count: number }[]>`
+    SELECT "accountId", COUNT(*)::int AS "count"
+    FROM "Tweet"
+    WHERE "accountId" = ANY(${accountIds}::text[])
+      AND "isPromoted" = true
+      AND "createdAt" >= ${since}
+    GROUP BY "accountId"
+  `
+  for (const row of rows) counts.set(row.accountId, row.count)
+  return counts
+}
+
+/**
  * @param prisma - Prisma クライアント
  * @param ids - 存在確認したい Tweet ID の一覧
  * @returns `ids` のうち `Tweet` テーブルにまだ存在しないものだけを抽出した一覧

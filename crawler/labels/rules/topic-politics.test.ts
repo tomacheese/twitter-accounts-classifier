@@ -372,4 +372,48 @@ describe('topicPoliticsRule', () => {
       true,
     )
   })
+
+  it.each([
+    '前田太郎（自民党所属）',
+    '前田太郎｜自民党員',
+    '元木花子/自民党所属',
+    '都議会議員です',
+    '区議会議員をしています',
+    '衆議院議員を務めています',
+  ])(
+    'is true for a current declaration that the former-holder or seat lists used to miss: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it.each(['元都議会議員です', '前区議会議員です', 'ゲーム内の村長です'])(
+    'is still false for a former holder or a nickname that only resembles a head-of-municipality title: %s',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it.each([
+    '区議会議員です',
+    '都議会議員をしています',
+    '府議会議員です',
+    '町議会議員です',
+    '町長です',
+    '区長をしています',
+    '参政党の党員です',
+  ])('is true for a self-declared office holder or party member (%s)', (bio) => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it.each(['元区議会議員です', '前町長です', '参政党の党員の祖父がいます', '副町長です'])(
+    'is false for a former, third-party, or appointed office mention (%s)',
+    (bio) => {
+      expect(topicPoliticsRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('is false for a neighborhood association 区長 (地区の区長)', () => {
+    expect(topicPoliticsRule.evaluate(makeBundle({ bio: '地区の区長です' })).value).toBe(false)
+  })
 })

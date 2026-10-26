@@ -1,3 +1,5 @@
+import { stripNul } from './sanitize'
+
 export interface RawUserResult {
   restId: string
   legacy: {
@@ -113,21 +115,21 @@ export interface NormalizedTweet {
 
 export function toAccountProfileInput(raw: RawUserResult): NormalizedAccountProfile {
   return {
-    id: raw.restId,
-    screenName: raw.legacy.screenName,
-    displayName: raw.legacy.name,
-    bio: raw.legacy.description,
-    profileImageUrl: raw.legacy.profileImageUrlHttps,
+    id: stripNul(raw.restId),
+    screenName: stripNul(raw.legacy.screenName),
+    displayName: stripNul(raw.legacy.name),
+    bio: stripNul(raw.legacy.description),
+    profileImageUrl: stripNul(raw.legacy.profileImageUrlHttps),
     followersCount: raw.legacy.followersCount,
     followingCount: raw.legacy.friendsCount,
     tweetCount: raw.legacy.statusesCount,
     accountCreatedAt: new Date(raw.legacy.createdAt),
-    location: raw.legacy.location,
-    url: raw.legacy.url,
+    location: stripNul(raw.legacy.location),
+    url: stripNul(raw.legacy.url),
     isBlueVerified: raw.isBlueVerified,
-    verifiedType: raw.verifiedType,
-    professionalType: raw.professionalType,
-    parodyCommentaryFanLabel: raw.parodyCommentaryFanLabel,
+    verifiedType: stripNul(raw.verifiedType),
+    professionalType: stripNul(raw.professionalType),
+    parodyCommentaryFanLabel: stripNul(raw.parodyCommentaryFanLabel),
   }
 }
 
@@ -212,7 +214,7 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
   const expandedUrls = [
     ...new Set(
       (raw.legacy.entities?.urls ?? [])
-        .map((entry) => entry.expandedUrl?.trim() ?? entry.url.trim())
+        .map((entry) => stripNul(entry.expandedUrl?.trim() ?? entry.url.trim()))
         .filter((url) => url.length > 0),
     ),
   ]
@@ -228,31 +230,31 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
   const hasMedia = media === undefined ? null : media.length > 0
 
   return {
-    id: raw.restId,
-    accountId: raw.user.restId,
-    fullText: raw.legacy.fullText,
+    id: stripNul(raw.restId),
+    accountId: stripNul(raw.user.restId),
+    fullText: stripNul(raw.legacy.fullText),
     createdAt: new Date(raw.legacy.createdAt),
     retweetCount: raw.legacy.retweetCount,
     likeCount: raw.legacy.favoriteCount,
     replyCount: raw.legacy.replyCount,
     quoteCount: raw.legacy.quoteCount,
     isReply,
-    conversationId: raw.legacy.conversationIdStr ?? null,
-    inReplyToTweetId: raw.legacy.inReplyToStatusIdStr,
+    conversationId: stripNul(raw.legacy.conversationIdStr ?? null),
+    inReplyToTweetId: stripNul(raw.legacy.inReplyToStatusIdStr),
     isAuthorReply: isReply && raw.user.restId === context.viewerAccountId,
     isRetweet,
-    retweetedTweetId: raw.legacy.retweetedStatusIdStr,
+    retweetedTweetId: stripNul(raw.legacy.retweetedStatusIdStr),
     isPromoted: raw.legacy.isPromoted ?? false,
     isPaidPromotion: raw.legacy.isPaidPromotion ?? false,
     expandedUrls,
-    cardDestinationUrls: raw.legacy.cardDestinationUrls ?? [],
+    cardDestinationUrls: (raw.legacy.cardDestinationUrls ?? []).map((url) => stripNul(url)),
     cardDestinationUrlsEvaluated: raw.legacy.cardDestinationUrlsEvaluated ?? false,
     hasMedia,
     hasAiGeneratedMedia: raw.legacy.hasAiGeneratedMedia ?? null,
-    aiGeneratedDetectionSource: raw.legacy.aiGeneratedDetectionSource ?? null,
+    aiGeneratedDetectionSource: stripNul(raw.legacy.aiGeneratedDetectionSource ?? null),
     foreignVideoSourceCount,
-    quotedTweetId: quotedResult?.restId ?? null,
-    quotedTweetAuthorId: quotedResult?.user?.restId ?? null,
+    quotedTweetId: stripNul(quotedResult?.restId ?? null),
+    quotedTweetAuthorId: stripNul(quotedResult?.user?.restId ?? null),
     quotedTweetHasVideo,
     source: context.source,
   }

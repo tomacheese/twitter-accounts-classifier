@@ -21,6 +21,7 @@ import type { FollowChurnObservation } from '../db/follow-churn-observation'
  * @param parentTweetTextById - リプライ先ツイート ID から本文を引くための共有マップ
  * @param parentTweetAuthorIdById - 親ツイート ID または conversation root ID から投稿者 ID を引く共有マップ
  * @param followChurnObservation - 呼び出し元が事前に取得した、このアカウントの follow churn 集計
+ * @param promotedTweetCountInWindow - 期間内のプロモーション付きツイートの DB 上の総数
  * @returns アカウントの feature bundle
  */
 export function buildAccountFeatureBundle(
@@ -34,6 +35,7 @@ export function buildAccountFeatureBundle(
   parentTweetTextById: Map<string, string>,
   parentTweetAuthorIdById = new Map<string, string>(),
   followChurnObservation?: FollowChurnObservation,
+  promotedTweetCountInWindow?: number,
 ): AccountFeatureBundle {
   // 複数の異なるテンプレ返信ネットワーク・リプライハイジャック群に属することがあるため、
   // 合計や平均ではなく最大値を最も強いシグナルとして採用する。
@@ -123,5 +125,6 @@ export function buildAccountFeatureBundle(
     followGraphLabelSignals: followGraphLabelIndex.signalsFor(account.id),
     selfReplyPromoEvidence: selfReplyPromoIndex.evidenceFor(account.id),
     followChurnObservation,
+    promotedTweetCountInWindow,
   }
 }

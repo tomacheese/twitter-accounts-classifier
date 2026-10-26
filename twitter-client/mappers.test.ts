@@ -436,3 +436,68 @@ describe('mergeTweetAdFlags', () => {
     })
   })
 })
+
+describe('NUL バイトの除去', () => {
+  it('toAccountProfileInput が全文字列フィールドから NUL を除く', () => {
+    const input = toAccountProfileInput({
+      ...rawUser,
+      restId: 'u\u00001',
+      legacy: {
+        ...rawUser.legacy,
+        screenName: 'test\u0000_user',
+        name: 'Test\u0000 User',
+        description: 'a\u0000 bio',
+        location: 'To\u0000kyo',
+        url: 'https://example.com/\u0000x',
+        profileImageUrlHttps: 'https://example.com/\u0000a.png',
+      },
+      verifiedType: 'Bus\u0000iness',
+      professionalType: 'Cre\u0000ator',
+      parodyCommentaryFanLabel: 'Fa\u0000n',
+    })
+
+    expect(input).toMatchObject({
+      id: 'u1',
+      screenName: 'test_user',
+      displayName: 'Test User',
+      bio: 'a bio',
+      location: 'Tokyo',
+      url: 'https://example.com/x',
+      profileImageUrl: 'https://example.com/a.png',
+      verifiedType: 'Business',
+      professionalType: 'Creator',
+      parodyCommentaryFanLabel: 'Fan',
+    })
+  })
+
+  it('toTweetInput が本文・URL 配列・識別子から NUL を除く', () => {
+    const input = toTweetInput(
+      {
+        ...rawTweet,
+        restId: 't\u00001',
+        legacy: {
+          ...rawTweet.legacy,
+          fullText: 'hel\u0000lo',
+          conversationIdStr: 'conv\u0000-1',
+          aiGeneratedDetectionSource: 'sou\u0000rce',
+          cardDestinationUrls: ['https://example-shop.test/\u0000a'],
+          entities: {
+            urls: [
+              { url: 'https://t.co/exampleXXXX', expandedUrl: 'https://example.test/\u0000p' },
+            ],
+          },
+        },
+        user: { ...rawUser, restId: 'u\u00001' },
+      },
+      { source: 'recommended', viewerAccountId: 'viewer' },
+    )
+
+    expect(input.id).toBe('t1')
+    expect(input.accountId).toBe('u1')
+    expect(input.fullText).toBe('hello')
+    expect(input.conversationId).toBe('conv-1')
+    expect(input.aiGeneratedDetectionSource).toBe('source')
+    expect(input.cardDestinationUrls).toEqual(['https://example-shop.test/a'])
+    expect(input.expandedUrls).toEqual(['https://example.test/p'])
+  })
+})

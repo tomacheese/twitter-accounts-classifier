@@ -244,4 +244,25 @@ describe('adPrHashtagRule missing-data handling', () => {
     expect(result.evaluable ?? true).toBe(true)
     expect(result.confidence).toBe(1)
   })
+
+  it('is false when the only #PR is on a short sweepstakes-entry quote tweet', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([
+        tweet({
+          fullText: '応募します！ #サンプル飲料キャンペーン #PR',
+          quotedTweetAuthorId: 'brand-1',
+        }),
+        tweet({ fullText: '今日はいい天気ですね' }),
+        tweet({ fullText: 'お昼ご飯なに食べようかな' }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('stays true for a short #PR post that is not a quote tweet', () => {
+    const result = adPrHashtagRule.evaluate(
+      makeBundle([tweet({ fullText: '応募します！ #サンプル飲料キャンペーン #PR' })]),
+    )
+    expect(result.value).toBe(true)
+  })
 })

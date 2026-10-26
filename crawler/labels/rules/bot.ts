@@ -47,7 +47,7 @@ export const botRule: LabelRule = {
   key: 'bot',
   description:
     '投稿頻度が人間としてあり得ない速さであり、かつリプライ比率がほぼゼロで、投稿間隔が機械的なまでに規則的である',
-  version: '1.7.0',
+  version: '1.8.0',
   evaluate(bundle) {
     const { tweetCount, accountCreatedAt } = bundle.account
     const sampled = bundle.recentTweets
@@ -112,9 +112,11 @@ export const botRule: LabelRule = {
     ])
     // replyRatio・intervalCoV のいずれかがサンプル不足なら、
     // value=false は「機械的でないと確認できた」のではなく「判定材料が無かった」に過ぎない。
+    // 生涯平均頻度が閾値未満なら高頻度の AND 条件は false で確定し、サンプル数に依存しない。
     const evaluable =
-      originalPosts.length >= MIN_SAMPLE_FOR_TIMING_SIGNALS &&
-      sampled.length >= MIN_SAMPLE_FOR_TIMING_SIGNALS
+      (originalPosts.length >= MIN_SAMPLE_FOR_TIMING_SIGNALS &&
+        sampled.length >= MIN_SAMPLE_FOR_TIMING_SIGNALS) ||
+      tweetsPerDay < VELOCITY_THRESHOLD_PER_DAY
 
     // 低労力アカウント登録シグネチャ(デフォルトアバター・機械的ユーザー名・空 bio)は、
     // 単独では正当な低労力ユーザーとの誤検知リスクが高いため、value=false の判定には使わない。

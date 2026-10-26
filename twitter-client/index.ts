@@ -18,6 +18,7 @@ export type {
 } from './cookie-issuer-client'
 export type { TrendsScraperLike } from './api-types'
 export { toAccountProfileInput, mergeTweetAdFlags, toTweetInput } from './mappers'
+export { stripNul } from './sanitize'
 export type {
   RawUserResult,
   RawTweetResult,

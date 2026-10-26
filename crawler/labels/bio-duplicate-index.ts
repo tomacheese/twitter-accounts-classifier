@@ -41,6 +41,27 @@ export interface BioDuplicateIndex {
 }
 
 /**
+ * bio コーパスを正規化 bio ごとのアカウント ID 一覧にまとめる。
+ * @param corpus - コーパスの (アカウント ID, bio) エントリ一覧
+ * @returns 2 アカウント以上が共有する正規化 bio と、そのアカウント ID 一覧
+ */
+export function buildBioClusters(corpus: BioCorpusEntry[]): Map<string, string[]> {
+  const accountsByNormalizedBio = new Map<string, Set<string>>()
+  for (const entry of corpus) {
+    const normalized = normalizeBioText(entry.bio)
+    if (normalized === '') continue
+    const accounts = accountsByNormalizedBio.get(normalized) ?? new Set<string>()
+    accounts.add(entry.accountId)
+    accountsByNormalizedBio.set(normalized, accounts)
+  }
+  const clusters = new Map<string, string[]>()
+  for (const [normalized, accounts] of accountsByNormalizedBio) {
+    if (accounts.size >= 2) clusters.set(normalized, [...accounts])
+  }
+  return clusters
+}
+
+/**
  * bio コーパスから、正規化後 bio ごとのアカウント集合インデックスを構築する。
  * @param corpus - コーパスの (アカウント ID, bio) エントリ一覧
  * @returns 構築されたインデックス

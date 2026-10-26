@@ -86,12 +86,16 @@ function isMassFollowingPattern(followingCount: number, followersCount: number):
   )
 }
 
+// 独立経路 (bio 勧誘なし) は単一シグナルの誤検知を避けるため標本の厚みと返信率を要求する。
+const STRONG_INFLATION_MIN_SAMPLE = 10
+const STRONG_INFLATION_MAX_REPLY_RATE = 0.1
+
 export const spamRule: LabelRule = {
   key: 'spam',
   description:
-    'プロフィール、またはツイート本文で 2 回以上繰り返された出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある。' +
-    'bio に勧誘文言が無くても、リツイート主体の釣り的タイムラインと大量フォロー傾向の両方が同時に強く出ている場合は、それ自体を独立したエンゲージメント水増しの証拠として扱う。懸賞応募に集中したリツイートは、それだけでは spam とみなさない',
-  version: '1.14.1',
+    'プロフィールに 1 回以上、またはツイート本文で 2 回以上繰り返された出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある。' +
+    'bio に勧誘文言が無くても、リツイート主体の釣り的タイムラインと大量フォロー傾向の両方が同時に強く出ている場合は、それ自体を独立したエンゲージメント水増しの証拠として扱う。ただしこの独立経路は、直近ツイートが 10 件以上あり返信率が 10% 以下の場合に限る。懸賞応募に集中したリツイートは、それだけでは spam とみなさない',
+  version: '1.15.0',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
     const hasSolicitation = bio !== null && hasGenuineSolicitation(bio)
@@ -114,8 +118,15 @@ export const spamRule: LabelRule = {
     // 単一シグナルだけの誤検知を防ぐガードとして維持する。
     // 一方、リツイート主体の釣り的タイムラインと大量フォローが両方同時に強く出ているアカウントは、
     // 単一シグナルの正当な挙動とは考えにくいため、bio 勧誘文言が無くても独立に検出対象とする。
+    const replyRate =
+      sampled.length > 0 ? sampled.filter((t) => t.isReply).length / sampled.length : 0
+    const canEvaluateStrongInflation =
+      sampled.length >= STRONG_INFLATION_MIN_SAMPLE && replyRate <= STRONG_INFLATION_MAX_REPLY_RATE
     const hasStrongEngagementInflation =
-      hasBaitRetweetPattern && hasMassFollowingPattern && !isGiveawayFocused
+      canEvaluateStrongInflation &&
+      hasBaitRetweetPattern &&
+      hasMassFollowingPattern &&
+      !isGiveawayFocused
     const value =
       hasStrongEngagementInflation ||
       (hasAnySolicitation && (hasBaitRetweetPattern || hasMassFollowingPattern))
@@ -147,11 +158,9 @@ export const spamRule: LabelRule = {
     ])
     // bio 勧誘文言なしの独立経路は、両シグナルが同時に強い場合のみを評価するため、
     // AND (combineRequired) で合成する。
-    const strongInflationScore = combineRequired([
-      retweetScore,
-      followingCountScore,
-      followingRatioScore,
-    ])
+    const strongInflationScore = canEvaluateStrongInflation
+      ? combineRequired([retweetScore, followingCountScore, followingRatioScore])
+      : 0
     const evidenceScore = combineAlternatives([bioGatedScore, strongInflationScore])
 
     // 低労力アカウント登録シグネチャ(デフォルトアバター・機械的ユーザー名・空 bio)は、
@@ -170,7 +179,7 @@ export const spamRule: LabelRule = {
     return {
       value,
       confidence: toConfidence(value, finalEvidenceScore, evaluable),
-      reason: `bio solicitation=${hasSolicitation}, tweetSolicitationCount=${tweetSolicitationCount}, retweetRatio=${retweetRatio.toFixed(2)} (n=${sampled.length}), giveawayFocused=${isGiveawayFocused}, followingCount=${followingCount}, followersCount=${followersCount}, lowEffortSignalCount=${lowEffortSignalCount}`,
+      reason: `bio solicitation=${hasSolicitation}, tweetSolicitationCount=${tweetSolicitationCount}, retweetRatio=${retweetRatio.toFixed(2)} (n=${sampled.length}), giveawayFocused=${isGiveawayFocused}, replyRate=${replyRate.toFixed(2)}, followingCount=${followingCount}, followersCount=${followersCount}, lowEffortSignalCount=${lowEffortSignalCount}`,
       evaluable,
     }
   },

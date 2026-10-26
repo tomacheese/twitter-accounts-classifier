@@ -14,8 +14,9 @@ const KEYWORD_SCORE = 0.8
 
 export const topicIdolRule: LabelRule = {
   key: 'topic_idol',
-  description: 'プロフィールの直接証拠、またはフォロー関係からアイドルとの強い関連が示される',
-  version: '1.2.1',
+  description:
+    'プロフィールの直接証拠、またはフォロー関係からアイドルとの強い関連が示される。「アイドル級」のような比喩的賛辞と実在アイドルは文字列で区別できないため除外せず、グループ名の辞書も持たないためグループ名だけの bio は直接証拠に含めない',
+  version: '1.2.2',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account

@@ -40,6 +40,11 @@ function retweets(count: number, giveawayCount: number): AccountFeatureBundle['r
     isPaidPromotion: false,
   }))
 }
+const mixed = (total: number, replies: number): AccountFeatureBundle['recentTweets'] => {
+  const rts = retweets(total, 0)
+  return rts.map((t, i) => (i < replies ? { ...t, isRetweet: false, isReply: true } : t))
+}
+
 describe('spamRule', () => {
   it('is true for a dating-solicitation bio with a mass-following pattern', () => {
     const result = spamRule.evaluate(
@@ -229,7 +234,7 @@ describe('spamRule', () => {
   })
 
   it('is true for mass-following combined with a bait-like retweet ratio even without a solicitation bio', () => {
-    const tweets: AccountFeatureBundle['recentTweets'] = Array.from({ length: 5 }, (_, i) => ({
+    const tweets: AccountFeatureBundle['recentTweets'] = Array.from({ length: 10 }, (_, i) => ({
       id: `t${i}`,
       fullText: 'RT @someone: ...',
       createdAt: new Date(),
@@ -628,26 +633,30 @@ describe('spamRule', () => {
   describe('giveaway and mass-following boundaries', () => {
     const base = { bio: '日常アカウントです', recentTweetsFetchStatus: 'success' as const }
 
-    it('treats 5 retweets with 3/5 giveaway ratio as giveaway-focused (false)', () => {
+    it('treats 10 retweets with 6/10 giveaway ratio as giveaway-focused (false)', () => {
       const result = spamRule.evaluate(
-        makeBundle({ ...base, followersCount: 10, followingCount: 800 }, retweets(5, 3)),
+        makeBundle({ ...base, followersCount: 10, followingCount: 800 }, retweets(10, 6)),
       )
       expect(result.value).toBe(false)
     })
 
-    it('does not treat 5 retweets with 2/5 giveaway ratio as giveaway-focused (true)', () => {
+    it('does not treat 10 retweets with 5/10 giveaway ratio as giveaway-focused (true)', () => {
       const result = spamRule.evaluate(
-        makeBundle({ ...base, followersCount: 10, followingCount: 800 }, retweets(5, 2)),
+        makeBundle({ ...base, followersCount: 10, followingCount: 800 }, retweets(10, 5)),
       )
       expect(result.value).toBe(true)
     })
 
-    it('does not treat fewer than 5 retweets as giveaway-focused', () => {
-      const tweets = [...retweets(4, 4), { ...retweets(1, 0)[0], id: 'own', isRetweet: false }]
-      const result = spamRule.evaluate(
-        makeBundle({ ...base, followersCount: 10, followingCount: 800 }, tweets),
+    it('treats 5 giveaway retweets as focused and 4 as not focused', () => {
+      const own = { ...retweets(1, 0)[0], id: 'own', isRetweet: false }
+      const focused = spamRule.evaluate(
+        makeBundle({ ...base, followersCount: 10, followingCount: 800 }, retweets(5, 5)),
       )
-      expect(result.value).toBe(true)
+      const notFocused = spamRule.evaluate(
+        makeBundle({ ...base, followersCount: 10, followingCount: 800 }, [...retweets(4, 4), own]),
+      )
+      expect(focused.reason).toContain('giveawayFocused=true')
+      expect(notFocused.reason).toContain('giveawayFocused=false')
     })
 
     it('does not label giveaway participants without solicitation even at the following boundary', () => {
@@ -665,6 +674,27 @@ describe('spamRule', () => {
       expect(spamRule.evaluate(makeBundle({ ...solicitation, followingCount: 500 })).value).toBe(
         true,
       )
+    })
+  })
+
+  describe('independent engagement-inflation path conditions', () => {
+    const base = { bio: '日常アカウントです', followersCount: 10, followingCount: 800 }
+
+    it('is false below the minimum sample size even when every signal is strong', () => {
+      expect(spamRule.evaluate(makeBundle(base, retweets(9, 0))).value).toBe(false)
+      expect(spamRule.evaluate(makeBundle(base, retweets(10, 0))).value).toBe(true)
+    })
+
+    it('is true at 10% replies and false above the reply-rate upper bound', () => {
+      expect(spamRule.evaluate(makeBundle(base, mixed(20, 2))).value).toBe(true)
+      expect(spamRule.evaluate(makeBundle(base, mixed(20, 3))).value).toBe(false)
+    })
+
+    it('does not apply the sample and reply conditions to the solicitation path', () => {
+      const result = spamRule.evaluate(
+        makeBundle({ ...base, bio: '稼げる情報を配信' }, retweets(5, 0)),
+      )
+      expect(result.value).toBe(true)
     })
   })
 })

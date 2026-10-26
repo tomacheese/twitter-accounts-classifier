@@ -29,12 +29,16 @@ function averageTweetsPerDay(tweetCount: number, accountCreatedAt: Date): number
   return tweetCount / ageDays
 }
 
+// 実況などの短時間の密集投稿から 1 日あたりの頻度を外挿すると過大になるため、
+// 観測期間が極端に短いサンプルは頻度の根拠にしない。
+const MIN_OBSERVATION_DAYS = 6 / 24
+
 function recentObservedTweetsPerDay(tweets: { createdAt: Date }[]): number {
   if (tweets.length < 2) return 0
   const timestamps = tweets.map((t) => t.createdAt.getTime())
   const spanDays = Math.max(
     (Math.max(...timestamps) - Math.min(...timestamps)) / (1000 * 60 * 60 * 24),
-    1 / 24,
+    MIN_OBSERVATION_DAYS,
   )
   return (tweets.length - 1) / spanDays
 }
@@ -42,8 +46,8 @@ function recentObservedTweetsPerDay(tweets: { createdAt: Date }[]): number {
 export const replyFarmingRule: LabelRule = {
   key: 'reply_farming',
   description:
-    '自身によるオリジナル投稿がほぼなく(直近のツイートのほぼ全てがリプライまたはリツイート)、かつ人間としてあり得ない投稿頻度である。大量生産型の AI 生成/エンゲージメント稼ぎリプライボットの特徴',
-  version: '1.4.1',
+    '自身によるオリジナル投稿がほぼなく(直近のツイートのほぼ全てがリプライまたはリツイート)、かつ人間としてあり得ない投稿頻度である(直近頻度は 6 時間以上の観測期間で評価する)。大量生産型の AI 生成/エンゲージメント稼ぎリプライボットの特徴',
+  version: '1.7.0',
   evaluate(bundle) {
     const { tweetCount, accountCreatedAt } = bundle.account
     const sampled = bundle.recentTweets
@@ -57,14 +61,22 @@ export const replyFarmingRule: LabelRule = {
       tweetsPerDay >= VELOCITY_THRESHOLD_PER_DAY &&
       recentTweetsPerDay >= RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY
 
-    const originalTweets = sampled.filter((t) => !t.isReply && !t.isRetweet)
+    // 自分の投稿に寄せられたコメントへの返信は、自分の読者との会話でありリプライ稼ぎではないため、
+    // オリジナル投稿側に数える。
+    const isInOwnConversation = (t: { conversationRootAuthorId?: string | null }): boolean =>
+      t.conversationRootAuthorId === bundle.account.id
+    const originalTweets = sampled.filter(
+      (t) => (!t.isReply && !t.isRetweet) || (t.isReply && isInOwnConversation(t)),
+    )
     const originalContentRatio = sampled.length > 0 ? originalTweets.length / sampled.length : 1
     const hasEnoughSample = sampled.length >= MIN_SAMPLE
     const hasNoOriginalContent =
       hasEnoughSample && originalContentRatio <= ORIGINAL_CONTENT_RATIO_THRESHOLD
 
     const replyRatio =
-      sampled.length > 0 ? sampled.filter((t) => t.isReply).length / sampled.length : 0
+      sampled.length > 0
+        ? sampled.filter((t) => t.isReply && !isInOwnConversation(t)).length / sampled.length
+        : 0
     const looksReplyFocused = hasEnoughSample && replyRatio >= REPLY_RATIO_THRESHOLD
 
     const value = isHighVelocity && hasNoOriginalContent && looksReplyFocused
@@ -84,7 +96,8 @@ export const replyFarmingRule: LabelRule = {
       ),
       rampScore(replyRatio, REPLY_RATIO_THRESHOLD, 0.5, 'higher-is-positive'),
     ])
-    const evaluable = hasEnoughSample
+    // 生涯平均頻度が閾値未満なら高頻度の AND 条件は false で確定し、サンプル数に依存しない。
+    const evaluable = hasEnoughSample || tweetsPerDay < VELOCITY_THRESHOLD_PER_DAY
 
     return {
       value,

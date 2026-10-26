@@ -1,5 +1,6 @@
 import { rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
+import { isCampaignEntryText } from '../campaign-entry-pattern'
 import { normalizeReplyText } from '../duplicate-reply-index'
 import { isRecentTweetsEvaluable } from '../recent-tweets-evaluable'
 
@@ -13,8 +14,8 @@ const MIN_DUPLICATE_PAIRS = 2
 export const selfDuplicateReplyRule: LabelRule = {
   key: 'self_duplicate_reply',
   description:
-    '同一内容(URL/メンションを除去した上で比較)を単独ツイートとしても @リプライとしても繰り返し投稿している。インプレッション稼ぎ(「インプレゾンビ」)行為の特徴',
-  version: '1.4.0',
+    '同一内容(URL/メンションを除去した上で比較)を単独ツイートとしても @リプライとしても繰り返し投稿している(キャンペーン応募への定型返信は除く)。インプレッション稼ぎ(「インプレゾンビ」)行為の特徴',
+  version: '1.5.0',
   evaluate(bundle) {
     // リプライ先が自分自身の直近ツイートである場合、それは他者のバズ投稿に相乗りした
     // リプライではなく、自分の投稿を続けるスレッド内の連投にすぎない。
@@ -30,6 +31,8 @@ export const selfDuplicateReplyRule: LabelRule = {
       if (isSelfThreadReply) continue
       const normalized = normalizeReplyText(tweet.fullText)
       if (normalized === '') continue
+      // 企業キャンペーンの応募投稿への定型返信は、使い回しではなく応募の意思表示にすぎない。
+      if (tweet.isReply && isCampaignEntryText(normalized)) continue
       const group = groups.get(normalized) ?? { hasStandalone: false, hasReply: false }
       if (tweet.isReply) {
         group.hasReply = true

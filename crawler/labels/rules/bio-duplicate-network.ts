@@ -2,7 +2,7 @@ import { rampScore, toConfidence } from '../confidence'
 import type { LabelRule } from '../types'
 
 // bio の複製ネットワークは、templated_reply_network と同水準の閾値を採用する。
-const MIN_NETWORK_SIZE = 5
+export const MIN_NETWORK_SIZE = 5
 
 export const bioDuplicateNetworkRule: LabelRule = {
   key: 'bio_duplicate_network',

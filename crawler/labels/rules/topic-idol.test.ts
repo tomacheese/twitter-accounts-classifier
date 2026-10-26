@@ -117,4 +117,20 @@ describe('topicIdolRule', () => {
     const result = topicIdolRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it('is true for a figurative compliment using アイドル (a known false positive kept by design)', () => {
+    expect(
+      topicIdolRule.evaluate(
+        makeBundle({ bio: '友人からアイドル級にかわいいと言われる猫の飼い主' }),
+      ).value,
+    ).toBe(true)
+  })
+
+  it('is false for a bio that only names a fictional group, because there is no group-name dictionary', () => {
+    expect(
+      topicIdolRule.evaluate(
+        makeBundle({ bio: 'サンプルガールズの箱推しです。ライブ遠征が生きがい' }),
+      ).value,
+    ).toBe(false)
+  })
 })

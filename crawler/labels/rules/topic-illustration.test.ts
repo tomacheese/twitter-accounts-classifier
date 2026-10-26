@@ -112,4 +112,59 @@ describe('topicIllustrationRule', () => {
     const result = topicIllustrationRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it("is false for a bio that only says it retweets others' illustrations", () => {
+    expect(
+      topicIllustrationRule.evaluate(
+        makeBundle({ bio: 'お出かけの記録を載せています。アニメのイラストもよくRTします' }),
+      ).value,
+    ).toBe(false)
+  })
+
+  it('stays true for a bio that declares drawing illustrations and welcomes retweets', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: 'イラストを描いています。RT歓迎です' }))
+        .value,
+    ).toBe(true)
+  })
+
+  it.each(['SRPGが好きなおじさんです。推し絵師⇒【ねこ】', '好きな絵師：ねこ先生'])(
+    'is false for a bio that only names another artist as a favorite (%s)',
+    (bio) => {
+      expect(topicIllustrationRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('stays true for a self-declared artist who also names a favorite artist', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: '絵師です。推し絵師はねこ先生' })).value,
+    ).toBe(true)
+  })
+
+  it('小説書きの bio で pixiv の記載だけなら false', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: 'サークル主宰の小説書きです pixiv→リンク' }))
+        .value,
+    ).toBe(false)
+  })
+
+  it('小説書きでもイラスト系の語を併記していれば true', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: '小説とイラストを描きます pixiv→リンク' }))
+        .value,
+    ).toBe(true)
+  })
+
+  it('小説の語がなければ pixiv の記載だけで true', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: '趣味垢です pixiv→リンク' })).value,
+    ).toBe(true)
+  })
+
+  it('ノベルティの語だけでは小説書きとみなさず pixiv の記載で true', () => {
+    expect(
+      topicIllustrationRule.evaluate(makeBundle({ bio: 'ノベルティ制作の担当です pixiv→リンク' }))
+        .value,
+    ).toBe(true)
+  })
 })

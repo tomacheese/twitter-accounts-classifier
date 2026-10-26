@@ -30,7 +30,12 @@ import {
   upsertReplyHijackEvidence,
   type ReplyHijackEvidenceInput,
 } from './db/reply-hijack-evidence-repository'
-import { loadRecentTweetsForAccounts, findTweetContextsByIds } from './db/tweet-repository'
+import {
+  loadRecentTweetsForAccounts,
+  loadPromotedTweetCountsForAccounts,
+  findTweetContextsByIds,
+} from './db/tweet-repository'
+import { PROMOTED_RECENT_WINDOW_DAYS } from './labels/rules/ad-promoted'
 import { buildDuplicateReplyIndex as buildDuplicateReplyIndexImpl } from './labels/duplicate-reply-index'
 import { buildBioDuplicateIndex } from './labels/bio-duplicate-index'
 import { buildReplyHijackIndex as buildReplyHijackIndexImpl } from './labels/reply-hijack-index'
@@ -153,17 +158,21 @@ async function evaluateAccountRelabelItemGroup(
   let accounts: Account[]
   let tweetsByAccountId: Map<string, Tweet[]>
   let followChurnObservationByAccountId: Map<string, FollowChurnObservation>
+  let promotedCountByAccountId: Map<string, number>
   let parentTweetTextById: Map<string, string>
   let parentTweetAuthorIdById: Map<string, string>
   try {
     const followChurnSince = new Date(
       Date.now() - FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS * 24 * 60 * 60 * 1000,
     )
-    ;[accounts, tweetsByAccountId, followChurnObservationByAccountId] = await Promise.all([
-      prisma.account.findMany({ where: { id: { in: accountIds } } }),
-      loadRecentTweetsForAccounts(prisma, accountIds, CRAWL_LIMITS.recentTweetsPerAccount),
-      loadFollowChurnObservationsForAccounts(prisma, accountIds, followChurnSince),
-    ])
+    const promotedSince = new Date(Date.now() - PROMOTED_RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+    ;[accounts, tweetsByAccountId, followChurnObservationByAccountId, promotedCountByAccountId] =
+      await Promise.all([
+        prisma.account.findMany({ where: { id: { in: accountIds } } }),
+        loadRecentTweetsForAccounts(prisma, accountIds, CRAWL_LIMITS.recentTweetsPerAccount),
+        loadFollowChurnObservationsForAccounts(prisma, accountIds, followChurnSince),
+        loadPromotedTweetCountsForAccounts(prisma, accountIds, promotedSince),
+      ])
 
     const allRecentTweets = [...tweetsByAccountId.values()].flat()
     const replyContextIds = [
@@ -220,6 +229,7 @@ async function evaluateAccountRelabelItemGroup(
         parentTweetTextById,
         parentTweetAuthorIdById,
         followChurnObservationByAccountId.get(account.id),
+        promotedCountByAccountId.get(account.id) ?? 0,
       )
       const labels: AccountLabelBulkInput[] = []
       const appliedRules = options.registry.applyAll(bundle)

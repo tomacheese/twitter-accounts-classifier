@@ -165,6 +165,12 @@ export interface AccountFeatureBundle {
    * この値を持たない bundle (多くのルール単体テストなど) では未観測として扱う。
    */
   followChurnObservation?: FollowChurnObservation
+  /**
+   * `PROMOTED_RECENT_WINDOW_DAYS` 日以内に投稿された、プロモーション付きツイートの DB 上の総数。
+   * `recentTweets` は件数上限で切られるため、上限より古い期間内のプロモ投稿はこの値でしか分からない。
+   * この値を持たない bundle (多くのルール単体テストなど) では `recentTweets` のみで判定する。
+   */
+  promotedTweetCountInWindow?: number
 }
 
 export interface LabelRuleResult {

@@ -15,7 +15,13 @@ import {
 import type { FollowListResult } from '../twitter/follows'
 import { upsertAccount, type AccountProfileInput } from './account-repository'
 import { upsertAccountRequestingRelabelIfChanged } from './account-relabel-on-change'
-import { upsertTweet, findTweetContextsByIds, type TweetInput } from './tweet-repository'
+import {
+  upsertTweet,
+  findTweetContextsByIds,
+  loadPromotedTweetCountsForAccounts,
+  type TweetInput,
+} from './tweet-repository'
+import { PROMOTED_RECENT_WINDOW_DAYS } from '../labels/rules/ad-promoted'
 import {
   upsertFollowSampleAuthors,
   replaceLabelingFollowSampleWithinTx,
@@ -186,6 +192,11 @@ export async function persistAuthorResultAtomic(
         params.profile.id,
         followChurnSince,
       )
+      const promotedCounts = await loadPromotedTweetCountsForAccounts(
+        txClient,
+        [params.profile.id],
+        new Date(Date.now() - PROMOTED_RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000),
+      )
       const bundle = buildAccountFeatureBundle(
         account,
         authorOwnTweets,
@@ -197,6 +208,7 @@ export async function persistAuthorResultAtomic(
         parentTweetTextById,
         parentTweetAuthorIdById,
         followChurnObservation,
+        promotedCounts.get(params.profile.id) ?? 0,
       )
       const appliedRules = params.registry.applyAll(bundle)
       const ruleResults = appliedRules.flatMap(({ rule, result }) => {

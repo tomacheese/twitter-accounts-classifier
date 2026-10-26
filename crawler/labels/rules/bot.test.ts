@@ -319,4 +319,20 @@ describe('botRule', () => {
     expect(withSignals.value).toBe(false)
     expect(withSignals.confidence).toBe(withoutSignals.confidence)
   })
+
+  it('is evaluable with a confident false when the lifetime velocity alone rules the account out', () => {
+    const result = botRule.evaluate(
+      makeBundle({ tweetCount: 10, accountCreatedAt: new Date('2025-01-01T00:00:00Z') }, []),
+    )
+
+    expect(result).toMatchObject({ value: false, evaluable: true })
+  })
+
+  it('stays not evaluable for an empty sample when the lifetime velocity is high', () => {
+    const result = botRule.evaluate(
+      makeBundle({ tweetCount: 100_000, accountCreatedAt: new Date('2025-01-01T00:00:00Z') }, []),
+    )
+
+    expect(result).toMatchObject({ value: false, evaluable: false })
+  })
 })

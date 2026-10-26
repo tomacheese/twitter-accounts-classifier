@@ -34,11 +34,62 @@ describe('evaluateAccountRelabelItems', () => {
     vi.spyOn(workItemRepository, 'claimStillLeasedWorkItemIdsForUpdate').mockImplementation(
       (_tx, input) => Promise.resolve(input.workItemIds),
     )
+    // 個別のテストで上書きしない限り、期間内のプロモ投稿の DB 集計は 0 件の前提にする。
+    vi.spyOn(tweetRepository, 'loadPromotedTweetCountsForAccounts').mockResolvedValue(new Map())
     // 個別のテストで上書きしない限り、follow churn の観測は無い前提にする。
     vi.spyOn(
       followChurnObservationModule,
       'loadFollowChurnObservationsForAccounts',
     ).mockResolvedValue(new Map())
+  })
+
+  it('期間内のプロモーション付きツイートの DB 集計値を bundle に渡す', async () => {
+    let observed: number | undefined
+    const probeRule: LabelRule = {
+      key: 'promoted_count_probe',
+      version: '1.0.0',
+      description: 'test probe',
+      evaluate(bundle: AccountFeatureBundle) {
+        observed = bundle.promotedTweetCountInWindow
+        return { value: false, confidence: 1, reason: 'probe' }
+      },
+    }
+    const registry = new LabelRuleRegistry()
+    registry.register(probeRule)
+    const prisma = makeTransactionalPrisma({
+      account: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ id: 'account-1', recentTweetsFetchStatus: 'success' }]),
+      },
+    })
+    vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
+    vi.spyOn(tweetRepository, 'loadPromotedTweetCountsForAccounts').mockResolvedValue(
+      new Map([['account-1', 3]]),
+    )
+    vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
+    vi.spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts').mockResolvedValue()
+    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
+      { id: 'wi-1', status: 'succeeded' },
+    ])
+
+    await evaluateAccountRelabelItems(prisma, [{ id: 'wi-1', triggerId: 'account-1' } as never], {
+      registry,
+      labelDefinitionIds: new Map([['promoted_count_probe', 'def-1']]),
+      duplicateReplyIndex: { countOtherAccounts: () => 0 },
+      bioDuplicateIndex: { countOtherAccounts: () => 0 },
+      replyHijackIndex: {
+        swarmSizeFor: () => 0,
+        isEligibleForScreening: () => false,
+        evidenceFor: () => undefined,
+      },
+      followGraphLabelIndex: { signalsFor: () => ({}) },
+      selfReplyPromoIndex: { evidenceFor: () => undefined },
+      concurrency: 1,
+      leaseOwner: 'test-worker',
+    })
+
+    expect(observed).toBe(3)
   })
 
   it('永続化を lease の生存確認から work item 完了まで 1 本の transaction にまとめて行う', async () => {
@@ -1003,6 +1054,8 @@ describe('runRelabelWorkerCycleOnce', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
+    // 個別のテストで上書きしない限り、期間内のプロモ投稿の DB 集計は 0 件の前提にする。
+    vi.spyOn(tweetRepository, 'loadPromotedTweetCountsForAccounts').mockResolvedValue(new Map())
     // 個別のテストで上書きしない限り、follow churn の観測は無い前提にする。
     vi.spyOn(
       followChurnObservationModule,

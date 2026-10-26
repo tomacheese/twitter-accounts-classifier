@@ -199,17 +199,21 @@ describe('adReplyHijackRule', () => {
     expect(result.value).toBe(true)
   })
 
-  it.each(['応募させていただきます', '応募いたします', '応募します'])(
-    'is false for a giveaway hunter using the polite entry phrasing: %s',
-    (phrase) => {
-      const tweets = [1, 2, 3, 4].map((i) => ({
-        ...entryReplyTweet(i),
-        fullText: `素敵なプレゼント企画をありがとうございます！${phrase} #${i}`,
-      }))
-      const result = adReplyHijackRule.evaluate(makeBundle(tweets))
-      expect(result.value).toBe(false)
-    },
-  )
+  it.each([
+    '応募させていただきます',
+    '応募いたします',
+    '応募します',
+    '参加させていただきます',
+    '参加します',
+    '当選しましたら投稿します',
+  ])('is false for a giveaway hunter using the polite entry phrasing: %s', (phrase) => {
+    const tweets = [1, 2, 3, 4].map((i) => ({
+      ...entryReplyTweet(i),
+      fullText: `素敵なプレゼント企画をありがとうございます！${phrase} #${i}`,
+    }))
+    const result = adReplyHijackRule.evaluate(makeBundle(tweets))
+    expect(result.value).toBe(false)
+  })
 
   it('does not count a bare 副業 mention as an ad pitch', () => {
     const replies = Array.from({ length: 4 }, (_, i) => ({
@@ -227,5 +231,21 @@ describe('adReplyHijackRule', () => {
     }))
 
     expect(adReplyHijackRule.evaluate(makeBundle(replies)).value).toBe(true)
+  })
+
+  it('職業の自己説明としての「求人側」を含む返信は広告として数えない', () => {
+    const tweets = [1, 2, 3].map((i) => ({
+      ...replyTweet(i, false),
+      fullText: `@someone 採用の求人側を担当しています。お気軽にどうぞ ${i}`,
+    }))
+    expect(adReplyHijackRule.evaluate(makeBundle(tweets)).value).toBe(false)
+  })
+
+  it('「求人情報はこちら」のような勧誘は引き続き広告として数える', () => {
+    const tweets = [1, 2, 3].map((i) => ({
+      ...replyTweet(i, false),
+      fullText: `@someone 高収入の求人情報はこちら ${i}`,
+    }))
+    expect(adReplyHijackRule.evaluate(makeBundle(tweets)).value).toBe(true)
   })
 })

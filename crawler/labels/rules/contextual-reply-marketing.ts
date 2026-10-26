@@ -1,4 +1,5 @@
 import { combineRequired, rampScore, toConfidence } from '../confidence'
+import { isCampaignEntryText } from '../campaign-entry-pattern'
 import type { LabelRule } from '../types'
 
 // 大量生産型ではない低頻度アカウントを対象とするため、
@@ -81,12 +82,6 @@ function codePointLength(text: string): number {
   return text.match(/./gu)?.length ?? 0
 }
 
-// 懸賞・キャンペーンへの定型的な応募返信は、プロフィール誘導ではなく応募の意思表示であるため根拠にしない。
-// ただしプロフィールへの誘導を併記する返信は、応募の言及を混ぜた勧誘でありうるため除外しない。
-const CAMPAIGN_ENTRY_PATTERN =
-  /(?:応募(?:し(?:まし)?た|します|いたします|させていただきます)|当(?:た|選)りますように|当選しますように|当選しました|当たりました)/u
-const PROFILE_GUIDANCE_PATTERN = /プロフ(?:ィール)?(?:から|を|欄|へ|に|は)/u
-
 function hasSelfPositioning(text: string): boolean {
   return SELF_POSITIONING_PATTERNS.some((pattern) => pattern.test(text))
 }
@@ -148,7 +143,7 @@ export const contextualReplyMarketingRule: LabelRule = {
     '「自分も」「〜として」「自分の立場では」等の自己ポジショニングを反復してプロフィール流入を狙う行動を検出する。' +
     '同一会話に集中する一致や、プロフィール誘導を伴わない懸賞・キャンペーンへの定型的な応募返信は自己ポジショニングの根拠にしない。' +
     'AI/LLM 利用そのものは推定しない',
-  version: '0.4.1',
+  version: '0.5.0',
   excludeFromStaleScan: true,
   evaluate(bundle) {
     const sampled = bundle.recentTweets
@@ -157,7 +152,10 @@ export const contextualReplyMarketingRule: LabelRule = {
       (tweet) => tweet.inReplyToTweetId && tweet.parentTweetAuthorId,
     )
     const externalReplies = resolvedReplyTweets.filter(
-      (tweet) => tweet.parentTweetAuthorId !== bundle.account.id,
+      (tweet) =>
+        tweet.parentTweetAuthorId !== bundle.account.id &&
+        // 自分の投稿に寄せられたコメントへの返信は、外部投稿者への営業的な返信ではない。
+        tweet.conversationRootAuthorId !== bundle.account.id,
     )
     const parentAuthorCoverage =
       replyTweets.length > 0 ? resolvedReplyTweets.length / replyTweets.length : 1
@@ -194,7 +192,7 @@ export const contextualReplyMarketingRule: LabelRule = {
     const selfPositioningConversations = new Set<string>()
     for (const [index, text] of normalizedExternalReplies.entries()) {
       if (!hasSelfPositioning(text)) continue
-      if (CAMPAIGN_ENTRY_PATTERN.test(text) && !PROFILE_GUIDANCE_PATTERN.test(text)) continue
+      if (isCampaignEntryText(text)) continue
       selfPositioningConversations.add(conversationKeys[index])
     }
     const selfPositioningCount = selfPositioningConversations.size

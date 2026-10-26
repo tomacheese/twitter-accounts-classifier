@@ -1137,3 +1137,8 @@ model ComponentBuildIdentity {
   startedAt          DateTime
   updatedAt          DateTime  @updatedAt
 }
+
+model BioDuplicateClusterSize {
+  clusterKey String @id
+  size       Int
+}

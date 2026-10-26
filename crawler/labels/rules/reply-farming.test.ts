@@ -4,7 +4,8 @@ import type { AccountFeatureBundle } from '../types'
 
 function makeBundle(
   tweetsPerDay: number,
-  tweets: { isReply?: boolean; isRetweet?: boolean }[],
+  tweets: { isReply?: boolean; isRetweet?: boolean; ownConversation?: boolean }[],
+  spanHours = 6,
 ): AccountFeatureBundle {
   const ageDays = 100
   return {
@@ -23,13 +24,17 @@ function makeBundle(
     recentTweets: tweets.map((t, i) => ({
       id: `t${i}`,
       fullText: `tweet ${i}`,
-      createdAt: new Date(),
+      // 直近頻度の観測期間下限 (6 時間) ちょうどに均等配置する。
+      createdAt: new Date(
+        Date.now() - (tweets.length > 1 ? (i / (tweets.length - 1)) * spanHours * 3_600_000 : 0),
+      ),
       retweetCount: 0,
       likeCount: 0,
       isReply: t.isReply ?? false,
       isRetweet: t.isRetweet ?? false,
       isPromoted: false,
       isPaidPromotion: false,
+      conversationRootAuthorId: t.ownConversation === true ? '1' : null,
     })),
   }
 }
@@ -37,12 +42,8 @@ function makeBundle(
 describe('replyFarmingRule', () => {
   it('is true for a high-velocity account whose recent tweets are all replies/retweets', () => {
     const bundle = makeBundle(340, [
-      { isReply: true },
-      { isReply: true },
-      { isReply: true },
+      ...Array.from({ length: 19 }, () => ({ isReply: true })),
       { isRetweet: true },
-      { isReply: true },
-      { isReply: true },
     ])
 
     const result = replyFarmingRule.evaluate(bundle)
@@ -52,12 +53,8 @@ describe('replyFarmingRule', () => {
 
   it('is false for a high-velocity account that still posts original content', () => {
     const bundle = makeBundle(340, [
-      { isReply: true },
-      { isReply: true },
-      {},
-      {},
-      { isReply: true },
-      {},
+      ...Array.from({ length: 10 }, () => ({ isReply: true })),
+      ...Array.from({ length: 10 }, () => ({})),
     ])
 
     const result = replyFarmingRule.evaluate(bundle)
@@ -118,7 +115,7 @@ describe('replyFarmingRule', () => {
     const result = replyFarmingRule.evaluate(
       makeBundle(
         151,
-        Array.from({ length: 6 }, () => ({ isReply: true })),
+        Array.from({ length: 20 }, () => ({ isReply: true })),
       ),
     )
 
@@ -192,5 +189,35 @@ describe('replyFarmingRule', () => {
     const result = replyFarmingRule.evaluate(bundle)
 
     expect(result.value).toBe(false)
+  })
+
+  it('is false when most replies are inside conversations rooted at the account itself', () => {
+    const bundle = makeBundle(340, [
+      ...Array.from({ length: 14 }, () => ({ isReply: true, ownConversation: true })),
+      ...Array.from({ length: 6 }, () => ({ isReply: true })),
+    ])
+
+    expect(replyFarmingRule.evaluate(bundle).value).toBe(false)
+  })
+
+  it('does not extrapolate a daily rate from a burst shorter than the observation floor', () => {
+    const burst = Array.from({ length: 10 }, () => ({ isReply: true }))
+    const sustained = Array.from({ length: 20 }, () => ({ isReply: true }))
+
+    expect(replyFarmingRule.evaluate(makeBundle(340, burst, 0)).value).toBe(false)
+    expect(replyFarmingRule.evaluate(makeBundle(340, burst, 6)).value).toBe(false)
+    expect(replyFarmingRule.evaluate(makeBundle(340, sustained, 6)).value).toBe(true)
+  })
+
+  it('is evaluable with a confident false when the lifetime velocity alone rules the account out', () => {
+    const result = replyFarmingRule.evaluate(makeBundle(5, [{ isReply: true }]))
+
+    expect(result).toMatchObject({ value: false, evaluable: true })
+  })
+
+  it('stays not evaluable for a small sample when the lifetime velocity is high', () => {
+    const result = replyFarmingRule.evaluate(makeBundle(340, [{ isReply: true }]))
+
+    expect(result).toMatchObject({ value: false, evaluable: false })
   })
 })

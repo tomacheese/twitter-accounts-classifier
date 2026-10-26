@@ -194,4 +194,34 @@ describe('selfDuplicateReplyRule', () => {
 
     expect(result.value).toBe(false)
   })
+
+  it('is false when the duplicated reply is only a campaign entry message', () => {
+    const entries = [
+      '応募しました！素敵な商品が当たりますように、よろしくお願いします',
+      '参加します！当選しますように、毎回楽しみにしています',
+    ]
+    const bundle = makeBundle(
+      entries.flatMap((text) => [
+        { fullText: text, isReply: false },
+        { fullText: `@example_corp ${text}`, isReply: true },
+      ]),
+    )
+
+    expect(selfDuplicateReplyRule.evaluate(bundle).value).toBe(false)
+  })
+
+  it('still counts a campaign-style reply that also guides readers to the profile', () => {
+    const entries = [
+      '応募しました！素敵な商品が当たりますように、詳しくはプロフを見てね',
+      '参加します！当選しますように、他の企画もプロフから確認できます',
+    ]
+    const bundle = makeBundle(
+      entries.flatMap((text) => [
+        { fullText: text, isReply: false },
+        { fullText: `@example_corp ${text}`, isReply: true },
+      ]),
+    )
+
+    expect(selfDuplicateReplyRule.evaluate(bundle).value).toBe(true)
+  })
 })

@@ -24,8 +24,26 @@ function hasScriptContent(text: string): boolean {
   return LETTER_PATTERN.test(languageBody(text))
 }
 
-const MIN_SAMPLE_PER_SIDE = 3
+// 自分側の下限は返信側と揃え、評価不能を増やさない。
+const MIN_OWN_POSTS = 3
+const MIN_REPLIES = 3
 const SCRIPT_MISMATCH_THRESHOLD = 0.7
+
+// 会話の途中で他者の返信に応じる返信は、相手の言語に合わせる個別の対話であり、
+// 無関係な読者への言語切り替えとは区別する。
+// 会話のルートへの直接返信か、返信先が不明なものだけを不一致の根拠にする。
+function isDialogueReply(t: {
+  inReplyToTweetId?: string | null
+  conversationId?: string | null
+  parentTweetAuthorId?: string | null
+}): boolean {
+  return (
+    t.inReplyToTweetId != null &&
+    t.conversationId != null &&
+    t.inReplyToTweetId !== t.conversationId &&
+    t.parentTweetAuthorId != null
+  )
+}
 
 function japaneseScriptRatio(texts: string[]): number {
   if (texts.length === 0) return 0
@@ -37,8 +55,8 @@ function japaneseScriptRatio(texts: string[]): number {
 export const replyLanguageMismatchRule: LabelRule = {
   key: 'reply_language_mismatch',
   description:
-    '自身のツイートは特定の言語体系にほぼ偏っているが、リプライ(自身のリプライを自己リツイートしているものを含む)では無関係な対象読者向けに突然言語が切り替わる。エンゲージメント稼ぎボットネットワークの特徴',
-  version: '1.5.0',
+    '自身のツイートは特定の言語体系にほぼ偏っているが、リプライ(自身のリプライを自己リツイートしているものを含む)では無関係な対象読者向けに突然言語が切り替わる(自分側の投稿が少ない場合と、会話途中の個別の対話は対象外)。エンゲージメント稼ぎボットネットワークの特徴',
+  version: '1.7.0',
   evaluate(bundle) {
     const { screenName } = bundle.account
     // リンクのみの投稿はスクリプト比率が常に0になり、
@@ -63,11 +81,13 @@ export const replyLanguageMismatchRule: LabelRule = {
     const replies = bundle.recentTweets.filter(
       (t) =>
         (t.isReply || (t.isRetweet && isSelfRetweetedReply(t.fullText))) &&
+        // 自分の投稿に寄せられたコメントへの返信は、相手の言語に合わせるのが自然なため対象から除く。
+        t.conversationRootAuthorId !== bundle.account.id &&
+        !isDialogueReply(t) &&
         hasScriptContent(t.fullText),
     )
 
-    const hasEnoughSample =
-      ownPosts.length >= MIN_SAMPLE_PER_SIDE && replies.length >= MIN_SAMPLE_PER_SIDE
+    const hasEnoughSample = ownPosts.length >= MIN_OWN_POSTS && replies.length >= MIN_REPLIES
     const ownJapaneseRatio = japaneseScriptRatio(ownPosts.map((t) => t.fullText))
     const replyJapaneseRatio = japaneseScriptRatio(replies.map((t) => t.fullText))
     const mismatch = Math.abs(ownJapaneseRatio - replyJapaneseRatio)
@@ -76,7 +96,7 @@ export const replyLanguageMismatchRule: LabelRule = {
     // サンプル数が多いほど閾値超過分に対し早く 1.0 へ飽和するよう、
     // rampWidth をサンプルサイズの平方根に反比例させる (統計量そのものは smoothedRate 等で縮小しない)。
     const minSampleSide = Math.min(ownPosts.length, replies.length)
-    const rampWidth = hasEnoughSample ? 0.3 * Math.sqrt(MIN_SAMPLE_PER_SIDE / minSampleSide) : 0.3
+    const rampWidth = hasEnoughSample ? 0.3 * Math.sqrt(MIN_REPLIES / minSampleSide) : 0.3
     const evidenceScore = hasEnoughSample
       ? rampScore(mismatch, SCRIPT_MISMATCH_THRESHOLD, rampWidth, 'higher-is-positive')
       : 0
