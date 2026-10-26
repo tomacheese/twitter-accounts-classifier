@@ -697,4 +697,23 @@ describe('spamRule', () => {
       expect(result.value).toBe(true)
     })
   })
+
+  it.each([
+    'パパ活募集中。気軽にDMしてね。ブロックしないでね',
+    '副業募集 DM歓迎\n無視しないでください',
+  ])('stays true when a rejection-like word sits in a later sentence (%s)', (bio) => {
+    const result = spamRule.evaluate(makeBundle({ bio, followersCount: 10, followingCount: 3000 }))
+    expect(result.value).toBe(true)
+  })
+
+  it('is false when a strong rejection word closes a multi-sentence solicitation list', () => {
+    const result = spamRule.evaluate(
+      makeBundle({
+        bio: '出会い系。パパ活。業者はお断り',
+        followersCount: 10,
+        followingCount: 3000,
+      }),
+    )
+    expect(result.value).toBe(false)
+  })
 })

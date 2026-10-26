@@ -215,6 +215,17 @@ describe('adReplyHijackRule', () => {
     expect(result.value).toBe(false)
   })
 
+  it.each(['プレゼント企画も大好物です', 'プレゼント企画が好きです', 'プレゼント企画いつも楽しみ'])(
+    'is false for a viewer who only says they like giveaways: %s',
+    (phrase) => {
+      const tweets = Array.from({ length: 4 }, (_, i) => ({
+        ...replyTweet(i, false),
+        fullText: `@someone 毎回楽しく視聴しています。${phrase} ${i}`,
+      }))
+      expect(adReplyHijackRule.evaluate(makeBundle(tweets)).value).toBe(false)
+    },
+  )
+
   it('does not count a bare 副業 mention as an ad pitch', () => {
     const replies = Array.from({ length: 4 }, (_, i) => ({
       ...replyTweet(i, false),

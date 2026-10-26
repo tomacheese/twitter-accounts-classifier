@@ -21,7 +21,7 @@ export const topicTravelRule: LabelRule = {
   key: 'topic_travel',
   description:
     'プロフィールの直接証拠、またはフォロー関係から旅行との強い関連が示される。趣味の羅列 (3 項目以上) に混じった 1 語だけでは直接証拠に含めない',
-  version: '1.2.0',
+  version: '1.2.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account

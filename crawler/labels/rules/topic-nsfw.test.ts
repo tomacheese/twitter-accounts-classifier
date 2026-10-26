@@ -574,4 +574,35 @@ describe('topicNsfwRule', () => {
   ])('stays true for a genuine declaration that merely sits near unrelated words (%s)', (bio) => {
     expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
   })
+
+  it.each([
+    'R18イラストを描いています 無断転載NG',
+    'R18絵描き フォロバしません',
+    'NSFW絵を投稿 リクエストお断り',
+    'R-18絵 AI学習NG',
+  ])('stays true when a self-declaration is followed by an unrelated usage notice (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
+
+  it.each([
+    'R18は見る専です。絵や日常を投稿しています',
+    'NSFW閲覧専用。イラストを描いています',
+    'アダルトは見る専',
+  ])('is false when NSFW is only consumed and not posted (%s)', (bio) => {
+    expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each(['R18お断り', 'NSFW NG', 'R18はNG', '成人向けフォロバしません'])(
+    'stays false when NSFW itself is the rejected object (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it.each(['R18絵はNG', 'R18イラストお断り'])(
+    'is false when NSFW art itself is the rejected object (%s)',
+    (bio) => {
+      expect(topicNsfwRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
 })

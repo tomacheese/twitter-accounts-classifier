@@ -27,8 +27,10 @@ const SOLICITATION_PATTERN = new RegExp(
 // 拒否対象を複数列挙してから最後にまとめて拒否語を置く bio が多いため、
 // window は列挙 1〜2 個分を見込める長さを確保している。
 const REJECTION_WINDOW_LENGTH = 60
+// 「ブロックしないで」のように勧誘とは無関係な文脈でも使われる語は、同一文内でのみ拒否とみなす。
+const SAME_SENTENCE_REJECTION_PATTERN = /ダメ|しないで|ブロック|スルー|無視/i
 const REJECTION_PATTERN =
-  /お断り|お断わり|御断り|拒否|(?<![a-z])ng(?![a-z])|ダメ|禁止|お控え|ご遠慮|しないで|通報|ブロック|スルー|無視|要らん|要りません|要らない|いりません|いらない|不要|結構です|興味(が)?(あり|有り)?ません|対応(は)?していません|受け?付け?(?:は)?(?:して)?(?:い|おり)?ません|🆖|❌|✗/i
+  /お断り|お断わり|御断り|拒否|(?<![a-z])ng(?![a-z])|禁止|お控え|ご遠慮|通報|要らん|要りません|要らない|いりません|いらない|不要|結構です|興味(が)?(あり|有り)?ません|対応(は)?していません|受け?付け?(?:は)?(?:して)?(?:い|おり)?ません|🆖|❌|✗/i
 
 function isRejectedMatch(normalized: string, match: RegExpMatchArray): boolean {
   const index = match.index ?? 0
@@ -36,7 +38,8 @@ function isRejectedMatch(normalized: string, match: RegExpMatchArray): boolean {
     index + match[0].length,
     index + match[0].length + REJECTION_WINDOW_LENGTH,
   )
-  return REJECTION_PATTERN.test(afterMatch)
+  const sameSentence = afterMatch.split(/[。\n]/)[0]
+  return REJECTION_PATTERN.test(afterMatch) || SAME_SENTENCE_REJECTION_PATTERN.test(sameSentence)
 }
 
 // 最初の一致だけを見ると、先に来た拒否表現につられて後方の別の勧誘を見逃す。
@@ -95,7 +98,7 @@ export const spamRule: LabelRule = {
   description:
     'プロフィールに 1 回以上、またはツイート本文で 2 回以上繰り返された出会い系/裏垢DM/自動フォローなどの勧誘・稼げる系文言があり、かつリツイート主体の釣り的なタイムライン、またはフォロー数がフォロワー数に比べて著しく多い大量フォロー傾向がある。' +
     'bio に勧誘文言が無くても、リツイート主体の釣り的タイムラインと大量フォロー傾向の両方が同時に強く出ている場合は、それ自体を独立したエンゲージメント水増しの証拠として扱う。ただしこの独立経路は、直近ツイートが 10 件以上あり返信率が 10% 以下の場合に限る。懸賞応募に集中したリツイートは、それだけでは spam とみなさない',
-  version: '1.15.0',
+  version: '1.15.1',
   evaluate(bundle) {
     const { bio, followersCount, followingCount } = bundle.account
     const hasSolicitation = bio !== null && hasGenuineSolicitation(bio)

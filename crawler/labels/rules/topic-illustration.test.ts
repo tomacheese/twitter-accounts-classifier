@@ -167,4 +167,16 @@ describe('topicIllustrationRule', () => {
         .value,
     ).toBe(true)
   })
+
+  it.each([
+    'ヘッダーのイラストはアリスさんとボブさん アイコンはキャロルさん',
+    'アイコン：ダンさん ヘッダー：イブ様',
+  ])('is false when illustration only credits header or icon artists (%s)', (bio) => {
+    expect(topicIllustrationRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it('stays true when a header credit sits next to a self-declaration', () => {
+    const bio = 'イラストを描いています。ヘッダーはアリスさん'
+    expect(topicIllustrationRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
 })

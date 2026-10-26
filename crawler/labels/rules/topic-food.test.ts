@@ -129,4 +129,9 @@ describe('topicFoodRule', () => {
     const result = topicFoodRule.evaluate(makeBundle({ bio: '日常アカウントです' }))
     expect(result.evaluable).toBe(true)
   })
+
+  it('is false when the only food word is one of several hashtags', () => {
+    const bio = '映画三昧の日々です #映画好き #カレー #ラーメン'
+    expect(topicFoodRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
 })

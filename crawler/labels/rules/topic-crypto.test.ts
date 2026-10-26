@@ -275,4 +275,21 @@ describe('topicCryptoRule', () => {
     })
     expect(result.evaluable).toBe(true)
   })
+
+  it('直近投稿の取得に失敗している場合、フォローグラフ一致だけの false は判定不能になる', () => {
+    const bundle = {
+      ...makeBundle({ recentTweetsFetchStatus: 'failed' }),
+      followGraphLabelSignals: {
+        topic_crypto: {
+          followeeLabeledCount: 50,
+          followeeTotalCount: 100,
+          followerLabeledCount: 0,
+          followerTotalCount: 0,
+        },
+      },
+    }
+    const result = topicCryptoRule.evaluate(bundle)
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+  })
 })

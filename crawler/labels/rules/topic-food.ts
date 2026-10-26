@@ -15,7 +15,7 @@ export const topicFoodRule: LabelRule = {
   key: 'topic_food',
   description:
     'プロフィールの直接証拠、またはフォロー関係からグルメ/料理との強い関連が示される。趣味の羅列 (3 項目以上) に混じった 1 語だけでは直接証拠に含めない',
-  version: '1.3.0',
+  version: '1.3.1',
   usesFollowGraphSignal: true,
   evaluate(bundle) {
     const { bio } = bundle.account
