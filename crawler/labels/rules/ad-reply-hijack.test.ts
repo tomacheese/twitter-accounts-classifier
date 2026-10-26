@@ -232,4 +232,20 @@ describe('adReplyHijackRule', () => {
 
     expect(adReplyHijackRule.evaluate(makeBundle(replies)).value).toBe(true)
   })
+
+  it('職業の自己説明としての「求人側」を含む返信は広告として数えない', () => {
+    const tweets = [1, 2, 3].map((i) => ({
+      ...replyTweet(i, false),
+      fullText: `@someone 採用の求人側を担当しています。お気軽にどうぞ ${i}`,
+    }))
+    expect(adReplyHijackRule.evaluate(makeBundle(tweets)).value).toBe(false)
+  })
+
+  it('「求人情報はこちら」のような勧誘は引き続き広告として数える', () => {
+    const tweets = [1, 2, 3].map((i) => ({
+      ...replyTweet(i, false),
+      fullText: `@someone 高収入の求人情報はこちら ${i}`,
+    }))
+    expect(adReplyHijackRule.evaluate(makeBundle(tweets)).value).toBe(true)
+  })
 })
