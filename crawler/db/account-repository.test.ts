@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Prisma, type PrismaClient } from '../generated/prisma'
+import { toAccountProfileInput, type RawUserResult } from 'twitter-client'
 import { upsertAccount, upsertAccountsBulk, type AccountProfileInput } from './account-repository'
 
 const sampleInput: AccountProfileInput = {
@@ -212,5 +213,51 @@ describe('upsertAccountsBulk bisection fallback', () => {
 
     const expected = new Set(inputs.map((i) => i.id).filter((id) => id !== badId))
     expect(result).toEqual(expected)
+  })
+})
+
+describe('NUL を含むプロフィールの upsert', () => {
+  const rawUser: RawUserResult = {
+    restId: '900',
+    legacy: {
+      screenName: 'nul_user',
+      name: 'Nul\u0000 User',
+      description: 'bio\u0000 text',
+      followersCount: 1,
+      friendsCount: 1,
+      statusesCount: 1,
+      createdAt: 'Wed Jan 01 00:00:00 +0000 2020',
+      profileImageUrlHttps: null,
+      location: 'Lo\u0000c',
+      url: 'https://example.test/\u0000u',
+    },
+    isBlueVerified: false,
+    verifiedType: null,
+    professionalType: null,
+    parodyCommentaryFanLabel: null,
+  }
+
+  it('upsertAccount に渡る値に NUL が残らない', async () => {
+    const upsert = vi.fn().mockResolvedValue({ id: '900' })
+    const prisma = { account: { upsert, findUnique: vi.fn() } } as unknown as PrismaClient
+
+    await upsertAccount(prisma, toAccountProfileInput(rawUser))
+
+    const call = upsert.mock.calls[0][0] as { create: { displayName: string; bio: string } }
+    expect(JSON.stringify(call)).not.toContain(String.raw`\u0000`)
+    expect(call.create.displayName).toBe('Nul User')
+    expect(call.create.bio).toBe('bio text')
+  })
+
+  it('bulk upsert の query パラメータに NUL が残らない', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ id: '900' }])
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
+
+    await upsertAccountsBulk(prisma, [toAccountProfileInput(rawUser)])
+
+    const values = (queryRaw.mock.calls[0] as unknown[]).slice(1).flat()
+    expect(values).toContain('Nul User')
+    expect(values).toContain('bio text')
+    expect(values.filter((v) => typeof v === 'string' && v.includes('\u0000'))).toEqual([])
   })
 })

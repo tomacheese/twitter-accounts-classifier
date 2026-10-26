@@ -740,3 +740,90 @@ describe('crawl author checkpoints', () => {
     })
   })
 })
+
+describe('NUL を含む warning の保存', () => {
+  const dirty = {
+    type: 'author_processing_failed' as const,
+    message: 'fai\u0000led',
+    authorId: 'a1',
+    errorMessage: 'bo\u0000om',
+    rawResponseSnippet: '{"x":"\u0000"}',
+  }
+  const clean = {
+    type: 'author_processing_failed',
+    message: 'failed',
+    authorId: 'a1',
+    errorMessage: 'boom',
+    rawResponseSnippet: '{"x":""}',
+  }
+
+  it('recordCrawlAccountRun が warnings と errorMessage から NUL を除く', async () => {
+    const create = vi.fn().mockResolvedValue({})
+    const prisma = { crawlAccountRun: { create } } as unknown as PrismaClient
+
+    await recordCrawlAccountRun(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      startedAt: new Date(),
+      finishedAt: new Date(),
+      status: 'failed',
+      recommendedCount: 0,
+      followingCount: 0,
+      trendingCount: 0,
+      replyCount: 0,
+      profileCount: 0,
+      labelsAppliedCount: 0,
+      parentTweetFetchCount: 0,
+      followingSynced: false,
+      followersSynced: false,
+      blocksSynced: false,
+      warnings: [dirty],
+      errorMessage: 'e\u0000rr',
+      appVersion: 'test',
+      classificationStatus: 'success',
+    })
+
+    const data = (create.mock.calls[0][0] as { data: { warnings: unknown; errorMessage: string } })
+      .data
+    expect(data.warnings).toEqual([clean])
+    expect(data.errorMessage).toBe('err')
+  })
+
+  it('recordCrawlAuthorCheckpoint が warnings から NUL を除く', async () => {
+    const upsert = vi.fn().mockResolvedValue({})
+    const prisma = { crawlAuthorCheckpoint: { upsert } } as unknown as PrismaClient
+
+    await recordCrawlAuthorCheckpoint(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      authorId: 'a1',
+      status: 'failed',
+      profileCount: 0,
+      labelsAppliedCount: 0,
+      warnings: [dirty],
+      appVersion: 'test',
+    })
+
+    const call = upsert.mock.calls[0][0] as {
+      create: { warnings: unknown }
+      update: { warnings: unknown }
+    }
+    expect(call.create.warnings).toEqual([clean])
+    expect(call.update.warnings).toEqual([clean])
+  })
+
+  it('completeCrawlAccountCheckpoint が payload 内の warning から NUL を除く', async () => {
+    const upsert = vi.fn().mockResolvedValue({})
+    const prisma = { crawlAccountCheckpoint: { upsert } } as unknown as PrismaClient
+
+    await completeCrawlAccountCheckpoint(prisma, {
+      crawlRunId: 'run1',
+      username: 'someuser',
+      phase: 'following',
+      data: { synced: false, warnings: [dirty] },
+    })
+
+    const call = upsert.mock.calls[0][0] as { create: { data: unknown } }
+    expect(call.create.data).toEqual({ synced: false, warnings: [clean] })
+  })
+})

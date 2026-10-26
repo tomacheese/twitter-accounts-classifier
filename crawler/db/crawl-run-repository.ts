@@ -1,5 +1,6 @@
 import { Logger } from '@book000/node-utils'
 import type { Prisma, PrismaClient } from '../generated/prisma'
+import { stripNul } from 'twitter-client'
 import { enqueueWorkItem } from './analysis-work-item-repository'
 
 const logger = Logger.configure('crawl-run-repository')
@@ -45,6 +46,25 @@ export interface CrawlWarning {
    * warning ごとに発生源のビルドを保持する。
    */
   appVersion?: string
+}
+
+/**
+ * jsonb は NUL を拒否し、warning や checkpoint の payload には外部由来のエラー文言が入りうるため、
+ * 保存前に JSON 値の全文字列 (キーを除く) から NUL を除く。
+ * @param value - 保存前の JSON 値
+ * @returns 文字列から NUL を除いた JSON 値
+ */
+function stripNulDeep(value: unknown): unknown {
+  if (typeof value === 'string') return stripNul(value)
+  if (Array.isArray(value)) return value.map((item) => stripNulDeep(item))
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, stripNulDeep(item)]))
+  }
+  return value
+}
+
+function sanitizeWarnings(warnings: CrawlWarning[]): Prisma.InputJsonValue {
+  return stripNulDeep(warnings) as Prisma.InputJsonValue
 }
 
 export interface RecordCrawlAccountRunParams {
@@ -186,11 +206,12 @@ export async function recordCrawlAccountRun(
   prisma: PrismaClient,
   params: RecordCrawlAccountRunParams,
 ): Promise<void> {
-  // `warnings` は構造化された配列だが、
-  // Prisma が生成する `InputJsonValue` union にそのまま渡せないため、
-  // 明示的なキャストが必要になる。
   await prisma.crawlAccountRun.create({
-    data: { ...params, warnings: params.warnings as unknown as Prisma.InputJsonValue },
+    data: {
+      ...params,
+      errorMessage: stripNul(params.errorMessage),
+      warnings: sanitizeWarnings(params.warnings),
+    },
   })
 }
 
@@ -232,10 +253,11 @@ export async function completeCrawlAccountCheckpoint(
   params: CrawlAccountCheckpointParams,
 ): Promise<void> {
   const { crawlRunId, username, phase, data } = params
+  const sanitized = stripNulDeep(data) as Prisma.InputJsonValue
   await prisma.crawlAccountCheckpoint.upsert({
     where: { crawlRunId_username_phase: { crawlRunId, username, phase } },
-    create: { crawlRunId, username, phase, data },
-    update: { data, completedAt: new Date() },
+    create: { crawlRunId, username, phase, data: sanitized },
+    update: { data: sanitized, completedAt: new Date() },
   })
 }
 
@@ -295,7 +317,7 @@ export async function recordCrawlAuthorCheckpoint(
   params: CrawlAuthorCheckpointParams,
 ): Promise<void> {
   const { crawlRunId, username, authorId, ...rest } = params
-  const data = { ...rest, warnings: rest.warnings as unknown as Prisma.InputJsonValue }
+  const data = { ...rest, warnings: sanitizeWarnings(rest.warnings) }
   await prisma.crawlAuthorCheckpoint.upsert({
     where: { crawlRunId_username_authorId: { crawlRunId, username, authorId } },
     create: { crawlRunId, username, authorId, ...data },
