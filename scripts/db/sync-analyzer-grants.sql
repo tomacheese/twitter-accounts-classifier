@@ -1,7 +1,7 @@
 -- analyzer は正本テーブルへ SELECT のみ、分析・read model テーブルへ INSERT/UPDATE/DELETE を持つ。
 -- 正本テーブル (Account, Tweet, AccountLabelLatest, Follow, CrawlRun,
 -- CrawlAccountRun, CrawlAccountCheckpoint, CrawlAccountLabelRun, WeeklyAnalysisRun,
--- Block, BlockRun, BlockAccountRun, BlockAction, LabelDefinition, LabelingFollowSample)
+-- Block, BlockRun, BlockAccountRun, BlockAction, LabelDefinition)
 -- は書き込ませない。
 
 BEGIN;

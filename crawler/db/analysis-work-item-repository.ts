@@ -160,8 +160,7 @@ export interface PeekWorkItemCandidatesInput {
 
 /**
  * claim 前の候補選択と同じ絞り込み条件・並び順で、lease を更新せず id・triggerId だけを読み取る。
- * follow-graph index のような重い前処理を、claim する前に候補の accountId 全体に対して
- * 1回だけ構築したい場合に使う。
+ * 共有 index のような重い前処理を、候補が 0 件のときに省くために、claim する前に使う。
  * @param prisma - Prisma クライアント
  * @param input - 対象 kind と上限件数
  * @returns 候補 WorkItem の id・triggerId 一覧 (claim 時と同じ並び順)

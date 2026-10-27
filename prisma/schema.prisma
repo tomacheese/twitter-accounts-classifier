@@ -56,8 +56,6 @@ model Account {
   followStateChangesAsFollower  FollowStateChange[]    @relation("FollowStateChangeFollower")
   followStateChangesAsFollowee  FollowStateChange[]    @relation("FollowStateChangeFollowee")
   replyHijackEvidence            ReplyHijackEvidence[]
-  labelingFollowSampleAsAccount  LabelingFollowSample[] @relation("LabelingFollowSampleAccount")
-  labelingFollowSampleAsFollowee LabelingFollowSample[] @relation("LabelingFollowSampleFollowee")
   blockerEdges                   Block[]                @relation("BlockerEdges")
   blockedEdges                   Block[]                @relation("BlockedEdges")
   blockActionsAsBlocker          BlockAction[]          @relation("BlockActionBlocker")
@@ -255,19 +253,6 @@ model ReplyHijackEvidence {
 
   @@unique([accountId, targetTweetId, ruleVersion])
   @@index([targetTweetId])
-}
-
-model LabelingFollowSample {
-  id         String   @id @default(cuid())
-  accountId  String
-  account    Account  @relation("LabelingFollowSampleAccount", fields: [accountId], references: [id])
-  followeeId String
-  followee   Account  @relation("LabelingFollowSampleFollowee", fields: [followeeId], references: [id])
-  fetchedAt  DateTime @default(now())
-
-  @@unique([accountId, followeeId])
-  @@index([accountId])
-  @@index([followeeId])
 }
 
 model Block {

@@ -72,8 +72,6 @@ function tweet(
   return { ...baseTweet(id, accountId), ...overrides }
 }
 
-const noFollowGraphSignals = { signalsFor: () => ({}) }
-
 function emptyRegistryParams() {
   return {
     registry: new LabelRuleRegistry(),
@@ -81,7 +79,6 @@ function emptyRegistryParams() {
     duplicateReplyIndex: buildDuplicateReplyIndex([]),
     bioDuplicateIndex: buildBioDuplicateIndex([]),
     replyHijackIndex: buildReplyHijackIndex([]),
-    followGraphLabelIndex: noFollowGraphSignals,
     selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
   }
 }
@@ -170,7 +167,6 @@ describe('persistAuthorResultAtomic', () => {
         evidenceFor: (_accountId, targetTweetId) =>
           evidenceByTarget[targetTweetId as keyof typeof evidenceByTarget],
       },
-      followGraphLabelIndex: noFollowGraphSignals,
       selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
       warnings: [],
       durationMs: 10,
@@ -263,7 +259,6 @@ describe('persistAuthorResultAtomic', () => {
           replyTweetIds: ['reply-1'],
         }),
       },
-      followGraphLabelIndex: noFollowGraphSignals,
       selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
       warnings: [],
       durationMs: 10,
@@ -401,7 +396,6 @@ describe('persistAuthorResultAtomic', () => {
       duplicateReplyIndex: buildDuplicateReplyIndex([]),
       bioDuplicateIndex: buildBioDuplicateIndex([]),
       replyHijackIndex: buildReplyHijackIndex([]),
-      followGraphLabelIndex: noFollowGraphSignals,
       selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
       warnings: [],
       durationMs: 10,
@@ -478,7 +472,6 @@ describe('persistAuthorResultAtomic', () => {
       duplicateReplyIndex: buildDuplicateReplyIndex([]),
       bioDuplicateIndex: buildBioDuplicateIndex([]),
       replyHijackIndex: buildReplyHijackIndex([]),
-      followGraphLabelIndex: noFollowGraphSignals,
       selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
       warnings: [],
       durationMs: 10,
@@ -550,7 +543,6 @@ describe('persistAuthorResultAtomic', () => {
       duplicateReplyIndex: buildDuplicateReplyIndex([]),
       bioDuplicateIndex: buildBioDuplicateIndex([]),
       replyHijackIndex: buildReplyHijackIndex([]),
-      followGraphLabelIndex: noFollowGraphSignals,
       selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
       warnings: [],
       durationMs: 10,
@@ -561,12 +553,12 @@ describe('persistAuthorResultAtomic', () => {
     expect(capturedBundle?.account.recentTweetsFetchStatus).toBe('success')
   })
 
-  it('skips the labeling follow sample write when followSample is null, without failing the transaction', async () => {
+  it('skips the followee account upsert when followSample is null, without failing the transaction', async () => {
     const accountUpsert = vi.fn().mockResolvedValue({})
     const accountFindUnique = vi.fn().mockResolvedValue(null)
     const tweetFindUnique = vi.fn().mockResolvedValue(null)
     const tweetUpsert = vi.fn().mockResolvedValue({ accountId: 'author1' })
-    const followSampleDeleteMany = vi.fn()
+    const followeeUpsertQueryRaw = vi.fn()
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
       account: {
@@ -575,13 +567,15 @@ describe('persistAuthorResultAtomic', () => {
         update: vi.fn().mockResolvedValue({ id: 'author1' }),
       },
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
-      labelingFollowSample: { deleteMany: followSampleDeleteMany },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
     }
     const transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(txClient))
-    const prisma = { $transaction: transaction } as unknown as PrismaClient
+    const prisma = {
+      $queryRaw: followeeUpsertQueryRaw,
+      $transaction: transaction,
+    } as unknown as PrismaClient
 
     await persistAuthorResultAtomic(prisma, {
       crawlRunId: 'run1',
@@ -606,7 +600,7 @@ describe('persistAuthorResultAtomic', () => {
       appVersion: 'test',
     })
 
-    expect(followSampleDeleteMany).not.toHaveBeenCalled()
+    expect(followeeUpsertQueryRaw).not.toHaveBeenCalled()
     expect(authorCheckpointUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({ status: 'success' }),
@@ -614,11 +608,9 @@ describe('persistAuthorResultAtomic', () => {
     )
   })
 
-  it('replaces the labeling follow sample within the same transaction when followSample is provided', async () => {
+  it('upserts the followee accounts outside the transaction when followSample is provided', async () => {
     const accountUpsert = vi.fn().mockResolvedValue({})
     const followUpsertQueryRaw = vi.fn().mockResolvedValue([{ id: 'followee1' }])
-    const followSampleDeleteMany = vi.fn().mockResolvedValue({ count: 0 })
-    const followSampleCreateMany = vi.fn().mockResolvedValue({ count: 1 })
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
       account: {
@@ -629,10 +621,6 @@ describe('persistAuthorResultAtomic', () => {
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
-      },
-      labelingFollowSample: {
-        deleteMany: followSampleDeleteMany,
-        createMany: followSampleCreateMany,
       },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
@@ -661,11 +649,7 @@ describe('persistAuthorResultAtomic', () => {
     })
 
     expect(followUpsertQueryRaw).toHaveBeenCalledTimes(1)
-    expect(followSampleDeleteMany).toHaveBeenCalledWith({ where: { accountId: 'author1' } })
-    expect(followSampleCreateMany).toHaveBeenCalledWith({
-      data: [{ accountId: 'author1', followeeId: 'followee1' }],
-      skipDuplicates: true,
-    })
+    expect(authorCheckpointUpsert).toHaveBeenCalledTimes(1)
   })
 
   it('opens the transaction with an extended budget for the combined write', async () => {
@@ -862,7 +846,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
         duplicateReplyIndex: buildDuplicateReplyIndex([]),
         bioDuplicateIndex: buildBioDuplicateIndex([]),
         replyHijackIndex: buildReplyHijackIndex([]),
-        followGraphLabelIndex: noFollowGraphSignals,
         selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
         warnings: [],
         durationMs: 0,
@@ -886,7 +869,6 @@ describe.skipIf(!process.env.DATABASE_URL)(
         duplicateReplyIndex: buildDuplicateReplyIndex([]),
         bioDuplicateIndex: buildBioDuplicateIndex([]),
         replyHijackIndex: buildReplyHijackIndex([]),
-        followGraphLabelIndex: noFollowGraphSignals,
         selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
         warnings: [],
         durationMs: 0,
@@ -969,7 +951,6 @@ it('crawl-time label evaluation receives the resolved parent author id', async (
     duplicateReplyIndex: buildDuplicateReplyIndex([]),
     bioDuplicateIndex: buildBioDuplicateIndex([]),
     replyHijackIndex: buildReplyHijackIndex([]),
-    followGraphLabelIndex: noFollowGraphSignals,
     selfReplyPromoIndex: buildSelfReplyPromoIndex([], []),
     warnings: [],
     durationMs: 0,

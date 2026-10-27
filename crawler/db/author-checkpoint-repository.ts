@@ -5,7 +5,6 @@ import type { LabelRuleRegistry } from '../labels/registry'
 import type { buildDuplicateReplyIndex } from '../labels/duplicate-reply-index'
 import type { buildBioDuplicateIndex } from '../labels/bio-duplicate-index'
 import type { buildReplyHijackIndex } from '../labels/reply-hijack-index'
-import type { FollowGraphLabelIndex } from '../labels/follow-graph-label-index'
 import type { buildSelfReplyPromoIndex } from '../labels/self-reply-promo-index'
 import { buildAccountFeatureBundle } from '../labels/build-account-feature-bundle'
 import {
@@ -13,7 +12,7 @@ import {
   FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS,
 } from './follow-churn-observation'
 import type { FollowListResult } from '../twitter/follows'
-import { upsertAccount, type AccountProfileInput } from './account-repository'
+import { upsertAccount, upsertAccountsBulk, type AccountProfileInput } from './account-repository'
 import { upsertAccountRequestingRelabelIfChanged } from './account-relabel-on-change'
 import {
   upsertTweet,
@@ -22,10 +21,6 @@ import {
   type TweetInput,
 } from './tweet-repository'
 import { PROMOTED_RECENT_WINDOW_DAYS } from '../labels/rules/ad-promoted'
-import {
-  upsertFollowSampleAuthors,
-  replaceLabelingFollowSampleWithinTx,
-} from './labeling-follow-sample-repository'
 import { recordCrawlAccountLabelsAtomicWithinTx } from './label-repository'
 import { upsertReplyHijackEvidence } from './reply-hijack-evidence-repository'
 import {
@@ -67,7 +62,6 @@ export interface PersistAuthorResultAtomicParams {
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
-  followGraphLabelIndex: FollowGraphLabelIndex
   selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>
   warnings: CrawlWarning[]
   durationMs: number
@@ -81,13 +75,14 @@ export interface PersistAuthorResultAtomicResult {
 }
 
 /**
- * 1 author 分のローカル副作用 (Account profile・recent tweets・labeling follow sample・label 評価・author checkpoint) を 1 つの transaction にまとめて記録する。
+ * 1 author 分のローカル副作用 (Account profile・recent tweets・label 評価・author checkpoint) を 1 つの transaction にまとめて記録する。
+ * followee の Account upsert は transaction の外で先に行う。
  * remote fetch はこの関数の呼び出し前に完了している前提であり、ここでは行わない。
  * ラベル評価は upsertAccount/upsertTweet が返す merge 後の値を使って行う。
  * fetch 直後の生データを直接評価すると、
  * DB 側が既存の強い evidence を merge で保持していてもその cycle の評価だけ弱い値を見て陰性に戻ることがあるため。
- * labeling follow sample の remote fetch 失敗は non-fatal として扱うため、
- * `followSample` が null であれば該当の書き込みのみ skip し、checkpoint は通常どおり 'success' で記録する。
+ * follow sample の remote fetch 失敗は non-fatal として扱うため、
+ * `followSample` が null であれば followee の Account upsert のみ skip し、checkpoint は通常どおり 'success' で記録する。
  * @param prisma - Prisma クライアント
  * @param params - author 1 件分の永続化対象
  * @returns ラベル claim が成功していれば作成した observation の id、全 claim 空振りなら null。および今回永続化したラベル件数
@@ -104,10 +99,8 @@ export async function persistAuthorResultAtomic(
     )
   }
 
-  let followeeIds: string[] = []
   if (params.followSample) {
-    const upsertedIds = await upsertFollowSampleAuthors(prisma, params.followSample)
-    followeeIds = params.followSample.ids.filter((id) => upsertedIds.has(id))
+    await upsertAccountsBulk(prisma, params.followSample.authors)
   }
 
   // `fetchRecentTweets` は tweets と同数の author を返すため、同一人物への言及が複数回あると重複する。
@@ -150,10 +143,6 @@ export async function persistAuthorResultAtomic(
       for (const tweet of dedupedTweets) {
         const { tweet: upserted } = await upsertTweet(txClient, tweet)
         upsertedTweets.push(upserted)
-      }
-
-      if (followeeIds.length > 0) {
-        await replaceLabelingFollowSampleWithinTx(txClient, params.authorId, followeeIds)
       }
 
       const parentTweetAuthorIdById = new Map(
@@ -203,7 +192,6 @@ export async function persistAuthorResultAtomic(
         params.duplicateReplyIndex,
         params.bioDuplicateIndex,
         params.replyHijackIndex,
-        params.followGraphLabelIndex,
         params.selfReplyPromoIndex,
         parentTweetTextById,
         parentTweetAuthorIdById,

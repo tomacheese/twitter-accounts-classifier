@@ -74,7 +74,8 @@ export async function syncFollowing(
         }
       }
     },
-    // `./labeling-follow-sample-repository` の同じコメントを参照。
+    // Postgres の書き込みが数秒滞留することがあるため、
+    // 既定の 5 秒ではなく 15 秒まで許容する。
     { maxWait: 15_000, timeout: 15_000 },
   )
 }
@@ -135,7 +136,8 @@ export async function syncFollowers(
         }
       }
     },
-    // `./labeling-follow-sample-repository` の同じコメントを参照。
+    // Postgres の書き込みが数秒滞留することがあるため、
+    // 既定の 5 秒ではなく 15 秒まで許容する。
     { maxWait: 15_000, timeout: 15_000 },
   )
 }

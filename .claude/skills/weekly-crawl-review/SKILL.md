@@ -61,7 +61,7 @@ Treat specification drift from the rule auditor as a `rule_behavior_mismatch` ca
 
 Use existing `LabelMetricSnapshot`, `AccountLabelChange`, and plan risk to evaluate topic and behavior coverage. Do not make expensive full-table `LIKE` scans a mandatory step on every run. If a database timeout prevents a core phase, do not hide it behind a successful result; emit `review_incomplete`.
 
-Preserve the intended semantics of `topic_nsfw`, `topic_politics`, and adjacent categories. When evidence supports a rule correction or coverage expansion, remediate it with the same TDD and impact checks as other labels. If the decision genuinely requires human product/policy judgment, create or reuse the matching open GitHub Issue and record `deferred_to_issue` with reason `human_judgment_required`; do not ask the user during this unattended run.
+Preserve the intended semantics of each existing label category. When evidence supports a rule correction or coverage expansion, remediate it with the same TDD and impact checks as other labels. If the decision genuinely requires human product/policy judgment, create or reuse the matching open GitHub Issue and record `deferred_to_issue` with reason `human_judgment_required`; do not ask the user during this unattended run.
 
 ### 5. Remediation
 

@@ -11,11 +11,7 @@ describe('ALL_LABEL_RULES', () => {
     expect(registry.getAll()).toHaveLength(ALL_LABEL_RULES.length)
   })
 
-  it('bumps the version for every rule that uses the follow graph signal', () => {
-    const followGraphRules = ALL_LABEL_RULES.filter((rule) => rule.usesFollowGraphSignal)
-    expect(followGraphRules.length).toBeGreaterThan(0)
-    for (const rule of followGraphRules) {
-      expect(rule.version).toBeTruthy()
-    }
+  it('does not register any topic_ rule', () => {
+    expect(ALL_LABEL_RULES.filter((rule) => rule.key.startsWith('topic_'))).toEqual([])
   })
 })

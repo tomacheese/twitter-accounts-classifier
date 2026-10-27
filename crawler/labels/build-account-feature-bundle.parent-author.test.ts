@@ -38,7 +38,6 @@ it('parent tweet author id is exposed for reply classification', () => {
     buildDuplicateReplyIndex([]),
     buildBioDuplicateIndex([]),
     buildReplyHijackIndex([]),
-    { signalsFor: () => ({}) },
     buildSelfReplyPromoIndex([], []),
     new Map([['parent-1', 'parent text']]),
     new Map([['parent-1', 'other-account']]),

@@ -6,7 +6,6 @@ import { LabelRuleRegistry } from './labels/registry'
 import { buildAccountFeatureBundle } from './labels/build-account-feature-bundle'
 import type { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
 import type { buildReplyHijackIndex } from './labels/reply-hijack-index'
-import type { FollowGraphLabelIndex } from './labels/follow-graph-label-index'
 import {
   claimStillLeasedWorkItemIdsForUpdate,
   claimWorkItemBatchByIds,
@@ -39,7 +38,6 @@ import { PROMOTED_RECENT_WINDOW_DAYS } from './labels/rules/ad-promoted'
 import { buildDuplicateReplyIndex as buildDuplicateReplyIndexImpl } from './labels/duplicate-reply-index'
 import { buildBioDuplicateIndex } from './labels/bio-duplicate-index'
 import { buildReplyHijackIndex as buildReplyHijackIndexImpl } from './labels/reply-hijack-index'
-import { buildFollowGraphLabelIndex } from './labels/follow-graph-label-index'
 import {
   loadFollowChurnObservationsForAccounts,
   FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS,
@@ -69,7 +67,7 @@ export interface PeekAccountRelabelCandidatesOptions {
 
 /**
  * account_relabel kind の claim 候補を、lease を更新せず read-only で確定する。
- * follow-graph index を評価前に1回構築するために、実際の claim より先に呼ぶ。
+ * 候補が 0 件のときに共有 index の構築を省くために、実際の claim より先に呼ぶ。
  * @param prisma - Prisma クライアント
  * @param options - 上限件数
  * @returns 候補 WorkItem の id・triggerId 一覧
@@ -109,7 +107,6 @@ export interface EvaluateAccountRelabelItemsOptions {
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
-  followGraphLabelIndex: FollowGraphLabelIndex
   selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>
   concurrency: number
   leaseOwner: string
@@ -224,7 +221,6 @@ async function evaluateAccountRelabelItemGroup(
         options.duplicateReplyIndex,
         options.bioDuplicateIndex,
         options.replyHijackIndex,
-        options.followGraphLabelIndex,
         options.selfReplyPromoIndex,
         parentTweetTextById,
         parentTweetAuthorIdById,
@@ -550,14 +546,12 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
     return
   }
 
-  const candidateAccountIds = candidates.map((candidate) => candidate.triggerId)
   const candidateWorkItemIds = candidates.map((candidate) => candidate.id)
 
   let duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
   let bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>
   let selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>
   let replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
-  let followGraphLabelIndex: FollowGraphLabelIndex
   try {
     // CrawlRun に紐づかないため、既存の全件対象の挙動を維持するよう現在時刻を watermark として渡す。
     const replyCorpus = await loadReplyCorpus(prisma, new Date())
@@ -569,28 +563,6 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
     selfReplyPromoIndex = buildSelfReplyPromoIndex(
       selfReplyPromoCorpus.selfReplyCorpus,
       selfReplyPromoCorpus.rootCorpus,
-    )
-    // follow-graph signal を使わないルールのラベルまで集計対象に含めると、
-    // 対象 account 数が同じでも不要な JOIN 対象ラベルが増えてクエリコストが膨らむ。
-    const followGraphLabelDefinitionIds = new Map(
-      [...labelDefinitionIds.entries()].filter(([key]) =>
-        registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
-      ),
-    )
-    // candidates を follow-graph ルールの ruleVersion 一致だけで絞り込むことはしない。
-    // account_relabel は stale scan だけでなく account/follow データの変更でも要求され、
-    // その場合 follow-graph ルールの ruleVersion は最新のままでも follow グラフ自体は
-    // 変化しているため、ruleVersion 一致を「follow-graph 再評価不要」の根拠にはできない。
-    // accountIds を全 candidate に対して cycle 開始時点で1回だけ構築するのは、
-    // ある chunk の評価による AccountLabelLatest 更新を、同じ cycle の後続 chunk の
-    // follow-graph signal が参照してしまう自己フィードバックを避けるためでもある。
-    followGraphLabelIndex = await buildFollowGraphLabelIndex(
-      prisma,
-      followGraphLabelDefinitionIds,
-      {
-        accountIds: candidateAccountIds,
-        chunkSize: getRelabelerWorkerChunkSize(),
-      },
     )
   } catch (error) {
     // この時点ではまだ何も claim していないため、lease されたまま残る WorkItem は 0 件のまま失敗する。
@@ -620,7 +592,6 @@ export async function runRelabelWorkerCycleOnce(prisma: PrismaClient): Promise<v
           bioDuplicateIndex,
           selfReplyPromoIndex,
           replyHijackIndex,
-          followGraphLabelIndex,
           concurrency,
           leaseOwner,
         })

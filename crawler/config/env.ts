@@ -126,7 +126,7 @@ export function getRelabelerWorkerConcurrency(): number {
 }
 
 /**
- * follow-graph index 構築の1回の SQL 呼び出し、および claim/evaluate 1 回あたりの account 件数。
+ * claim/evaluate 1 回あたりの account 件数。
  * @returns worker chunk size
  */
 export function getRelabelerWorkerChunkSize(): number {

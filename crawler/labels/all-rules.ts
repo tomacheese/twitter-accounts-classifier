@@ -19,26 +19,6 @@ import { botRule } from './rules/bot'
 import { aiGeneratedRule } from './rules/ai-generated'
 import { tweetAiGeneratedMediaRule } from './rules/tweet-ai-generated-media'
 import { videoRepostRule } from './rules/video-repost'
-import { topicTechRule } from './rules/topic-tech'
-import { topicFinanceRule } from './rules/topic-finance'
-import { topicCryptoRule } from './rules/topic-crypto'
-import { topicAnimeRule } from './rules/topic-anime'
-import { topicGamingRule } from './rules/topic-gaming'
-import { topicIdolRule } from './rules/topic-idol'
-import { topicIllustrationRule } from './rules/topic-illustration'
-import { topicVtuberRule } from './rules/topic-vtuber'
-import { topicNsfwRule } from './rules/topic-nsfw'
-import { topicPoliticsRule } from './rules/topic-politics'
-import { topicSportsRule } from './rules/topic-sports'
-import { topicMusicRule } from './rules/topic-music'
-import { topicFoodRule } from './rules/topic-food'
-import { topicMovieRule } from './rules/topic-movie'
-import { topicParentingRule } from './rules/topic-parenting'
-import { topicTravelRule } from './rules/topic-travel'
-import { topicBeautyRule } from './rules/topic-beauty'
-import { topicVrchatRule } from './rules/topic-vrchat'
-import { topicPetsRule } from './rules/topic-pets'
-import { topicFitnessRule } from './rules/topic-fitness'
 import { templatedReplyNetworkRule } from './rules/templated-reply-network'
 import { bioDuplicateNetworkRule } from './rules/bio-duplicate-network'
 import { selfDuplicateReplyRule } from './rules/self-duplicate-reply'
@@ -79,26 +59,6 @@ export const ALL_LABEL_RULES: LabelRule[] = [
   aiGeneratedRule,
   tweetAiGeneratedMediaRule,
   videoRepostRule,
-  topicTechRule,
-  topicFinanceRule,
-  topicCryptoRule,
-  topicAnimeRule,
-  topicGamingRule,
-  topicIdolRule,
-  topicIllustrationRule,
-  topicVtuberRule,
-  topicNsfwRule,
-  topicPoliticsRule,
-  topicSportsRule,
-  topicMusicRule,
-  topicFoodRule,
-  topicMovieRule,
-  topicParentingRule,
-  topicTravelRule,
-  topicBeautyRule,
-  topicVrchatRule,
-  topicPetsRule,
-  topicFitnessRule,
   templatedReplyNetworkRule,
   bioDuplicateNetworkRule,
   selfDuplicateReplyRule,

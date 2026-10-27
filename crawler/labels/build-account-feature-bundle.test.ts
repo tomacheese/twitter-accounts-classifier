@@ -6,8 +6,6 @@ import { buildReplyHijackIndex } from './reply-hijack-index'
 import { buildAccountFeatureBundle } from './build-account-feature-bundle'
 import { buildSelfReplyPromoIndex } from './self-reply-promo-index'
 
-const emptyFollowGraphLabelIndex = { signalsFor: () => ({}) }
-
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: 'acct-1',
@@ -77,7 +75,6 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       buildSelfReplyPromoIndex([], []),
       new Map(),
     )
@@ -98,7 +95,6 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       buildSelfReplyPromoIndex([], []),
       new Map(),
     )
@@ -116,7 +112,6 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       buildSelfReplyPromoIndex([], []),
       new Map(),
     )
@@ -130,7 +125,6 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       buildSelfReplyPromoIndex([], []),
       new Map(),
     )
@@ -164,7 +158,6 @@ describe('buildAccountFeatureBundle', () => {
       duplicateReplyIndex,
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       buildSelfReplyPromoIndex([], []),
       new Map(),
     )
@@ -179,7 +172,6 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       buildSelfReplyPromoIndex([], []),
       new Map([['parent-1', 'これが親ツイートの本文です']]),
     )
@@ -194,7 +186,6 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       buildSelfReplyPromoIndex([], []),
       new Map(),
       new Map([['root-1', 'acct-1']]),
@@ -210,7 +201,6 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       buildSelfReplyPromoIndex([], []),
       new Map(),
     )
@@ -230,7 +220,6 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       bioDuplicateIndex,
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       buildSelfReplyPromoIndex([], []),
       new Map(),
     )
@@ -245,7 +234,6 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       buildSelfReplyPromoIndex([], []),
       new Map(),
     )
@@ -299,7 +287,6 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       selfReplyPromoIndex,
       new Map(),
     )
@@ -313,7 +300,6 @@ describe('buildAccountFeatureBundle', () => {
       buildDuplicateReplyIndex([]),
       buildBioDuplicateIndex([]),
       buildReplyHijackIndex([]),
-      emptyFollowGraphLabelIndex,
       buildSelfReplyPromoIndex([], []),
       new Map<string, string>(),
     ] as const
