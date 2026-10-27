@@ -25,10 +25,7 @@ export const RETIRED_TOPIC_LABEL_KEYS = [
   'topic_vtuber',
 ] as const
 
-/**
- * `labelDefinitionId` を持つテーブルを、子→親、行テーブル→集計テーブルの順に並べたもの。
- * 集計テーブルは行テーブルのトリガーが decrement するため、行テーブルを先に空にしてから消す。
- */
+// 集計テーブルは行テーブルのトリガーが decrement するため、行テーブルを先に空にする。
 export const PURGE_TABLES = [
   'BlockAction',
   'BlockOutboxEntry',
@@ -47,10 +44,7 @@ export const PURGE_TABLES = [
   'LabelSummaryCurrent',
 ] as const
 
-/**
- * マイグレーションから作られた DB にだけ残る旧テーブル。`LabelDefinition` を外部キーで参照するため、存在する場合のみ削除する。
- * 本番など、すでに取り除かれている DB には存在しない。
- */
+// マイグレーションから作った DB にだけ残る旧テーブル。外部キーで LabelDefinition を参照するため、存在する場合のみ消す。
 export const OPTIONAL_PURGE_TABLES = ['AccountLabel_pre_compaction'] as const
 
 type PurgeTable = (typeof PURGE_TABLES)[number] | (typeof OPTIONAL_PURGE_TABLES)[number]
@@ -67,13 +61,7 @@ export interface PurgeDependencies {
   log: (message: string) => void
 }
 
-/**
- * 1 回の `DELETE`/`UPDATE` を小さな batch に分け、各 batch を独立した transaction として commit する。
- * 1 transaction で全行を消すと、行ごとのトリガーと WAL でタイムアウトや長時間ロックを招くため。
- * @param deps - 実行に使う依存
- * @param run - 1 batch を実行し、影響を受けた行数を返す関数
- * @returns 影響を受けた行数の合計
- */
+// 1 transaction で全行を消すとトリガーと WAL でタイムアウトするため、batch ごとに commit する。
 async function runBatches(deps: PurgeDependencies, run: () => Promise<number>): Promise<number> {
   let total = 0
   for (;;) {
@@ -85,10 +73,8 @@ async function runBatches(deps: PurgeDependencies, run: () => Promise<number>): 
 }
 
 /**
- * `labelDefinitionId` を持つテーブルが、purge 対象で漏れなく覆われているか確認する。
- * スキーマに後から足されたテーブルの孤立行を、静かに残さないため。
- * @param prisma - Prisma クライアント
- * @returns 削除対象のテーブル。`PURGE_TABLES` の後ろに、存在する `OPTIONAL_PURGE_TABLES` を続けたもの
+ * 対象外のテーブルに `labelDefinitionId` があれば、孤立行を残さないよう何も消さずに失敗する。
+ * @returns 削除対象のテーブル。`PURGE_TABLES` の後ろに、存在する `OPTIONAL_PURGE_TABLES` が続く
  */
 async function resolvePurgeTables(prisma: PrismaClient): Promise<PurgeTable[]> {
   const rows = await prisma.$queryRawUnsafe<{ tableName: string }[]>(
@@ -140,9 +126,8 @@ async function cleanActiveLabelKeysBatch(
 }
 
 /**
- * 廃止した topic_* ラベルのデータを、小さな batch で削除する。冪等で、中断しても再実行できる。
+ * 冪等で、中断しても再実行できる。
  * 旧バージョンの crawler / relabel-worker / analyzer が動いていると行が再作成されるため、停止してから実行すること。
- * @param deps - 実行に使う依存
  */
 export async function runRetireTopicRulesPurge(deps: PurgeDependencies): Promise<void> {
   const { prisma, options, log } = deps
