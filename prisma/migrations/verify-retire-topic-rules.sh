@@ -191,13 +191,18 @@ if [ "$SEEDED_AGGREGATES" = "0" ]; then
 fi
 SPAM_BEFORE=$(spam_snapshot)
 
-# 3. 新 migration を復元して適用する。
+# 3. 新 migration を復元して適用し、続けて batch 削除スクリプトを実行する。
+#    batch size を 1 にして、複数 batch に跨っても結果が変わらないことを確認する。
 mv "$STASH_DIR/$NEW_MIGRATION_NAME" "$MIGRATION_DIR/"
 pnpm --filter analyzer exec prisma migrate deploy --schema=../prisma/schema.prisma
+RETIRE_TOPIC_PURGE_BATCH_SIZE=1 RETIRE_TOPIC_PURGE_SLEEP_MS=1 \
+  pnpm --filter crawler exec tsx scripts/retire-topic-rules-purge.ts
 assert_retired_state
 
-# 4. 冪等性: 同じ SQL をもう一度適用しても no-op で、状態が変わらない。
+# 4. 冪等性: migration と purge スクリプトをもう一度実行しても no-op で、状態が変わらない。
 psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$MIGRATION_DIR/$NEW_MIGRATION_NAME/migration.sql"
+RETIRE_TOPIC_PURGE_BATCH_SIZE=1 RETIRE_TOPIC_PURGE_SLEEP_MS=1 \
+  pnpm --filter crawler exec tsx scripts/retire-topic-rules-purge.ts
 assert_retired_state
 
 echo "OK: topic_* rows were removed from every label table, non-topic rows were untouched, and reapplying is a no-op"
