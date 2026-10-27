@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildReplyHijackIndex, type ReplyHijackCorpusEntry } from './reply-hijack-index'
 
 function entry(
@@ -173,7 +173,13 @@ describe('ReplyHijackIndex.isEligibleForScreening', () => {
 })
 
 describe('ReplyHijackIndex.evidenceFor', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('returns the qualifying target metrics and retained reply IDs for a swarm member', () => {
+    // 時刻を固定しないと entry() 呼び出し間の経過でミリ秒がずれ、spanHours が 4 ちょうどにならない
+    vi.useFakeTimers()
     const corpus = Array.from({ length: 5 }, (_, index) =>
       entry(
         `member-${index}`,
