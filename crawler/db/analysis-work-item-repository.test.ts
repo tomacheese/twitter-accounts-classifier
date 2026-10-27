@@ -526,11 +526,20 @@ describe.skipIf(!process.env.DATABASE_URL)('recoverExhaustedExpiredWorkItems (DB
     })
     expect(recovered.reArmed).toBe(1)
 
-    const candidates = await peekWorkItemCandidates(prisma, {
-      kinds: ['account_relabel'],
-      limit: 10,
-    })
-    expect(candidates.map((c) => c.id)).toEqual([existing.id])
+    // availableAt は DB の now() で書かれ、peek は JS の時刻と比較する。
+    // 実時計同士の比較だとミリ秒の前後で結果が変わるため、JS 側の時刻だけ固定する。
+    const rearmed = await prisma.analysisWorkItem.findFirstOrThrow({ where: { id: existing.id } })
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date(rearmed.availableAt.getTime() + 1000))
+      const candidates = await peekWorkItemCandidates(prisma, {
+        kinds: ['account_relabel'],
+        limit: 10,
+      })
+      expect(candidates.map((c) => c.id)).toEqual([existing.id])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
