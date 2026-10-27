@@ -155,8 +155,9 @@ export async function syncBlocks(
       })
     },
     // 変更行の update・insert をそれぞれ 1 クエリへまとめたため、ブロック件数に比例して
-    // 伸びるのは読み取り (findMany) のみになる。HDD の I/O 滞留を吸収する余地として
-    // `./labeling-follow-sample-repository` と同じ 15 秒を踏襲する。
+    // 伸びるのは読み取り (findMany) のみになる。
+    // Postgres の書き込みが数秒滞留することがあるため、
+    // 既定の 5 秒ではなく 15 秒まで許容する。
     { maxWait: 15_000, timeout: 15_000 },
   )
 }

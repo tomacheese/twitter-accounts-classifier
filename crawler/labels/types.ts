@@ -1,4 +1,3 @@
-import type { FollowGraphLabelSignal } from './follow-graph-label-index'
 import type { ReplyHijackEvidenceDetails } from '../db/reply-hijack-evidence-repository'
 import type { SelfReplyPromoEvidence } from './self-reply-promo-index'
 import type { FollowChurnObservation } from '../db/follow-churn-observation'
@@ -152,14 +151,6 @@ export interface AccountFeatureBundle {
    */
   selfReplyPromoEvidence?: SelfReplyPromoEvidence
   /**
-   * このアカウントのフォロー先・フォロワーにおける、ラベルごとの既存付与状況。
-   * ルールごとではなく実行ごとに共有インデックスから一度算出する（`buildFollowGraphLabelIndex` 参照）。
-   * 今回の実行で新たに確定したラベルは含まず、
-   * 実行開始時点で `AccountLabelLatest` に永続化済みだった値のみを反映する。
-   * この値を持たない bundle（多くのルール単体テストなど）では空オブジェクトとして扱う。
-   */
-  followGraphLabelSignals?: Record<string, FollowGraphLabelSignal | undefined>
-  /**
    * このアカウントが `FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS` 日以内に行った、
    * フォロー/アンフォローの状態変化の集計。
    * この値を持たない bundle (多くのルール単体テストなど) では未観測として扱う。
@@ -201,11 +192,6 @@ export interface LabelRule {
    * bump しないまま算出式だけ変えると新旧の confidence が同一 `ruleVersion` の下で混在してしまう。
    */
   version: string
-  /**
-   * `hasFollowGraphTopicSignal()` を呼び follow-graph signal を利用するルールが明示的に true を宣言する。
-   * `buildFollowGraphLabelIndex()` の呼び出し元がこのフラグで対象ラベルを絞り込む。
-   */
-  usesFollowGraphSignal?: boolean
   /**
    * true の場合、この rule の version 変更だけを理由に `scanForStaleAccounts` が
    * account を stale 扱いにしない。crawl 時・account 変更時の通常評価では

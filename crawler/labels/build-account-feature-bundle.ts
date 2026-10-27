@@ -3,7 +3,6 @@ import type { AccountFeatureBundle } from './types'
 import type { buildDuplicateReplyIndex } from './duplicate-reply-index'
 import type { buildBioDuplicateIndex } from './bio-duplicate-index'
 import type { buildReplyHijackIndex } from './reply-hijack-index'
-import type { FollowGraphLabelIndex } from './follow-graph-label-index'
 import type { buildSelfReplyPromoIndex } from './self-reply-promo-index'
 import type { FollowChurnObservation } from '../db/follow-churn-observation'
 
@@ -16,7 +15,6 @@ import type { FollowChurnObservation } from '../db/follow-churn-observation'
  * @param duplicateReplyIndex - アカウント横断で共有する重複返信インデックス
  * @param bioDuplicateIndex - アカウント横断で共有する bio 複製インデックス
  * @param replyHijackIndex - アカウント横断で共有するリプライハイジャック群インデックス
- * @param followGraphLabelIndex - アカウント横断で共有するフォローグラフラベルインデックス
  * @param selfReplyPromoIndex - アカウント横断で共有する self-reply promo chain インデックス
  * @param parentTweetTextById - リプライ先ツイート ID から本文を引くための共有マップ
  * @param parentTweetAuthorIdById - 親ツイート ID または conversation root ID から投稿者 ID を引く共有マップ
@@ -30,7 +28,6 @@ export function buildAccountFeatureBundle(
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>,
-  followGraphLabelIndex: FollowGraphLabelIndex,
   selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,
   parentTweetTextById: Map<string, string>,
   parentTweetAuthorIdById = new Map<string, string>(),
@@ -122,7 +119,6 @@ export function buildAccountFeatureBundle(
     bioDuplicateNetworkSize,
     replyHijackSwarmSize,
     replyHijackEvidence,
-    followGraphLabelSignals: followGraphLabelIndex.signalsFor(account.id),
     selfReplyPromoEvidence: selfReplyPromoIndex.evidenceFor(account.id),
     followChurnObservation,
     promotedTweetCountInWindow,

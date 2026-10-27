@@ -67,14 +67,14 @@ async function seed(prisma: PrismaClient, count: number): Promise<void> {
 }
 
 /**
- * follow-graph 集計クエリ・AccountLabelLatest lookup クエリを現実的な cardinality で再現するため、
+ * Follow 参照クエリ・AccountLabelLatest lookup クエリを現実的な cardinality で再現するため、
  * 各 account に Follow エッジと AccountLabelLatest 行を追加でシードする。
  * 廃止済みラベルも1件混在させ、labelDefinitionId 絞り込みの効果を計測できるようにする。
  * @param prisma - シード投入に使う Prisma クライアント
  * @param accountIds - シード済み account の id 一覧
  * @param registry - currentRuleVersion 解決に使うルールレジストリ
  */
-async function seedFollowGraphAndLabels(
+async function seedFollowEdgesAndLabels(
   prisma: PrismaClient,
   accountIds: string[],
   registry: LabelRuleRegistry,
@@ -190,8 +190,8 @@ async function main(): Promise<void> {
 
     if (process.env.BENCHMARK_MODE === 'worker') {
       const accountIds = Array.from({ length: SEED_ACCOUNT_COUNT }, (_, i) => `bench-${i}`)
-      console.log(`Seeding follow graph (${FOLLOW_EDGES_PER_ACCOUNT} edges/account) and labels...`)
-      await seedFollowGraphAndLabels(prisma, accountIds, registry)
+      console.log(`Seeding follow edges (${FOLLOW_EDGES_PER_ACCOUNT} edges/account) and labels...`)
+      await seedFollowEdgesAndLabels(prisma, accountIds, registry)
       await runWorkerDrainBenchmark(prisma)
       return
     }
@@ -226,7 +226,7 @@ main().catch((error: unknown) => {
 // 3. アカウント作成 + backfill 計測のみの場合:
 //    DATABASE_URL=postgresql://crawler:crawler@localhost:5432/twitter_accounts_classifier \
 //      pnpm --filter crawler exec tsx scripts/relabel-benchmark.ts
-//    follow-graph/AccountLabelLatest lookup を含む worker drain を計測する場合:
+//    Follow/AccountLabelLatest lookup を含む worker drain を計測する場合:
 //    DATABASE_URL=postgresql://crawler:crawler@localhost:5432/twitter_accounts_classifier \
 //      BENCHMARK_MODE=worker RELABELER_WORKER_CHUNK_SIZE=1000 RELABELER_LABEL_LOOKUP_CHUNK_SIZE=1000 \
 //      pnpm --filter crawler exec tsx scripts/relabel-benchmark.ts

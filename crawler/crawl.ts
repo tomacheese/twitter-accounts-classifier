@@ -35,10 +35,6 @@ import { buildReplyHijackIndex, type ReplyHijackCorpusEntry } from './labels/rep
 import { buildSelfReplyPromoIndex } from './labels/self-reply-promo-index'
 import { fetchSelfReplyChain, hasThirdPartyStatusLink } from './twitter/self-reply-chain'
 import {
-  buildFollowGraphLabelIndex,
-  type FollowGraphLabelIndex,
-} from './labels/follow-graph-label-index'
-import {
   createCookieIssuerClient,
   formatResponseErrorDiagnostics,
   getLastResponseMatching,
@@ -167,10 +163,6 @@ export interface CrawlDependencies {
   loadBioCorpus: (watermark: Date) => Promise<BioCorpusEntry[]>
   relabelGrownBioClusters: (corpus: BioCorpusEntry[]) => Promise<number>
   loadSelfReplyPromoCorpus: (watermark: Date) => ReturnType<typeof loadSelfReplyPromoCorpus>
-  loadFollowGraphLabelIndex: (
-    labelDefinitionIds: Map<string, string>,
-    accountIds: string[],
-  ) => Promise<FollowGraphLabelIndex>
   persistAuthorResultAtomic: (
     params: PersistAuthorResultAtomicParams,
   ) => Promise<PersistAuthorResultAtomicResult>
@@ -601,7 +593,6 @@ export async function runAuthorUnitPhase(
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
   selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,
   replyCorpus: ReplyHijackCorpusEntry[],
-  followGraphLabelDefinitionIds: Map<string, string>,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
   timelineSnapshot: TimelineSnapshot,
@@ -675,13 +666,6 @@ export async function runAuthorUnitPhase(
       ),
     ]),
   ]
-
-  // follow-graph signal は判定対象となる author の accountId でしか引かれないため、
-  // ここで author 単位に判明した accountId だけに絞って構築する。
-  const followGraphLabelIndex = await deps.loadFollowGraphLabelIndex(
-    followGraphLabelDefinitionIds,
-    uniqueAuthorIds,
-  )
 
   const existingCheckpoints = await deps.loadCrawlAuthorCheckpoints(crawlRunId, account.username)
   const warnings: CrawlWarning[] = []
@@ -975,7 +959,6 @@ export async function runAuthorUnitPhase(
           bioDuplicateIndex,
           selfReplyPromoIndex,
           replyHijackIndex: buildEffectiveReplyHijackIndex(authorId),
-          followGraphLabelIndex,
           warnings: authorWarnings,
           durationMs: Date.now() - authorStartedAt,
           retryWaitMs: authorRetryWait.ms,
@@ -1651,7 +1634,6 @@ async function runAccountCycle(
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
   selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,
   replyCorpus: ReplyHijackCorpusEntry[],
-  followGraphLabelDefinitionIds: Map<string, string>,
   account: AppConfig['accounts'][number],
   crawlRunId: string,
 ): Promise<'success' | 'partial'> {
@@ -1831,7 +1813,6 @@ async function runAccountCycle(
                       bioDuplicateIndex,
                       selfReplyPromoIndex,
                       replyCorpus,
-                      followGraphLabelDefinitionIds,
                       account,
                       crawlRunId,
                       resolvedTimelineSnapshot,
@@ -2024,13 +2005,6 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
   // 開始前に実行すると生存中でも古い heartbeat の CrawlRun が残って見える。また前処理が
   // 失敗した場合に running 行を確定できない。
   try {
-    // follow-graph signal 対象の accountId は account のタイムライン取得後にしか判明しない。
-    // そのため、ここではラベル集合だけを決め、index 自体は author 単位で構築する。
-    const followGraphLabelDefinitionIds = new Map(
-      [...labelDefinitionIds.entries()].filter(([key]) =>
-        registry.getAll().some((rule) => rule.key === key && rule.usesFollowGraphSignal),
-      ),
-    )
     // テンプレ返信ネットワークの検出はアカウント横断の比較が本質のため、
     // アカウントごとではなくサイクルごとに 1 回だけ構築する。
     const replyCorpus = await deps.loadReplyCorpus(crawlRunStartedAt)
@@ -2087,7 +2061,6 @@ export async function runCrawlCycle(deps: CrawlDependencies): Promise<void> {
           bioDuplicateIndex,
           selfReplyPromoIndex,
           replyCorpus,
-          followGraphLabelDefinitionIds,
           account,
           crawlRunId,
         )
@@ -2239,8 +2212,6 @@ async function main(): Promise<void> {
     loadBioCorpus: (watermark) => loadBioCorpus(prisma, watermark),
     relabelGrownBioClusters: (corpus) => relabelGrownBioClusters(prisma, corpus),
     loadSelfReplyPromoCorpus: (watermark) => loadSelfReplyPromoCorpus(prisma, watermark),
-    loadFollowGraphLabelIndex: (labelDefinitionIds, accountIds) =>
-      buildFollowGraphLabelIndex(prisma, labelDefinitionIds, { accountIds }),
     persistAuthorResultAtomic: (params) => persistAuthorResultAtomicRecord(prisma, params),
     findMissingTweetIds: (ids) => findMissingTweetIds(prisma, ids),
     recordCrawlAuthorCheckpoint: (params) => recordCrawlAuthorCheckpointRecord(prisma, params),

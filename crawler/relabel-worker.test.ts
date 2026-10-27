@@ -6,7 +6,6 @@ import * as workItemRepository from './db/analysis-work-item-repository'
 import * as labelRepository from './db/label-repository'
 import * as tweetRepository from './db/tweet-repository'
 import * as followChurnObservationModule from './db/follow-churn-observation'
-import * as followGraphIndexModule from './labels/follow-graph-label-index'
 import * as replyCorpusModule from './db/reply-corpus'
 import * as bioCorpusModule from './db/bio-corpus'
 import * as selfReplyPromoCorpusModule from './db/self-reply-promo-corpus'
@@ -83,7 +82,6 @@ describe('evaluateAccountRelabelItems', () => {
         isEligibleForScreening: () => false,
         evidenceFor: () => undefined,
       },
-      followGraphLabelIndex: { signalsFor: () => ({}) },
       selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 1,
       leaseOwner: 'test-worker',
@@ -144,7 +142,6 @@ describe('evaluateAccountRelabelItems', () => {
             replyTweetIds: ['reply-1', 'reply-2'],
           }),
         },
-        followGraphLabelIndex: { signalsFor: () => ({}) },
         selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
@@ -220,7 +217,6 @@ describe('evaluateAccountRelabelItems', () => {
           replyTweetIds: ['reply-1'],
         }),
       },
-      followGraphLabelIndex: { signalsFor: () => ({}) },
       selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 1,
       leaseOwner: 'test-worker',
@@ -281,7 +277,6 @@ describe('evaluateAccountRelabelItems', () => {
             replyTweetIds: ['reply-1', 'reply-2'],
           }),
         },
-        followGraphLabelIndex: { signalsFor: () => ({}) },
         selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
@@ -347,7 +342,6 @@ describe('evaluateAccountRelabelItems', () => {
           isEligibleForScreening: () => true,
           evidenceFor: () => undefined,
         },
-        followGraphLabelIndex: { signalsFor: () => ({}) },
         selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
@@ -408,7 +402,6 @@ describe('evaluateAccountRelabelItems', () => {
           isEligibleForScreening: () => true,
           evidenceFor: () => undefined,
         },
-        followGraphLabelIndex: { signalsFor: () => ({}) },
         selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
@@ -485,7 +478,6 @@ describe('evaluateAccountRelabelItems', () => {
         isEligibleForScreening: () => true,
         evidenceFor: () => undefined,
       },
-      followGraphLabelIndex: { signalsFor: () => ({}) },
       selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 1,
       leaseOwner: 'test-worker',
@@ -517,7 +509,6 @@ describe('evaluateAccountRelabelItems', () => {
           isEligibleForScreening: () => true,
           evidenceFor: () => undefined,
         },
-        followGraphLabelIndex: { signalsFor: () => ({}) },
         selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
@@ -568,7 +559,6 @@ describe('evaluateAccountRelabelItems', () => {
         isEligibleForScreening: () => true,
         evidenceFor: () => undefined,
       },
-      followGraphLabelIndex: { signalsFor: () => ({}) },
       selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 2,
       leaseOwner: 'test-worker',
@@ -638,7 +628,6 @@ describe('evaluateAccountRelabelItems', () => {
           isEligibleForScreening: () => true,
           evidenceFor: () => undefined,
         },
-        followGraphLabelIndex: { signalsFor: () => ({}) },
         selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
@@ -711,7 +700,6 @@ describe('evaluateAccountRelabelItems', () => {
           isEligibleForScreening: () => true,
           evidenceFor: () => undefined,
         },
-        followGraphLabelIndex: { signalsFor: () => ({}) },
         selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
@@ -787,7 +775,6 @@ describe('evaluateAccountRelabelItems', () => {
         isEligibleForScreening: () => true,
         evidenceFor: () => undefined,
       },
-      followGraphLabelIndex: { signalsFor: () => ({}) },
       selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 1,
       leaseOwner: 'test-worker',
@@ -844,7 +831,6 @@ describe('evaluateAccountRelabelItems', () => {
           isEligibleForScreening: () => true,
           evidenceFor: () => undefined,
         },
-        followGraphLabelIndex: { signalsFor: () => ({}) },
         selfReplyPromoIndex: { evidenceFor: () => undefined },
         concurrency: 1,
         leaseOwner: 'test-worker',
@@ -891,7 +877,6 @@ describe('evaluateAccountRelabelItems', () => {
         isEligibleForScreening: () => true,
         evidenceFor: () => undefined,
       },
-      followGraphLabelIndex: { signalsFor: () => ({}) },
       selfReplyPromoIndex: { evidenceFor: () => undefined },
       concurrency: 1,
       leaseOwner: 'test-worker',
@@ -1119,9 +1104,6 @@ describe('runRelabelWorkerCycleOnce', () => {
       selfReplyCorpus: [],
       rootCorpus: [],
     })
-    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
-      signalsFor: () => ({}),
-    })
     const claimSpy = vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([])
     const prisma = makeCursorPrisma()
 
@@ -1148,9 +1130,6 @@ describe('runRelabelWorkerCycleOnce', () => {
       selfReplyCorpus: [],
       rootCorpus: [],
     })
-    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
-      signalsFor: () => ({}),
-    })
     const claimSpy = vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([])
     const prisma = makeCursorPrisma()
 
@@ -1172,9 +1151,6 @@ describe('runRelabelWorkerCycleOnce', () => {
     vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
       selfReplyCorpus: [],
       rootCorpus: [],
-    })
-    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
-      signalsFor: () => ({}),
     })
     vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([])
     const accountFindMany = vi.fn().mockResolvedValue([])
@@ -1204,9 +1180,6 @@ describe('runRelabelWorkerCycleOnce', () => {
       selfReplyCorpus: [],
       rootCorpus: [],
     })
-    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
-      signalsFor: () => ({}),
-    })
     vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([])
     const accountFindMany = vi.fn().mockResolvedValue([])
     const cursorUpsert = vi.fn().mockResolvedValue({})
@@ -1222,11 +1195,10 @@ describe('runRelabelWorkerCycleOnce', () => {
     expect(cursorUpsert).not.toHaveBeenCalled()
   })
 
-  it('peek 候補が 0 件の場合、buildFollowGraphLabelIndex・loadReplyCorpus・claim を一切行わない', async () => {
+  it('peek 候補が 0 件の場合、loadReplyCorpus・claim を一切行わない', async () => {
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
     const peekSpy = vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([])
     const claimSpy = vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds')
-    const followGraphSpy = vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
     const replyCorpusSpy = vi.spyOn(replyCorpusModule, 'loadReplyCorpus')
     const bioCorpusSpy = vi.spyOn(bioCorpusModule, 'loadBioCorpus')
     const prisma = makeCursorPrisma()
@@ -1235,92 +1207,8 @@ describe('runRelabelWorkerCycleOnce', () => {
 
     expect(peekSpy).toHaveBeenCalled()
     expect(claimSpy).not.toHaveBeenCalled()
-    expect(followGraphSpy).not.toHaveBeenCalled()
     expect(replyCorpusSpy).not.toHaveBeenCalled()
     expect(bioCorpusSpy).not.toHaveBeenCalled()
-  })
-
-  it('buildFollowGraphLabelIndex には peek した全 accountId を1回だけ渡し、usesFollowGraphSignal を持つルールのラベルだけを渡す', async () => {
-    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(
-      new Map([
-        ['topic_anime', 'ld-follow'],
-        ['ad_pr_hashtag', 'ld-no-follow'],
-      ]),
-    )
-    vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' },
-      { id: 'wi-2', triggerId: 'bob' },
-    ])
-    vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' } as never,
-      { id: 'wi-2', triggerId: 'bob' } as never,
-    ])
-    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
-    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
-    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
-      selfReplyCorpus: [],
-      rootCorpus: [],
-    })
-    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([])
-    const followGraphSpy = vi
-      .spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
-      .mockResolvedValue({ signalsFor: () => ({}) })
-    const prisma = makeCursorPrisma({
-      account: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-    })
-
-    await runRelabelWorkerCycleOnce(prisma)
-
-    expect(followGraphSpy).toHaveBeenCalledTimes(1)
-    expect(followGraphSpy).toHaveBeenCalledWith(prisma, new Map([['topic_anime', 'ld-follow']]), {
-      accountIds: ['alice', 'bob'],
-      chunkSize: 1000,
-    })
-  })
-
-  it('account/follow データ変更による通常の account_relabel は、follow-graph ルールの ruleVersion が最新でも follow-graph index の対象から除外しない', async () => {
-    // alice は account_relabel を要求されているが、follow-graph ルールの ruleVersion は
-    // 既に最新 (= stale scan 由来ではなく account/follow データ変更由来の可能性がある)。
-    // ruleVersion 一致だけを根拠に follow-graph index 構築対象から除外すると、
-    // 変化した follow グラフを無視して空の signal で再評価してしまう。
-    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(
-      new Map([['topic_anime', 'ld-follow']]),
-    )
-    vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' },
-    ])
-    vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' } as never,
-    ])
-    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
-    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
-    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
-      selfReplyCorpus: [],
-      rootCorpus: [],
-    })
-    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([])
-    const followGraphSpy = vi
-      .spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
-      .mockResolvedValue({ signalsFor: () => ({}) })
-    const prisma = makeCursorPrisma({
-      account: { findMany: vi.fn().mockResolvedValue([]) },
-      accountLabelLatest: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([
-            { accountId: 'alice', labelDefinitionId: 'ld-follow', ruleVersion: '999.0.0' },
-          ]),
-      },
-    })
-
-    await runRelabelWorkerCycleOnce(prisma)
-
-    expect(followGraphSpy).toHaveBeenCalledWith(prisma, new Map([['topic_anime', 'ld-follow']]), {
-      accountIds: ['alice'],
-      chunkSize: 1000,
-    })
   })
 
   it('index 構築が候補確定後・claim 前に失敗した場合、1 件も claim されず lastErrorSummary も書かれない', async () => {
@@ -1352,9 +1240,6 @@ describe('runRelabelWorkerCycleOnce', () => {
     vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
       selfReplyCorpus: [],
       rootCorpus: [],
-    })
-    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
-      signalsFor: () => ({}),
     })
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockImplementation(
       (_prisma, { workItemIds }) =>
@@ -1395,9 +1280,6 @@ describe('runRelabelWorkerCycleOnce', () => {
       selfReplyCorpus: [],
       rootCorpus: [],
     })
-    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
-      signalsFor: () => ({}),
-    })
     const completeSpy = vi
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
       .mockResolvedValue([{ id: 'wi-1', status: 'succeeded' }])
@@ -1420,43 +1302,6 @@ describe('runRelabelWorkerCycleOnce', () => {
     })
   })
 
-  it('自己フィードバック防止: chunk A の評価後も chunk B の評価には同じ followGraphLabelIndex インスタンスを使う', async () => {
-    vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '1')
-    vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
-    vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' },
-      { id: 'wi-2', triggerId: 'bob' },
-    ])
-    vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
-    vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
-    vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
-      selfReplyCorpus: [],
-      rootCorpus: [],
-    })
-    const sharedIndex = { signalsFor: () => ({}) }
-    const followGraphSpy = vi
-      .spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex')
-      .mockResolvedValue(sharedIndex)
-    vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockImplementation(
-      (_prisma, { workItemIds }) =>
-        Promise.resolve(workItemIds.map((id) => ({ id, status: 'succeeded' as const }))),
-    )
-    vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockImplementation((_prisma, { ids }) =>
-      Promise.resolve(
-        ids.map((id) => ({ id, triggerId: id === 'wi-1' ? 'alice' : 'bob' }) as never),
-      ),
-    )
-    const accountFindMany = vi.fn().mockResolvedValue([])
-    const prisma = makeCursorPrisma({
-      account: { findMany: accountFindMany },
-    })
-
-    await runRelabelWorkerCycleOnce(prisma)
-
-    // followGraphLabelIndex は cycle 全体で1回しか構築されず、2 chunk とも同じインスタンスを参照する。
-    expect(followGraphSpy).toHaveBeenCalledTimes(1)
-  })
-
   it('2 chunk 目の claim が失敗した場合、1 chunk 目は complete 済みのまま例外を再送出する (blast radius は chunk size 以下)', async () => {
     vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '1')
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
@@ -1469,9 +1314,6 @@ describe('runRelabelWorkerCycleOnce', () => {
     vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
       selfReplyCorpus: [],
       rootCorpus: [],
-    })
-    vi.spyOn(followGraphIndexModule, 'buildFollowGraphLabelIndex').mockResolvedValue({
-      signalsFor: () => ({}),
     })
     const completeSpy = vi
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')

@@ -176,7 +176,6 @@ function makeDeps(overrides: Partial<CrawlDependencies> = {}): CrawlDependencies
     loadBioCorpus: vi.fn().mockResolvedValue([]),
     relabelGrownBioClusters: vi.fn().mockResolvedValue(0),
     loadSelfReplyPromoCorpus: vi.fn().mockResolvedValue({ selfReplyCorpus: [], rootCorpus: [] }),
-    loadFollowGraphLabelIndex: vi.fn().mockResolvedValue({ signalsFor: () => ({}) }),
     persistAuthorResultAtomic: vi
       .fn()
       .mockResolvedValue({ observationId: 'observation1', labelsAppliedCount: 1 }),
@@ -1369,25 +1368,6 @@ describe('runCrawlCycle', () => {
     expect(callForCandidate.replyHijackIndex.swarmSizeFor('candidate3', 'target-C')).toBe(5)
   })
 
-  it('follow-graph 対象ラベルと author 単位で判明した accountId を loadFollowGraphLabelIndex に渡し、その結果を persistAuthorResultAtomic に渡す', async () => {
-    const followGraphLabelIndex = { signalsFor: vi.fn().mockReturnValue({}) }
-    const deps = makeDeps({
-      // フィルタ後も残ることを検証するため、実際に usesFollowGraphSignal: true を持つルールの key を使う。
-      ensureLabelDefinitions: vi.fn().mockResolvedValue(new Map([['topic_anime', 'ld1']])),
-      loadFollowGraphLabelIndex: vi.fn().mockResolvedValue(followGraphLabelIndex),
-    })
-
-    await runCrawlCycle(deps)
-
-    // デフォルトのタイムライン fixture が発見する author は author1 のみ。
-    expect(deps.loadFollowGraphLabelIndex).toHaveBeenCalledWith(new Map([['topic_anime', 'ld1']]), [
-      'author1',
-    ])
-    expect(deps.persistAuthorResultAtomic).toHaveBeenCalledWith(
-      expect.objectContaining({ followGraphLabelIndex }),
-    )
-  })
-
   it('assigns a different cycletls port to each account', async () => {
     const config = {
       accounts: [
@@ -1402,47 +1382,6 @@ describe('runCrawlCycle', () => {
     const openApiPorts = vi.mocked(deps.createOpenApiClient).mock.calls.map(([, port]) => port)
     expect(openApiPorts).toHaveLength(2)
     expect(openApiPorts[0]).not.toBe(openApiPorts[1])
-  })
-
-  it('resume で全 account が success/partial の場合、loadFollowGraphLabelIndex を呼ばない', async () => {
-    const loadFollowGraphLabelIndex = vi.fn().mockResolvedValue({ signalsFor: () => ({}) })
-    const deps = makeDeps({
-      loadFollowGraphLabelIndex,
-      startOrResumeCrawlRun: vi.fn().mockResolvedValue({
-        id: 'run1',
-        latestAccountStatuses: new Map([
-          ['v', { status: 'success', classificationStatus: 'success' }],
-        ]),
-      }),
-    })
-
-    await runCrawlCycle(deps)
-
-    expect(loadFollowGraphLabelIndex).not.toHaveBeenCalled()
-  })
-
-  it('resume で一部 account だけが処理対象の場合、その account だけについて loadFollowGraphLabelIndex を呼ぶ', async () => {
-    const loadFollowGraphLabelIndex = vi.fn().mockResolvedValue({ signalsFor: () => ({}) })
-    const deps = makeDeps({
-      config: {
-        accounts: [
-          { email: 'done@example.com', username: 'done', password: 'p', otpSecret: null },
-          { email: 'partial@example.com', username: 'partial', password: 'p', otpSecret: null },
-        ],
-      },
-      loadFollowGraphLabelIndex,
-      startOrResumeCrawlRun: vi.fn().mockResolvedValue({
-        id: 'run1',
-        latestAccountStatuses: new Map([
-          ['done', { status: 'success', classificationStatus: 'success' }],
-        ]),
-      }),
-    })
-
-    await runCrawlCycle(deps)
-
-    expect(loadFollowGraphLabelIndex).toHaveBeenCalledTimes(1)
-    expect(loadFollowGraphLabelIndex).toHaveBeenCalledWith(expect.any(Map), ['author1'])
   })
 
   it('continues to the next account if one account throws', async () => {
@@ -2251,34 +2190,17 @@ describe('runCrawlCycle', () => {
     )
   })
 
-  it('starts or resumes the CrawlRun before author-level follow-graph index construction', async () => {
+  it('starts or resumes the CrawlRun before loading the reply corpus', async () => {
     const deps = makeDeps()
 
     await runCrawlCycle(deps)
 
     const startOrder = (deps.startOrResumeCrawlRun as ReturnType<typeof vi.fn>).mock
       .invocationCallOrder[0]
-    const followIndexOrder = (deps.loadFollowGraphLabelIndex as ReturnType<typeof vi.fn>).mock
-      .invocationCallOrder[0]
     const replyCorpusOrder = (deps.loadReplyCorpus as ReturnType<typeof vi.fn>).mock
       .invocationCallOrder[0]
 
-    expect(startOrder).toBeLessThan(followIndexOrder)
     expect(startOrder).toBeLessThan(replyCorpusOrder)
-  })
-
-  it('follow-graph index の構築が失敗した account は failed として記録され、CrawlRun 全体は中断されない', async () => {
-    const deps = makeDeps({
-      loadFollowGraphLabelIndex: vi.fn().mockRejectedValue(new Error('index build failed')),
-    })
-
-    await runCrawlCycle(deps)
-
-    expect(deps.startOrResumeCrawlRun).toHaveBeenCalledTimes(1)
-    expect(deps.recordCrawlAccountRun).toHaveBeenCalledWith(
-      expect.objectContaining({ username: 'v', status: 'failed' }),
-    )
-    expect(deps.finishCrawlRun).toHaveBeenCalledWith('run1', expect.any(Date), 'failed')
   })
 
   it('records a CrawlRun and one successful CrawlAccountRun for a clean cycle', async () => {
@@ -3615,7 +3537,6 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       buildBioDuplicateIndex([]),
       buildSelfReplyPromoIndex([], []),
       [],
-      new Map(),
       testAccount(),
       'run1',
       singleTweetTimelineSnapshot(),
@@ -3656,7 +3577,6 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       buildBioDuplicateIndex([]),
       buildSelfReplyPromoIndex([], []),
       [],
-      new Map(),
       testAccount(),
       'run1',
       singleTweetTimelineSnapshot(),
@@ -3689,7 +3609,6 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       buildBioDuplicateIndex([]),
       buildSelfReplyPromoIndex([], []),
       [],
-      new Map(),
       testAccount(),
       'run1',
       singleTweetTimelineSnapshot(),
@@ -3723,7 +3642,6 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       buildBioDuplicateIndex([]),
       buildSelfReplyPromoIndex([], []),
       [],
-      new Map(),
       testAccount(),
       'run1',
       singleTweetTimelineSnapshot(),
@@ -3758,7 +3676,6 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       buildBioDuplicateIndex([]),
       buildSelfReplyPromoIndex([], []),
       [],
-      new Map(),
       testAccount(),
       'run1',
       singleTweetTimelineSnapshot(),
@@ -3805,7 +3722,6 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       buildBioDuplicateIndex([]),
       buildSelfReplyPromoIndex([], []),
       [],
-      new Map(),
       testAccount(),
       'run1',
       singleTweetTimelineSnapshot(),
@@ -3857,7 +3773,6 @@ describe('runAuthorUnitPhase parent tweet fetch', () => {
       buildBioDuplicateIndex([]),
       buildSelfReplyPromoIndex([], []),
       [],
-      new Map(),
       testAccount(),
       'run1',
       singleTweetTimelineSnapshot(),
@@ -3925,7 +3840,6 @@ describe('runAuthorUnitPhase self-reply promo candidate probe', () => {
       buildBioDuplicateIndex([]),
       buildSelfReplyPromoIndex([], []),
       [],
-      new Map(),
       testAccount(),
       'run1',
       singleTweetTimelineSnapshot(),
@@ -3969,7 +3883,6 @@ describe('runAuthorUnitPhase self-reply promo candidate probe', () => {
       buildBioDuplicateIndex([]),
       buildSelfReplyPromoIndex([], []),
       [],
-      new Map(),
       testAccount(),
       'run1',
       singleTweetTimelineSnapshot(),

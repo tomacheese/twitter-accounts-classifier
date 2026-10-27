@@ -92,7 +92,6 @@ it('relabel evaluation receives the resolved parent author id', async () => {
       isEligibleForScreening: () => false,
       evidenceFor: () => undefined,
     },
-    followGraphLabelIndex: { signalsFor: () => ({}) },
     selfReplyPromoIndex: { evidenceFor: () => undefined },
     concurrency: 1,
     leaseOwner: 'test-worker',
