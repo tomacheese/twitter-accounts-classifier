@@ -665,8 +665,26 @@ describe('aiGeneratedRule', () => {
     '代表取締役。生成AI事業。アイコンは猫',
     '生成AI事業を運営しています。イラストは猫です',
     '代表取締役。生成AI事業。ヘッダーは風景です',
+    '代表取締役。アイコンは猫。生成AI事業',
+    'ヘッダーは風景。生成AIについて解説',
   ])('is false for a bio that mentions generative AI without self-declaring (%s)', (bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    '猫が好きです。転載は禁止です。生成AI滅びよ',
+    '散歩が好き。生成AIは消えろ',
+    '猫の写真を載せています。画像生成AI用のサブアカウント⇨https://t.co/exampleXXXX',
+    '日常用。AI生成イラストは別アカ→@sample_sub で投稿',
+  ])('is false for an anti-AI slogan or a pointer to another account (%s)', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    '生成AIの滅びを願う人もいますが、AI生成イラストを投稿しています',
+    '画像生成AI用のサブアカウントです。AI生成イラストを投稿しています',
+  ])('stays true for a self-declaration near similar wording (%s)', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(true)
   })
 
   it.each([
@@ -674,6 +692,7 @@ describe('aiGeneratedRule', () => {
     '生成AI画像を配信しています',
     'アイコン画像はAI生成です',
     'アイコンはAI生成です',
+    'アイコンは生成AIで作成',
     '風景を投稿しています。画像は短いプロンプトで出力したものです。画像生成AIを使っています',
   ])('stays true for a genuine self-declaration near similar wording (%s)', (bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(true)
