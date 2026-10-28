@@ -683,6 +683,7 @@ describe('aiGeneratedRule', () => {
   it.each([
     '生成AIの滅びを願う人もいますが、AI生成イラストを投稿しています',
     '画像生成AI用のサブアカウントです。AI生成イラストを投稿しています',
+    '生成AI滅多にエラーが出ないので毎日AI生成イラストを投稿しています',
   ])('stays true for a self-declaration near similar wording (%s)', (bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(true)
   })

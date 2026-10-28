@@ -43,7 +43,7 @@ export const amazonAffiliateLinkRule: LabelRule = {
         firstShortLink ??= { tweetId: tweet.id, host: evidence.host }
         hasContext ||=
           PRODUCT_CONTEXT_PATTERN.test(tweet.fullText) ||
-          hasPrDisclosure(tweet.fullText) ||
+          hasPrDisclosure(tweet.fullText, { isQuote: tweet.quotedTweetAuthorId != null }) ||
           tweet.isPaidPromotion
       }
     }

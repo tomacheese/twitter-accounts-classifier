@@ -77,6 +77,19 @@ describe('amazonAffiliateLinkRule', () => {
     expect(result.value).toBe(true)
   })
 
+  it('is false for a short sweepstakes quote tweet whose mandated PR tag is not a disclosure', () => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([
+        tweet({
+          fullText: '応募します #PR',
+          quotedTweetAuthorId: 'fictional-organizer',
+          expandedUrls: ['https://amzn.to/fictional'],
+        }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+  })
+
   it('is true for a single amzn.to link in a paid promotion tweet', () => {
     const result = amazonAffiliateLinkRule.evaluate(
       makeBundle([
