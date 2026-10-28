@@ -67,6 +67,90 @@ describe('amazonAffiliateLinkRule', () => {
     expect(result.confidence).toBeGreaterThan(0.5)
   })
 
+  it.each([
+    ['ハッシュタグ', '新作のお知らせ #PR'],
+    ['括弧表記', '【PR】新作のお知らせ'],
+  ])('is true for a single amzn.to link with a PR disclosure (%s)', (_name, fullText) => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([tweet({ fullText, expandedUrls: ['https://amzn.to/fictional'] })]),
+    )
+    expect(result.value).toBe(true)
+  })
+
+  it('is false for a short sweepstakes quote tweet whose mandated PR tag is not a disclosure', () => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([
+        tweet({
+          fullText: '応募します #PR',
+          quotedTweetAuthorId: 'fictional-organizer',
+          expandedUrls: ['https://amzn.to/fictional'],
+        }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('is true for a single amzn.to link in a paid promotion tweet', () => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([
+        tweet({
+          fullText: '友達に教えてもらった',
+          isPaidPromotion: true,
+          expandedUrls: ['https://amzn.to/fictional'],
+        }),
+      ]),
+    )
+    expect(result.value).toBe(true)
+  })
+
+  it('is false when the PR marker is only a URL fragment on a single amzn.to link', () => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([
+        tweet({
+          fullText: '参考 https://example.com/page#PR',
+          expandedUrls: ['https://amzn.to/fictional'],
+        }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it.each([
+    [
+      '短縮リンクの後',
+      ['https://amzn.to/fictional', 'https://www.amazon.co.jp/dp/FICTIONAL?tag=fictional-22'],
+    ],
+    [
+      '短縮リンクの前',
+      ['https://www.amazon.co.jp/dp/FICTIONAL?tag=fictional-22', 'https://amzn.to/fictional'],
+    ],
+  ])('is true when a tagged Amazon URL appears %s in the same tweet', (_name, expandedUrls) => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([tweet({ fullText: '友達に教えてもらった', expandedUrls })]),
+    )
+    expect(result.value).toBe(true)
+    expect(result.reason).toContain('associate-tag')
+  })
+
+  it('counts two amzn.to links in one tweet as a single tweet', () => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([
+        tweet({
+          fullText: '友達に教えてもらった',
+          expandedUrls: ['https://amzn.to/fictionalA', 'https://amzn.to/fictionalB'],
+        }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('treats a full-width yen sign as product context', () => {
+    const result = amazonAffiliateLinkRule.evaluate(
+      makeBundle([tweet({ fullText: '特価￥980', expandedUrls: ['https://amzn.to/fictional'] })]),
+    )
+    expect(result.value).toBe(true)
+  })
+
   it.each(['500円のランチを食べた', '新しい椅子を買ってきた'])(
     'is false for a single amzn.to link whose text only mentions money or buying in passing (%s)',
     (fullText) => {
