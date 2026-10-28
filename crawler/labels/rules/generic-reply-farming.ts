@@ -91,7 +91,7 @@ export const genericReplyFarmingRule: LabelRule = {
     '多数の異なる外部投稿へ、汎用的な評価・共感や抽象的な関心の締めを高頻度に繰り返す行動、' +
     'および非日本語プロフィールが外部投稿へ低頻度に日本語の文脈追随型の返信を繰り返す行動を検出する shadow ラベル。' +
     'AI/LLM 利用そのものは推定しない',
-  version: '0.3.0',
+  version: '0.3.1',
   excludeFromStaleScan: true,
   evaluate(bundle) {
     const sampled = bundle.recentTweets
@@ -143,7 +143,12 @@ export const genericReplyFarmingRule: LabelRule = {
       bundle.account.tweetCount,
       bundle.account.accountCreatedAt,
     )
-    const recentTweetsPerDay = recentObservedTweetsPerDay(sampled)
+    // 自分の投稿が拡散した際の返信バーストで、外部への返信頻度が過大にならないようにする。
+    const recentTweetsPerDay = recentObservedTweetsPerDay(
+      sampled.filter(
+        (tweet) => !(tweet.isReply && tweet.conversationRootAuthorId === bundle.account.id),
+      ),
+    )
     const isVerifiedBusiness = bundle.account.verifiedType === 'Business'
     const hasGenericStyle =
       genericReactionRatio >= GENERIC_REACTION_RATIO_THRESHOLD ||

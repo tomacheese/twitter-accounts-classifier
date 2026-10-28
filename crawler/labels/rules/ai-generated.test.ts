@@ -662,6 +662,9 @@ describe('aiGeneratedRule', () => {
     'スポーツが好きです\n\n生成AIエッセイスト',
     'A daily digest of generative AI news, trends and innovations in AI-generated content. #SampleTag',
     '生成AI推進派。アイコン画像はAIFAです',
+    '代表取締役。生成AI事業。アイコンは猫',
+    '生成AI事業を運営しています。イラストは猫です',
+    '代表取締役。生成AI事業。ヘッダーは風景です',
   ])('is false for a bio that mentions generative AI without self-declaring (%s)', (bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
   })

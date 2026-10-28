@@ -19,12 +19,16 @@ function averageTweetsPerDay(tweetCount: number, accountCreatedAt: Date): number
   return tweetCount / ageDays
 }
 
+// 実況などの短時間の密集投稿から 1 日あたりの頻度を外挿すると過大になるため、
+// 観測期間が極端に短いサンプルは頻度の根拠にしない。
+const MIN_OBSERVATION_DAYS = 6 / 24
+
 function recentObservedTweetsPerDay(tweets: { createdAt: Date }[]): number {
   if (tweets.length < 2) return 0
   const timestamps = tweets.map((t) => t.createdAt.getTime())
   const spanDays = Math.max(
     (Math.max(...timestamps) - Math.min(...timestamps)) / (1000 * 60 * 60 * 24),
-    1 / 24,
+    MIN_OBSERVATION_DAYS,
   )
   return (tweets.length - 1) / spanDays
 }
@@ -47,7 +51,7 @@ export const botRule: LabelRule = {
   key: 'bot',
   description:
     '投稿頻度が人間としてあり得ない速さであり、かつリプライ比率がほぼゼロで、投稿間隔が機械的なまでに規則的である',
-  version: '1.8.0',
+  version: '1.8.1',
   evaluate(bundle) {
     const { tweetCount, accountCreatedAt } = bundle.account
     const sampled = bundle.recentTweets
@@ -55,9 +59,6 @@ export const botRule: LabelRule = {
     const recentTweetsPerDay = recentObservedTweetsPerDay(sampled)
     // 直近の投稿頻度が高いだけでは十分条件とせず、
     // 生涯平均も同時に満たす必要がある。
-    // `recentObservedTweetsPerDay` はサンプルした件数から「1日あたり」の頻度を外挿するため、
-    // 配信・ゲーム実況・ドラマ視聴などの短時間の実況で密集投稿する人間は、
-    // 生涯平均が bot 的でなくても閾値を容易に超えてしまう。
     const isHighVelocity =
       tweetsPerDay >= VELOCITY_THRESHOLD_PER_DAY &&
       recentTweetsPerDay >= RECENT_VELOCITY_CORROBORATION_THRESHOLD_PER_DAY

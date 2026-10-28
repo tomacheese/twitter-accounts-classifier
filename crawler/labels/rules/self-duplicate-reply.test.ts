@@ -60,6 +60,28 @@ describe('selfDuplicateReplyRule', () => {
     expect(result.value).toBe(true)
   })
 
+  it('is false when the duplicated replies are hashtag-only campaign entries', () => {
+    const bundle = makeBundle([
+      { fullText: '#fictionalcampaign2026 #sampleentryaaa', isReply: false },
+      { fullText: '@brand_a #fictionalcampaign2026 #sampleentryaaa', isReply: true },
+      { fullText: '#fictionalfanevent2026 #sampleentrybbb', isReply: false },
+      { fullText: '@brand_b #fictionalfanevent2026 #sampleentrybbb', isReply: true },
+    ])
+
+    expect(selfDuplicateReplyRule.evaluate(bundle).value).toBe(false)
+  })
+
+  it('stays true when a hashtag is combined with promotional text', () => {
+    const bundle = makeBundle([
+      { fullText: '稼げる方法を教えます #fictionalcampaign2026', isReply: false },
+      { fullText: '@brand_a 稼げる方法を教えます #fictionalcampaign2026', isReply: true },
+      { fullText: '副業のコツを配信中です #fictionalfanevent2026', isReply: false },
+      { fullText: '@brand_b 副業のコツを配信中です #fictionalfanevent2026', isReply: true },
+    ])
+
+    expect(selfDuplicateReplyRule.evaluate(bundle).value).toBe(true)
+  })
+
   it('is false when the duplicate standalone/reply pattern occurs only once', () => {
     const bundle = makeBundle([
       { fullText: 'これはとても素晴らしい情報ですね！ぜひ拡散をお願いします', isReply: false },

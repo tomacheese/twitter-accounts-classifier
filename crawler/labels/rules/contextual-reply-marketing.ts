@@ -143,7 +143,7 @@ export const contextualReplyMarketingRule: LabelRule = {
     '「自分も」「〜として」「自分の立場では」等の自己ポジショニングを反復してプロフィール流入を狙う行動を検出する。' +
     '同一会話に集中する一致や、プロフィール誘導を伴わない懸賞・キャンペーンへの定型的な応募返信は自己ポジショニングの根拠にしない。' +
     'AI/LLM 利用そのものは推定しない',
-  version: '0.5.0',
+  version: '0.5.1',
   excludeFromStaleScan: true,
   evaluate(bundle) {
     const sampled = bundle.recentTweets

@@ -13,7 +13,7 @@ const CROSS_TARGET_TEMPLATED_REPLY_CONFIDENCE_THRESHOLD = 0.7
 describe('rollout backtest: bot gate boundary', () => {
   it('meets confidenceThreshold at the minimal value=true configuration (gate exactly)', () => {
     const now = new Date()
-    const tweets: AccountFeatureBundle['recentTweets'] = Array.from({ length: 10 }, (_, i) => ({
+    const tweets: AccountFeatureBundle['recentTweets'] = Array.from({ length: 20 }, (_, i) => ({
       id: `t${i}`,
       fullText: `post ${i}`,
       createdAt: new Date(now.getTime() - (i * (1000 * 60 * 60 * 24)) / 300),

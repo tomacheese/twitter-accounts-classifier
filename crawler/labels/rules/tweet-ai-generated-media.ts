@@ -36,8 +36,8 @@ function confidenceForSource(source: string | null | undefined): number {
 export const tweetAiGeneratedMediaRule: LabelRule = {
   key: 'tweet_ai_generated_media',
   description:
-    'X の投稿ごとの AI 生成メディア開示 (contentDisclosure) が直近ツイートに1件以上ある。保存ツイートが 2 件未満の場合は根拠不足として判定対象外にする (C2PA 由来の開示は除く)',
-  version: '1.2.0',
+    'X の投稿ごとの AI 生成メディア開示 (contentDisclosure) が直近の自身のツイート (リツイートを除く) に1件以上ある。自身の保存ツイートが 2 件未満の場合は根拠不足として判定対象外にする (C2PA 由来の開示は除く)。陽性がなく、開示の有無を判定済みのツイートが 2 件未満の場合も判定対象外にする',
+  version: '1.3.0',
   evaluate(bundle) {
     if (!isRecentTweetsEvaluable(bundle)) {
       return {
@@ -48,32 +48,35 @@ export const tweetAiGeneratedMediaRule: LabelRule = {
       }
     }
 
+    // リツイートの開示は元の投稿者のものであり、このアカウントの投稿として数えない。
+    const ownTweets = bundle.recentTweets.filter((t) => !t.isRetweet)
+
     // 保存ツイートが 1 件以下では根拠不足のため、フラグが立っていても陽性にしない。
     // ただし C2PA は改ざん検知可能な来歴で単独でも十分な根拠になるため対象外とする。
-    const hasC2paEvidence = bundle.recentTweets.some(
+    const hasC2paEvidence = ownTweets.some(
       (t) => t.hasAiGeneratedMedia === true && t.aiGeneratedDetectionSource === 'C2paClient',
     )
-    if (bundle.recentTweets.length < MIN_TWEETS_FOR_EVALUATION && !hasC2paEvidence) {
+    if (ownTweets.length < MIN_TWEETS_FOR_EVALUATION && !hasC2paEvidence) {
       return {
         value: false,
         confidence: 0.5,
-        reason: `too few recentTweets (n=${bundle.recentTweets.length})`,
+        reason: `too few own recentTweets (n=${ownTweets.length})`,
         evaluable: false,
       }
     }
 
-    const flagged = bundle.recentTweets.filter((t) => t.hasAiGeneratedMedia === true)
+    const flagged = ownTweets.filter((t) => t.hasAiGeneratedMedia === true)
     const value = flagged.length > 0
 
     // hasAiGeneratedMedia が null の行は判定自体が行われていないため、陰性の根拠に数えない。
-    const evaluatedCount = bundle.recentTweets.filter(
+    const evaluatedCount = ownTweets.filter(
       (t) => t.hasAiGeneratedMedia !== null && t.hasAiGeneratedMedia !== undefined,
     ).length
     if (!value && evaluatedCount < MIN_TWEETS_FOR_EVALUATION) {
       return {
         value: false,
         confidence: 0.5,
-        reason: `too few evaluated recentTweets (n=${evaluatedCount} of ${bundle.recentTweets.length})`,
+        reason: `too few evaluated recentTweets (n=${evaluatedCount} of ${ownTweets.length})`,
         evaluable: false,
       }
     }
@@ -88,7 +91,7 @@ export const tweetAiGeneratedMediaRule: LabelRule = {
     return {
       value,
       confidence,
-      reason: `aiGeneratedMediaTweetCount=${flagged.length} (n=${bundle.recentTweets.length}), sources=${sources.join(',') || 'none'}`,
+      reason: `aiGeneratedMediaTweetCount=${flagged.length} (n=${ownTweets.length}), sources=${sources.join(',') || 'none'}`,
     }
   },
 }

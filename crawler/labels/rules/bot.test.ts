@@ -59,10 +59,26 @@ describe('botRule', () => {
   it('is true for a high-velocity account with regular intervals and no replies', () => {
     const oneYearAgo = new Date('2025-01-01T00:00:00Z')
     const result = botRule.evaluate(
-      makeBundle({ tweetCount: 100_000, accountCreatedAt: oneYearAgo }, regularTweets(10, 60e3)),
+      makeBundle({ tweetCount: 100_000, accountCreatedAt: oneYearAgo }, regularTweets(20, 60e3)),
     )
     expect(result.value).toBe(true)
     expect(result.confidence).toBeGreaterThan(0)
+  })
+
+  it('does not corroborate recent velocity from a sample spanning under six hours', () => {
+    const oneYearAgo = new Date('2025-01-01T00:00:00Z')
+    const result = botRule.evaluate(
+      makeBundle({ tweetCount: 100_000, accountCreatedAt: oneYearAgo }, regularTweets(13, 60e3)),
+    )
+    expect(result.value).toBe(false)
+  })
+
+  it('corroborates recent velocity once the sample is large enough at the six-hour floor', () => {
+    const oneYearAgo = new Date('2025-01-01T00:00:00Z')
+    const result = botRule.evaluate(
+      makeBundle({ tweetCount: 100_000, accountCreatedAt: oneYearAgo }, regularTweets(14, 60e3)),
+    )
+    expect(result.value).toBe(true)
   })
 
   it('is false for a heavy but human-plausible posting rate', () => {
@@ -210,7 +226,7 @@ describe('botRule', () => {
   it('is still true for a high-velocity account posting only original, non-conversational content', () => {
     const oneYearAgo = new Date('2025-01-01T00:00:00Z')
     const result = botRule.evaluate(
-      makeBundle({ tweetCount: 100_000, accountCreatedAt: oneYearAgo }, regularTweets(10, 60e3)),
+      makeBundle({ tweetCount: 100_000, accountCreatedAt: oneYearAgo }, regularTweets(20, 60e3)),
     )
     expect(result.value).toBe(true)
   })
@@ -253,7 +269,7 @@ describe('botRule', () => {
   it('boosts confidence when low-effort signup signals accompany a positive bot judgment', () => {
     const oneYearAgo = new Date('2025-01-01T00:00:00Z')
     const withoutSignals = botRule.evaluate(
-      makeBundle({ tweetCount: 100_000, accountCreatedAt: oneYearAgo }, regularTweets(10, 60e3)),
+      makeBundle({ tweetCount: 100_000, accountCreatedAt: oneYearAgo }, regularTweets(20, 60e3)),
     )
     const withSignals = botRule.evaluate(
       makeBundle(
@@ -265,7 +281,7 @@ describe('botRule', () => {
           profileImageUrl:
             'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png',
         },
-        regularTweets(10, 60e3),
+        regularTweets(20, 60e3),
       ),
     )
     expect(withoutSignals.value).toBe(true)
@@ -283,10 +299,10 @@ describe('botRule', () => {
       profileImageUrl: 'https://pbs.twimg.com/profile_images/example/avatar.jpg',
     }
     const withoutSignals = botRule.evaluate(
-      makeBundle(baseAccountOverrides, regularTweets(10, 60e3)),
+      makeBundle(baseAccountOverrides, regularTweets(20, 60e3)),
     )
     const withOneSignal = botRule.evaluate(
-      makeBundle({ ...baseAccountOverrides, screenName: 'user12345678' }, regularTweets(10, 60e3)),
+      makeBundle({ ...baseAccountOverrides, screenName: 'user12345678' }, regularTweets(20, 60e3)),
     )
     expect(withoutSignals.value).toBe(true)
     expect(withOneSignal.value).toBe(true)
