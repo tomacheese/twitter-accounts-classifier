@@ -77,7 +77,7 @@ const AI_OCCUPATIONAL_CONTEXT_PATTERN =
 // 使われるが、「画像/イラスト/作品を紹介します」のように自身のコンテンツ名詞を目的語に取る場合は、
 // 「画像は」のような主題化(は)ではなく目的語化(を)であっても、実質的に自己申告と同じである。
 const PERSONAL_CONTENT_DECLARATION_PATTERN =
-  /(?<!アイコン)画像は|アイコン画像は.{0,12}(?:AI生成|AIで|生成|AI-generated)|イラストは|作品(です|を投稿)|ヘッダーは|アイコンは|保管庫|ポートレート|(?:画像|イラスト|作品)を紹介(?:します|しています)|(?:生成AI|AI生成|AIで生成).{0,16}(?:画像|イラスト|作品|音楽|楽曲|動画|小説).{0,12}(?:投稿|公開|配信(?!者)|発信|販売)|AI-generated music.{0,12}(?:publish|post|upload|stream)|(?<!\b(?:in|of|about)\s+AI)-generated (images?|art|content|portraits?)|images? are AI/i
+  /(?:画像|イラスト|ヘッダー|アイコン)は.{0,12}(?:AI生成|AIで|生成|AI-generated)|作品(です|を投稿)|保管庫|ポートレート|(?:画像|イラスト|作品)を紹介(?:します|しています)|(?:生成AI|AI生成|AIで生成).{0,16}(?:画像|イラスト|作品|音楽|楽曲|動画|小説).{0,12}(?:投稿|公開|配信(?!者)|発信|販売)|AI-generated music.{0,12}(?:publish|post|upload|stream)|(?<!\b(?:in|of|about)\s+AI)-generated (images?|art|content|portraits?)|images? are AI/i
 
 // 「投稿して(います|ます)」は画像/イラストなどのコンテンツ名詞を伴わない限り、
 // 単に何らかの記事を投稿している意味でしかなく、AI生成物の自己申告にはならない。
@@ -330,7 +330,7 @@ export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description:
     'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及や、改行や記号 (スラッシュ・読点・中黒・括弧など) で区切った列挙の一項目、または AI 語のみの bio としての記載だけでは該当しない。AI 語と同じ文に書かれた否定 (AI生成禁止・生成AI不使用など) は自己申告を打ち消すが、別の文の禁止語は打ち消さない。また、二次利用・転載・学習などの利用条件表記は打ち消さない。アイコンのみの AI 生成申告は自己申告として扱う。冗談・ネタとして書かれた申告と、制作会社の担当者が自社の生成 AI 案件に触れる記載は自己申告として扱わない',
-  version: '1.21.1',
+  version: '1.21.2',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =

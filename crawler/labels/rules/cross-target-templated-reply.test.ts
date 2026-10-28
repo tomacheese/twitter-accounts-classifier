@@ -69,6 +69,32 @@ describe('crossTargetTemplatedReplyRule', () => {
     expect(result.confidence).toBeCloseTo(0.5)
   })
 
+  it('is false when the templated reply is a hashtag-only campaign entry', () => {
+    const bundle = makeBundle(
+      Array.from({ length: 6 }, (_, i) => ({
+        fullText: '#fictionalbirthdayevent2026 #sampletag',
+        isReply: true,
+        hoursAgo: i,
+        inReplyToTweetId: `target${i}`,
+      })),
+    )
+
+    expect(crossTargetTemplatedReplyRule.evaluate(bundle).value).toBe(false)
+  })
+
+  it('stays true when a hashtag is combined with templated praise', () => {
+    const bundle = makeBundle(
+      Array.from({ length: 5 }, (_, i) => ({
+        fullText: `${TEMPLATE_TEXT} #fictionalbirthdayevent2026`,
+        isReply: true,
+        hoursAgo: i,
+        inReplyToTweetId: `target${i}`,
+      })),
+    )
+
+    expect(crossTargetTemplatedReplyRule.evaluate(bundle).value).toBe(true)
+  })
+
   it('is false when distinct targets are 4 or fewer', () => {
     const bundle = makeBundle(
       Array.from({ length: 4 }, (_, i) => ({

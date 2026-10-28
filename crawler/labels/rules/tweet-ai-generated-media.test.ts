@@ -63,6 +63,44 @@ describe('tweetAiGeneratedMediaRule', () => {
     expect(result).toMatchObject({ value: false, confidence: 0.5, evaluable: false })
   })
 
+  it('does not attribute a retweeted AI-generated media disclosure to the account', () => {
+    const result = tweetAiGeneratedMediaRule.evaluate(
+      makeBundle([
+        tweet({ id: 'r1', isRetweet: true, hasAiGeneratedMedia: true }),
+        tweet({ id: 'r2', isRetweet: true, hasAiGeneratedMedia: true }),
+        tweet({ id: 'o1', hasAiGeneratedMedia: false }),
+        tweet({ id: 'o2', hasAiGeneratedMedia: false }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+    expect(result.confidence).toBe(1)
+  })
+
+  it('is not evaluable when the account has too few own tweets besides retweets', () => {
+    const retweets = Array.from({ length: 10 }, (_, i) =>
+      tweet({ id: `r${i}`, isRetweet: true, hasAiGeneratedMedia: false }),
+    )
+    const result = tweetAiGeneratedMediaRule.evaluate(
+      makeBundle([...retweets, tweet({ id: 'o1', hasAiGeneratedMedia: false })]),
+    )
+    expect(result).toMatchObject({ value: false, confidence: 0.5, evaluable: false })
+  })
+
+  it('judges from own tweets once two of them have been evaluated', () => {
+    const retweets = Array.from({ length: 10 }, (_, i) =>
+      tweet({ id: `r${i}`, isRetweet: true, hasAiGeneratedMedia: false }),
+    )
+    const result = tweetAiGeneratedMediaRule.evaluate(
+      makeBundle([
+        ...retweets,
+        tweet({ id: 'o1', hasAiGeneratedMedia: false }),
+        tweet({ id: 'o2', hasAiGeneratedMedia: false }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+    expect(result.confidence).toBe(1)
+  })
+
   it('is not evaluable for an account with no recent tweets', () => {
     const result = tweetAiGeneratedMediaRule.evaluate(makeBundle([]))
     expect(result.value).toBe(false)

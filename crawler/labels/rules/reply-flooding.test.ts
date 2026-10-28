@@ -44,6 +44,22 @@ function makeBundle(
   }
 }
 
+function floodingTweets(spanMinutes: number) {
+  return Array.from({ length: 8 }, (_, i) => ({
+    fullText: `@target これは十分に長い言い換えリプライ本文で境界値を確認します ${i}`,
+    isReply: true,
+    minutesAgo: (spanMinutes / 7) * i,
+  }))
+}
+
+function tweetsWithBodyLength(length: number) {
+  return Array.from({ length: 8 }, (_, i) => ({
+    fullText: `@target ${'あ'.repeat(length)}`,
+    isReply: true,
+    minutesAgo: i * 3,
+  }))
+}
+
 describe('replyFloodingRule', () => {
   it('is true for many paraphrased replies flooding a single target within a short window', () => {
     const bundle = makeBundle(
@@ -115,6 +131,66 @@ describe('replyFloodingRule', () => {
     } finally {
       similaritySpy.mockRestore()
     }
+  })
+
+  describe('window span boundary', () => {
+    it('keeps a group spanning exactly 24 hours positive', () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+      const similaritySpy = vi
+        .spyOn(textSimilarity, 'averagePairwiseSimilarity')
+        .mockReturnValue(0.5)
+
+      try {
+        expect(replyFloodingRule.evaluate(makeBundle(floodingTweets(24 * 60))).value).toBe(true)
+      } finally {
+        similaritySpy.mockRestore()
+        vi.useRealTimers()
+      }
+    })
+
+    it('excludes a group spanning one minute over 24 hours', () => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+      const similaritySpy = vi
+        .spyOn(textSimilarity, 'averagePairwiseSimilarity')
+        .mockReturnValue(0.5)
+
+      try {
+        expect(replyFloodingRule.evaluate(makeBundle(floodingTweets(24 * 60 + 1))).value).toBe(
+          false,
+        )
+      } finally {
+        similaritySpy.mockRestore()
+        vi.useRealTimers()
+      }
+    })
+  })
+
+  describe('short reply median length boundary', () => {
+    it.each([
+      { length: 18, expected: true },
+      { length: 17, expected: false },
+    ])(
+      'applies the matching similarity threshold at a median length of $length',
+      ({ length, expected }) => {
+        const [sample] = tweetsWithBodyLength(length)
+        expect(
+          textSimilarity.normalizeForSimilarity(sample.fullText, { removeHashtags: true }).length,
+        ).toBe(length)
+        const similaritySpy = vi
+          .spyOn(textSimilarity, 'averagePairwiseSimilarity')
+          .mockReturnValue(0.2)
+
+        try {
+          expect(replyFloodingRule.evaluate(makeBundle(tweetsWithBodyLength(length))).value).toBe(
+            expected,
+          )
+        } finally {
+          similaritySpy.mockRestore()
+        }
+      },
+    )
   })
 
   it('keeps an unrounded score below the threshold negative when its reason would round to 0.150', () => {

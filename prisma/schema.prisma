@@ -1124,6 +1124,7 @@ model ComponentBuildIdentity {
 }
 
 model BioDuplicateClusterSize {
-  clusterKey String @id
+  clusterKey String   @id
   size       Int
+  memberIds  String[] @default([])
 }

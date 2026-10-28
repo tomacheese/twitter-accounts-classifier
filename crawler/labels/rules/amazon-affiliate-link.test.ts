@@ -67,6 +67,26 @@ describe('amazonAffiliateLinkRule', () => {
     expect(result.confidence).toBeGreaterThan(0.5)
   })
 
+  it.each(['500円のランチを食べた', '新しい椅子を買ってきた'])(
+    'is false for a single amzn.to link whose text only mentions money or buying in passing (%s)',
+    (fullText) => {
+      const result = amazonAffiliateLinkRule.evaluate(
+        makeBundle([tweet({ fullText, expandedUrls: ['https://amzn.to/fictional'] })]),
+      )
+      expect(result.value).toBe(false)
+    },
+  )
+
+  it.each(['価格は¥1,200でした', '値段が手頃でした'])(
+    'stays true for a single amzn.to link with an explicit price context (%s)',
+    (fullText) => {
+      const result = amazonAffiliateLinkRule.evaluate(
+        makeBundle([tweet({ fullText, expandedUrls: ['https://amzn.to/fictional'] })]),
+      )
+      expect(result.value).toBe(true)
+    },
+  )
+
   it('is true for amzn.to links in two separate tweets even without product context', () => {
     const result = amazonAffiliateLinkRule.evaluate(
       makeBundle([
