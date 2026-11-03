@@ -247,9 +247,10 @@ export async function claimNextWorkItem(
   const now = new Date()
   const leaseExpiresAt = new Date(now.getTime() + input.leaseDurationMs)
 
-  return prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
-      `SELECT "id" FROM "AnalysisWorkItem"
+  return prisma.$transaction(
+    async (tx) => {
+      const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
+        `SELECT "id" FROM "AnalysisWorkItem"
        WHERE "kind" = ANY($1)
          AND "status" IN ('queued', 'leased', 'failed')
          AND "availableAt" <= $2
@@ -258,22 +259,24 @@ export async function claimNextWorkItem(
        ORDER BY "priority" DESC, "availableAt" ASC
        LIMIT 1
        FOR UPDATE SKIP LOCKED`,
-      input.kinds,
-      now,
-    )
-    const target = rows.at(0)
-    if (!target) return undefined
+        input.kinds,
+        now,
+      )
+      const target = rows.at(0)
+      if (!target) return undefined
 
-    return tx.analysisWorkItem.update({
-      where: { id: target.id },
-      data: {
-        status: 'leased',
-        leaseOwner: input.leaseOwner,
-        leaseExpiresAt,
-        attemptCount: { increment: 1 },
-      },
-    })
-  })
+      return tx.analysisWorkItem.update({
+        where: { id: target.id },
+        data: {
+          status: 'leased',
+          leaseOwner: input.leaseOwner,
+          leaseExpiresAt,
+          attemptCount: { increment: 1 },
+        },
+      })
+    },
+    { maxWait: 15_000, timeout: 15_000 },
+  )
 }
 
 export interface CompleteAccountRelabelWorkItemInput {

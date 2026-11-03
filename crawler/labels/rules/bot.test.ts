@@ -1,6 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { botRule } from './bot'
 import type { AccountFeatureBundle } from '../types'
+
+// フィクスチャの固定日付 (2025-01-01 を「1 年前」とみなす) と `Date.now()` を使う実装の差で、
+// 実行日に応じて平均投稿頻度が変わりテストが壊れるのを防ぐため、現在時刻を固定する。
+beforeEach(() => {
+  vi.useFakeTimers({ now: new Date('2026-01-01T00:00:00Z'), toFake: ['Date'] })
+})
 
 afterEach(() => {
   vi.restoreAllMocks()
