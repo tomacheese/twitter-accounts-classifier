@@ -16,14 +16,12 @@ COPY pipeline-health ./pipeline-health
 RUN pnpm --filter viewer run db:generate
 RUN pnpm --filter viewer run build
 
-# `output: 'standalone'` traces only the files each route actually needs, so
-# the runtime stage below copies that minimal bundle instead of the full
-# node_modules tree, and runs the bundle's own server.js directly — no pnpm
-# or package manager needed at runtime. outputFileTracingRoot in
-# next.config.ts is pinned to the pnpm workspace root (one level above
-# viewer/), so the traced bundle mirrors that layout: shared deps land at
-# .next/standalone/node_modules, and the app itself lands nested at
-# .next/standalone/viewer/ rather than at the standalone root.
+# `output: 'standalone'` は各ルートが実際に必要とするファイルだけをトレースする。
+# そのため後続の runtime ステージでは node_modules 全体ではなくこの最小バンドルをコピーし、
+# バンドル自身の server.js を直接実行する (実行時に pnpm などのパッケージマネージャーは不要)。
+# next.config.ts の outputFileTracingRoot は pnpm workspace のルート (viewer/ の 1 つ上) に固定されている。
+# このためトレース結果もその構成を反映し、共有依存は .next/standalone/node_modules に、
+# アプリ本体は standalone ルートではなく .next/standalone/viewer/ にネストして配置される。
 FROM node:24-bookworm-slim
 
 ARG APPLICATION_VERSION=unknown

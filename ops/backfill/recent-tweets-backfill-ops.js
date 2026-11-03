@@ -41,7 +41,7 @@ const AUTHENTICATED_USER_API_FACTORY_DEPENDENCIES = {
 /**
  * 指定済み account の cookie と OpenAPI client を作り、backfill 用 UserApiLike に変換する。
  * @param account - username で選択済みの設定 account
- * @param requestTimeoutMs - OpenAPI request timeout
+ * @param requestTimeoutMs - OpenAPI リクエストのタイムアウト (ミリ秒)
  * @param deps - cookie/OpenAPI client 構築と cleanup の依存関係
  * @returns 認証済み UserApiLike と close 処理
  */

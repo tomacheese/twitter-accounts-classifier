@@ -3,9 +3,8 @@ import path from 'node:path'
 import { FlatCompat } from '@eslint/eslintrc'
 import book000Config from '@book000/eslint-config'
 
-// eslint-config-next only ships legacy eslintrc-style configs (no flat
-// config export yet), so FlatCompat bridges `next/core-web-vitals` into
-// this flat config.
+// eslint-config-next は従来の eslintrc 形式の設定しか提供しておらず (flat config 形式の export が無い)、
+// FlatCompat で `next/core-web-vitals` をこの flat config へ橋渡しする。
 const compat = new FlatCompat({
   baseDirectory: path.dirname(fileURLToPath(import.meta.url)),
 })
@@ -42,8 +41,8 @@ const config = [
     ],
   },
   {
-    // postcss.config.js must stay CommonJS: postcss/autoprefixer's config
-    // loader resolves this file synchronously and does not support ESM here.
+    // postcss.config.js は CommonJS のままにする。
+    // postcss/autoprefixer の設定ローダーはこのファイルを同期的に解決し、ESM をサポートしないため。
     files: ['postcss.config.js'],
     rules: {
       'unicorn/prefer-module': 'off',

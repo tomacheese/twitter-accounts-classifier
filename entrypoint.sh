@@ -4,9 +4,9 @@ set -eu
 # prisma db seed は内部で tsx ../prisma/seed.ts を子プロセスとして spawn するため、PATH に無いと spawn tsx ENOENT になる。
 export PATH="/app/crawler/node_modules/.bin:$PATH"
 
-# `docker compose run crawler <command>` passes <command> as $@; without this, the
-# container ignored it and always fell through to the crawl loop below, making one-off
-# commands (e.g. `node dist/relabel.js`) silently run a full crawl cycle instead.
+# `docker compose run crawler <command>` は <command> を $@ として渡す。
+# この分岐が無いと引数が無視されて常に下のクロールループへ進み、
+# 単発コマンド (例: `node dist/relabel.js`) の代わりにクロールサイクルが走ってしまう。
 if [ "$#" -gt 0 ]; then
   exec "$@"
 fi

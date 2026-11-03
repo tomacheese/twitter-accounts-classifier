@@ -4,8 +4,12 @@ Twitter をクロールしてツイート・アカウント情報を収集し、
 
 ## 概要
 
-- `crawler/`: Twitter のタイムライン・ツイート・プロフィールを収集し、`crawler/labels/rules/` のルール群でラベリングして Postgres に保存する Node.js アプリ。6時間ごとに実行する。
+- `crawler/`: Twitter のタイムライン・ツイート・プロフィールを収集し、`crawler/labels/rules/` のルール群でラベリングして Postgres に保存する Node.js アプリ。`compose.yaml` では 3 時間ごと (`CRAWL_INTERVAL_SECONDS=10800`) に実行する。`relabeler` サービスはラベル定義の変更後に既存アカウントを再ラベリングする。
+- `blocker/`: ラベルと確信度のしきい値に基づいてブロックを実行する Node.js アプリ。
+- `analyzer/`: 収集結果の read model 更新と、検出器による Finding 生成を行う Node.js アプリ。
 - `viewer/`: 収集結果をダッシュボード表示する Next.js アプリ。
+- `twitter-client/`: crawler・blocker が共有する Twitter/X クライアントのライブラリ。
+- `pipeline-health/`: viewer が使うパイプライン健全性判定のライブラリ。
 - `prisma/`: crawler・viewer が共有する Postgres スキーマ。リポジトリルート直下に置き、両アプリから `--schema=../prisma/schema.prisma` で相対参照する。
 - 詳細な設計判断・背景は [SPEC.md](./SPEC.md) を参照。
 
@@ -39,7 +43,7 @@ Viewer には認証機構がなく、フォロー・フォロワー・ブロッ�
 | ------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`                        | ○    | Postgres 接続文字列                                                                                                                                                                                                       |
 | `COOKIE_ISSUER_URL`                   | ○    | cookie-issuer サービスの URL。フォールバック値はないため未設定だと起動時にエラーになる                                                                                                                                    |
-| `CRAWL_INTERVAL_SECONDS`              | -    | クロール間隔 (秒)。デフォルト 21600 (6時間)                                                                                                                                                                               |
+| `CRAWL_INTERVAL_SECONDS`              | -    | クロール間隔 (秒)。コード上のデフォルトは 21600 (6時間) で、`compose.yaml` の crawler サービスは 10800 (3時間) を設定する                                                                                                 |
 | `CRAWL_STALE_THRESHOLD_MULTIPLIER`    | -    | `running` のまま放置された CrawlRun を検出するしきい値の倍率 (クロール間隔の何倍か)。デフォルト 3                                                                                                                         |
 | `GLITCHTIP_DSN`                       | -    | GlitchTip (エラートラッキング) の DSN。未設定なら送信しない                                                                                                                                                               |
 | `CRAWL_WARNING_THRESHOLD`             | -    | 1 アカウントの crawl 1 回あたり、GlitchTip へ集約通知する warning 件数の閾値。デフォルト 5                                                                                                                                |
@@ -56,12 +60,13 @@ Viewer には認証機構がなく、フォロー・フォロワー・ブロッ�
 | `RELABELER_WORKER_CONCURRENCY`        | -    | relabeler worker の evaluate フェーズの並行度。デフォルト 1                                                                                                                                                               |
 | `RELABELER_WORKER_CHUNK_SIZE`         | -    | relabeler worker が claim/evaluate する際の 1 chunk あたりの account 件数。デフォルト 1000                                                                                                    |
 | `RELABELER_LABEL_LOOKUP_CHUNK_SIZE`   | -    | relabeler producer の stale scan が AccountLabelLatest を lookup する際の 1 chunk あたりの account 件数。デフォルト 1000                                                                                                  |
+| `RELABELER_ORPHAN_RECOVERY_BATCH_SIZE` | -    | relabeler が孤立した work item を回復する際の 1 回あたりの件数。デフォルト 1000 |
 
 ## relabel backfill の運用契約
 
 `relabeler` サービスは crawl とは独立して常駐し、`RELABELER_INTERVAL_SECONDS` (デフォルト 30 秒) ごとに stale scan と `account_relabel` キューの drain を行う。デフォルト設定 (batch size 現行維持・concurrency 1) では、新規/更新ラベル追加後の対象アカウント数が `RELABELER_WORKER_BATCH_SIZE` (デフォルト 2000) 件を大きく超えない範囲であれば数分〜数十分程度で `currentRuleVersion` coverage が収束する。対象が Account 全件規模 (約 247 万件) に及ぶ場合は、producer の `RELABELER_PRODUCER_BATCH_SIZE` による段階的な queued 化と drain 速度の両方に依存するため、より長い時間を要する。進捗は viewer の System 画面「Relabel backfill」セクションの coverage 表・backlog 表・scan cursor 更新時刻で確認できる。
 
-**重要**: 本番機の `compose.prod.yaml` はこのリポジトリに含まれないため、このリポジトリの `compose.yaml` に追随して本番の compose 定義へ `relabeler` サービスを追加するまでは、本番へのデプロイと同時に relabel が一切実行されなくなる (`entrypoint.sh` からの `relabel-worker` 呼び出しを本 PR で削除したため)。crawler イメージの更新と `relabeler` サービス追加は同一デプロイで反映すること。
+**重要**: 本番機の `compose.prod.yaml` はこのリポジトリに含まれないため、このリポジトリの `compose.yaml` に追随して本番の compose 定義へ `relabeler` サービスを追加するまでは、本番へのデプロイと同時に relabel が一切実行されなくなる (crawler の `entrypoint.sh` からは `relabel-worker` を呼び出さなくなったため)。crawler イメージの更新と `relabeler` サービス追加は同一デプロイで反映すること。
 
 ## recent tweets backfill の運用契約
 
