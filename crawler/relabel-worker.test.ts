@@ -730,7 +730,7 @@ describe('evaluateAccountRelabelItems', () => {
     })
   })
 
-  it('1 グループが 25 件を超えると永続化・完了をサブバッチに分割し、1 サブバッチの失敗が他サブバッチの完了済み分を巻き込まない', async () => {
+  it('1 グループが 10 件を超えると永続化・完了をサブバッチに分割し、1 サブバッチの失敗が他サブバッチの完了済み分を巻き込まない', async () => {
     const rule: LabelRule = {
       key: 'test_rule',
       description: 'test',
@@ -741,10 +741,10 @@ describe('evaluateAccountRelabelItems', () => {
     registry.register(rule)
 
     const items = Array.from(
-      { length: 30 },
+      { length: 15 },
       (_, index) => ({ id: `wi-${index}`, triggerId: `account-${index}` }) as never,
     )
-    const accounts = Array.from({ length: 30 }, (_, index) => ({ id: `account-${index}` }))
+    const accounts = Array.from({ length: 15 }, (_, index) => ({ id: `account-${index}` }))
 
     const recordLabelsSpy = vi
       .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
@@ -780,13 +780,13 @@ describe('evaluateAccountRelabelItems', () => {
       leaseOwner: 'test-worker',
     })
 
-    // 30 件は 25 件・5 件の 2 サブバッチに分かれ、2 サブバッチ目の失敗は 1 サブバッチ目の 25 件を巻き込まない。
+    // 15 件は 10 件・5 件の 2 サブバッチに分かれ、2 サブバッチ目の失敗は 1 サブバッチ目の 10 件を巻き込まない。
     expect(recordLabelsSpy).toHaveBeenCalledTimes(2)
     expect(completeSpy).toHaveBeenCalledTimes(2)
-    expect(result.succeeded).toBe(25)
+    expect(result.succeeded).toBe(10)
     expect(updateManySpy).toHaveBeenCalledWith({
       where: {
-        id: { in: Array.from({ length: 5 }, (_, index) => `wi-${index + 25}`) },
+        id: { in: Array.from({ length: 5 }, (_, index) => `wi-${index + 10}`) },
         status: { not: 'succeeded' },
       },
       data: { lastErrorSummary: expect.stringContaining('DB write failed') as string },

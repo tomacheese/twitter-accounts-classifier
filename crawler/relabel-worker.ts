@@ -122,9 +122,11 @@ export interface EvaluateAccountRelabelItemsResult {
  * 失敗時に失われる範囲をこのサブバッチ単位に留める。
  * ルール数 (`ALL_LABEL_RULES.length`、現状 49) との積が `recordAccountLabelsBulkLatestOnlyForAccounts` の
  * サブチャンク上限 2000 行に収まるようこの値を選んでおり、1 サブバッチが常に 1 回の UNNEST
- * UPSERT で書けるようにしている。将来ルールが増えても 80 個までは 2000 行以内に収まる。
+ * UPSERT で書けるようにしている。将来ルールが増えても 200 個までは 2000 行以内に収まる。
+ * AccountLabelLatest は行ごとのトリガーと複数 index を持ち、所要時間が書き込み行数に比例して伸びる。
+ * timeout を延ばす案は行ロックの保持を長引かせるだけなので採らず、行数を抑えて timeout に余裕を持たせる。
  */
-const ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE = 25
+const ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE = 10
 
 /**
  * サブバッチ単位のラベル永続化・work item 完了を包む interactive transaction の上限 (ms)。
@@ -287,7 +289,7 @@ async function evaluateAccountRelabelItemGroup(
       // 再 claim も同じ FOR UPDATE SKIP LOCKED で行うためロック中の行をスキップし、
       // 生存確認から書き込み完了までの間に割り込めなくなる。単なる事前 SELECT では
       // 確認と書き込みの間に再 claim が割り込む窓が残るため採用しない。
-      // サブバッチを小さく (25 account) 保つことで、この transaction 自体は
+      // サブバッチを小さく (10 account) 保つことで、この transaction 自体は
       // lease (5分) より十分短い timeout で完了できる規模に留めている。
       const completions = await prisma.$transaction(
         async (tx) => {
