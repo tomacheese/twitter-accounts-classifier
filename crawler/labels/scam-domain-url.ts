@@ -21,7 +21,8 @@ export function classifyScamDomainUrl(value: string): ScamDomainEvidence | null 
 
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
 
-  const host = url.hostname.toLowerCase()
+  // 末尾ドット付きの FQDN でも判定をすり抜けないよう取り除く。
+  const host = url.hostname.toLowerCase().replace(/\.$/u, '')
   const indicator = SCAM_DOMAIN_INDICATORS.find((entry) => isHostOrSubdomain(host, entry.domain))
   if (!indicator) return null
 

@@ -814,6 +814,11 @@ describe('aiGeneratedRule', () => {
     'AI生成イラストを投稿しています ろうそく好き',
     'AI生成イラストを投稿しています 無断転載は禁止',
     'AI生成イラストを投稿しています 二次利用もNG',
+    'AI生成の画像を投稿。そうそう、猫好きです',
+    'AI生成イラスト投稿。ネタ切れ中',
+    'AI生成イラスト投稿 / 嘘は言いません',
+    'I never repost. AI-generated art daily',
+    '架空のヒーロー作品の画像をAIで生成して更新中 #嘘予告',
   ])('stays true when an unrelated word or usage notice follows the declaration (%s)', (bio) => {
     expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(true)
   })
@@ -824,4 +829,22 @@ describe('aiGeneratedRule', () => {
       expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
     },
   )
+
+  it.each([
+    '古い端末で生成AIを動かす人。エンジニア',
+    '小型端末で生成AIを動作させる研究をしています',
+  ])(
+    'is false when the bio only says the user runs a generative model as a technology (%s)',
+    (bio) => {
+      expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+    },
+  )
+
+  it('is true when a model-running mention sits next to a genuine declaration', () => {
+    expect(
+      aiGeneratedRule.evaluate(
+        makeBundle({ bio: '古い端末で生成AIを動かす人。生成AIで作ったイラストを投稿中' }),
+      ).value,
+    ).toBe(true)
+  })
 })
