@@ -53,7 +53,11 @@ describe('videoRepostRule', () => {
 
   it('does not treat repeated quote-posts of another account video as reuse', () => {
     const result = videoRepostRule.evaluate(
-      makeBundle([tweet({ id: 't1' }), tweet({ id: 't2' }), tweet({ id: 't3' })]),
+      makeBundle([
+        tweet({ id: 't1', foreignVideoSourceCount: 0 }),
+        tweet({ id: 't2', foreignVideoSourceCount: 0 }),
+        tweet({ id: 't3', foreignVideoSourceCount: 0 }),
+      ]),
     )
     expect(result.value).toBe(false)
     expect(result.confidence).toBe(1)
@@ -103,5 +107,46 @@ describe('videoRepostRule', () => {
     expect(result.value).toBe(false)
     expect(result.evaluable).toBe(false)
     expect(result.confidence).toBe(0.5)
+  })
+
+  it('is evaluable=false when unaggregated tweets could still reach the threshold', () => {
+    const result = videoRepostRule.evaluate(
+      makeBundle([
+        tweet({ id: 't1', foreignVideoSourceCount: 1 }),
+        tweet({ id: 't2', foreignVideoSourceCount: null }),
+        tweet({ id: 't3', foreignVideoSourceCount: undefined }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(false)
+    expect(result.confidence).toBe(0.5)
+  })
+
+  it('stays a confident false when unaggregated tweets cannot reach the threshold', () => {
+    const result = videoRepostRule.evaluate(
+      makeBundle([
+        tweet({ id: 't1', foreignVideoSourceCount: 0 }),
+        tweet({ id: 't2', foreignVideoSourceCount: 0 }),
+        tweet({ id: 't3', foreignVideoSourceCount: null }),
+        tweet({ id: 't4', foreignVideoSourceCount: null, isRetweet: true }),
+        tweet({ id: 't5', foreignVideoSourceCount: null, isRetweet: true }),
+      ]),
+    )
+    expect(result.value).toBe(false)
+    expect(result.evaluable).toBe(true)
+    expect(result.confidence).toBe(1)
+  })
+
+  it('stays true when the threshold is met regardless of unaggregated tweets', () => {
+    const result = videoRepostRule.evaluate(
+      makeBundle([
+        tweet({ id: 't1', foreignVideoSourceCount: 1 }),
+        tweet({ id: 't2', foreignVideoSourceCount: 2 }),
+        tweet({ id: 't3', foreignVideoSourceCount: 1 }),
+        tweet({ id: 't4', foreignVideoSourceCount: null }),
+      ]),
+    )
+    expect(result.value).toBe(true)
+    expect(result.evaluable).toBe(true)
   })
 })

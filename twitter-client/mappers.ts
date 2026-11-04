@@ -225,9 +225,12 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
           media.sourceUserIdStr != null &&
           media.sourceUserIdStr !== raw.user.restId,
       ).length ?? 0)
-    : null
+    : raw.legacy.entities === undefined
+      ? null
+      : 0
   const media = raw.legacy.extendedEntities?.media ?? raw.legacy.entities?.media
-  const hasMedia = media === undefined ? null : media.length > 0
+  const hasMedia =
+    media === undefined ? (raw.legacy.entities === undefined ? null : false) : media.length > 0
 
   return {
     id: stripNul(raw.restId),

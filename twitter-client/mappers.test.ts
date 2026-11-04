@@ -111,7 +111,7 @@ describe('toTweetInput', () => {
     expect(input.quotedTweetHasVideo).toBeNull()
   })
 
-  it('maps a present empty media list to false and an absent media list to unknown', () => {
+  it('maps a present empty media list to false and a tweet without any entities to unknown', () => {
     const noMedia = toTweetInput(
       { ...rawTweet, legacy: { ...rawTweet.legacy, extendedEntities: { media: [] } } },
       { source: 'profile', viewerAccountId: 'u1' },
@@ -119,6 +119,16 @@ describe('toTweetInput', () => {
     const unknownMedia = toTweetInput(rawTweet, { source: 'profile', viewerAccountId: 'u1' })
     expect(noMedia.hasMedia).toBe(false)
     expect(unknownMedia.hasMedia).toBeNull()
+    expect(unknownMedia.foreignVideoSourceCount).toBeNull()
+  })
+
+  it('treats a tweet whose entities were returned without any media as text-only', () => {
+    const textOnly = toTweetInput(
+      { ...rawTweet, legacy: { ...rawTweet.legacy, entities: { urls: [] } } },
+      { source: 'profile', viewerAccountId: 'u1' },
+    )
+    expect(textOnly.hasMedia).toBe(false)
+    expect(textOnly.foreignVideoSourceCount).toBe(0)
   })
 
   it('detects media from entities when extendedEntities is absent', () => {
