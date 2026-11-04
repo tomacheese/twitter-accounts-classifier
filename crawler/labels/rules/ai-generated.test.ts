@@ -847,4 +847,31 @@ describe('aiGeneratedRule', () => {
       ).value,
     ).toBe(true)
   })
+
+  it.each(['ＡＩ生成イラストを投稿しています', '生成ＡＩで作った画像を投稿中'])(
+    'is true when a full-width self-declaration is normalized (%s)',
+    (bio) => {
+      expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(true)
+    },
+  )
+
+  it('is false for a full-width negated declaration', () => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio: 'ＡＩ生成は禁止です' })).value).toBe(false)
+  })
+
+  it.each([
+    '猫、写真、水彩調生成AI、旅行',
+    '猫、写真、レトロ風AI生成、旅行',
+    '猫\nゲーム\n水彩系生成AI',
+  ])('is false when a modified term is one item of an enumeration (%s)', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(false)
+  })
+
+  it.each([
+    '猫、写真、毎日AI生成、旅行',
+    '猫、写真、水彩調AI生成イラストを投稿中',
+    '猫、写真、とても長い修飾語がつくレトロ調生成AI、旅行',
+  ])('stays true when the modifier rule does not apply (%s)', (bio) => {
+    expect(aiGeneratedRule.evaluate(makeBundle({ bio })).value).toBe(true)
+  })
 })

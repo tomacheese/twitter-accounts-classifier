@@ -45,8 +45,9 @@ export function classifyAmazonAffiliateUrl(value: string): AmazonAffiliateEviden
 
   // 末尾ドット付きの FQDN でも判定をすり抜けないよう取り除く。
   const host = url.hostname.toLowerCase().replace(/\.$/u, '')
-  // amzn.to は Amazon Associates の SiteStripe 専用の発行経路である前提のため、
-  // 他の Amazon ドメインと異なり tag クエリの有無を条件にしていない。
+  // amzn.to は短縮後に tag が見えないため、他の Amazon ドメインと異なり tag クエリの有無を条件にしていない。
+  // 一般ユーザーの商品共有でも使われるため、陽性にする条件は呼び出し側のルールで絞る。
+  // amzn.asia・a.co・link.amazon はアプリの共有リンク等でも発行され、Associates 由来を判別できないため対象外とする。
   if (isHostOrSubdomain(host, 'amzn.to')) {
     return { kind: 'associates-short-link', host }
   }
