@@ -17,6 +17,8 @@ export interface TextOnlyBackfillDependencies {
   log: (message: string) => void
 }
 
+const PROGRESS_LOG_INTERVAL = 100
+
 function parseDate(args: string[], name: string): Date {
   const index = args.indexOf(name)
   const parsed = index === -1 ? Number.NaN : Date.parse(args.at(index + 1) ?? '')
@@ -41,10 +43,14 @@ function parsePositiveInt(args: string[], name: string, defaultValue?: number): 
 export function parseTextOnlyBackfillArgs(args: string[]): TextOnlyBackfillOptions {
   const execute = args.includes('--execute')
   const afterIndex = args.indexOf('--after-id')
+  const afterId = afterIndex === -1 ? undefined : args.at(afterIndex + 1)
+  if (afterId !== undefined && !/^\d+$/.test(afterId)) {
+    throw new Error('--after-id must be a numeric tweet id')
+  }
   return {
     foreignVideoSince: parseDate(args, '--foreign-video-since'),
     hasMediaSince: parseDate(args, '--has-media-since'),
-    afterId: afterIndex === -1 ? undefined : args.at(afterIndex + 1),
+    afterId,
     batchSize: parsePositiveInt(args, '--batch-size', 5000) ?? 5000,
     sleepMs: parsePositiveInt(args, '--sleep-ms', 100) ?? 100,
     maxBatches: parsePositiveInt(args, '--max-batches', execute ? undefined : 1),
@@ -54,10 +60,8 @@ export function parseTextOnlyBackfillArgs(args: string[]): TextOnlyBackfillOptio
 
 /**
  * 動画・画像のない投稿で NULL のまま残っている `foreignVideoSourceCount` と `hasMedia` を確定値へ埋める。
- * 動画・画像のない投稿は extendedEntities を持たず、収集時に未評価と区別されずに NULL で保存されていた。
- * 判定が収集に入る前の行は本当に未評価なので、取り込み時刻の境界以降の行だけを対象にする。
- * PK の id を keyset で窓切りし、窓ごとに commit するため長いロックを保持しない。
- * 冪等で、中断しても `--after-id` で再開できる。
+ * 各列の判定が収集に入る前の行は本当に未評価なので、列ごとの取り込み時刻の境界以降の行だけを対象にする。
+ * 冪等で、進捗ログの `lastId` を `--after-id` に渡して再開できる。
  * @param options - 実行オプション
  * @param deps - 依存関係
  */
@@ -95,6 +99,9 @@ export async function runTextOnlyMediaBackfill(
           AND "collectedAt" >= ${options.foreignVideoSince}
       `)
       await deps.sleep(options.sleepMs)
+      if (batches % PROGRESS_LOG_INTERVAL === 0) {
+        deps.log(JSON.stringify({ progress: true, batches, scanned, updated, lastId: afterId }))
+      }
     } else {
       const [row] = await prisma.$queryRaw<{ count: bigint }[]>(Prisma.sql`
         SELECT count(*) AS "count" FROM "Tweet"

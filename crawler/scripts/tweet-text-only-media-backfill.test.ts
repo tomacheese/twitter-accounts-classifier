@@ -52,6 +52,13 @@ describe('parseTextOnlyBackfillArgs', () => {
     expect(run.batchSize).toBe(50)
   })
 
+  it('rejects an after-id that is not a numeric tweet id', () => {
+    expect(() => parseTextOnlyBackfillArgs([...REQUIRED_ARGS, '--after-id', '--execute'])).toThrow(
+      '--after-id must be a numeric tweet id',
+    )
+    expect(parseTextOnlyBackfillArgs([...REQUIRED_ARGS, '--after-id', '123']).afterId).toBe('123')
+  })
+
   it('rejects a non-positive batch size', () => {
     expect(() => parseTextOnlyBackfillArgs([...REQUIRED_ARGS, '--batch-size', '0'])).toThrow(
       '--batch-size must be a positive integer',

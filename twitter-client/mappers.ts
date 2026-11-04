@@ -218,7 +218,6 @@ export function toTweetInput(raw: RawTweetResult, context: ToTweetInputContext):
         .filter((url) => url.length > 0),
     ),
   ]
-  // extendedEntities が無いのは動画・画像のない投稿であり、entities も無い場合だけ未評価として扱う。
   const foreignVideoSourceCount = raw.legacy.extendedEntities
     ? (raw.legacy.extendedEntities.media?.filter(
         (media) =>

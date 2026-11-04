@@ -15,7 +15,6 @@ export const videoRepostRule: LabelRule = {
     const value = candidates.length >= 3
 
     // recentTweets が未取得の場合、単に一致が無いだけの陰性とは区別する。
-    // 出典数が未集計の投稿を全て該当と仮定すると閾値に届く場合は、陰性と断定しない。
     const evaluable =
       value || (isRecentTweetsEvaluable(bundle) && candidates.length + unaggregatedCount < 3)
     return {
