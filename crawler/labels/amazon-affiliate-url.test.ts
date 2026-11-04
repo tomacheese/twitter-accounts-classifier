@@ -36,4 +36,10 @@ describe('classifyAmazonAffiliateUrl', () => {
   it('does not classify malformed input', () => {
     expect(classifyAmazonAffiliateUrl('not a url')).toBeNull()
   })
+
+  it('detects an amzn.to short link written as a trailing-dot FQDN', () => {
+    expect(classifyAmazonAffiliateUrl('https://amzn.to./fictional')?.kind).toBe(
+      'associates-short-link',
+    )
+  })
 })

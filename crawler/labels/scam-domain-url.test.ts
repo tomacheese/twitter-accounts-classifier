@@ -29,4 +29,8 @@ describe('classifyScamDomainUrl', () => {
   it('does not classify a non-http(s) protocol', () => {
     expect(classifyScamDomainUrl('ftp://1link.jp/fictional')).toBeNull()
   })
+
+  it('detects an indicator domain written as a trailing-dot FQDN', () => {
+    expect(classifyScamDomainUrl('https://1link.jp./fictional')?.host).toBe('1link.jp')
+  })
 })

@@ -13,7 +13,7 @@ const BIO_DECLARATION_PATTERN =
 // 確認範囲は前後に十分な幅を持たせている。
 const NEGATION_WINDOW_LENGTH = 30
 // 別の文に書かれた禁止語は AI 語に係らないため、文の区切りで窓を打ち切る。
-const SENTENCE_BOUNDARY_PATTERN = /[。！？!?\n]/
+const SENTENCE_BOUNDARY_PATTERN = /[。！？!?\n]|\.(?:\s|$)/
 const NEGATION_PATTERN =
   /しません|していません|しておりません|おりません|使っていません|使ってません|使いません|載せません|載せてません|扱いません|しない|していない|ではありません|じゃありません|じゃない|不使用|未使用|不要|禁止|厳禁|やめて(ください)?|出来ません|できません|不可|盗用|盗作|盗品|🚫|🈲|❌|✖|🆖|\bNG\b|\bnot\b|\bnever\b|\bno\b/i
 
@@ -314,9 +314,14 @@ const RESEARCH_ORG_NAME_PATTERN =
 
 // 冗談・ネタとして書かれた申告は、本人の制作物の生成元を示していない。
 // 「嘘じゃない」のように冗談を打ち消す表記は先に取り除く。
-const JOKE_DENIAL_PATTERN = /(?:嘘|うそ|冗談|ネタ)(?:じゃ|では)(?:ない|ありません)/g
-// 「ネタバレ」「ろうそく」のように冗談を意味しない語に含まれる部分一致は除外している。
-const JOKE_MARKER_PATTERN = /冗談|ジョーク|ネタ(?!バレ)|嘘|(?<!ろ)うそ|なんちゃって/
+const JOKE_DENIAL_PATTERN =
+  /(?:(?:嘘|うそ|冗談|ネタ)(?:じゃ|では)(?:ない|ありません)|嘘は言いません)/g
+// 「ネタバレ」「ネタ切れ」「嘘予告」「ろうそく」「そうそう」のように冗談を意味しない語に含まれる部分一致は除外している。
+const JOKE_MARKER_PATTERN =
+  /冗談|ジョーク|ネタ(?!バレ|切れ)|嘘(?!予告)|(?<![ろそ])うそ|なんちゃって/
+
+// モデルを動かす技術的な言及は、生成物を制作・投稿する自己申告ではない。
+const AI_RUNTIME_PATTERN = /(?:生成AI|AI生成)を(?:動かす|動作させ)/g
 
 function isJokeDeclaration(bio: string): boolean {
   return JOKE_MARKER_PATTERN.test(bio.replaceAll(JOKE_DENIAL_PATTERN, ' '))
@@ -336,12 +341,12 @@ export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description:
     'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及や、改行や記号 (スラッシュ・読点・中黒・括弧など) で区切った列挙の一項目、または AI 語のみの bio としての記載だけでは該当しない。AI 語と同じ文に書かれた否定 (AI生成禁止・生成AI不使用など) は自己申告を打ち消すが、別の文の禁止語は打ち消さない。また、二次利用・転載・学習などの利用条件表記は打ち消さない。アイコンのみの AI 生成申告は自己申告として扱う。生成 AI を呪う定型句と、矢印付きで別アカウントへ誘導する記載は自己申告として扱わない。冗談・ネタとして書かれた申告と、制作会社の担当者が自社の生成 AI 案件に触れる記載は自己申告として扱わない',
-  version: '1.21.3',
+  version: '1.21.4',
   evaluate(bundle) {
     const { bio } = bundle.account
     const hasDeclaration =
       bio !== null &&
-      BIO_DECLARATION_PATTERN.test(bio) &&
+      BIO_DECLARATION_PATTERN.test(bio.replaceAll(AI_RUNTIME_PATTERN, ' ')) &&
       !isNegatedDeclaration(bio) &&
       !AI_OPPOSITION_PATTERN.test(bio) &&
       !AI_OTHER_ACCOUNT_REFERRAL_PATTERN.test(bio) &&

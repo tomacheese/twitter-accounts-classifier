@@ -16,7 +16,7 @@ export const amazonAffiliateLinkRule: LabelRule = {
   key: 'amazon_affiliate_link',
   description:
     '自身の最近の投稿に、Amazonアソシエイト由来と高い確度で判断できるリンクが含まれている。tag 付きの Amazon リンクは 1 件で陽性とし、amzn.to 短縮リンクは商品文脈または PR 開示を伴うか複数ツイートに現れる場合のみ陽性とする',
-  version: '1.3.0',
+  version: '1.3.1',
   evaluate(bundle) {
     let shortLinkTweetCount = 0
     let hasContext = false

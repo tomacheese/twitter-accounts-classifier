@@ -7,7 +7,7 @@ export const scamLinkDomainRule: LabelRule = {
   key: 'scam_link_domain',
   description:
     '最近の投稿に、管理対象の詐欺悪用ドメインリストと一致するリンクが含まれている。確信度は一致ツイート数に応じて上がる',
-  version: '1.2.0',
+  version: '1.2.1',
   evaluate(bundle) {
     // 件数が増えても 1 に達しないのは、リストの偽陽性を完全には否定できないため。
     let matchCount = 0
