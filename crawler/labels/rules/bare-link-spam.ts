@@ -16,7 +16,7 @@ export const bareLinkSpamRule: LabelRule = {
   key: 'bare_link_spam',
   description:
     '自身のメディアなし投稿の大半が、URL・メンション除去後のテキストが実質空になる、コメントなしリンクの連投である。メディア有無が不明な投稿は評価対象から除く。リンク先ドメインを問わない汎用的な spam パターン',
-  version: '1.2.0',
+  version: '1.3.0',
   evaluate(bundle) {
     // hasMedia が不明な投稿は動画・画像付きか判別できないため、母集団から除く。
     const observedOwnPosts = bundle.recentTweets.filter(
