@@ -18,6 +18,22 @@ const ADMINISTRATIVE_DECLINE_PATTERN =
 const PRAISE_OR_SOLICITATION_PATTERN =
   /フォロー|拡散|いいね|プロフ(ィール)?(から|欄)|こちら(から|より)?|詳しくは|dm|相互|チェック/i
 
+// 挨拶・お礼だけの短い返信は相互の礼儀であり、誘導語彙や連絡手段への言及を伴う場合のみ定型スパムとして残す。
+// 長い文面は挨拶で始まる賞賛・勧誘テンプレートと区別できないため対象にしない。
+const GREETING_PATTERN =
+  /^(?:おはよう|こんにちは|こんばんは|ありがとう|コメント(?:ありがとう|感謝)|good (?:morning|evening|night)|thank(?:s| you))/u
+const CONTACT_OR_LINK_PATTERN = /[#＃]|メッセージ|message|送|無料|招待|line|telegram|tiktok|vote/i
+const MAX_GREETING_LENGTH = 40
+
+function isBenignGreeting(normalizedText: string): boolean {
+  return (
+    (normalizedText.match(/./gu)?.length ?? 0) <= MAX_GREETING_LENGTH &&
+    GREETING_PATTERN.test(normalizedText) &&
+    !PRAISE_OR_SOLICITATION_PATTERN.test(normalizedText) &&
+    !CONTACT_OR_LINK_PATTERN.test(normalizedText)
+  )
+}
+
 function isBenignAdministrativeDecline(normalizedText: string): boolean {
   return (
     ADMINISTRATIVE_DECLINE_PATTERN.test(normalizedText) &&
@@ -99,8 +115,8 @@ function buildReason(stats: GroupStats): string {
 export const crossTargetTemplatedReplyRule: LabelRule = {
   key: 'cross_target_templated_reply',
   description:
-    '同一または実質同一の定型リプライを、短時間のうちに複数の異なる親ツイートへ反復投稿している。インプレッション獲得目的のアカウントが異なるバズ投稿へ同じ賞賛文・誘導文を大量に返信する典型パターン。ハッシュタグのみの返信は応募・企画への参加として除く',
-  version: '1.4.2',
+    '同一または実質同一の定型リプライを、短時間のうちに複数の異なる親ツイートへ反復投稿している。インプレッション獲得目的のアカウントが異なるバズ投稿へ同じ賞賛文・誘導文を大量に返信する典型パターン。ハッシュタグのみの返信は応募・企画への参加として、誘導や連絡手段を伴わない短い挨拶・お礼の返信は礼儀として除く',
+  version: '1.5.0',
   evaluate(bundle) {
     // 自分自身の過去ツイートへの返信はスレッド内の連投であり、
     // 異なる他者への反復投稿という本ルールの検出対象ではないため除外する
@@ -130,7 +146,8 @@ export const crossTargetTemplatedReplyRule: LabelRule = {
     for (const [normalizedText, entries] of groups) {
       const stats = computeGroupStats(normalizedText, entries)
       if (stats.targetCount < MIN_DISTINCT_TARGETS) continue
-      if (isBenignAdministrativeDecline(normalizedText)) continue
+      if (isBenignAdministrativeDecline(normalizedText) || isBenignGreeting(normalizedText))
+        continue
       if (best === null || isBetterGroup(stats, best)) {
         best = stats
       }

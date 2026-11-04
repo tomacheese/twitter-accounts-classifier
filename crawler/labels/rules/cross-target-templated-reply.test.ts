@@ -52,6 +52,18 @@ function makeBundle(
 const TEMPLATE_TEXT =
   'このアカウントは素晴らしい発信をされていて、いつも参考にさせていただいております'
 
+const evaluateWithText = (fullText: string) =>
+  crossTargetTemplatedReplyRule.evaluate(
+    makeBundle(
+      Array.from({ length: 5 }, (_, i) => ({
+        fullText,
+        isReply: true,
+        hoursAgo: i,
+        inReplyToTweetId: `target${i}`,
+      })),
+    ),
+  )
+
 describe('crossTargetTemplatedReplyRule', () => {
   it('is true when the same templated reply hits 5 distinct targets within 24 hours', () => {
     const bundle = makeBundle(
@@ -421,6 +433,31 @@ describe('crossTargetTemplatedReplyRule', () => {
     const result = crossTargetTemplatedReplyRule.evaluate(bundle)
 
     expect(result.value).toBe(true)
+  })
+
+  describe('plain greeting and thanks replies', () => {
+    it.each([
+      'おはようございます！今日も一日よろしくお願いします',
+      'good morning everyone, have a great day',
+      'コメントありがとうございます！とても嬉しいです😊',
+    ])('is false for a short plain greeting or thanks (%s)', (text) => {
+      expect(evaluateWithText(text).value).toBe(false)
+    })
+
+    it.each([
+      'フォローありがとう！ ツイッターにメッセージを送りましたのでご確認ください',
+      'おはようございます！こちらのリンクから無料で参加できます',
+      'ありがとうございます。詳しくはプロフィールをご覧ください、よろしくお願いします',
+      'good morning! dm me for a free signal group invitation',
+    ])('is still true when the greeting carries solicitation (%s)', (text) => {
+      expect(evaluateWithText(text).value).toBe(true)
+    })
+
+    it('is still true for a long greeting-led template over the length limit', () => {
+      const text =
+        'おはようございます！今日も素晴らしい発信をありがとうございます。いつも参考にさせていただいております。応援しています'
+      expect(evaluateWithText(text).value).toBe(true)
+    })
   })
 
   it('keeps a confident false when recentTweets were fetched successfully but no templated group exists', () => {

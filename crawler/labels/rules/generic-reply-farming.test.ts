@@ -99,7 +99,13 @@ describe('genericReplyFarmingRule', () => {
   })
 
   it('exposes the current rule version', () => {
-    expect(getRule().version).toBe('0.3.1')
+    expect(getRule().version).toBe('0.3.2')
+  })
+
+  it('floors the observed span at 6 hours when computing recent velocity', () => {
+    const result = getRule().evaluate(makeBundle({ intervalMinutes: 1 }))
+
+    expect(result.reason).toContain('recentTweetsPerDay=76.0')
   })
 
   it('does not count replies inside the account’s own post conversation toward high-frequency farming', () => {
