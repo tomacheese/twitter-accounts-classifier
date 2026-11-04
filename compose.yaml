@@ -84,9 +84,9 @@ services:
       GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
       CRAWL_WARNING_THRESHOLD: ${CRAWL_WARNING_THRESHOLD:-}
     volumes:
-      # entrypoint.sh cds into /app/crawler before running anything, and
-      # loadConfig()'s default path ('data/config.json') is relative to that
-      # cwd, so the bind mount target must be /app/crawler/data (not /app/data).
+      # entrypoint.sh は何よりも先に /app/crawler へ cd し、
+      # loadConfig() の既定パス ('data/config.json') はその cwd からの相対パスになる。
+      # そのため bind mount 先は /app/data ではなく /app/crawler/data にする。
       - ./data:/app/crawler/data
     logging: *default-logging
 
@@ -158,10 +158,9 @@ services:
       # ComponentBuildIdentity の起動情報 upsert だけは INSERT/UPDATE を限定許可する。
       # crawler ロールで接続すると、DB 側の最小権限制約が意味を持たなくなる。
       DATABASE_URL: postgresql://viewer:${VIEWER_DB_PASSWORD:?VIEWER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
-      # Docker sets HOSTNAME to the container ID by default; Next.js's
-      # standalone server.js binds to that literal value instead of all
-      # interfaces — override it so the server (and the healthcheck's
-      # localhost probe) works.
+      # Docker は HOSTNAME に既定でコンテナ ID を設定し、
+      # Next.js の standalone server.js は全インターフェースではなくその値にバインドしてしまう。
+      # サーバー (と healthcheck の localhost 向けプローブ) が動くように上書きする。
       HOSTNAME: "0.0.0.0"
       GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
       VIEWER_NEW_UI_SECTIONS: ${VIEWER_NEW_UI_SECTIONS:-}
@@ -173,10 +172,9 @@ services:
           "CMD",
           "node",
           "-e",
-          # 127.0.0.1, not localhost: the container's DNS resolves localhost to ::1
-          # first, and the server (bound to 0.0.0.0, IPv4-only) doesn't answer there,
-          # so the fetch stalls for several seconds before falling back to IPv4 and
-          # blows past the timeout below.
+          # localhost ではなく 127.0.0.1 を使う。
+          # コンテナの DNS は localhost をまず ::1 に解決するが、0.0.0.0 にバインドした IPv4 のみのサーバーはそこで応答しない。
+          # そのため fetch が IPv4 へフォールバックするまで数秒止まり、下の timeout を超えてしまう。
           #
           # '/' ではなく /api/health: ダッシュボードのルートは KPI/ラベル分布のクエリを実行し、DB にアクセスする
           # (際限なく増え続ける AccountLabel 履歴ではなく上限のある AccountLabelLatest テーブルに対してだが、

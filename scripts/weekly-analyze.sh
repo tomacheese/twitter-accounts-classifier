@@ -6,8 +6,8 @@ cd "$(dirname "$0")/.."
 # shellcheck source=scripts/weekly-analyze-runtime.sh
 . ./scripts/weekly-analyze-runtime.sh
 
-# The crontab entry no longer redirects output itself, so this script owns rotation:
-# without it, cron running daily would grow this file unbounded over months.
+# crontab エントリは出力をリダイレクトしないため、このスクリプトがログのローテーションを担う。
+# ローテーションしないと、cron の毎日実行で数か月のうちにこのファイルが際限なく肥大化する。
 LOG_FILE="$(pwd)/logs/weekly-analyze.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE")" -gt 5242880 ]; then
@@ -15,8 +15,8 @@ if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE")" -gt 5242880 ]; then
 fi
 exec >> "$LOG_FILE" 2>&1
 
-# cron runs jobs with a minimal environment (no shell profile, no DATABASE_URL),
-# so load the repo's .env explicitly before the skill runs any prisma command.
+# cron は最小限の環境 (シェルプロファイルも DATABASE_URL も無い) でジョブを実行する。
+# そのためスキルが prisma コマンドを実行する前に、リポジトリの .env を明示的に読み込む。
 if [ -f .env ]; then
   set -a
   # shellcheck disable=SC1091
@@ -24,9 +24,9 @@ if [ -f .env ]; then
   set +a
 fi
 
-# The dev machine's normal DATABASE_URL points at its local Postgres; weekly-crawl-review
-# needs to read/write the production Postgres instead, via the least-privilege
-# weekly_review role. .env.weekly-review overrides DATABASE_URL for this run only.
+# 開発機の通常の DATABASE_URL はローカルの Postgres を指す。
+# weekly-crawl-review は代わりに本番の Postgres を最小権限の weekly_review ロールで読み書きする必要がある。
+# .env.weekly-review はこの実行に限って DATABASE_URL を上書きする。
 if [ -f .env.weekly-review ]; then
   set -a
   # shellcheck disable=SC1091
@@ -103,7 +103,7 @@ cleanup_tmux_review_processes() {
   }
 
   if "$TMUX_BIN" has-session -t "$SESSION_NAME" 2>/dev/null; then
-    # Stop pipe-pane before killing the pane so its logger process cannot outlive the run.
+    # pane を kill する前に pipe-pane を止め、ロガープロセスが実行より長く残らないようにする。
     "$TMUX_BIN" pipe-pane -t "$SESSION_NAME" 2>/dev/null || true
   fi
 
@@ -275,10 +275,9 @@ for PREVIOUS_RUN_ID in $PREVIOUS_RUN_IDS; do
   esac
 done
 
-# Run the review in an isolated worktree rather than this checkout: this checkout may be
-# `master`, which a developer or another automated flow can have dirty/in-progress at any
-# time, and the skill itself now works on its own feature branch anyway (see
-# .claude/skills/weekly-crawl-review/SKILL.md step 8).
+# このチェックアウトではなく隔離した worktree でレビューを実行する。
+# このチェックアウトは `master` の可能性があり、開発者や別の自動フローがいつでも未コミット・作業中の状態にしうる。
+# またスキル自体も専用のフィーチャーブランチで作業する (.claude/skills/weekly-crawl-review/SKILL.md の手順 8)。
 if git worktree list --porcelain | grep -qx "worktree $WORKTREE_DIR"; then
   echo "[weekly-analyze] removing stale worktree at $WORKTREE_DIR"
   git worktree remove --force "$WORKTREE_DIR" 2>/dev/null || rm -rf "$WORKTREE_DIR"
@@ -288,10 +287,9 @@ fi
 echo "[weekly-analyze] creating isolated worktree at $WORKTREE_DIR"
 git worktree add "$WORKTREE_DIR" -b "$WORKTREE_BRANCH" master
 
-# .env / .env.weekly-review are gitignored, so the new worktree doesn't get them via
-# git — copy the ones already loaded into this shell's environment above instead. The
-# skill only needs these to be readable from its own working directory (crawler commands
-# run with `--filter crawler` from the repo root either way).
+# .env / .env.weekly-review は gitignore 対象なので、新しい worktree には git 経由で渡らない。
+# 代わりに、上でこのシェルへ読み込み済みのものをコピーする。
+# スキルは自身の作業ディレクトリからこれらを読めればよい (crawler コマンドはどちらの場合もリポジトリルートから `--filter crawler` で実行する)。
 [ -f .env ] && cp .env "$WORKTREE_DIR/.env"
 [ -f .env.weekly-review ] && cp .env.weekly-review "$WORKTREE_DIR/.env.weekly-review"
 

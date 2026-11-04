@@ -154,7 +154,7 @@ export function posteriorProbabilityAtLeast(
  * @param threshold - value 判定に使う既存の閾値
  * @param rampWidth - 0.5 から 0 または 1 まで遷移する幅
  * @param direction - 値が大きいほど陽性方向か (省略時 'higher-is-positive')
- * @returns evidenceScore [0, 1]
+ * @returns [0, 1] の evidenceScore
  */
 export function rampScore(
   value: number,
@@ -198,7 +198,7 @@ export function combineAlternatives(scores: number[]): number {
  * @param value - ルールの判定結果
  * @param evidenceScore - value=true 方向の証拠の強さ [0, 1]
  * @param evaluable - 判定材料が十分にあるか (省略時 true)
- * @returns confidence [0, 1]
+ * @returns [0, 1] の confidence
  */
 export function toConfidence(value: boolean, evidenceScore: number, evaluable = true): number {
   if (!evaluable) return 0.5

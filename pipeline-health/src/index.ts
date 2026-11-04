@@ -71,7 +71,7 @@ const STATUS_SEVERITY: Record<PipelineHealthStatus, number> = {
 /**
  * pipeline policy に使う ISO 8601 duration の日・時・分を milliseconds へ変換する。
  * @param duration - P1D、PT3H、PT15M の形式の duration
- * @returns milliseconds
+ * @returns ミリ秒
  */
 export function parseIsoDurationMs(duration: string): number {
   const match = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/.exec(duration);
