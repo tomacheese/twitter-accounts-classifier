@@ -690,6 +690,36 @@ describe('spamRule', () => {
       expect(spamRule.evaluate(makeBundle(base, mixed(20, 3))).value).toBe(false)
     })
 
+    it('is true at following/followers = 5x and false just below it', () => {
+      const own = { bio: base.bio, followingCount: 500 }
+      expect(
+        spamRule.evaluate(makeBundle({ ...own, followersCount: 100 }, retweets(10, 0))).value,
+      ).toBe(true)
+      expect(
+        spamRule.evaluate(makeBundle({ ...own, followersCount: 101 }, retweets(10, 0))).value,
+      ).toBe(false)
+    })
+
+    it('is true at a retweet ratio of exactly 0.8 but with lower confidence than a pure retweet timeline', () => {
+      const atThreshold = spamRule.evaluate(
+        makeBundle(
+          base,
+          mixed(10, 0).map((t, i) => (i < 2 ? { ...t, isRetweet: false } : t)),
+        ),
+      )
+      const pure = spamRule.evaluate(makeBundle(base, retweets(10, 0)))
+      expect(atThreshold.value).toBe(true)
+      expect(pure.confidence).toBeGreaterThan(atThreshold.confidence)
+      expect(
+        spamRule.evaluate(
+          makeBundle(
+            base,
+            mixed(10, 0).map((t, i) => (i < 3 ? { ...t, isRetweet: false } : t)),
+          ),
+        ).value,
+      ).toBe(false)
+    })
+
     it('does not apply the sample and reply conditions to the solicitation path', () => {
       const result = spamRule.evaluate(
         makeBundle({ ...base, bio: '稼げる情報を配信' }, retweets(5, 0)),

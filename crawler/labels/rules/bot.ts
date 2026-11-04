@@ -50,7 +50,7 @@ function intervalCoefficientOfVariation(createdAtValues: Date[]): number {
 export const botRule: LabelRule = {
   key: 'bot',
   description:
-    '投稿頻度が人間としてあり得ない速さであり、かつリプライ比率がほぼゼロで、投稿間隔が機械的なまでに規則的である',
+    '生涯平均の投稿頻度 (1 日 150 件以上) と直近サンプルの実測頻度 (1 日 50 件以上、観測期間は最短 6 時間として扱う) の両方が人間としてあり得ない速さであり、かつオリジナル投稿のリプライ比率がほぼゼロで、投稿間隔が機械的なまでに規則的である',
   version: '1.8.1',
   evaluate(bundle) {
     const { tweetCount, accountCreatedAt } = bundle.account
