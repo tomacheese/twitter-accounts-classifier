@@ -242,4 +242,28 @@ describe('amazonAffiliatePrSpamRule', () => {
     expect(result.evaluable).toBe(false)
     expect(result.confidence).toBe(0.5)
   })
+
+  it('does not count short sweepstakes quote tweets with a #PR entry tag as PR disclosure', () => {
+    const tweets = Array.from({ length: 8 }, (_, i) =>
+      tweet({
+        id: `q${i}`,
+        fullText: `応募します #PR ${i}`,
+        quotedTweetAuthorId: 'fictional-host',
+        expandedUrls: [`https://www.amazon.co.jp/dp/FICTIONAL${i}?tag=fictional-22`],
+      }),
+    )
+    expect(amazonAffiliatePrSpamRule.evaluate(makeBundle(tweets)).value).toBe(false)
+  })
+
+  it('still counts a long quote tweet with a #PR disclosure', () => {
+    const tweets = Array.from({ length: 8 }, (_, i) =>
+      tweet({
+        id: `q${i}`,
+        fullText: `この新商品を実際に二週間使ってみた感想を詳しく書きました。軽くて持ち運びやすく、毎日の通勤にちょうどいい大きさです #PR ${i}`,
+        quotedTweetAuthorId: 'fictional-host',
+        expandedUrls: [`https://www.amazon.co.jp/dp/FICTIONAL${i}?tag=fictional-22`],
+      }),
+    )
+    expect(amazonAffiliatePrSpamRule.evaluate(makeBundle(tweets)).value).toBe(true)
+  })
 })

@@ -26,14 +26,17 @@ function hasAmazonAffiliateEvidence(tweet: RecentTweet): boolean {
 }
 
 function hasPrEvidence(tweet: RecentTweet): boolean {
-  return hasPrDisclosure(tweet.fullText) || tweet.isPaidPromotion
+  return (
+    hasPrDisclosure(tweet.fullText, { isQuote: tweet.quotedTweetAuthorId != null }) ||
+    tweet.isPaidPromotion
+  )
 }
 
 export const amazonAffiliatePrSpamRule: LabelRule = {
   key: 'amazon_affiliate_pr_spam',
   description:
     '自身の最近の投稿の大半が、PR 開示と高い確度で判断できる Amazon アソシエイトリンクを組み合わせた誘導で占められている',
-  version: '1.1.0',
+  version: '1.2.0',
   // 新規ルールの追加だけで既存アカウント全件が stale 扱いになることを避けるため、
   // version 変更だけでは scanForStaleAccounts の対象にしない。
   excludeFromStaleScan: true,

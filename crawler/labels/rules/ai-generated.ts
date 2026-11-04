@@ -266,10 +266,17 @@ const LIST_DELIMITER_CHARS = new Set(['/', '、', ',', '・', '|', '｜', '(', '
 const HORIZONTAL_WHITESPACE_END_PATTERN = /[ \t]+$/
 const HORIZONTAL_WHITESPACE_START_PATTERN = /^[ \t]+/
 
+// 「水彩調生成AI」のように調・風・系で終わる短い修飾語が付いた項目も列挙の一項目とみなす。
+// 修飾語を広く許すと「毎日AI生成」のような自己申告まで除外するため、この接尾語に限る。
+const ENUMERATION_ITEM_MODIFIER_PATTERN = /[^\s/、,・|｜()（）]{1,8}[調風系]$/
+
 function isListEnumerationItem(bio: string): boolean {
   const match = BIO_DECLARATION_PATTERN.exec(bio)
   if (match === null) return false
-  const before = bio.slice(0, match.index).replace(HORIZONTAL_WHITESPACE_END_PATTERN, '')
+  const before = bio
+    .slice(0, match.index)
+    .replace(ENUMERATION_ITEM_MODIFIER_PATTERN, '')
+    .replace(HORIZONTAL_WHITESPACE_END_PATTERN, '')
   const after = bio
     .slice(match.index + match[0].length)
     .replace(HORIZONTAL_WHITESPACE_START_PATTERN, '')
@@ -337,13 +344,21 @@ function isCompanyStaffMention(bio: string): boolean {
 
 const TWEET_BOILERPLATE_PATTERN = /as an AI language model|AIが生成|AI(が)?作成した/i
 
+// NFKC 正規化は「🈲」を「禁」に、「／」を「/」に変えて否定マーカーや列挙判定の結果を変えてしまう。
+// そのため、全角の「ＡＩ生成」に一致させる目的に必要な全角英数字だけを半角にする。
+function toHalfWidthAlphanumeric(text: string): string {
+  return text.replaceAll(/[Ａ-Ｚａ-ｚ０-９]/gu, (char) =>
+    String.fromCodePoint((char.codePointAt(0) ?? 0) - 0xfe_e0),
+  )
+}
+
 export const aiGeneratedRule: LabelRule = {
   key: 'ai-generated',
   description:
-    'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及や、改行や記号 (スラッシュ・読点・中黒・括弧など) で区切った列挙の一項目、または AI 語のみの bio としての記載だけでは該当しない。AI 語と同じ文に書かれた否定 (AI生成禁止・生成AI不使用など) は自己申告を打ち消すが、別の文の禁止語は打ち消さない。また、二次利用・転載・学習などの利用条件表記は打ち消さない。アイコンのみの AI 生成申告は自己申告として扱う。生成 AI を呪う定型句と、矢印付きで別アカウントへ誘導する記載は自己申告として扱わない。冗談・ネタとして書かれた申告と、制作会社の担当者が自社の生成 AI 案件に触れる記載は自己申告として扱わない',
-  version: '1.21.4',
+    'プロフィールで本人が AI 生成コンテンツを制作・投稿・配信することを自己申告している。生成 AI に関する業務・趣味・見解への言及や、改行や記号 (スラッシュ・読点・中黒・括弧など) で区切った列挙の一項目 (「〇〇調」「〇〇風」「〇〇系」の修飾語付きを含む)、または AI 語のみの bio としての記載だけでは該当しない。AI 語と同じ文に書かれた否定 (AI生成禁止・生成AI不使用など) は自己申告を打ち消すが、別の文の禁止語は打ち消さない。また、二次利用・転載・学習などの利用条件表記は打ち消さない。アイコンのみの AI 生成申告は自己申告として扱う。生成 AI を呪う定型句と、矢印付きで別アカウントへ誘導する記載は自己申告として扱わない。冗談・ネタとして書かれた申告と、制作会社の担当者が自社の生成 AI 案件に触れる記載は自己申告として扱わない',
+  version: '1.22.0',
   evaluate(bundle) {
-    const { bio } = bundle.account
+    const bio = bundle.account.bio === null ? null : toHalfWidthAlphanumeric(bundle.account.bio)
     const hasDeclaration =
       bio !== null &&
       BIO_DECLARATION_PATTERN.test(bio.replaceAll(AI_RUNTIME_PATTERN, ' ')) &&
