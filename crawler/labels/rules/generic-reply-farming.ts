@@ -75,12 +75,15 @@ function averageTweetsPerDay(tweetCount: number, accountCreatedAt: Date): number
   return tweetCount / ageDays
 }
 
+// 観測幅が極端に短いサンプルから 1 日あたりの頻度を外挿しないよう、bot・reply_farming と同じ 6 時間を下限にする。
+const MIN_OBSERVATION_DAYS = 6 / 24
+
 function recentObservedTweetsPerDay(tweets: { createdAt: Date }[]): number {
   if (tweets.length < 2) return 0
   const timestamps = tweets.map((tweet) => tweet.createdAt.getTime())
   const spanDays = Math.max(
     (Math.max(...timestamps) - Math.min(...timestamps)) / 86_400_000,
-    1 / 24,
+    MIN_OBSERVATION_DAYS,
   )
   return (tweets.length - 1) / spanDays
 }
@@ -91,12 +94,13 @@ export const genericReplyFarmingRule: LabelRule = {
     '多数の異なる外部投稿へ、汎用的な評価・共感や抽象的な関心の締めを高頻度に繰り返す行動、' +
     'および非日本語プロフィールが外部投稿へ低頻度に日本語の文脈追随型の返信を繰り返す行動を検出する shadow ラベル。' +
     'AI/LLM 利用そのものは推定しない',
-  version: '0.3.1',
+  version: '0.3.2',
   excludeFromStaleScan: true,
   evaluate(bundle) {
     const sampled = bundle.recentTweets
     // 自分の投稿が拡散した際のコメントへの返信は、親ツイートの投稿者が他者でも farming ではない。
-    // 比率の分母・分子の双方に影響するため、最初に返信集合から除く。
+    // 返信比率の分子と、外部返信比率・親ツイート解決率の分母から除くため、最初に返信集合から除く。
+    // 返信比率の分母 (サンプル総数) には自身の会話への返信も含める。
     const replyTweets = sampled.filter(
       (tweet) => tweet.isReply && tweet.conversationRootAuthorId !== bundle.account.id,
     )
