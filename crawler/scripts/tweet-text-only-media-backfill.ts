@@ -1,10 +1,16 @@
 import { Prisma, type PrismaClient } from '../generated/prisma'
 import { getPrismaClient, disconnectPrisma } from '../db/client'
 
+export interface TweetKey {
+  accountId: string
+  id: string
+}
+
 export interface TextOnlyBackfillOptions {
   foreignVideoSince: Date
   hasMediaSince: Date
-  afterId?: string
+  /** 前回の最後の位置。Tweet の PK の並び (accountId, id) で再開する。 */
+  after?: TweetKey
   batchSize: number
   sleepMs: number
   maxBatches?: number
@@ -18,6 +24,10 @@ export interface TextOnlyBackfillDependencies {
 }
 
 const PROGRESS_LOG_INTERVAL = 100
+
+function formatKey(key: TweetKey): string {
+  return `${key.accountId}:${key.id}`
+}
 
 function parseDate(args: string[], name: string): Date {
   const index = args.indexOf(name)
@@ -42,15 +52,16 @@ function parsePositiveInt(args: string[], name: string, defaultValue?: number): 
  */
 export function parseTextOnlyBackfillArgs(args: string[]): TextOnlyBackfillOptions {
   const execute = args.includes('--execute')
-  const afterIndex = args.indexOf('--after-id')
-  const afterId = afterIndex === -1 ? undefined : args.at(afterIndex + 1)
-  if (afterId !== undefined && !/^\d+$/.test(afterId)) {
-    throw new Error('--after-id must be a numeric tweet id')
+  const afterIndex = args.indexOf('--after-key')
+  const afterKey = afterIndex === -1 ? undefined : args.at(afterIndex + 1)
+  if (afterKey !== undefined && !/^\d+:\d+$/.test(afterKey)) {
+    throw new Error('--after-key must be <accountId>:<tweetId>')
   }
+  const [afterAccountId, afterTweetId] = afterKey?.split(':') ?? []
   return {
     foreignVideoSince: parseDate(args, '--foreign-video-since'),
     hasMediaSince: parseDate(args, '--has-media-since'),
-    afterId,
+    after: afterKey === undefined ? undefined : { accountId: afterAccountId, id: afterTweetId },
     batchSize: parsePositiveInt(args, '--batch-size', 5000) ?? 5000,
     sleepMs: parsePositiveInt(args, '--sleep-ms', 100) ?? 100,
     maxBatches: parsePositiveInt(args, '--max-batches', execute ? undefined : 1),
@@ -61,7 +72,7 @@ export function parseTextOnlyBackfillArgs(args: string[]): TextOnlyBackfillOptio
 /**
  * 動画・画像のない投稿で NULL のまま残っている `foreignVideoSourceCount` と `hasMedia` を確定値へ埋める。
  * 各列の判定が収集に入る前の行は本当に未評価なので、列ごとの取り込み時刻の境界以降の行だけを対象にする。
- * 冪等で、進捗ログの `lastId` を `--after-id` に渡して再開できる。
+ * 冪等で、進捗ログの `lastKey` を `--after-key` に渡して再開できる。
  * @param options - 実行オプション
  * @param deps - 依存関係
  */
@@ -70,19 +81,24 @@ export async function runTextOnlyMediaBackfill(
   deps: TextOnlyBackfillDependencies,
 ): Promise<void> {
   const { prisma } = deps
-  let afterId = options.afterId ?? '0'
+  let after: TweetKey = options.after ?? { accountId: '0', id: '0' }
   let batches = 0
   let scanned = 0
   let candidates = 0
   let updated = 0
 
   while (options.maxBatches === undefined || batches < options.maxBatches) {
-    const window = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
-      SELECT "id"::text AS "id" FROM "Tweet" WHERE "id" > ${afterId}::bigint ORDER BY "Tweet"."id" LIMIT ${options.batchSize}
+    // 走査と更新の対象指定は PK の形 (accountId, id) に依存する。RANGE 版 (PK は id のみ) へ切り替えるときはここを書き換える。
+    // ORDER BY は出力の別名 (text) ではなく列そのものを指すよう、表名で修飾する。
+    const window = await prisma.$queryRaw<TweetKey[]>(Prisma.sql`
+      SELECT "accountId"::text AS "accountId", "id"::text AS "id" FROM "Tweet"
+      WHERE ("accountId", "id") > (${after.accountId}::bigint, ${after.id}::bigint)
+      ORDER BY "Tweet"."accountId", "Tweet"."id" LIMIT ${options.batchSize}
     `)
     if (window.length === 0) break
     const ids = window.map((row) => row.id)
-    afterId = ids.at(-1) ?? afterId
+    const accountIds = window.map((row) => row.accountId)
+    after = window.at(-1) ?? after
     scanned += ids.length
     batches += 1
 
@@ -94,18 +110,20 @@ export async function runTextOnlyMediaBackfill(
             WHEN "collectedAt" >= ${options.hasMediaSince} AND "hasMedia" IS NULL THEN false
             ELSE "hasMedia"
           END
-        WHERE "id" = ANY(${ids}::bigint[])
+        WHERE ("accountId", "id") IN (SELECT * FROM UNNEST(${accountIds}::bigint[], ${ids}::bigint[]))
           AND "foreignVideoSourceCount" IS NULL
           AND "collectedAt" >= ${options.foreignVideoSince}
       `)
       await deps.sleep(options.sleepMs)
       if (batches % PROGRESS_LOG_INTERVAL === 0) {
-        deps.log(JSON.stringify({ progress: true, batches, scanned, updated, lastId: afterId }))
+        deps.log(
+          JSON.stringify({ progress: true, batches, scanned, updated, lastKey: formatKey(after) }),
+        )
       }
     } else {
       const [row] = await prisma.$queryRaw<{ count: bigint }[]>(Prisma.sql`
         SELECT count(*) AS "count" FROM "Tweet"
-        WHERE "id" = ANY(${ids}::bigint[])
+        WHERE ("accountId", "id") IN (SELECT * FROM UNNEST(${accountIds}::bigint[], ${ids}::bigint[]))
           AND "foreignVideoSourceCount" IS NULL
           AND "collectedAt" >= ${options.foreignVideoSince}
       `)
@@ -119,7 +137,7 @@ export async function runTextOnlyMediaBackfill(
       batches,
       scanned,
       ...(options.execute ? { updated } : { candidates }),
-      lastId: afterId === '0' ? undefined : afterId,
+      lastKey: after.id === '0' ? undefined : formatKey(after),
     }),
   )
 }
