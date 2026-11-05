@@ -22,7 +22,10 @@ async function main(): Promise<void> {
     const candidateAccountIds = selfReplyPromoAccountIds.slice(0, BACKTEST_ACCOUNT_LIMIT)
     console.log(`Evaluating ${candidateAccountIds.length} candidate accounts...`)
 
-    const accounts = await prisma.account.findMany({ where: { id: { in: candidateAccountIds } } })
+    const accounts = await prisma.account.findMany({
+      where: { id: { in: candidateAccountIds } },
+      include: { crawlState: true },
+    })
     let positiveCount = 0
 
     for (const account of accounts) {

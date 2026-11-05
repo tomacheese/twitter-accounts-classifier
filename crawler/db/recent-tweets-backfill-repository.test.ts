@@ -27,24 +27,17 @@ describe('recent tweets backfill 部分index migration', () => {
     expect(sql).toMatch(/WHERE "evaluable" = false/)
   })
 
-  it('Account_recent_tweets_unattempted_idx を期待する列・述語で定義する', () => {
+  it('AccountCrawlState_recent_tweets_unattempted_idx を baseline で期待する列・述語で定義する', () => {
     // eslint-disable-next-line unicorn/prefer-module
-    const migrationsDir = path.join(__dirname, '../../prisma/migrations')
-    const dirs = readdirSync(migrationsDir).filter((d) =>
-      d.includes('add_account_recent_tweets_unattempted_index'),
-    )
-    expect(dirs.length).toBe(1)
-    const sql = readFileSync(path.join(migrationsDir, dirs[0], 'migration.sql'), 'utf8')
+    const sql = readFileSync(path.join(__dirname, '../../prisma/baseline/baseline.sql'), 'utf8')
     expect(sql).toMatch(
-      /CREATE INDEX CONCURRENTLY IF NOT EXISTS "Account_recent_tweets_unattempted_idx"/,
+      /CREATE INDEX "AccountCrawlState_recent_tweets_unattempted_idx"\s+ON "AccountCrawlState" \("accountId"\)\s+WHERE "lastRecentTweetsAttemptedAt" IS NULL;/,
     )
-    expect(sql).toMatch(/ON "Account" \("id"\)/)
-    expect(sql).toMatch(/WHERE "lastRecentTweetsAttemptedAt" IS NULL/)
   })
 })
 
 describe('selectRecentTweetsBackfillCandidates query shape', () => {
-  it('Account を起点に LATERAL fence 付き EXISTS 相当で対象ラベルの有無を probe する', async () => {
+  it('AccountCrawlState を起点に LATERAL fence 付き EXISTS 相当で対象ラベルの有無を probe する', async () => {
     const queryRaw = vi
       .fn()
       .mockResolvedValueOnce([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }])
@@ -60,13 +53,14 @@ describe('selectRecentTweetsBackfillCandidates query shape', () => {
     expect(definitionLookupSql).toContain('"key" IN')
 
     const candidateSql = (queryRaw.mock.calls[1][0] as { strings: string[] }).strings.join('')
-    // 起点は AccountLabelLatest ではなく Account でなければ、
+    // 起点は AccountLabelLatest ではなく AccountCrawlState でなければ、
     // backfill 進行に伴う試行済み prefix の skip 量増加という残課題が再発する。
-    expect(candidateSql).toContain('FROM "Account" AS a')
+    expect(candidateSql).toContain('FROM "AccountCrawlState" AS a')
     expect(candidateSql).toContain('CROSS JOIN LATERAL')
     expect(candidateSql).toContain('"labelDefinitionId" IN')
     expect(candidateSql).toContain('"evaluable" = false')
     expect(candidateSql).toContain('WHERE a."lastRecentTweetsAttemptedAt" IS NULL')
+    expect(candidateSql).not.toContain('FROM "Account" ')
     // LATERAL 内の LIMIT 1 が optimizer による semi-join への平坦化を防ぐ fence、
     // 外側の LIMIT が limit+1 sentinel。
     expect(candidateSql.match(/LIMIT/g)).toHaveLength(2)
@@ -92,8 +86,8 @@ interface SyntheticAccountOptions {
 
 async function createSyntheticTables(tx: Prisma.TransactionClient): Promise<void> {
   await tx.$executeRaw`
-    CREATE TEMPORARY TABLE "Account" (
-      "id" bigint PRIMARY KEY,
+    CREATE TEMPORARY TABLE "AccountCrawlState" (
+      "accountId" bigint PRIMARY KEY,
       "lastRecentTweetsAttemptedAt" timestamptz
     ) ON COMMIT DROP
   `
@@ -120,7 +114,7 @@ async function seedSyntheticAccount(
 ): Promise<void> {
   const attemptedAt = options.attempted ? new Date('2026-08-24T00:00:00Z') : null
   await tx.$executeRaw`
-    INSERT INTO "Account" ("id", "lastRecentTweetsAttemptedAt")
+    INSERT INTO "AccountCrawlState" ("accountId", "lastRecentTweetsAttemptedAt")
     VALUES (${id}::bigint, ${attemptedAt})
   `
 }
@@ -212,63 +206,80 @@ describe.skipIf(!process.env.DATABASE_URL)('selectRecentTweetsBackfillCandidates
 describe.skipIf(!process.env.DATABASE_URL)(
   'selectRecentTweetsBackfillCandidates EXPLAIN 契約',
   () => {
-    it('試行済み prefix が伸びても Account 側は未試行分の部分 index からのみ読む', async () => {
+    it('試行済み prefix が伸びても AccountCrawlState 側は未試行分の部分 index からのみ読む', async () => {
       let assertionsCompleted = false
       try {
         await prisma.$transaction(async (tx) => {
-          const runId = randomUUID().replaceAll('-', '')
-          const botDefinitionId = `synthetic_definition_${runId}_bot`
+          const baseId = BigInt(createSyntheticId())
           await tx.$executeRaw`
-          INSERT INTO "LabelDefinition" ("id", "key", "description")
-          VALUES (${botDefinitionId}, ${'bot'}, ${'synthetic'})
-        `
+            CREATE TEMPORARY TABLE "AccountLabelLatest" (
+              "accountId" bigint NOT NULL,
+              "labelDefinitionId" smallint NOT NULL,
+              "evaluable" boolean NOT NULL,
+              PRIMARY KEY ("accountId", "labelDefinitionId")
+            ) ON COMMIT DROP
+          `
+          await tx.$executeRaw`
+            INSERT INTO "LabelDefinition" ("key", "description")
+            VALUES ('bot', 'synthetic')
+            ON CONFLICT ("key") DO NOTHING
+          `
+          const [{ id: botDefinitionId }] = await tx.$queryRaw<{ id: number }[]>`
+            SELECT "id" FROM "LabelDefinition" WHERE "key" = 'bot'
+          `
           // 低密度の evaluable=false 付き account を大量に試行済みとして敷き、
           // production の「進行済み prefix」を再現する。
           await tx.$executeRaw`
-          INSERT INTO "Account" (
-            "id", "screenName", "displayName", "followersCount", "followingCount", "tweetCount",
-            "accountCreatedAt", "updatedAt", "lastRecentTweetsAttemptedAt"
-          )
-          SELECT
-            'synthetic_recent_backfill_' || ${runId} || '_attempted_' || lpad(g::text, 6, '0'),
-            'synthetic_user_' || g, 'Synthetic User ' || g, 0, 0, 0, now(), now(), now()
-          FROM generate_series(1, 20000) AS g
-        `
+            INSERT INTO "Account" (
+              "id", "screenName", "displayName", "followersCount", "followingCount", "tweetCount",
+              "accountCreatedAt", "updatedAt"
+            )
+            SELECT
+              ${baseId}::bigint + g, 'synthetic_user_' || g, 'Synthetic User ' || g, 0, 0, 0,
+              now(), now()
+            FROM generate_series(1, 20000) AS g
+          `
           await tx.$executeRaw`
-          INSERT INTO "AccountLabelLatest" (
-            "accountId", "labelDefinitionId", "value", "confidence", "reason", "method",
-            "ruleVersion", "evaluable", "labeledAt"
-          )
-          SELECT
-            'synthetic_recent_backfill_' || ${runId} || '_attempted_' || lpad(g::text, 6, '0'),
-            ${botDefinitionId}, false, 0, 'synthetic', 'synthetic', 'v1', false, now()
-          FROM generate_series(1, 20000) AS g
-          WHERE g % 10 = 0
-        `
-          const candidateId = `synthetic_recent_backfill_${runId}_zzz_candidate`
+            INSERT INTO "AccountCrawlState" ("accountId", "lastRecentTweetsAttemptedAt")
+            SELECT ${baseId}::bigint + g, now()
+            FROM generate_series(1, 20000) AS g
+          `
           await tx.$executeRaw`
-          INSERT INTO "Account" (
-            "id", "screenName", "displayName", "followersCount", "followingCount", "tweetCount",
-            "accountCreatedAt", "updatedAt", "lastRecentTweetsAttemptedAt"
-          )
-          VALUES (${candidateId}, 'synthetic_candidate', 'Synthetic Candidate', 0, 0, 0, now(), now(), NULL)
-        `
+            INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "evaluable")
+            SELECT ${baseId}::bigint + g, ${botDefinitionId}::smallint, false
+            FROM generate_series(1, 20000) AS g
+            WHERE g % 10 = 0
+          `
+          const candidateId = String(baseId + 20_001n)
           await tx.$executeRaw`
-          INSERT INTO "AccountLabelLatest" (
-            "accountId", "labelDefinitionId", "value", "confidence", "reason", "method",
-            "ruleVersion", "evaluable", "labeledAt"
-          )
-          VALUES (${candidateId}, ${botDefinitionId}, false, 0, 'synthetic', 'synthetic', 'v1', false, now())
-        `
-          // planner の統計情報を synthetic fixture 挿入直後の実データに合わせておかないと、
+            INSERT INTO "Account" (
+              "id", "screenName", "displayName", "followersCount", "followingCount", "tweetCount",
+              "accountCreatedAt", "updatedAt"
+            )
+            VALUES (
+              ${candidateId}::bigint, 'synthetic_candidate', 'Synthetic Candidate', 0, 0, 0,
+              now(), now()
+            )
+          `
+          await tx.$executeRaw`
+            INSERT INTO "AccountCrawlState" ("accountId", "lastRecentTweetsAttemptedAt")
+            VALUES (${candidateId}::bigint, NULL)
+          `
+          await tx.$executeRaw`
+            INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "evaluable")
+            VALUES (${candidateId}::bigint, ${botDefinitionId}::smallint, false)
+          `
+          // planner の統計情報を fixture 挿入直後の実データに合わせておかないと、
           // 共有 DB での実行順序次第で古い統計のまま EXPLAIN が別の plan を選び、
           // 期待した index の使用を検証できなくなる。
-          await tx.$executeRaw`ANALYZE "Account", "AccountLabelLatest"`
+          await tx.$executeRaw`ANALYZE "AccountCrawlState", "AccountLabelLatest"`
 
           let capturedCandidateSql: Prisma.Sql | undefined
           const capturingClient = {
             $queryRaw: async (sql: Prisma.Sql) => {
-              if (sql.strings.join('').includes('FROM "Account" AS a')) capturedCandidateSql = sql
+              if (sql.strings.join('').includes('FROM "AccountCrawlState" AS a')) {
+                capturedCandidateSql = sql
+              }
               return (tx as unknown as PrismaClient).$queryRaw(sql)
             },
           } as unknown as PrismaClient
@@ -282,10 +293,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
             Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${capturedCandidateSql}`,
           )
           const plan = JSON.stringify(explainRows[0]['QUERY PLAN'])
-          // Account 側が Account_recent_tweets_unattempted_idx からの Index Scan であれば、
-          // 未試行分のみを読み、試行済み prefix の長さに比例した skip は発生しない。
-          expect(plan).toContain('Account_recent_tweets_unattempted_idx')
-          expect(plan).not.toContain('Account_pkey')
+          // 部分 index からの Index Scan であれば、未試行分のみを読み、
+          // 試行済み prefix の長さに比例した skip は発生しない。
+          expect(plan).toContain('AccountCrawlState_recent_tweets_unattempted_idx')
+          expect(plan).not.toContain('AccountCrawlState_pkey')
+          expect(plan).not.toContain('Seq Scan')
 
           assertionsCompleted = true
           throw new RollbackFixture()

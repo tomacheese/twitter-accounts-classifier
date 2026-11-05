@@ -1,13 +1,21 @@
 import { Logger } from '@book000/node-utils'
-import { Prisma, type Account, type PrismaClient } from '../generated/prisma'
+import {
+  Prisma,
+  type Account,
+  type AccountCrawlState,
+  type PrismaClient,
+} from '../generated/prisma'
 import type { NormalizedAccountProfile } from 'twitter-client'
 
 const logger = Logger.configure('account-repository')
 
 export type AccountProfileInput = NormalizedAccountProfile
 
+/** プロフィール行と、更新頻度の高いクロール状態行 (1:1) を合わせた Account。 */
+export type AccountWithCrawlState = Account & { crawlState: AccountCrawlState | null }
+
 export interface UpsertAccountResult {
-  account: Account
+  account: AccountWithCrawlState
   /** `AccountFeatureBundle.account` が参照するフィールドのいずれかが更新前後で変化したか。 */
   changed: boolean
 }
@@ -42,6 +50,97 @@ function hasBundleRelevantChange(
 ): boolean {
   if (existing === null) return true
   return BUNDLE_RELEVANT_FIELDS.some((field) => existing[field] !== input[field])
+}
+
+interface UpsertAccountsBulkRow {
+  id: string
+}
+
+async function upsertAccountsBulkQuery(
+  prisma: PrismaClient,
+  rows: AccountProfileInput[],
+): Promise<UpsertAccountsBulkRow[]> {
+  const ids = rows.map((r) => r.id)
+  const screenNames = rows.map((r) => r.screenName)
+  const displayNames = rows.map((r) => r.displayName)
+  const bios = rows.map((r) => r.bio)
+  const profileImageUrls = rows.map((r) => r.profileImageUrl)
+  const followersCounts = rows.map((r) => r.followersCount)
+  const followingCounts = rows.map((r) => r.followingCount)
+  const tweetCounts = rows.map((r) => r.tweetCount)
+  const accountCreatedAts = rows.map((r) => r.accountCreatedAt)
+  const locations = rows.map((r) => r.location)
+  const urls = rows.map((r) => r.url)
+  const isBlueVerifieds = rows.map((r) => r.isBlueVerified)
+  const verifiedTypes = rows.map((r) => r.verifiedType)
+  const professionalTypes = rows.map((r) => r.professionalType)
+  const parodyCommentaryFanLabels = rows.map((r) => r.parodyCommentaryFanLabel)
+
+  // 単一文にまとめるのは、同じ文内の Account 挿入を AccountCrawlState の外部キーが参照できるため。
+  return prisma.$queryRaw<UpsertAccountsBulkRow[]>`
+    WITH shared_now AS (
+      SELECT now() AS "now"
+    ),
+    input_rows AS (
+      SELECT * FROM UNNEST(
+        ${ids}::bigint[], ${screenNames}::text[], ${displayNames}::text[], ${bios}::text[],
+        ${profileImageUrls}::text[], ${followersCounts}::int[], ${followingCounts}::int[],
+        ${tweetCounts}::int[], ${accountCreatedAts}::timestamptz[], ${locations}::text[],
+        ${urls}::text[], ${isBlueVerifieds}::boolean[], ${verifiedTypes}::text[],
+        ${professionalTypes}::text[], ${parodyCommentaryFanLabels}::text[]
+      ) AS u(
+        "id", "screenName", "displayName", "bio", "profileImageUrl", "followersCount",
+        "followingCount", "tweetCount", "accountCreatedAt", "location", "url",
+        "isBlueVerified", "verifiedType", "professionalType", "parodyCommentaryFanLabel"
+      )
+    ),
+    upserted_accounts AS (
+      INSERT INTO "Account" (
+        "id", "screenName", "displayName", "bio", "profileImageUrl", "followersCount",
+        "followingCount", "tweetCount", "accountCreatedAt", "location", "url",
+        "isBlueVerified", "verifiedType", "professionalType", "parodyCommentaryFanLabel",
+        "firstSeenAt", "updatedAt"
+      )
+      SELECT
+        ir.*, shared_now."now", shared_now."now"
+      FROM input_rows ir
+      CROSS JOIN shared_now
+      ON CONFLICT ("id") DO UPDATE SET
+        "screenName" = EXCLUDED."screenName",
+        "displayName" = EXCLUDED."displayName",
+        "bio" = EXCLUDED."bio",
+        "profileImageUrl" = EXCLUDED."profileImageUrl",
+        "followersCount" = EXCLUDED."followersCount",
+        "followingCount" = EXCLUDED."followingCount",
+        "tweetCount" = EXCLUDED."tweetCount",
+        "location" = EXCLUDED."location",
+        "url" = EXCLUDED."url",
+        "isBlueVerified" = EXCLUDED."isBlueVerified",
+        "verifiedType" = EXCLUDED."verifiedType",
+        "professionalType" = EXCLUDED."professionalType",
+        "parodyCommentaryFanLabel" = EXCLUDED."parodyCommentaryFanLabel",
+        "updatedAt" = EXCLUDED."updatedAt"
+      WHERE (
+        "Account"."screenName", "Account"."displayName", "Account"."bio",
+        "Account"."profileImageUrl", "Account"."followersCount", "Account"."followingCount",
+        "Account"."tweetCount", "Account"."location", "Account"."url",
+        "Account"."isBlueVerified", "Account"."verifiedType", "Account"."professionalType",
+        "Account"."parodyCommentaryFanLabel"
+      ) IS DISTINCT FROM (
+        EXCLUDED."screenName", EXCLUDED."displayName", EXCLUDED."bio",
+        EXCLUDED."profileImageUrl", EXCLUDED."followersCount", EXCLUDED."followingCount",
+        EXCLUDED."tweetCount", EXCLUDED."location", EXCLUDED."url",
+        EXCLUDED."isBlueVerified", EXCLUDED."verifiedType", EXCLUDED."professionalType",
+        EXCLUDED."parodyCommentaryFanLabel"
+      )
+    )
+    INSERT INTO "AccountCrawlState" ("accountId", "lastCrawledAt")
+    SELECT ir."id", shared_now."now"
+    FROM input_rows ir
+    CROSS JOIN shared_now
+    ON CONFLICT ("accountId") DO UPDATE SET "lastCrawledAt" = EXCLUDED."lastCrawledAt"
+    RETURNING "accountId"::text AS "id"
+  `
 }
 
 export interface UpsertAccountOptions {
@@ -79,37 +178,13 @@ export async function upsertAccount(
       )
     : false
 
-  const now = new Date()
-  const account = await prisma.account.upsert({
+  await upsertAccountsBulkQuery(prisma, [input])
+  const account = await prisma.account.findUniqueOrThrow({
     where: { id: input.id },
-    create: {
-      ...input,
-      firstSeenAt: now,
-      lastCrawledAt: now,
-    },
-    update: {
-      screenName: input.screenName,
-      displayName: input.displayName,
-      bio: input.bio,
-      profileImageUrl: input.profileImageUrl,
-      followersCount: input.followersCount,
-      followingCount: input.followingCount,
-      tweetCount: input.tweetCount,
-      location: input.location,
-      url: input.url,
-      isBlueVerified: input.isBlueVerified,
-      verifiedType: input.verifiedType,
-      professionalType: input.professionalType,
-      parodyCommentaryFanLabel: input.parodyCommentaryFanLabel,
-      lastCrawledAt: now,
-    },
+    include: { crawlState: true },
   })
 
   return { account, changed }
-}
-
-interface UpsertAccountsBulkRow {
-  id: string
 }
 
 // row-local (行内容に起因する決定的なエラー): NOT NULL 制約違反・チェック制約違反・型不一致等。
@@ -143,73 +218,6 @@ function isRowLocalSqlState(sqlState: string): boolean {
  */
 function maxBisectionDepth(initialBatchSize: number): number {
   return Math.ceil(Math.log2(Math.max(initialBatchSize, 1))) * 4
-}
-
-async function upsertAccountsBulkQuery(
-  prisma: PrismaClient,
-  rows: AccountProfileInput[],
-): Promise<UpsertAccountsBulkRow[]> {
-  const ids = rows.map((r) => r.id)
-  const screenNames = rows.map((r) => r.screenName)
-  const displayNames = rows.map((r) => r.displayName)
-  const bios = rows.map((r) => r.bio)
-  const profileImageUrls = rows.map((r) => r.profileImageUrl)
-  const followersCounts = rows.map((r) => r.followersCount)
-  const followingCounts = rows.map((r) => r.followingCount)
-  const tweetCounts = rows.map((r) => r.tweetCount)
-  const accountCreatedAts = rows.map((r) => r.accountCreatedAt)
-  const locations = rows.map((r) => r.location)
-  const urls = rows.map((r) => r.url)
-  const isBlueVerifieds = rows.map((r) => r.isBlueVerified)
-  const verifiedTypes = rows.map((r) => r.verifiedType)
-  const professionalTypes = rows.map((r) => r.professionalType)
-  const parodyCommentaryFanLabels = rows.map((r) => r.parodyCommentaryFanLabel)
-
-  return prisma.$queryRaw<UpsertAccountsBulkRow[]>`
-    WITH shared_now AS (
-      SELECT now() AS "now"
-    ),
-    input_rows AS (
-      SELECT * FROM UNNEST(
-        ${ids}::bigint[], ${screenNames}::text[], ${displayNames}::text[], ${bios}::text[],
-        ${profileImageUrls}::text[], ${followersCounts}::int[], ${followingCounts}::int[],
-        ${tweetCounts}::int[], ${accountCreatedAts}::timestamptz[], ${locations}::text[],
-        ${urls}::text[], ${isBlueVerifieds}::boolean[], ${verifiedTypes}::text[],
-        ${professionalTypes}::text[], ${parodyCommentaryFanLabels}::text[]
-      ) AS u(
-        "id", "screenName", "displayName", "bio", "profileImageUrl", "followersCount",
-        "followingCount", "tweetCount", "accountCreatedAt", "location", "url",
-        "isBlueVerified", "verifiedType", "professionalType", "parodyCommentaryFanLabel"
-      )
-    )
-    INSERT INTO "Account" (
-      "id", "screenName", "displayName", "bio", "profileImageUrl", "followersCount",
-      "followingCount", "tweetCount", "accountCreatedAt", "location", "url",
-      "isBlueVerified", "verifiedType", "professionalType", "parodyCommentaryFanLabel",
-      "firstSeenAt", "lastCrawledAt", "updatedAt"
-    )
-    SELECT
-      ir.*, shared_now."now", shared_now."now", shared_now."now"
-    FROM input_rows ir
-    CROSS JOIN shared_now
-    ON CONFLICT ("id") DO UPDATE SET
-      "screenName" = EXCLUDED."screenName",
-      "displayName" = EXCLUDED."displayName",
-      "bio" = EXCLUDED."bio",
-      "profileImageUrl" = EXCLUDED."profileImageUrl",
-      "followersCount" = EXCLUDED."followersCount",
-      "followingCount" = EXCLUDED."followingCount",
-      "tweetCount" = EXCLUDED."tweetCount",
-      "location" = EXCLUDED."location",
-      "url" = EXCLUDED."url",
-      "isBlueVerified" = EXCLUDED."isBlueVerified",
-      "verifiedType" = EXCLUDED."verifiedType",
-      "professionalType" = EXCLUDED."professionalType",
-      "parodyCommentaryFanLabel" = EXCLUDED."parodyCommentaryFanLabel",
-      "lastCrawledAt" = EXCLUDED."lastCrawledAt",
-      "updatedAt" = EXCLUDED."updatedAt"
-    RETURNING "id"::text AS "id"
-  `
 }
 
 async function upsertAccountsBulkWithBisection(
@@ -281,4 +289,44 @@ export async function upsertAccountsBulk(
   const deduped = new Map(inputs.map((input) => [input.id, input]))
   const rows = [...deduped.values()]
   return upsertAccountsBulkWithBisection(prisma, rows, 0, maxBisectionDepth(rows.length))
+}
+
+/**
+ * recent tweets の取得成功を AccountCrawlState に記録する。
+ * @param prisma - Prisma クライアント (transaction client も可)
+ * @param accountId - 対象 Account の ID。AccountCrawlState の行が存在していること
+ * @param fetchedAt - 取得完了時刻 (試行時刻と取得成功時刻の両方に使う)
+ * @returns 更新後の AccountCrawlState
+ */
+export async function recordRecentTweetsFetchSuccess(
+  prisma: PrismaClient,
+  accountId: string,
+  fetchedAt: Date,
+): Promise<AccountCrawlState> {
+  return prisma.accountCrawlState.update({
+    where: { accountId },
+    data: {
+      lastRecentTweetsAttemptedAt: fetchedAt,
+      lastRecentTweetsFetchedAt: fetchedAt,
+      recentTweetsFetchStatus: 'success',
+    },
+  })
+}
+
+/**
+ * recent tweets の取得失敗を AccountCrawlState に記録する。既存の取得成功時刻は消さない。
+ * @param prisma - Prisma クライアント (transaction client も可)
+ * @param accountId - 対象 Account の ID。AccountCrawlState の行が存在していること
+ * @param attemptedAt - 試行時刻
+ * @returns 更新後の AccountCrawlState
+ */
+export async function recordRecentTweetsFetchFailure(
+  prisma: PrismaClient,
+  accountId: string,
+  attemptedAt: Date,
+): Promise<AccountCrawlState> {
+  return prisma.accountCrawlState.update({
+    where: { accountId },
+    data: { lastRecentTweetsAttemptedAt: attemptedAt, recentTweetsFetchStatus: 'failed' },
+  })
 }

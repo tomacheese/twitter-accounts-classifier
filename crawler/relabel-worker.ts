@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { Logger } from '@book000/node-utils'
-import type { Account, AnalysisWorkItem, PrismaClient, Tweet } from './generated/prisma'
+import type { AnalysisWorkItem, PrismaClient, Tweet } from './generated/prisma'
+import type { AccountWithCrawlState } from './db/account-repository'
 import { LabelRuleRegistry } from './labels/registry'
 import { buildAccountFeatureBundle } from './labels/build-account-feature-bundle'
 import type { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
@@ -154,7 +155,7 @@ async function evaluateAccountRelabelItemGroup(
   if (group.length === 0) return 0
 
   const accountIds = group.map((item) => item.triggerId)
-  let accounts: Account[]
+  let accounts: AccountWithCrawlState[]
   let tweetsByAccountId: Map<string, Tweet[]>
   let followChurnObservationByAccountId: Map<string, FollowChurnObservation>
   let promotedCountByAccountId: Map<string, number>
@@ -167,7 +168,10 @@ async function evaluateAccountRelabelItemGroup(
     const promotedSince = new Date(Date.now() - PROMOTED_RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000)
     ;[accounts, tweetsByAccountId, followChurnObservationByAccountId, promotedCountByAccountId] =
       await Promise.all([
-        prisma.account.findMany({ where: { id: { in: accountIds } } }),
+        prisma.account.findMany({
+          where: { id: { in: accountIds } },
+          include: { crawlState: true },
+        }),
         loadRecentTweetsForAccounts(prisma, accountIds, CRAWL_LIMITS.recentTweetsPerAccount),
         loadFollowChurnObservationsForAccounts(prisma, accountIds, followChurnSince),
         loadPromotedTweetCountsForAccounts(prisma, accountIds, promotedSince),

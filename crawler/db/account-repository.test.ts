@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Prisma, type PrismaClient } from '../generated/prisma'
 import { toAccountProfileInput, type RawUserResult } from 'twitter-client'
-import { upsertAccount, upsertAccountsBulk, type AccountProfileInput } from './account-repository'
+import {
+  recordRecentTweetsFetchFailure,
+  recordRecentTweetsFetchSuccess,
+  upsertAccount,
+  upsertAccountsBulk,
+  type AccountProfileInput,
+} from './account-repository'
 
 const sampleInput: AccountProfileInput = {
   id: '123',
@@ -39,26 +45,33 @@ function makeKnownRequestError(code: string, meta?: Record<string, unknown>) {
   })
 }
 
+function makePrisma(existing: Record<string, unknown> | null) {
+  const queryRaw = vi.fn().mockResolvedValue([{ id: sampleInput.id }])
+  const findUnique = vi.fn().mockResolvedValue(existing)
+  const findUniqueOrThrow = vi.fn().mockResolvedValue({ ...sampleInput, crawlState: null })
+  const prisma = {
+    $queryRaw: queryRaw,
+    account: { findUnique, findUniqueOrThrow },
+  } as unknown as PrismaClient
+  return { prisma, queryRaw, findUnique, findUniqueOrThrow }
+}
+
 describe('upsertAccount', () => {
-  it('upserts keyed by account id, setting lastCrawledAt on update', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: '123' })
-    const findUnique = vi.fn().mockResolvedValue(null)
-    const prisma = { account: { upsert, findUnique } } as unknown as PrismaClient
+  it('upserts with a single statement and reads the account back together with its crawl state', async () => {
+    const { prisma, queryRaw, findUniqueOrThrow } = makePrisma(null)
 
-    await upsertAccount(prisma, sampleInput)
+    const { account } = await upsertAccount(prisma, sampleInput)
 
-    expect(upsert).toHaveBeenCalledTimes(1)
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.where).toEqual({ id: '123' })
-    expect((call.create as Record<string, unknown>).id).toBe('123')
-    expect((call.update as Record<string, unknown>).screenName).toBe('test_user')
-    expect((call.update as Record<string, unknown>).lastCrawledAt).toBeInstanceOf(Date)
+    expect(queryRaw).toHaveBeenCalledTimes(1)
+    expect(findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: '123' },
+      include: { crawlState: true },
+    })
+    expect(account.id).toBe('123')
   })
 
   it('skips the change-detection lookup and returns changed: false when detectChange is not requested', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: '123' })
-    const findUnique = vi.fn().mockResolvedValue(null)
-    const prisma = { account: { upsert, findUnique } } as unknown as PrismaClient
+    const { prisma, findUnique } = makePrisma(null)
 
     const { changed } = await upsertAccount(prisma, sampleInput)
 
@@ -79,9 +92,7 @@ describe('upsertAccount', () => {
       professionalType: sampleInput.professionalType,
       parodyCommentaryFanLabel: sampleInput.parodyCommentaryFanLabel,
     }
-    const findUnique = vi.fn().mockResolvedValue(existing)
-    const upsert = vi.fn().mockResolvedValue({ id: sampleInput.id, ...existing })
-    const prisma = { account: { upsert, findUnique } } as unknown as PrismaClient
+    const { prisma } = makePrisma(existing)
 
     const { changed } = await upsertAccount(prisma, sampleInput, { detectChange: true })
 
@@ -101,9 +112,7 @@ describe('upsertAccount', () => {
       professionalType: sampleInput.professionalType,
       parodyCommentaryFanLabel: sampleInput.parodyCommentaryFanLabel,
     }
-    const findUnique = vi.fn().mockResolvedValue(existing)
-    const upsert = vi.fn().mockResolvedValue({ ...sampleInput })
-    const prisma = { account: { upsert, findUnique } } as unknown as PrismaClient
+    const { prisma } = makePrisma(existing)
 
     const { changed } = await upsertAccount(prisma, sampleInput, { detectChange: true })
 
@@ -111,13 +120,43 @@ describe('upsertAccount', () => {
   })
 
   it('returns changed: true for a brand-new account (no existing row)', async () => {
-    const findUnique = vi.fn().mockResolvedValue(null)
-    const upsert = vi.fn().mockResolvedValue({ ...sampleInput })
-    const prisma = { account: { upsert, findUnique } } as unknown as PrismaClient
+    const { prisma } = makePrisma(null)
 
     const { changed } = await upsertAccount(prisma, sampleInput, { detectChange: true })
 
     expect(changed).toBe(true)
+  })
+})
+
+describe('recordRecentTweetsFetchSuccess / recordRecentTweetsFetchFailure', () => {
+  it('writes success status and both timestamps to AccountCrawlState', async () => {
+    const update = vi.fn().mockResolvedValue({})
+    const prisma = { accountCrawlState: { update } } as unknown as PrismaClient
+    const fetchedAt = new Date('2026-01-02T03:04:05.000Z')
+
+    await recordRecentTweetsFetchSuccess(prisma, '123', fetchedAt)
+
+    expect(update).toHaveBeenCalledWith({
+      where: { accountId: '123' },
+      data: {
+        lastRecentTweetsAttemptedAt: fetchedAt,
+        lastRecentTweetsFetchedAt: fetchedAt,
+        recentTweetsFetchStatus: 'success',
+      },
+    })
+  })
+
+  it('writes failed status without touching lastRecentTweetsFetchedAt', async () => {
+    const update = vi.fn().mockResolvedValue({})
+    const prisma = { accountCrawlState: { update } } as unknown as PrismaClient
+    const attemptedAt = new Date('2026-01-02T03:04:05.000Z')
+
+    await recordRecentTweetsFetchFailure(prisma, '123', attemptedAt)
+
+    expect(update).toHaveBeenCalledWith({
+      where: { accountId: '123' },
+      data: { lastRecentTweetsAttemptedAt: attemptedAt, recentTweetsFetchStatus: 'failed' },
+    })
   })
 })
 
@@ -237,16 +276,15 @@ describe('NUL を含むプロフィールの upsert', () => {
     parodyCommentaryFanLabel: null,
   }
 
-  it('upsertAccount に渡る値に NUL が残らない', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: '900' })
-    const prisma = { account: { upsert, findUnique: vi.fn() } } as unknown as PrismaClient
+  it('upsertAccount の query パラメータに NUL が残らない', async () => {
+    const { prisma, queryRaw } = makePrisma(null)
 
     await upsertAccount(prisma, toAccountProfileInput(rawUser))
 
-    const call = upsert.mock.calls[0][0] as { create: { displayName: string; bio: string } }
-    expect(JSON.stringify(call)).not.toContain(String.raw`\u0000`)
-    expect(call.create.displayName).toBe('Nul User')
-    expect(call.create.bio).toBe('bio text')
+    const values = (queryRaw.mock.calls[0] as unknown[]).slice(1).flat()
+    expect(values).toContain('Nul User')
+    expect(values).toContain('bio text')
+    expect(values.filter((v) => typeof v === 'string' && v.includes('\u0000'))).toEqual([])
   })
 
   it('bulk upsert の query パラメータに NUL が残らない', async () => {

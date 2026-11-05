@@ -62,10 +62,12 @@ const account = {
   followingCount: 20,
   isBlueVerified: false,
   firstSeenAt: new Date('2026-01-01T00:00:00Z'),
-  lastCrawledAt: new Date('2026-01-02T00:00:00Z'),
-  lastRecentTweetsAttemptedAt: null,
-  lastRecentTweetsFetchedAt: null,
-  recentTweetsFetchStatus: null,
+  crawlState: {
+    lastCrawledAt: new Date('2026-01-02T00:00:00Z'),
+    lastRecentTweetsAttemptedAt: null,
+    lastRecentTweetsFetchedAt: null,
+    recentTweetsFetchStatus: null,
+  },
   updatedAt: new Date('2026-01-03T00:00:00Z'),
 }
 
@@ -456,6 +458,44 @@ describe('getAccountTechnical', () => {
       accountId: 'account-1',
       freshnessStatus: 'healthy',
       sourceWatermarkAt,
+      recentTweetsFetchStatus: null,
+    })
+  })
+
+  it('AccountCrawlState の列を Technical view にそのまま載せる', async () => {
+    const attemptedAt = new Date('2026-01-05T00:00:00Z')
+    const fetchedAt = new Date('2026-01-05T00:00:01Z')
+    const { prisma } = createMockPrisma({
+      account: {
+        ...account,
+        crawlState: {
+          lastCrawledAt: new Date('2026-01-06T00:00:00Z'),
+          lastRecentTweetsAttemptedAt: attemptedAt,
+          lastRecentTweetsFetchedAt: fetchedAt,
+          recentTweetsFetchStatus: 'success',
+        },
+      },
+    })
+
+    const result = await getAccountTechnical(prisma, 'account-1')
+
+    expect(result).toMatchObject({
+      lastCrawledAt: new Date('2026-01-06T00:00:00Z'),
+      lastRecentTweetsAttemptedAt: attemptedAt,
+      lastRecentTweetsFetchedAt: fetchedAt,
+      recentTweetsFetchStatus: 'success',
+    })
+  })
+
+  it('AccountCrawlState の行が無ければ crawl 状態は null になる', async () => {
+    const { prisma } = createMockPrisma({ account: { ...account, crawlState: null } })
+
+    const result = await getAccountTechnical(prisma, 'account-1')
+
+    expect(result).toMatchObject({
+      lastCrawledAt: null,
+      lastRecentTweetsAttemptedAt: null,
+      lastRecentTweetsFetchedAt: null,
       recentTweetsFetchStatus: null,
     })
   })
