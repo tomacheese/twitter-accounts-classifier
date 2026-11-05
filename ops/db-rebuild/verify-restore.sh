@@ -27,10 +27,18 @@ RESTORE_PARENT="${NEW_DB_RESTORE_PARENT:-$(dirname "$(dirname "$SRC")")}"
 DST="$(mktemp -d "$RESTORE_PARENT/postgres-new-restore.XXXXXX")"
 
 cleanup() {
+    local status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "--- restore container logs ---" >&2
+        docker logs --tail 50 "$RESTORE_CONTAINER" >&2 || true
+    fi
     docker rm -f "$RESTORE_CONTAINER" >/dev/null 2>&1 || true
     if [ "${KEEP_RESTORE:-0}" != "1" ]; then
-        docker run --rm --user root -v "$DST":/dst --entrypoint sh "$IMAGE" -c 'rm -rf /dst/* /dst/.[!.]*' || true
-        rmdir "$DST" 2>/dev/null || true
+        # リストア先のコピーはバックアップと同じ容量のため、消せなかった場合は気づけるようにする。
+        if ! docker run --rm --user root -v "$DST":/dst --entrypoint sh "$IMAGE" -c 'rm -rf /dst/* /dst/.[!.]*' \
+            || ! rmdir "$DST"; then
+            echo "WARNING: failed to remove restore directory $DST; remove it manually" >&2
+        fi
     else
         echo "kept restore directory: $DST"
     fi

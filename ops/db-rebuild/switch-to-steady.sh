@@ -4,7 +4,7 @@
 #   2. ANALYZE (bulk 中は autovacuum が止まっているため統計がない)
 #   3. WAL アーカイブの動作確認
 #   4. 最初の pg_basebackup と pg_verifybackup
-# 検証ゲート (Task 9) を通過した後に実行する。環境変数は compose.new-db.yaml と共通。
+# 検証ゲートを通過した後に実行する。環境変数は compose.new-db.yaml と共通。
 # SKIP_ANALYZE=1 で ANALYZE を省略できる。
 set -euo pipefail
 
@@ -37,16 +37,18 @@ if [ "${SKIP_ANALYZE:-0}" != "1" ]; then
     docker exec "$CONTAINER" vacuumdb -U "$DB_USER" -d "$DB_NAME" --analyze-only --jobs=4
 fi
 
-# WAL を 1 本切り替え、アーカイブ成功と失敗なしを確認する。
-psql_c 'SELECT pg_switch_wal()' >/dev/null
+# 切り替えた WAL セグメント自体がアーカイブされたことを確認する。
+# pg_switch_wal() は切り替え先の先頭 LSN を返すため、1 引いて切り替えたセグメントの名前にする。
+segment="$(psql_c 'SELECT pg_walfile_name(pg_switch_wal() - 1)')"
+archived=f
 for _ in $(seq 1 30); do
-    archived="$(psql_c 'SELECT archived_count FROM pg_stat_archiver')"
-    [ "$archived" -gt 0 ] && break
+    archived="$(psql_c "SELECT coalesce(last_archived_wal >= '$segment', false) FROM pg_stat_archiver")"
+    [ "$archived" = t ] && break
     sleep 2
 done
 failed="$(psql_c 'SELECT failed_count FROM pg_stat_archiver')"
-if [ "$archived" -eq 0 ] || [ "$failed" -ne 0 ]; then
-    echo "ERROR: WAL archiving is not healthy: archived_count=$archived failed_count=$failed" >&2
+if [ "$archived" != t ] || [ "$failed" -ne 0 ]; then
+    echo "ERROR: WAL archiving is not healthy: segment=$segment archived=$archived failed_count=$failed" >&2
     exit 1
 fi
 
