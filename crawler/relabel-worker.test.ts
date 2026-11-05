@@ -298,7 +298,7 @@ describe('evaluateAccountRelabelItems', () => {
     expect(recordLabelsSpy).toHaveBeenCalledWith(prisma, expect.anything())
     expect(completeSpy).not.toHaveBeenCalled()
     expect(updateMany).toHaveBeenCalledWith({
-      where: { id: { in: [1] }, status: { not: 'succeeded' } },
+      where: { id: { in: [1] } },
       data: { lastErrorSummary: expect.stringContaining('evidence write failed') as string },
     })
   })
@@ -790,7 +790,6 @@ describe('evaluateAccountRelabelItems', () => {
     expect(updateManySpy).toHaveBeenCalledWith({
       where: {
         id: { in: Array.from({ length: 5 }, (_, index) => `wi-${index + 10}`) },
-        status: { not: 'succeeded' },
       },
       data: { lastErrorSummary: expect.stringContaining('DB write failed') as string },
     })
@@ -844,7 +843,7 @@ describe('evaluateAccountRelabelItems', () => {
     expect(recordLabelsSpy).not.toHaveBeenCalled()
     expect(completeSpy).not.toHaveBeenCalled()
     expect(updateManySpy).toHaveBeenCalledWith({
-      where: { id: { in: [1, 2] }, status: { not: 'succeeded' } },
+      where: { id: { in: [1, 2] } },
       data: { lastErrorSummary: expect.stringContaining('connection reset') as string },
     })
   })

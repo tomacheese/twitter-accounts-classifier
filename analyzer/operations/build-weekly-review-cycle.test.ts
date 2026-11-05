@@ -11,6 +11,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateWeeklyReviewCycle', () 
     await prisma.operationCycle.deleteMany()
     await prisma.analysisRun.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.weeklyAnalysisRun.deleteMany()
   })
 

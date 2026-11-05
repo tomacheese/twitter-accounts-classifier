@@ -205,7 +205,7 @@ async function evaluateAccountRelabelItemGroup(
     )
     captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
     await prisma.analysisWorkItem.updateMany({
-      where: { id: { in: group.map((item) => item.id) }, status: { not: 'succeeded' } },
+      where: { id: { in: group.map((item) => item.id) } },
       data: { lastErrorSummary: String(error).slice(0, 500) },
     })
     return 0
@@ -338,10 +338,10 @@ async function evaluateAccountRelabelItemGroup(
       )
       captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
       // completeAccountRelabelWorkItemsBulk が commit 済みでレスポンスだけ失われた場合、
-      // 対象は既に succeeded になっている。status ガードで上書きしないようにする。
+      // 完了した行は既に消えている。再要求で queued に戻った行にだけ書き込まれる。
       await prisma.analysisWorkItem
         .updateMany({
-          where: { id: { in: subBatch.map((item) => item.id) }, status: { not: 'succeeded' } },
+          where: { id: { in: subBatch.map((item) => item.id) } },
           data: { lastErrorSummary: String(error).slice(0, 500) },
         })
         .catch(() => undefined)

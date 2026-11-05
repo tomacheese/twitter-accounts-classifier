@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
+import { enqueuedKeys } from './enqueued-keys.test-helper'
 import {
   clearCrawlAccountCheckpoints,
   completeCrawlAccountCheckpoint,
@@ -21,8 +22,8 @@ describe('startOrResumeCrawlRun', () => {
     const findFirst = vi.fn().mockResolvedValue(null)
     const startedAt = new Date('2026-07-28T00:00:00Z')
     const create = vi.fn().mockResolvedValue({ id: 'run1', startedAt })
-    const upsert = vi.fn().mockResolvedValue({})
-    const tx = { crawlRun: { create }, analysisWorkItem: { upsert } }
+    const executeRaw = vi.fn().mockResolvedValue({})
+    const tx = { crawlRun: { create }, $executeRaw: executeRaw }
     const transaction = vi.fn((fn: (transactionClient: unknown) => Promise<unknown>) => fn(tx))
     const prisma = {
       crawlRun: { findFirst, create },
@@ -45,21 +46,7 @@ describe('startOrResumeCrawlRun', () => {
         staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
       },
     })
-    expect(upsert).toHaveBeenCalledWith({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'operation_cycle_refresh',
-          triggerType: 'crawl_run',
-          triggerId: 'run1',
-        },
-      },
-      create: {
-        kind: 'operation_cycle_refresh',
-        triggerType: 'crawl_run',
-        triggerId: 'run1',
-      },
-      update: {},
-    })
+    expect(enqueuedKeys(executeRaw)).toEqual([['operation_cycle_refresh', 'crawl_run', 'run1']])
   })
 
   it('reuses the newest interrupted run and refreshes its heartbeat', async () => {
@@ -82,10 +69,10 @@ describe('startOrResumeCrawlRun', () => {
     })
     const create = vi.fn()
     const update = vi.fn()
-    const upsert = vi.fn()
+    const executeRaw = vi.fn()
     const prisma = {
       crawlRun: { findFirst, create, update },
-      analysisWorkItem: { upsert },
+      $executeRaw: executeRaw,
       $queryRaw: queryRaw,
     } as unknown as PrismaClient
 
@@ -107,7 +94,7 @@ describe('startOrResumeCrawlRun', () => {
     expect(sqlQuery.join('')).toContain('ORDER BY "username", "startedAt" DESC, "id" DESC')
     expect(requestedRunId).toBe('run2')
     expect(create).not.toHaveBeenCalled()
-    expect(upsert).not.toHaveBeenCalled()
+    expect(executeRaw).not.toHaveBeenCalled()
     expect(update).toHaveBeenCalledWith({
       where: { id: 'run2' },
       data: {
@@ -127,14 +114,14 @@ describe('startOrResumeCrawlRun', () => {
     })
     const create = vi.fn().mockResolvedValue({ id: 'new-run', startedAt })
     const update = vi.fn().mockResolvedValue({})
-    const upsert = vi.fn().mockResolvedValue({})
+    const executeRaw = vi.fn().mockResolvedValue({})
     const upsertEvidenceEpoch = vi.fn().mockResolvedValue({})
     const deleteCheckpoints = vi.fn().mockReturnValue({})
     const deleteLabelClaims = vi.fn().mockReturnValue({})
     const tx = {
       crawlRun: { update, create },
       labelEvidenceEpoch: { upsert: upsertEvidenceEpoch },
-      analysisWorkItem: { upsert },
+      $executeRaw: executeRaw,
     }
     const transaction = vi.fn((arg: unknown) =>
       typeof arg === 'function'
@@ -170,21 +157,10 @@ describe('startOrResumeCrawlRun', () => {
         staleAfterAt: new Date(startedAt.getTime() + staleThresholdMs),
       },
     })
-    expect(upsert).toHaveBeenCalledWith({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'operation_cycle_refresh',
-          triggerType: 'crawl_run',
-          triggerId: 'new-run',
-        },
-      },
-      create: {
-        kind: 'operation_cycle_refresh',
-        triggerType: 'crawl_run',
-        triggerId: 'new-run',
-      },
-      update: {},
-    })
+    expect(enqueuedKeys(executeRaw)).toEqual([
+      ['label_aggregate_refresh', 'crawl_run', 'abandoned-run'],
+      ['operation_cycle_refresh', 'crawl_run', 'new-run'],
+    ])
   })
 
   it('resumes a running row exactly at the stale threshold boundary (not stale)', async () => {
@@ -194,10 +170,10 @@ describe('startOrResumeCrawlRun', () => {
     const queryRaw = vi.fn().mockResolvedValue([])
     const create = vi.fn()
     const update = vi.fn()
-    const upsert = vi.fn()
+    const executeRaw = vi.fn()
     const prisma = {
       crawlRun: { findFirst, create, update },
-      analysisWorkItem: { upsert },
+      $executeRaw: executeRaw,
       $queryRaw: queryRaw,
     } as unknown as PrismaClient
 
@@ -205,7 +181,7 @@ describe('startOrResumeCrawlRun', () => {
 
     expect(result.id).toBe('run3')
     expect(create).not.toHaveBeenCalled()
-    expect(upsert).not.toHaveBeenCalled()
+    expect(executeRaw).not.toHaveBeenCalled()
     expect(update).toHaveBeenCalledWith({
       where: { id: 'run3' },
       data: {
@@ -219,8 +195,8 @@ describe('startOrResumeCrawlRun', () => {
     const startedAt = new Date('2026-01-01T00:00:00Z')
     const findFirst = vi.fn().mockResolvedValue(null)
     const create = vi.fn().mockResolvedValue({ id: 'run1', startedAt })
-    const upsert = vi.fn().mockResolvedValue({})
-    const tx = { crawlRun: { create }, analysisWorkItem: { upsert } }
+    const executeRaw = vi.fn().mockResolvedValue({})
+    const tx = { crawlRun: { create }, $executeRaw: executeRaw }
     const transaction = vi.fn((fn: (transactionClient: unknown) => Promise<unknown>) => fn(tx))
     const prisma = {
       crawlRun: { findFirst, create },
@@ -242,10 +218,10 @@ describe('startOrResumeCrawlRun', () => {
     })
     const queryRaw = vi.fn().mockResolvedValue([])
     const update = vi.fn().mockResolvedValue({})
-    const upsert = vi.fn().mockResolvedValue({})
+    const executeRaw = vi.fn().mockResolvedValue({})
     const prisma = {
       crawlRun: { findFirst, create: vi.fn(), update },
-      analysisWorkItem: { upsert },
+      $executeRaw: executeRaw,
       $queryRaw: queryRaw,
     } as unknown as PrismaClient
 
@@ -265,7 +241,7 @@ describe('finishCrawlRun', () => {
     const tx = {
       crawlRun: { update },
       labelEvidenceEpoch: { upsert },
-      analysisWorkItem: { upsert: enqueue },
+      $executeRaw: enqueue,
     }
     const transaction = vi.fn((fn: (transactionClient: unknown) => Promise<unknown>) => fn(tx))
     const prisma = { $transaction: transaction } as unknown as PrismaClient
@@ -277,21 +253,7 @@ describe('finishCrawlRun', () => {
       create: { crawlRunId: 'crawl-1', sourceWatermarkAt: finishedAt },
       update: {},
     })
-    expect(enqueue).toHaveBeenCalledWith({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'label_aggregate_refresh',
-          triggerType: 'crawl_run',
-          triggerId: 'crawl-1',
-        },
-      },
-      create: {
-        kind: 'label_aggregate_refresh',
-        triggerType: 'crawl_run',
-        triggerId: 'crawl-1',
-      },
-      update: {},
-    })
+    expect(enqueuedKeys(enqueue)).toEqual([['label_aggregate_refresh', 'crawl_run', 'crawl-1']])
     expect(upsert.mock.invocationCallOrder[0]).toBeLessThan(enqueue.mock.invocationCallOrder[0])
   })
 })
@@ -314,12 +276,12 @@ describe('touchCrawlRunHeartbeat', () => {
 describe('finishCrawlRun', () => {
   it('updates finishedAt, status, and clears the current-account fields', async () => {
     const update = vi.fn().mockResolvedValue({})
-    const upsert = vi.fn().mockResolvedValue({})
+    const executeRaw = vi.fn().mockResolvedValue({})
     const upsertEvidenceEpoch = vi.fn().mockResolvedValue({})
     const tx = {
       crawlRun: { update },
       labelEvidenceEpoch: { upsert: upsertEvidenceEpoch },
-      analysisWorkItem: { upsert },
+      $executeRaw: executeRaw,
     }
     const prisma = {
       $transaction: vi.fn((fn: (tx: unknown) => Promise<void>) => fn(tx)),
@@ -343,12 +305,12 @@ describe('finishCrawlRun', () => {
   // kind/triggerType/triggerId をそのまま再利用し、契約の崩れを検出する。
   it('enqueues a label_aggregate_refresh AnalysisWorkItem for the finished run', async () => {
     const update = vi.fn().mockResolvedValue({})
-    const upsert = vi.fn().mockResolvedValue({})
+    const executeRaw = vi.fn().mockResolvedValue({})
     const upsertEvidenceEpoch = vi.fn().mockResolvedValue({})
     const tx = {
       crawlRun: { update },
       labelEvidenceEpoch: { upsert: upsertEvidenceEpoch },
-      analysisWorkItem: { upsert },
+      $executeRaw: executeRaw,
     }
     const prisma = {
       $transaction: vi.fn((fn: (tx: unknown) => Promise<void>) => fn(tx)),
@@ -356,17 +318,7 @@ describe('finishCrawlRun', () => {
 
     await finishCrawlRun(prisma, 'run1', new Date('2026-07-28T01:00:00Z'), 'failed')
 
-    expect(upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          kind_triggerType_triggerId: {
-            kind: 'label_aggregate_refresh',
-            triggerType: 'crawl_run',
-            triggerId: 'run1',
-          },
-        },
-      }),
-    )
+    expect(enqueuedKeys(executeRaw)).toEqual([['label_aggregate_refresh', 'crawl_run', 'run1']])
   })
 })
 

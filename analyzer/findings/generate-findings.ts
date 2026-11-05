@@ -10,6 +10,7 @@ import { evaluateLabelCountDrop } from './detectors/label-count-drop'
 import { evaluateReasonDistributionShifts } from './detectors/reason-distribution-shift'
 import type { DetectionPolicy, DetectionPolicyRule } from '../policy/schema'
 import { Logger } from '@book000/node-utils'
+import { enqueueWorkItem } from '../queue/work-item-repository'
 
 const logger = Logger.configure('analyzer:generate-findings')
 
@@ -233,20 +234,10 @@ async function upsertOccurrence(
   })
 
   if (input.primaryScopeType === 'account') {
-    await tx.analysisWorkItem.upsert({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'account_summary_refresh',
-          triggerType: 'review_finding_occurrence',
-          triggerId: occurrence.id,
-        },
-      },
-      create: {
-        kind: 'account_summary_refresh',
-        triggerType: 'review_finding_occurrence',
-        triggerId: occurrence.id,
-      },
-      update: {},
+    await enqueueWorkItem(tx, {
+      kind: 'account_summary_refresh',
+      triggerType: 'review_finding_occurrence',
+      triggerId: occurrence.id,
     })
   }
 }
