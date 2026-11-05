@@ -14,13 +14,13 @@ export async function loadBioCorpus(
   prisma: PrismaClient,
   watermark: Date,
 ): Promise<BioCorpusEntry[]> {
-  const accounts = await prisma.account.findMany({
-    where: { bio: { not: null }, lastCrawledAt: { lte: watermark } },
-    orderBy: [{ lastCrawledAt: 'desc' }, { id: 'desc' }],
+  const states = await prisma.accountCrawlState.findMany({
+    where: { lastCrawledAt: { lte: watermark }, account: { bio: { not: null } } },
+    orderBy: [{ lastCrawledAt: 'desc' }, { accountId: 'desc' }],
     take: BIO_CORPUS_LIMIT,
-    select: { id: true, bio: true },
+    select: { accountId: true, account: { select: { bio: true } } },
   })
-  return accounts
-    .filter((account): account is { id: string; bio: string } => account.bio !== null)
-    .map((account) => ({ accountId: account.id, bio: account.bio }))
+  return states.flatMap((state) =>
+    state.account.bio === null ? [] : [{ accountId: state.accountId, bio: state.account.bio }],
+  )
 }

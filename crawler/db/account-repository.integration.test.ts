@@ -38,6 +38,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await prisma.accountLabelLatest.deleteMany()
       await prisma.crawlAccountLabelRun.deleteMany()
       await prisma.block.deleteMany()
+      await prisma.accountCrawlState.deleteMany()
       await prisma.account.deleteMany()
     })
 

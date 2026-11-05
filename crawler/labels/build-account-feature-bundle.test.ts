@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { Account, Tweet } from '../generated/prisma'
+import type { Tweet } from '../generated/prisma'
+import type { AccountWithCrawlState } from '../db/account-repository'
 import { buildDuplicateReplyIndex } from './duplicate-reply-index'
 import { buildBioDuplicateIndex } from './bio-duplicate-index'
 import { buildReplyHijackIndex } from './reply-hijack-index'
 import { buildAccountFeatureBundle } from './build-account-feature-bundle'
 import { buildSelfReplyPromoIndex } from './self-reply-promo-index'
 
-function makeAccount(overrides: Partial<Account> = {}): Account {
+function makeAccount(overrides: Partial<AccountWithCrawlState> = {}): AccountWithCrawlState {
   return {
     id: 'acct-1',
     screenName: 'test_user',
@@ -24,13 +25,22 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
     professionalType: null,
     parodyCommentaryFanLabel: null,
     firstSeenAt: new Date('2020-01-01T00:00:00Z'),
-    lastCrawledAt: new Date('2026-01-01T00:00:00Z'),
-    lastRecentTweetsAttemptedAt: null,
-    lastRecentTweetsFetchedAt: null,
-    recentTweetsFetchStatus: null,
+    crawlState: null,
     updatedAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
   }
+}
+
+function buildWithoutTweets(account: AccountWithCrawlState) {
+  return buildAccountFeatureBundle(
+    account,
+    [],
+    buildDuplicateReplyIndex([]),
+    buildBioDuplicateIndex([]),
+    buildReplyHijackIndex([]),
+    buildSelfReplyPromoIndex([], []),
+    new Map(),
+  )
 }
 
 function makeTweet(overrides: Partial<Tweet> = {}): Tweet {
@@ -81,6 +91,23 @@ describe('buildAccountFeatureBundle', () => {
 
     expect(bundle.recentTweets[0].hasAiGeneratedMedia).toBe(true)
     expect(bundle.recentTweets[0].aiGeneratedDetectionSource).toBe('C2paClient')
+  })
+
+  it('recentTweetsFetchStatus は AccountCrawlState から取り、行が無ければ null にする', () => {
+    const crawlState = {
+      accountId: 'acct-1',
+      lastCrawledAt: new Date('2026-01-01T00:00:00Z'),
+      lastRecentTweetsAttemptedAt: new Date('2026-01-01T00:00:00Z'),
+      lastRecentTweetsFetchedAt: new Date('2026-01-01T00:00:00Z'),
+      recentTweetsFetchStatus: 'success' as const,
+    }
+
+    expect(buildWithoutTweets(makeAccount({ crawlState })).account.recentTweetsFetchStatus).toBe(
+      'success',
+    )
+    expect(
+      buildWithoutTweets(makeAccount({ crawlState: null })).account.recentTweetsFetchStatus,
+    ).toBeNull()
   })
 
   it('Card destination URL 関連フィールドを bundle に含める', () => {

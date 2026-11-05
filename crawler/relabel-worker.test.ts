@@ -59,7 +59,9 @@ describe('evaluateAccountRelabelItems', () => {
       account: {
         findMany: vi
           .fn()
-          .mockResolvedValue([{ id: 'account-1', recentTweetsFetchStatus: 'success' }]),
+          .mockResolvedValue([
+            { id: 'account-1', crawlState: { recentTweetsFetchStatus: 'success' } },
+          ]),
       },
     })
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
@@ -97,7 +99,9 @@ describe('evaluateAccountRelabelItems', () => {
       account: {
         findMany: vi
           .fn()
-          .mockResolvedValue([{ id: 'account-1', recentTweetsFetchStatus: 'success' }]),
+          .mockResolvedValue([
+            { id: 'account-1', crawlState: { recentTweetsFetchStatus: 'success' } },
+          ]),
       },
     })
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(
@@ -177,7 +181,9 @@ describe('evaluateAccountRelabelItems', () => {
       account: {
         findMany: vi
           .fn()
-          .mockResolvedValue([{ id: 'account-1', recentTweetsFetchStatus: 'success' }]),
+          .mockResolvedValue([
+            { id: 'account-1', crawlState: { recentTweetsFetchStatus: 'success' } },
+          ]),
       },
     })
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(
@@ -233,7 +239,9 @@ describe('evaluateAccountRelabelItems', () => {
       account: {
         findMany: vi
           .fn()
-          .mockResolvedValue([{ id: 'account-1', recentTweetsFetchStatus: 'success' }]),
+          .mockResolvedValue([
+            { id: 'account-1', crawlState: { recentTweetsFetchStatus: 'success' } },
+          ]),
       },
       analysisWorkItem: { updateMany },
     })

@@ -264,7 +264,8 @@ export async function getAccountHistory(
 export interface AccountTechnicalView {
   accountId: string
   firstSeenAt: Date
-  lastCrawledAt: Date
+  /** AccountCrawlState の行が無い場合は null (診断用の画面のため、欠落をそのまま見せる)。 */
+  lastCrawledAt: Date | null
   lastRecentTweetsAttemptedAt: Date | null
   lastRecentTweetsFetchedAt: Date | null
   recentTweetsFetchStatus: string | null
@@ -283,7 +284,10 @@ export async function getAccountTechnical(
   prisma: PrismaClient,
   accountId: string,
 ): Promise<AccountTechnicalView | null> {
-  const account = await prisma.account.findUnique({ where: { id: accountId } })
+  const account = await prisma.account.findUnique({
+    where: { id: accountId },
+    include: { crawlState: true },
+  })
   if (!account) return null
 
   const meta = await getReadModelMeta(prisma, 'account_summary_latest')
@@ -291,10 +295,10 @@ export async function getAccountTechnical(
   return {
     accountId: account.id,
     firstSeenAt: account.firstSeenAt,
-    lastCrawledAt: account.lastCrawledAt,
-    lastRecentTweetsAttemptedAt: account.lastRecentTweetsAttemptedAt,
-    lastRecentTweetsFetchedAt: account.lastRecentTweetsFetchedAt,
-    recentTweetsFetchStatus: account.recentTweetsFetchStatus,
+    lastCrawledAt: account.crawlState?.lastCrawledAt ?? null,
+    lastRecentTweetsAttemptedAt: account.crawlState?.lastRecentTweetsAttemptedAt ?? null,
+    lastRecentTweetsFetchedAt: account.crawlState?.lastRecentTweetsFetchedAt ?? null,
+    recentTweetsFetchStatus: account.crawlState?.recentTweetsFetchStatus ?? null,
     updatedAt: account.updatedAt,
     freshnessStatus: meta.freshnessStatus,
     sourceWatermarkAt: meta.sourceDataAt,

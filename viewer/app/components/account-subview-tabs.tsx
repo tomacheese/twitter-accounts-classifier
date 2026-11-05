@@ -278,7 +278,7 @@ function TechnicalView({ data }: { data: AccountTechnicalView }): React.ReactEle
       <dt className="text-gray-500 dark:text-gray-400">First seen</dt>
       <dd>{formatDateTime(data.firstSeenAt)}</dd>
       <dt className="text-gray-500 dark:text-gray-400">Last crawled</dt>
-      <dd>{formatDateTime(data.lastCrawledAt)}</dd>
+      <dd>{data.lastCrawledAt ? formatDateTime(data.lastCrawledAt) : '—'}</dd>
       <dt className="text-gray-500 dark:text-gray-400">Recent tweets fetch</dt>
       <dd>{data.recentTweetsFetchStatus ?? 'unknown'}</dd>
       <dt className="text-gray-500 dark:text-gray-400">Recent tweets attempted</dt>

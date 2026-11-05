@@ -13,7 +13,11 @@ import {
 import type { PrismaClient } from './generated/prisma'
 import { getPrismaClient, disconnectPrisma } from './db/client'
 import { upsertComponentBuildIdentity } from './build-identity'
-import { upsertAccount, type AccountProfileInput } from './db/account-repository'
+import {
+  recordRecentTweetsFetchFailure,
+  upsertAccount,
+  type AccountProfileInput,
+} from './db/account-repository'
 import { upsertTweets, findMissingTweetIds, type TweetInput } from './db/tweet-repository'
 import {
   ensureLabelDefinitionsForRules,
@@ -2153,10 +2157,7 @@ export function createRecordRecentTweetsFetchFailureFn(
 ): CrawlDependencies['recordRecentTweetsFetchFailure'] {
   return async (input, attemptedAt) => {
     const { account } = await upsertAccount(prisma, input)
-    await prisma.account.update({
-      where: { id: account.id },
-      data: { lastRecentTweetsAttemptedAt: attemptedAt, recentTweetsFetchStatus: 'failed' },
-    })
+    await recordRecentTweetsFetchFailure(prisma, account.id, attemptedAt)
   }
 }
 

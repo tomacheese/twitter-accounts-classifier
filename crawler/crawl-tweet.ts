@@ -4,7 +4,12 @@ import { loadConfig } from './config/load-config'
 import { CRAWL_LIMITS, SELF_REPLY_PROMO_CHAIN_LIMITS } from './config/crawl-limits'
 import { getCookieIssuerBaseUrl } from './config/env'
 import { getPrismaClient, disconnectPrisma } from './db/client'
-import { upsertAccount, type AccountProfileInput } from './db/account-repository'
+import {
+  recordRecentTweetsFetchFailure,
+  recordRecentTweetsFetchSuccess,
+  upsertAccount,
+  type AccountProfileInput,
+} from './db/account-repository'
 import { upsertTweets, type TweetInput } from './db/tweet-repository'
 import { requestAccountRelabelBulk } from './db/analysis-work-item-repository'
 import {
@@ -41,9 +46,9 @@ export interface ManualTweetCrawlDependencies {
   client: ManualCrawlOpenApiClient
   persistAccount: (input: AccountProfileInput) => Promise<void>
   persistTweets: (inputs: TweetInput[]) => Promise<void>
-  /** recent tweets 取得成功時に `Account.recentTweetsFetchStatus` 等を更新する。 */
+  /** recent tweets 取得成功時に `AccountCrawlState.recentTweetsFetchStatus` 等を更新する。 */
   recordRecentTweetsFetchSuccess: (accountId: string, fetchedAt: Date) => Promise<void>
-  /** recent tweets 取得失敗時に `Account.recentTweetsFetchStatus` 等を更新する。既存の fetchedAt は消さない。 */
+  /** recent tweets 取得失敗時に `AccountCrawlState.recentTweetsFetchStatus` 等を更新する。既存の fetchedAt は消さない。 */
   recordRecentTweetsFetchFailure: (accountId: string, attemptedAt: Date) => Promise<void>
   /** 既存ラベル有無でフィルタしない account_relabel の一括要求。 */
   requestAccountRelabel: (accountIds: string[]) => Promise<void>
@@ -209,20 +214,10 @@ async function main(): Promise<void> {
           await upsertTweets(prisma, inputs)
         },
         recordRecentTweetsFetchSuccess: async (accountId, fetchedAt) => {
-          await prisma.account.update({
-            where: { id: accountId },
-            data: {
-              lastRecentTweetsAttemptedAt: fetchedAt,
-              lastRecentTweetsFetchedAt: fetchedAt,
-              recentTweetsFetchStatus: 'success',
-            },
-          })
+          await recordRecentTweetsFetchSuccess(prisma, accountId, fetchedAt)
         },
         recordRecentTweetsFetchFailure: async (accountId, attemptedAt) => {
-          await prisma.account.update({
-            where: { id: accountId },
-            data: { lastRecentTweetsAttemptedAt: attemptedAt, recentTweetsFetchStatus: 'failed' },
-          })
+          await recordRecentTweetsFetchFailure(prisma, accountId, attemptedAt)
         },
         requestAccountRelabel: (accountIds) => requestAccountRelabelBulk(prisma, accountIds),
         recentTweetsPerAccount: CRAWL_LIMITS.recentTweetsPerAccount,

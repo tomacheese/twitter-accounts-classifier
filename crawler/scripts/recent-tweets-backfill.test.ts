@@ -68,12 +68,12 @@ function makeDependencies(): RecentTweetsBackfillDependencies & {
   const accountUpdate = vi.fn().mockResolvedValue({})
   const accountUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
   const tx = {
-    account: { update: accountUpdate, updateMany: accountUpdateMany },
+    accountCrawlState: { update: accountUpdate, updateMany: accountUpdateMany },
   } as unknown as PrismaClient
   const transaction = vi.fn((fn: (transactionClient: PrismaClient) => Promise<unknown>) => fn(tx))
   const prisma = {
     $transaction: transaction,
-    account: { update: accountUpdate, updateMany: accountUpdateMany },
+    accountCrawlState: { update: accountUpdate, updateMany: accountUpdateMany },
   } as unknown as PrismaClient
   const authenticatedClose = vi.fn().mockResolvedValue(undefined)
 
@@ -227,7 +227,7 @@ describe('runRecentTweetsBackfill', () => {
     })
     expect(deps.accountUpdateMany).toHaveBeenCalledWith({
       where: {
-        id: 'account-a',
+        accountId: 'account-a',
         lastRecentTweetsAttemptedAt: null,
       },
       data: {
@@ -416,7 +416,7 @@ describe('runRecentTweetsBackfill', () => {
 
       expect(deps.accountUpdateMany).toHaveBeenCalledWith({
         where: {
-          id: 'account-a',
+          accountId: 'account-a',
           lastRecentTweetsAttemptedAt: null,
         },
         data: {
