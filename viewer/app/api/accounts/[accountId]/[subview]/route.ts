@@ -1,3 +1,4 @@
+import { isValidId } from 'id-boundary'
 import { NextResponse } from 'next/server'
 import { getPrismaClient } from '@/lib/prisma'
 import {
@@ -48,6 +49,10 @@ export async function GET(request: Request, context: RouteParams): Promise<NextR
   const { accountId, subview } = await context.params
   if (!isSubviewKey(subview)) {
     return NextResponse.json({ error: 'unknown subview' }, { status: 400 })
+  }
+
+  if (!isValidId(accountId)) {
+    return NextResponse.json({ error: 'account not found' }, { status: 404 })
   }
 
   const prisma = getPrismaClient()

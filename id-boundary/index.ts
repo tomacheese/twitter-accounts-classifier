@@ -2,6 +2,7 @@ export {
   MAX_BIGINT_ID,
   InvalidIdError,
   toBigIntId,
+  isValidId,
   fromBigIntId,
   toBigIntIdOrNull,
   fromBigIntIdOrNull,

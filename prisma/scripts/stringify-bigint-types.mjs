@@ -1,11 +1,6 @@
 // 生成済み Prisma Client の型宣言 (index.d.ts) の bigint を string に書き換える。
 //
-// アプリのドメイン型は ID を 10 進文字列で持ち、実行時の bigint との変換は
-// id-boundary の query extension が境界で行う。生成された型のままだと
-// 実行時の値 (string) と型 (bigint) が食い違うため、型だけをここで合わせる。
-// 実行時のコード (index.js) には触れない。
-//
-// 使い方: node prisma/scripts/stringify-bigint-types.mjs [生成先ディレクトリ...]
+// 実行時の変換は id-boundary が境界で行うため、型だけを実行時の値 (string) に合わせる。
 // 引数なしの場合は、各パッケージの generated/prisma のうち存在するものを対象にする。
 import fs from 'node:fs'
 import path from 'node:path'

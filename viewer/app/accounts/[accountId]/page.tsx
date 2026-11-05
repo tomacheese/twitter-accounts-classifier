@@ -1,3 +1,4 @@
+import { isValidId } from 'id-boundary'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -26,6 +27,7 @@ async function LegacyAccountDetailPage({
   params,
 }: AccountDetailPageProps): Promise<React.ReactElement> {
   const { accountId } = await params
+  if (!isValidId(accountId)) notFound()
   let detail: Awaited<ReturnType<typeof getAccountDetail>>
   try {
     detail = await getAccountDetail(getPrismaClient(), accountId, RECENT_TWEET_COUNT)
@@ -246,6 +248,7 @@ async function NewAccountDetailView({
   params,
 }: AccountDetailPageProps): Promise<React.ReactElement> {
   const { accountId } = await params
+  if (!isValidId(accountId)) notFound()
   const prisma = getPrismaClient()
 
   const overview = await (async () => {

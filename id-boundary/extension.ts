@@ -72,10 +72,7 @@ function convertIdLeaves(value: unknown): unknown {
   return value
 }
 
-/**
- * where / data / create / update 内のオブジェクトを変換する。
- * フィールド名に一致するキーは型で扱いを決め、それ以外 (AND、some、connect など) は同じモデルのまま辿る。
- */
+/** フィールド名に一致するキーは型で扱いを決め、それ以外 (AND、some、connect など) は同じモデルのまま辿る。 */
 function convertContainer(models: Models, modelName: string, node: unknown): unknown {
   if (Array.isArray(node)) return node.map((item) => convertContainer(models, modelName, item))
   if (!isPlainObject(node)) return node

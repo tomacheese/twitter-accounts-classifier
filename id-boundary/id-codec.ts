@@ -49,6 +49,15 @@ export function toBigIntId(value: string | number | bigint): bigint {
 }
 
 /**
+ * 外部入力 (URL や検索語) が ID として DB へ渡せるかを、例外を投げずに判定する。
+ * @param value 判定する文字列
+ * @returns toBigIntId が受け付ける 10 進文字列なら true
+ */
+export function isValidId(value: string): boolean {
+  return ID_PATTERN.test(value) && BigInt(value) <= MAX_BIGINT_ID
+}
+
+/**
  * bigint の ID を 10 進の文字列に戻す。
  * @param value bigint の ID
  * @returns 10 進の文字列
@@ -89,7 +98,7 @@ export function toBigIntIds(values: readonly (string | number | bigint)[]): bigi
 /**
  * 10 進文字列の ID を、bigint 列の並び (数値順) と同じ順序で比較する。
  * 文字列の辞書順 (localeCompare) は桁数が違うと数値順と食い違うため使わない。
- * ID は先頭ゼロを持たないので、桁数、同じ桁数なら辞書順で数値順になる。
+ * 先頭ゼロのない ID は、桁数が小さいほうが小さく、同じ桁数なら辞書順が数値順に一致する。
  * @param left - 10 進文字列の ID
  * @param right - 10 進文字列の ID
  * @returns left が小さければ負、大きければ正、等しければ 0

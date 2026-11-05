@@ -253,8 +253,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
   })
 
   it('advances cursor/processedCount exactly once per row when two work items race on the same chunk', async () => {
-    // id は '100598866219' .. '_4' の辞書順が数値順と一致するため、
-    // orderBy: { id: 'asc' } のチャンク境界を事前に予測できる。
+    // id は同じ桁数なので辞書順と数値順が一致し、チャンク境界を事前に予測できる。
     for (let i = 0; i < 5; i++) {
       await prisma.account.create({
         data: {
@@ -509,8 +508,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const labelDefinition = await prisma.labelDefinition.create({
         data: { key: 'test_sampling_race', description: 'テスト用ラベル' },
       })
-      // id は '100888547941' .. '_4' の辞書順が数値順と一致するため、
-      // orderBy accountId asc のチャンク境界を事前に予測できる。
+      // id は同じ桁数なので辞書順と数値順が一致し、チャンク境界を事前に予測できる。
       for (let i = 0; i < 5; i++) {
         await createAccount(String(100_743_446_399n + BigInt(i)))
         await prisma.accountClassificationLatest.create({

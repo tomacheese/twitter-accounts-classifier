@@ -8,6 +8,7 @@ import {
   fromBigIntId,
   fromBigIntIdOrNull,
   fromBigIntIds,
+  isValidId,
   toBigIntId,
   toBigIntIdOrNull,
   toBigIntIds,
@@ -103,6 +104,19 @@ describe('配列', () => {
   it('1 要素でも不正なら全体を拒否する', () => {
     expect(() => toBigIntIds(['1', 'x', '3'])).toThrow(InvalidIdError)
   })
+})
+
+describe('isValidId', () => {
+  it.each(['0', '42', '9223372036854775807'])('%s は ID として受け付ける', (value) => {
+    expect(isValidId(value)).toBe(true)
+  })
+
+  it.each(['', 'alice', '007', '-1', '1.5', '9223372036854775808', '12345678901234567890'])(
+    '%s は ID として受け付けない',
+    (value) => {
+      expect(isValidId(value)).toBe(false)
+    },
+  )
 })
 
 describe('compareIds', () => {

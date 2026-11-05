@@ -38,30 +38,37 @@ afterEach(() => {
 describe('GET /api/accounts/[accountId]/[subview]', () => {
   it('accounts feature flag が無くても既知の subview を利用できる', async () => {
     process.env.VIEWER_NEW_UI_SECTIONS = ''
-    getAccountOverview.mockResolvedValue({ accountId: 'account-1' })
+    getAccountOverview.mockResolvedValue({ accountId: '1001' })
 
-    const response = await callGet('account-1', 'overview')
+    const response = await callGet('1001', 'overview')
 
     expect(response.status).toBe(200)
   })
 
   it('既知の subview はデータを 200 で返す', async () => {
-    getAccountOverview.mockResolvedValue({ accountId: 'account-1' })
+    getAccountOverview.mockResolvedValue({ accountId: '1001' })
 
-    const response = await callGet('account-1', 'overview')
+    const response = await callGet('1001', 'overview')
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ data: { accountId: 'account-1' } })
+    expect(await response.json()).toEqual({ data: { accountId: '1001' } })
+  })
+
+  it('ID として解釈できない accountId は DB を引かずに 404 を返す', async () => {
+    const response = await callGet('not-a-number', 'overview')
+
+    expect(response.status).toBe(404)
+    expect(getAccountOverview).not.toHaveBeenCalled()
   })
 
   it('未知の subview は 400 を返す', async () => {
-    const response = await callGet('account-1', 'bogus')
+    const response = await callGet('1001', 'bogus')
     expect(response.status).toBe(400)
   })
 
   it('Object.prototype 由来のキーを subview として受け付けない', async () => {
     for (const key of ['toString', 'constructor', 'valueOf', '__proto__', 'hasOwnProperty']) {
-      const response = await callGet('account-1', key)
+      const response = await callGet('1001', key)
       expect(response.status).toBe(400)
     }
   })
@@ -77,7 +84,7 @@ describe('GET /api/accounts/[accountId]/[subview]', () => {
   it('結果が空配列の subview は 404 にしない', async () => {
     getAccountClassification.mockResolvedValue([])
 
-    const response = await callGet('account-1', 'classification')
+    const response = await callGet('1001', 'classification')
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ data: [] })
@@ -87,11 +94,11 @@ describe('GET /api/accounts/[accountId]/[subview]', () => {
     getAccountRelations.mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 })
 
     const response = await GET(new Request('http://localhost/api?cursor=abc&limit=10'), {
-      params: Promise.resolve({ accountId: 'account-1', subview: 'relations' }),
+      params: Promise.resolve({ accountId: '1001', subview: 'relations' }),
     })
 
     expect(response.status).toBe(200)
-    expect(getAccountRelations).toHaveBeenCalledWith(expect.anything(), 'account-1', {
+    expect(getAccountRelations).toHaveBeenCalledWith(expect.anything(), '1001', {
       cursor: 'abc',
       limit: 10,
     })
@@ -101,10 +108,10 @@ describe('GET /api/accounts/[accountId]/[subview]', () => {
     getAccountRelations.mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 })
 
     await GET(new Request('http://localhost/api'), {
-      params: Promise.resolve({ accountId: 'account-1', subview: 'relations' }),
+      params: Promise.resolve({ accountId: '1001', subview: 'relations' }),
     })
 
-    expect(getAccountRelations).toHaveBeenCalledWith(expect.anything(), 'account-1', {
+    expect(getAccountRelations).toHaveBeenCalledWith(expect.anything(), '1001', {
       cursor: undefined,
       limit: undefined,
     })
@@ -114,12 +121,12 @@ describe('GET /api/accounts/[accountId]/[subview]', () => {
     getAccountRelations.mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 })
 
     await GET(new Request('http://localhost/api?limit=abc'), {
-      params: Promise.resolve({ accountId: 'account-1', subview: 'relations' }),
+      params: Promise.resolve({ accountId: '1001', subview: 'relations' }),
     })
 
     expect(getAccountRelations).toHaveBeenCalledWith(
       expect.anything(),
-      'account-1',
+      '1001',
       expect.objectContaining({ limit: undefined }),
     )
   })
@@ -128,12 +135,12 @@ describe('GET /api/accounts/[accountId]/[subview]', () => {
     getAccountRelations.mockResolvedValue({ items: [], nextCursor: null, totalCount: 0 })
 
     await GET(new Request('http://localhost/api?limit=-5'), {
-      params: Promise.resolve({ accountId: 'account-1', subview: 'relations' }),
+      params: Promise.resolve({ accountId: '1001', subview: 'relations' }),
     })
 
     expect(getAccountRelations).toHaveBeenCalledWith(
       expect.anything(),
-      'account-1',
+      '1001',
       expect.objectContaining({ limit: undefined }),
     )
   })
