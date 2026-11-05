@@ -77,8 +77,7 @@ start_snapshot() {
         printf 'SELECT pg_sleep(0) \\watch i=30 c=%s\n' "$count"
     } | old_psql -At >"$out" 2>"$WORK_DIR/snapshot.err" &
     SNAPSHOT_PID=$!
-    local i
-    for i in $(seq 1 120); do
+    for _ in $(seq 1 120); do
         if grep -q SNAPSHOT_READY "$out" 2>/dev/null; then
             SNAPSHOT_ID="$(head -n1 "$out")"
             export SNAPSHOT_ID
@@ -134,7 +133,7 @@ start_guard() {
     [ -n "${OLD_GUARD_SSH:-}" ] || return 0
     rm -f "$WORK_DIR/ABORT" "$WORK_DIR/load.now"
     (
-        local base err_limit out kind a b c load psi
+        local base err_limit out load psi err
         base=$(guard_probe | awk '$1 == "app" { s += $4 } END { print s + 0 }')
         err_limit=$((base * 3 + 100))
         while true; do
@@ -190,7 +189,7 @@ scope_by_ids() {
 : "${JOBS:=2}"
 : "${ID_BATCH:=2000}"
 : "${CTID_BLOCKS:=131072}"
-: "${KEEP_UPDATED:=true}"
+: "${KEEP_UPDATED:=false}"
 : "${FV_SINCE:=2026-08-03 00:00:00}"
 : "${HM_SINCE:=2026-09-28 00:00:00}"
 : "${SHARD:=}"

@@ -66,8 +66,8 @@ say "Tweet 2b source heap read rate during the fetch: $(awk -v b="$((SLICE_BLOCK
 
 parts="$(new_q "SELECT part_no FROM mig.tweet_part ORDER BY part_no" | tr '\n' ' ')"
 mkdir -p "$SLICE_DIR/route"
-# shellcheck disable=SC2086
 t0=$(now)
+# shellcheck disable=SC2086
 python3 -I "$HERE/tools/tweet-route.py" "$SLICE_DIR/route" $parts <"$SLICE_DIR/tweet.txt" 2>"$SLICE_DIR/route.log"
 t1=$(now)
 say "$(rate 'Tweet 3 route (tweet-route.py, to files)' "$bytes" "$t0" "$t1")"

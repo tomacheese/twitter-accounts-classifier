@@ -27,7 +27,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 : "${OLD_GUARD_SSH=${OLD_SSH:-Nuts}}"
 : "${OLD_APP_CONTAINERS:=twitter-accounts-classifier-crawler-1 twitter-accounts-classifier-relabeler-1 twitter-accounts-classifier-analyzer-1 twitter-accounts-classifier-blocker-1 twitter-accounts-classifier-viewer-1 twitter-accounts-classifier-storage-guard-1}"
 : "${PROBE_SEQ:=1}"
-export SHARD THROTTLE_SLEEP JOBS NEW_CONTAINER OLD_GUARD_SSH OLD_APP_CONTAINERS ENUM_UPDATED="${ENUM_UPDATED:-1}"
+export SHARD THROTTLE_SLEEP JOBS NEW_CONTAINER OLD_GUARD_SSH OLD_APP_CONTAINERS ENUM_UPDATED="${ENUM_UPDATED:-1}" KEEP_UPDATED="${KEEP_UPDATED:-true}"
 export WORK_DIR="${WORK_DIR:-/mnt/ssd/t9/rehearsal-work}"
 # shellcheck source=lib.sh
 . "$HERE/lib.sh"
@@ -58,8 +58,7 @@ start_new_db() {
             NEW_DB_WAL_ARCHIVE_HOST_PATH="$REHEARSAL_DATA_DIR/wal" NEW_DB_BACKUP_HOST_PATH="$REHEARSAL_DATA_DIR/backup" "$HERE/initdb.sh"
     fi
     compose up -d
-    local i
-    for i in $(seq 1 60); do
+    for _ in $(seq 1 60); do
         new_psql -Atc 'SELECT 1' >/dev/null 2>&1 && break
         sleep 1
     done
