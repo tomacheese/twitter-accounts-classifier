@@ -17,90 +17,33 @@ export async function enqueueWorkItem(
   tx: Prisma.TransactionClient | PrismaClient,
   input: EnqueueWorkItemInput,
 ): Promise<void> {
-  await tx.analysisWorkItem.upsert({
-    where: {
-      kind_triggerType_triggerId: {
-        kind: input.kind,
-        triggerType: input.triggerType,
-        triggerId: input.triggerId,
-      },
-    },
-    create: input,
-    update: {},
-  })
+  await tx.$executeRaw`
+    INSERT INTO "AnalysisWorkItem" ("kind", "triggerType", "triggerId", "updatedAt")
+    SELECT ${input.kind}, ${input.triggerType}, ${input.triggerId}, now()
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "AnalysisWorkItemDone"
+      WHERE "kind" = ${input.kind} AND "triggerType" = ${input.triggerType} AND "triggerId" = ${input.triggerId}
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM "AnalysisWorkItem"
+      WHERE "kind" = ${input.kind} AND "triggerType" = ${input.triggerType} AND "triggerId" = ${input.triggerId}
+    )
+    ON CONFLICT ("kind", "triggerType", "triggerId") DO NOTHING
+  `
 }
 
 const ACCOUNT_RELABEL_KIND = 'account_relabel'
 const ACCOUNT_RELABEL_TRIGGER_TYPE = 'account'
-const TERMINAL_STATUSES = ['succeeded', 'failed', 'dead']
+const TERMINAL_STATUSES = ['failed', 'dead']
 
 /**
- * account_relabel の再 arm 可能な enqueue。
- * 通常の enqueueWorkItem と異なり、succeeded/failed/dead だった行も queued に戻し、
- * leased 中は dirty marker (staleRequestedAt) を立てるだけに留める。
- * ただし lease が既に失効し attemptCount も使い切った行は、保持していた worker が
- * 二度と complete しないため dirty marker では再 arm できず永久に取り残される。
- * この場合は terminal 行と同様に queued へ全リセットする。
- * 既存行の status 確認と書き込みを 1 回の UPDATE 文にまとめ、
- * 他の呼び出しが割り込むレースを避ける。
- * @param prisma - Prisma クライアント
- * @param accountId - 再評価を要求する account の ID
- */
-export async function requestAccountRelabel(
-  prisma: Prisma.TransactionClient | PrismaClient,
-  accountId: string,
-): Promise<void> {
-  const resetCondition = Prisma.sql`(
-    "status" = ANY(${TERMINAL_STATUSES})
-    OR (
-      "status" = 'leased'
-      AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < now())
-      AND "attemptCount" >= "maxAttempts"
-    )
-  )`
-  const updated = await prisma.$executeRaw`
-    UPDATE "AnalysisWorkItem"
-    SET
-      "status" = CASE WHEN ${resetCondition} THEN 'queued' ELSE "status" END,
-      "availableAt" = CASE WHEN ${resetCondition} THEN now() ELSE "availableAt" END,
-      "staleRequestedAt" = CASE
-        WHEN ${resetCondition} THEN NULL
-        WHEN "status" = 'leased' THEN now()
-        ELSE "staleRequestedAt"
-      END,
-      "leaseOwner" = CASE WHEN ${resetCondition} THEN NULL ELSE "leaseOwner" END,
-      "leaseExpiresAt" = CASE WHEN ${resetCondition} THEN NULL ELSE "leaseExpiresAt" END,
-      "attemptCount" = CASE WHEN ${resetCondition} THEN 0 ELSE "attemptCount" END
-    WHERE "kind" = ${ACCOUNT_RELABEL_KIND}
-      AND "triggerType" = ${ACCOUNT_RELABEL_TRIGGER_TYPE}
-      AND "triggerId" = ${accountId}
-  `
-  if (updated > 0) return
-
-  try {
-    await prisma.analysisWorkItem.create({
-      data: {
-        kind: ACCOUNT_RELABEL_KIND,
-        triggerType: ACCOUNT_RELABEL_TRIGGER_TYPE,
-        triggerId: accountId,
-      },
-    })
-  } catch (error) {
-    // 一意制約違反 (P2002) は、上記 UPDATE との間に他の呼び出しが先に作成した競合であり、
-    // 既に queued として存在していることを意味するため無視してよい。
-    const isUniqueConstraintError =
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      (error as { code?: unknown }).code === 'P2002'
-    if (!isUniqueConstraintError) throw error
-  }
-}
-
-/**
- * requestAccountRelabel の複数 account 版。1 account ずつ逐次 UPDATE/INSERT する代わりに、
- * UNNEST で展開した1本の INSERT ... ON CONFLICT 文にまとめてラウンドトリップを1回に抑える。
- * CASE の意味論は requestAccountRelabel と同じ。
+ * requestAccountRelabel の複数 account 版。既存行を 1 文の UPDATE で再 arm し、
+ * 更新されなかった account だけを別の文で INSERT する。
+ * 1 文にまとめると、完了処理が行を削除した直後の再要求を取りこぼす。
+ * UPDATE は空振りし、INSERT は文開始時点のスナップショットで行が残って見えるためである。
+ * 結合や NOT EXISTS を使わないのは、統計が古いと入れ子ループの全走査を選びかねないためである。
+ * INSERT だけを分けるのは、衝突行でも識別子の採番が進み、再通知の多い経路で int4 を使い果たすためである。
+ * 2 文の間に同じ account の行が作られた場合に備え、INSERT も同じ再 arm で衝突を処理する。
  * @param prisma - Prisma クライアント
  * @param accountIds - 再評価を要求する account の ID 一覧
  */
@@ -121,23 +64,53 @@ export async function requestAccountRelabelBulk(
       AND "AnalysisWorkItem"."attemptCount" >= "AnalysisWorkItem"."maxAttempts"
     )
   )`
+  const rearmAssignments = Prisma.sql`
+    "status" = CASE WHEN ${resetCondition} THEN 'queued' ELSE "AnalysisWorkItem"."status" END,
+    "availableAt" = CASE WHEN ${resetCondition} THEN now() ELSE "AnalysisWorkItem"."availableAt" END,
+    "staleRequestedAt" = CASE
+      WHEN ${resetCondition} THEN NULL
+      WHEN "AnalysisWorkItem"."status" = 'leased' THEN now()
+      ELSE "AnalysisWorkItem"."staleRequestedAt"
+    END,
+    "leaseOwner" = CASE WHEN ${resetCondition} THEN NULL ELSE "AnalysisWorkItem"."leaseOwner" END,
+    "leaseExpiresAt" = CASE WHEN ${resetCondition} THEN NULL ELSE "AnalysisWorkItem"."leaseExpiresAt" END,
+    "attemptCount" = CASE WHEN ${resetCondition} THEN 0 ELSE "AnalysisWorkItem"."attemptCount" END
+  `
+  const rearmed = await prisma.$queryRaw<{ triggerId: string }[]>`
+    UPDATE "AnalysisWorkItem"
+    SET ${rearmAssignments}
+    WHERE "AnalysisWorkItem"."kind" = ${ACCOUNT_RELABEL_KIND}
+      AND "AnalysisWorkItem"."triggerType" = ${ACCOUNT_RELABEL_TRIGGER_TYPE}
+      AND "AnalysisWorkItem"."triggerId" = ANY(${accountIds}::text[])
+    RETURNING "AnalysisWorkItem"."triggerId"
+  `
+  const rearmedIds = new Set(rearmed.map((row) => row.triggerId))
+  const missingIds = [...new Set(accountIds)].filter((id) => !rearmedIds.has(id))
+  if (missingIds.length === 0) return
+
   await prisma.$executeRaw`
     INSERT INTO "AnalysisWorkItem" ("kind", "triggerType", "triggerId", "updatedAt")
-    SELECT ${ACCOUNT_RELABEL_KIND}, ${ACCOUNT_RELABEL_TRIGGER_TYPE}, u."triggerId", now()
-    FROM UNNEST(${accountIds}::text[]) AS u("triggerId")
+    SELECT ${ACCOUNT_RELABEL_KIND}, ${ACCOUNT_RELABEL_TRIGGER_TYPE}, missing."triggerId", now()
+    FROM UNNEST(${missingIds}::text[]) AS missing("triggerId")
     ON CONFLICT ("kind", "triggerType", "triggerId") DO UPDATE
-    SET
-      "status" = CASE WHEN ${resetCondition} THEN 'queued' ELSE "AnalysisWorkItem"."status" END,
-      "availableAt" = CASE WHEN ${resetCondition} THEN now() ELSE "AnalysisWorkItem"."availableAt" END,
-      "staleRequestedAt" = CASE
-        WHEN ${resetCondition} THEN NULL
-        WHEN "AnalysisWorkItem"."status" = 'leased' THEN now()
-        ELSE "AnalysisWorkItem"."staleRequestedAt"
-      END,
-      "leaseOwner" = CASE WHEN ${resetCondition} THEN NULL ELSE "AnalysisWorkItem"."leaseOwner" END,
-      "leaseExpiresAt" = CASE WHEN ${resetCondition} THEN NULL ELSE "AnalysisWorkItem"."leaseExpiresAt" END,
-      "attemptCount" = CASE WHEN ${resetCondition} THEN 0 ELSE "AnalysisWorkItem"."attemptCount" END
+    SET ${rearmAssignments}
   `
+}
+
+/**
+ * account_relabel の再 arm 可能な enqueue。
+ * 通常の enqueueWorkItem と異なり台帳を見ず、完了済み (キュー表に無い) の account も新しい行で積み直す。
+ * failed/dead だった行は queued に戻し、leased 中は dirty marker (staleRequestedAt) を立てるだけに留める。
+ * lease が失効し attemptCount も使い切った行は、保持していた worker が二度と complete しない。
+ * dirty marker では再 arm できないため、terminal 行と同様に queued へ全リセットする。
+ * @param prisma - Prisma クライアント
+ * @param accountId - 再評価を要求する account の ID
+ */
+export async function requestAccountRelabel(
+  prisma: Prisma.TransactionClient | PrismaClient,
+  accountId: string,
+): Promise<void> {
+  await requestAccountRelabelBulk(prisma, [accountId])
 }
 
 export interface ClaimNextWorkItemInput {
@@ -277,41 +250,6 @@ export async function claimNextWorkItem(
   )
 }
 
-export interface CompleteAccountRelabelWorkItemInput {
-  workItemId: number
-  leaseOwner: string
-}
-
-/**
- * account_relabel の完了処理。complete 直前に staleRequestedAt を確認し、
- * lease 中に新しい変更要求が来ていれば succeeded にせず queued へ戻す。
- * 確認と書き込みを 1 回の UPDATE 文にまとめることで、
- * チェックと書き込みの間に別の requestAccountRelabel が割り込むレースを作らない。
- * @param prisma - Prisma クライアント
- * @param input - 対象 WorkItem と claim 時の lease owner
- * @returns 'succeeded' | 'requeued' | 'lease_lost'(lease を失っていた場合)
- */
-export async function completeAccountRelabelWorkItem(
-  prisma: PrismaClient,
-  input: CompleteAccountRelabelWorkItemInput,
-): Promise<'succeeded' | 'requeued' | 'lease_lost'> {
-  const rows = await prisma.$queryRaw<{ status: string }[]>`
-    UPDATE "AnalysisWorkItem"
-    SET
-      "status" = CASE WHEN "staleRequestedAt" IS NOT NULL THEN 'queued' ELSE 'succeeded' END,
-      "availableAt" = CASE WHEN "staleRequestedAt" IS NOT NULL THEN now() ELSE "availableAt" END,
-      "staleRequestedAt" = NULL,
-      "leaseOwner" = NULL,
-      "leaseExpiresAt" = NULL,
-      "attemptCount" = 0
-    WHERE "id" = ${input.workItemId} AND "leaseOwner" = ${input.leaseOwner}
-    RETURNING "status"
-  `
-  const row = rows.at(0)
-  if (!row) return 'lease_lost'
-  return row.status === 'queued' ? 'requeued' : 'succeeded'
-}
-
 export interface CompleteAccountRelabelWorkItemsBulkInput {
   workItemIds: number[]
   leaseOwner: string
@@ -322,6 +260,9 @@ export interface CompleteAccountRelabelWorkItemsBulkInput {
  * 対象の全 item が同じ lease owner (同一 worker の同一グループ claim) を持つため、item ごとに往復する必要がない。
  * `claimStillLeasedWorkItemIdsForUpdate` と同じトランザクション内で呼び、
  * そちらが保持した行ロックの上でラベル・evidence 書き込みと合わせて完了させることを想定する。
+ * 変更要求が来ていない item はキュー表から削除する。
+ * 完了後の再要求は requestAccountRelabel が新しい行で受けるため、台帳には記録しない。
+ * 要求の有無の確認と書き込みは行ロックの上で 1 文にまとめる。
  * @param prisma - Prisma クライアントまたはトランザクションクライアント
  * @param input - 対象 WorkItem の id 一覧と claim 時の lease owner
  * @returns lease を保持できていた item の id と、その完了ステータス
@@ -333,21 +274,64 @@ export async function completeAccountRelabelWorkItemsBulk(
   if (input.workItemIds.length === 0) return []
 
   const rows = await prisma.$queryRaw<{ id: number; status: string }[]>`
-    UPDATE "AnalysisWorkItem"
-    SET
-      "status" = CASE WHEN "staleRequestedAt" IS NOT NULL THEN 'queued' ELSE 'succeeded' END,
-      "availableAt" = CASE WHEN "staleRequestedAt" IS NOT NULL THEN now() ELSE "availableAt" END,
-      "staleRequestedAt" = NULL,
-      "leaseOwner" = NULL,
-      "leaseExpiresAt" = NULL,
-      "attemptCount" = 0
-    WHERE "id" = ANY(${input.workItemIds}) AND "leaseOwner" = ${input.leaseOwner}
-    RETURNING "id", "status"
+    WITH target AS (
+      SELECT "id", "staleRequestedAt" IS NOT NULL AS "requeue"
+      FROM "AnalysisWorkItem"
+      WHERE "id" = ANY(${input.workItemIds}) AND "leaseOwner" = ${input.leaseOwner}
+      FOR UPDATE
+    ),
+    requeued AS (
+      UPDATE "AnalysisWorkItem" AS item
+      SET
+        "status" = 'queued',
+        "availableAt" = now(),
+        "staleRequestedAt" = NULL,
+        "leaseOwner" = NULL,
+        "leaseExpiresAt" = NULL,
+        "attemptCount" = 0
+      FROM target
+      WHERE item."id" = target."id" AND target."requeue"
+      RETURNING item."id"
+    ),
+    removed AS (
+      DELETE FROM "AnalysisWorkItem" AS item
+      USING target
+      WHERE item."id" = target."id" AND NOT target."requeue"
+      RETURNING item."id"
+    )
+    SELECT "id", 'queued' AS "status" FROM requeued
+    UNION ALL
+    SELECT "id", 'succeeded' AS "status" FROM removed
   `
   return rows.map((row) => ({
     id: row.id,
     status: row.status === 'queued' ? ('requeued' as const) : ('succeeded' as const),
   }))
+}
+
+export interface CompleteAccountRelabelWorkItemInput {
+  workItemId: number
+  leaseOwner: string
+}
+
+/**
+ * account_relabel の完了処理。complete 直前に staleRequestedAt を確認し、
+ * lease 中に新しい変更要求が来ていれば完了にせず queued へ戻す。
+ * @param prisma - Prisma クライアント
+ * @param input - 対象 WorkItem と claim 時の lease owner
+ * @returns 'succeeded' | 'requeued' | 'lease_lost'(lease を失っていた場合)
+ */
+export async function completeAccountRelabelWorkItem(
+  prisma: PrismaClient,
+  input: CompleteAccountRelabelWorkItemInput,
+): Promise<'succeeded' | 'requeued' | 'lease_lost'> {
+  const results = await completeAccountRelabelWorkItemsBulk(prisma, {
+    workItemIds: [input.workItemId],
+    leaseOwner: input.leaseOwner,
+  })
+  const result = results.at(0)
+  if (!result) return 'lease_lost'
+  return result.status
 }
 
 export interface ClaimStillLeasedWorkItemIdsForUpdateInput {
@@ -423,7 +407,7 @@ export async function recoverExhaustedExpiredWorkItems(
         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < now())
         AND "attemptCount" >= "maxAttempts"
       -- leaseExpiresAt に対応する index が無くフルソートになるため、
-      -- 既存の (status, availableAt, priority) index を活かせる availableAt でソートする。
+      -- 部分 index (status, availableAt, priority) を活かせる availableAt でソートする。
       -- 回収順序自体は正しさに影響しないため、コストの低い並びを優先してよい。
       ORDER BY "availableAt" ASC
       LIMIT ${input.batchSize}

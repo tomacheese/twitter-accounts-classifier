@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { Logger } from '@book000/node-utils'
-import type { Account, AnalysisWorkItem, PrismaClient, Tweet } from './generated/prisma'
+import type { AnalysisWorkItem, PrismaClient, Tweet } from './generated/prisma'
+import type { AccountWithCrawlState } from './db/account-repository'
 import { LabelRuleRegistry } from './labels/registry'
 import { buildAccountFeatureBundle } from './labels/build-account-feature-bundle'
 import type { buildDuplicateReplyIndex } from './labels/duplicate-reply-index'
@@ -163,7 +164,7 @@ async function evaluateAccountRelabelItemGroup(
 
   const accountIds = group.map((item) => item.triggerId)
   let labelStateByAccountId: Map<string, AccountLabelSnapshot>
-  let accounts: Account[]
+  let accounts: AccountWithCrawlState[]
   let tweetsByAccountId: Map<string, Tweet[]>
   let followChurnObservationByAccountId: Map<string, FollowChurnObservation>
   let promotedCountByAccountId: Map<string, number>
@@ -178,7 +179,10 @@ async function evaluateAccountRelabelItemGroup(
     labelStateByAccountId = await loadAccountLabelStates(prisma, accountIds)
     ;[accounts, tweetsByAccountId, followChurnObservationByAccountId, promotedCountByAccountId] =
       await Promise.all([
-        prisma.account.findMany({ where: { id: { in: accountIds } } }),
+        prisma.account.findMany({
+          where: { id: { in: accountIds } },
+          include: { crawlState: true },
+        }),
         loadRecentTweetsForAccounts(prisma, accountIds, CRAWL_LIMITS.recentTweetsPerAccount),
         loadFollowChurnObservationsForAccounts(prisma, accountIds, followChurnSince),
         loadPromotedTweetCountsForAccounts(prisma, accountIds, promotedSince),
@@ -212,7 +216,7 @@ async function evaluateAccountRelabelItemGroup(
     )
     captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
     await prisma.analysisWorkItem.updateMany({
-      where: { id: { in: group.map((item) => item.id) }, status: { not: 'succeeded' } },
+      where: { id: { in: group.map((item) => item.id) } },
       data: { lastErrorSummary: String(error).slice(0, 500) },
     })
     return 0
@@ -354,10 +358,10 @@ async function evaluateAccountRelabelItemGroup(
       )
       captureException(error, { source: 'relabel-worker.evaluateAccountRelabelItems' })
       // completeAccountRelabelWorkItemsBulk が commit 済みでレスポンスだけ失われた場合、
-      // 対象は既に succeeded になっている。status ガードで上書きしないようにする。
+      // 完了した行は既に消えている。再要求で queued に戻った行にだけ書き込まれる。
       await prisma.analysisWorkItem
         .updateMany({
-          where: { id: { in: subBatch.map((item) => item.id) }, status: { not: 'succeeded' } },
+          where: { id: { in: subBatch.map((item) => item.id) } },
           data: { lastErrorSummary: String(error).slice(0, 500) },
         })
         .catch(() => undefined)

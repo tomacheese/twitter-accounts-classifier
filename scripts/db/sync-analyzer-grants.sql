@@ -35,7 +35,7 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO analyzer;
 
 -- 分析・運用・read model テーブルへの write allowlist。
 GRANT INSERT, UPDATE, DELETE ON TABLE
-  "AnalysisWorkItem", "AnalysisRun",
+  "AnalysisWorkItem", "AnalysisWorkItemDone", "AnalysisRun",
   "OperationCycle", "OperationStage", "OperationalIssue", "OperationalIssueOccurrence",
   "ReviewFinding", "ReviewFindingOccurrence", "FindingEvidence", "FindingRawArtifact",
   "FindingEntityLink", "DetectionPolicyVersion", "DetectorEvaluation",

@@ -532,6 +532,9 @@ CREATE TABLE "AnalysisWorkItem" (
 -- CreateTable
 CREATE TABLE "AnalysisWorkItemDone" (
     "completedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMPTZ(3) NOT NULL,
+    "workItemId" INTEGER NOT NULL,
+    "attemptCount" INTEGER NOT NULL,
     "kind" TEXT NOT NULL,
     "triggerType" TEXT NOT NULL,
     "triggerId" TEXT NOT NULL,
@@ -1142,13 +1145,16 @@ CREATE INDEX "BlockOutboxEntry_status_createdAt_idx" ON "BlockOutboxEntry"("stat
 CREATE UNIQUE INDEX "BlockOutboxEntry_blockerId_blockedId_key" ON "BlockOutboxEntry"("blockerId", "blockedId");
 
 -- CreateIndex
-CREATE INDEX "AnalysisWorkItem_status_availableAt_priority_idx" ON "AnalysisWorkItem"("status", "availableAt", "priority");
+CREATE INDEX "AnalysisWorkItem_queue_idx" ON "AnalysisWorkItem"("status", "availableAt", "priority") WHERE "status" IN ('queued', 'leased', 'failed');
 
 -- CreateIndex
 CREATE UNIQUE INDEX "AnalysisWorkItem_kind_triggerType_triggerId_key" ON "AnalysisWorkItem"("kind", "triggerType", "triggerId");
 
 -- CreateIndex
 CREATE INDEX "AnalysisWorkItemDone_completedAt_idx" ON "AnalysisWorkItemDone"("completedAt");
+
+-- CreateIndex
+CREATE INDEX "AnalysisWorkItemDone_workItemId_idx" ON "AnalysisWorkItemDone"("workItemId");
 
 -- CreateIndex
 CREATE INDEX "AnalysisRun_workItemId_startedAt_idx" ON "AnalysisRun"("workItemId", "startedAt" DESC);
@@ -1688,7 +1694,13 @@ ALTER TABLE "AccountCrawlState" SET (fillfactor = 70, autovacuum_vacuum_scale_fa
 ALTER TABLE "AccountLabelState" SET (fillfactor = 75, autovacuum_vacuum_scale_factor = 0.02);
 ALTER TABLE "AccountClassificationLatest" SET (autovacuum_vacuum_scale_factor = 0.02);
 ALTER TABLE "AccountActiveLabel" SET (autovacuum_vacuum_scale_factor = 0.02);
-ALTER TABLE "AnalysisWorkItem" SET (fillfactor = 50, autovacuum_vacuum_scale_factor = 0.02);
+ALTER TABLE "AnalysisWorkItem" SET (
+    fillfactor = 50,
+    autovacuum_vacuum_scale_factor = 0,
+    autovacuum_vacuum_threshold = 1000,
+    autovacuum_analyze_scale_factor = 0,
+    autovacuum_analyze_threshold = 1000
+);
 ALTER TABLE "AccountClassificationObservation" SET (autovacuum_vacuum_scale_factor = 0.02);
 -- AccountLabelChange は追記のみのため、insert 起点の autovacuum だけを早める。
 ALTER TABLE "AccountLabelChange" SET (autovacuum_vacuum_insert_scale_factor = 0.02);

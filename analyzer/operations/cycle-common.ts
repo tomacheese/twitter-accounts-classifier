@@ -1,4 +1,5 @@
 import type { PrismaClient } from '../generated/prisma'
+import { findWorkItemByKey } from '../queue/work-item-repository'
 
 /**
  * 起点 Run の完了時には必ず AnalysisWorkItem が enqueue される前提のもとで、
@@ -124,9 +125,7 @@ export async function deriveWorkItemStage(
   triggerType: string,
   triggerId: string,
 ): Promise<WorkItemStage> {
-  const workItem = await prisma.analysisWorkItem.findUnique({
-    where: { kind_triggerType_triggerId: { kind, triggerType, triggerId } },
-  })
+  const workItem = await findWorkItemByKey(prisma, { kind, triggerType, triggerId })
   if (!workItem) {
     return {
       status: 'failed',
@@ -140,6 +139,7 @@ export async function deriveWorkItemStage(
     }
   }
 
+  // 完了済みでも AnalysisRun は元の id を指すため、キュー表の行の有無に関わらず id で引ける。
   const latestRun = await prisma.analysisRun.findFirst({
     where: { workItemId: workItem.id },
     orderBy: { startedAt: 'desc' },

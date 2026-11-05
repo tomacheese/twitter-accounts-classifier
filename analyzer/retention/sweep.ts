@@ -7,9 +7,8 @@ const OVERVIEW_SNAPSHOT_RETENTION_DAYS = 30
 const SHADOW_DETECTOR_EVALUATION_RETENTION_DAYS = 30
 const ACCOUNT_CLASSIFICATION_OBSERVATION_RETENTION_DAYS = 30
 
-// リトライを使い切って再試行され得なくなった WorkItem。succeeded と同じく
-// 完了済みとして 30日retentionの対象にする。
-const TERMINAL_WORK_ITEM_STATUSES = ['succeeded', 'dead']
+// succeeded は完了時に台帳へ移るため、キュー表の終端状態は dead だけである。
+const TERMINAL_WORK_ITEM_STATUSES = ['dead']
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -23,14 +22,12 @@ function daysBefore(now: Date, days: number): Date {
 }
 
 /**
- * 完了済み WorkItem を保持期間に応じて削除する。
- * WorkItem (30日) と AnalysisRun (180日) は保持期間が異なるため、AnalysisRun を
- * cascade delete すると audit 記録が実質 30日しか残らない。AnalysisRun.workItemId は
- * nullable FK (onDelete: SetNull) にしてあり、WorkItem 削除時は参照を外すだけに留め、
- * AnalysisRun 自体は自身の 180日の retention sweep が削除するまで残す。
+ * リトライを使い切った dead の WorkItem と、保持期間を過ぎた完了台帳の行を削除する。
+ * AnalysisRun.workItemId は FK を持たない参照のため、WorkItem 削除後も AnalysisRun は残る。
+ * AnalysisRun は自身の 180日の retention sweep が削除する。
  * @param prisma - Prisma クライアント
  * @param now - 基準時刻
- * @returns 削除した WorkItem 数
+ * @returns 削除した WorkItem 数 (台帳の行を含む)
  */
 async function sweepWorkItems(
   prisma: PrismaClient,
@@ -44,7 +41,11 @@ async function sweepWorkItems(
     },
   })
 
-  return { deletedWorkItemCount: workItemResult.count }
+  const doneResult = await prisma.analysisWorkItemDone.deleteMany({
+    where: { completedAt: { lt: daysBefore(now, WORK_ITEM_RETENTION_DAYS) } },
+  })
+
+  return { deletedWorkItemCount: workItemResult.count + doneResult.count }
 }
 
 /**
@@ -92,7 +93,7 @@ async function sweepShadowDetectorEvaluations(prisma: PrismaClient, now: Date): 
 /**
  * AccountClassificationObservation を保持期間に応じて削除する。
  * account_summary_refresh WorkItem が triggerId として参照している間は、
- * その WorkItem が succeeded/dead (再試行され得ない) になるまで削除しない。
+ * その WorkItem が完了して台帳へ移るか dead (再試行され得ない) になるまで削除しない。
  * WorkItem 側は自身の 30日 retention (`sweepWorkItems`) で先に消えることがあるが、
  * その場合は保護対象から自然に外れるため二重に気にする必要はない。
  * 保護対象の ID を一覧取得してから notIn で除外する二段構えだと、取得と削除の間に

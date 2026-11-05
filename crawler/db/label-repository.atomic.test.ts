@@ -68,6 +68,7 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
 
   beforeEach(async () => {
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.accountClassificationObservation.deleteMany()
     await prisma.crawlAccountLabelRun.deleteMany()
     await prisma.crawlAuthorCheckpoint.deleteMany()

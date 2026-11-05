@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { createSyntheticId } from 'id-boundary'
@@ -10,19 +10,12 @@ import { selectRecentTweetsBackfillCandidates } from './recent-tweets-backfill-r
 const prisma = getPrismaClient()
 
 describe('recent tweets backfill 部分index migration', () => {
-  it('Account_recent_tweets_unattempted_idx を期待する列・述語で定義する', () => {
+  it('AccountCrawlState_recent_tweets_unattempted_idx を baseline で期待する列・述語で定義する', () => {
     // eslint-disable-next-line unicorn/prefer-module
-    const migrationsDir = path.join(__dirname, '../../prisma/migrations')
-    const dirs = readdirSync(migrationsDir).filter((d) =>
-      d.includes('add_account_recent_tweets_unattempted_index'),
-    )
-    expect(dirs.length).toBe(1)
-    const sql = readFileSync(path.join(migrationsDir, dirs[0], 'migration.sql'), 'utf8')
+    const sql = readFileSync(path.join(__dirname, '../../prisma/baseline/baseline.sql'), 'utf8')
     expect(sql).toMatch(
-      /CREATE INDEX CONCURRENTLY IF NOT EXISTS "Account_recent_tweets_unattempted_idx"/,
+      /CREATE INDEX "AccountCrawlState_recent_tweets_unattempted_idx"\s+ON "AccountCrawlState" \("accountId"\)\s+WHERE "lastRecentTweetsAttemptedAt" IS NULL;/,
     )
-    expect(sql).toMatch(/ON "Account" \("id"\)/)
-    expect(sql).toMatch(/WHERE "lastRecentTweetsAttemptedAt" IS NULL/)
   })
 })
 
@@ -50,6 +43,7 @@ describe('selectRecentTweetsBackfillCandidates query shape', () => {
     expect(candidateSql).toContain('FROM "AccountLabelState" AS state')
     expect(candidateSql).toContain('state."versions"[d."labelDefinitionId"] < 0')
     expect(candidateSql).toContain('WHERE c."lastRecentTweetsAttemptedAt" IS NULL')
+    expect(candidateSql).not.toContain('FROM "Account" ')
     // LATERAL 内の LIMIT 1 が optimizer による semi-join への平坦化を防ぐ fence、
     // 外側の LIMIT が limit+1 sentinel。
     expect(candidateSql.match(/LIMIT/g)).toHaveLength(2)

@@ -59,6 +59,7 @@ async function seedActiveLabel(input: {
 
 async function resetDb(): Promise<void> {
   await prisma.analysisWorkItem.deleteMany()
+  await prisma.analysisWorkItemDone.deleteMany()
   await prisma.readModelBootstrap.deleteMany()
   await prisma.readModelState.deleteMany()
   await prisma.accountClassificationObservation.deleteMany()

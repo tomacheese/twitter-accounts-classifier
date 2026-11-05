@@ -10,6 +10,7 @@ function createMockPrisma(
 ) {
   const analysisRunDeleteMany = vi.fn().mockResolvedValue({ count: 3 })
   const analysisWorkItemDeleteMany = vi.fn().mockResolvedValue({ count: 2 })
+  const analysisWorkItemDoneDeleteMany = vi.fn().mockResolvedValue({ count: 0 })
   const labelMetricSnapshotDeleteMany = vi.fn().mockResolvedValue({ count: 1 })
   const readModelPointerFindUnique = vi
     .fn()
@@ -28,6 +29,7 @@ function createMockPrisma(
   const prisma = {
     analysisRun: { deleteMany: analysisRunDeleteMany },
     analysisWorkItem: { deleteMany: analysisWorkItemDeleteMany },
+    analysisWorkItemDone: { deleteMany: analysisWorkItemDoneDeleteMany },
     labelMetricSnapshot: { deleteMany: labelMetricSnapshotDeleteMany },
     readModelPointer: { findUnique: readModelPointerFindUnique },
     overviewSnapshot: { deleteMany: overviewSnapshotDeleteMany },
@@ -38,6 +40,7 @@ function createMockPrisma(
     prisma,
     analysisRunDeleteMany,
     analysisWorkItemDeleteMany,
+    analysisWorkItemDoneDeleteMany,
     labelMetricSnapshotDeleteMany,
     readModelPointerFindUnique,
     overviewSnapshotDeleteMany,
@@ -69,7 +72,7 @@ describe('runRetentionSweep', () => {
     expect(call.where.observedAt.lt.toISOString()).toBe('2026-05-10T00:00:00.000Z')
   })
 
-  it('succeeded/deadなWorkItemを30日より前のupdatedAtで対象にする (参照中のAnalysisRunの有無は問わない)', async () => {
+  it('deadなWorkItemを30日より前のupdatedAtで対象にする (参照中のAnalysisRunの有無は問わない)', async () => {
     const { prisma, analysisWorkItemDeleteMany } = createMockPrisma()
     const now = new Date('2026-08-08T00:00:00.000Z')
 
@@ -78,9 +81,22 @@ describe('runRetentionSweep', () => {
     const call = analysisWorkItemDeleteMany.mock.calls[0][0] as {
       where: { status: { in: string[] }; updatedAt: { lt: Date } }
     }
-    expect(call.where.status.in).toEqual(['succeeded', 'dead'])
+    expect(call.where.status.in).toEqual(['dead'])
     expect(call.where.updatedAt.lt.toISOString()).toBe('2026-07-09T00:00:00.000Z')
     expect(call.where).not.toHaveProperty('runs')
+  })
+
+  it('完了台帳の行を30日より前のcompletedAtで削除し、削除数をWorkItemの件数に加える', async () => {
+    const { prisma, analysisWorkItemDoneDeleteMany } = createMockPrisma()
+    analysisWorkItemDoneDeleteMany.mockResolvedValue({ count: 7 })
+
+    const result = await runRetentionSweep(prisma, new Date('2026-08-08T00:00:00.000Z'))
+
+    const call = analysisWorkItemDoneDeleteMany.mock.calls[0][0] as {
+      where: { completedAt: { lt: Date } }
+    }
+    expect(call.where.completedAt.lt.toISOString()).toBe('2026-07-09T00:00:00.000Z')
+    expect(result.deletedWorkItemCount).toBe(2 + 7)
   })
 
   it('WorkItemを ID の列挙ではなく述語で削除する (バインド変数上限を超えないため)', async () => {
@@ -90,7 +106,7 @@ describe('runRetentionSweep', () => {
 
     const result = await runRetentionSweep(prisma, new Date('2026-08-08T00:00:00.000Z'))
 
-    // AnalysisRun.workItemId は ON DELETE SET NULL のため、WorkItem 削除は
+    // AnalysisRun.workItemId は FK を持たない参照のため、WorkItem 削除は
     // AnalysisRun への追加の deleteMany 呼び出しを発生させない。
     expect(analysisRunDeleteMany).toHaveBeenCalledTimes(1)
     expect(analysisWorkItemDeleteMany).toHaveBeenCalledTimes(1)
@@ -175,6 +191,7 @@ describe.skipIf(!process.env.DATABASE_URL)('sweepAccountClassificationObservatio
 
   beforeEach(async () => {
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.accountClassificationObservation.deleteMany()
   })
 
@@ -199,7 +216,7 @@ describe.skipIf(!process.env.DATABASE_URL)('sweepAccountClassificationObservatio
     expect(remaining).not.toBeNull()
   })
 
-  it('参照するWorkItemがsucceeded/deadのみの古い行は削除する', async () => {
+  it('参照するWorkItemがdeadのみの古い行は削除する', async () => {
     const observation = await prisma.accountClassificationObservation.create({
       data: { accountId: '100538243087', observedAt: OLD, labelCount: 0 },
     })
@@ -208,7 +225,7 @@ describe.skipIf(!process.env.DATABASE_URL)('sweepAccountClassificationObservatio
         kind: 'account_summary_refresh',
         triggerType: 'account_classification_observation',
         triggerId: observation.id,
-        status: 'succeeded',
+        status: 'dead',
       },
     })
 
@@ -244,5 +261,44 @@ describe.skipIf(!process.env.DATABASE_URL)('sweepAccountClassificationObservatio
       where: { id: observation.id },
     })
     expect(remaining).not.toBeNull()
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('完了台帳の保持期間 (実DB)', () => {
+  const prisma = getPrismaClient()
+  const now = new Date('2026-08-08T00:00:00.000Z')
+
+  beforeEach(async () => {
+    await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
+  })
+
+  /**
+   * @param triggerId - 論理キーの triggerId
+   * @param completedAt - 完了時刻
+   */
+  async function createDone(triggerId: string, completedAt: Date): Promise<void> {
+    await prisma.analysisWorkItemDone.create({
+      data: {
+        kind: 'label_aggregate_refresh',
+        triggerType: 'crawl_run',
+        triggerId,
+        workItemId: 1,
+        attemptCount: 1,
+        createdAt: completedAt,
+        completedAt,
+      },
+    })
+  }
+
+  it('30日ちょうどの行は残し、それより前の行だけを削除する', async () => {
+    await createDone('boundary', new Date('2026-07-09T00:00:00.000Z'))
+    await createDone('expired', new Date('2026-07-08T23:59:59.999Z'))
+
+    const result = await runRetentionSweep(prisma, now)
+
+    const remaining = await prisma.analysisWorkItemDone.findMany()
+    expect(remaining.map((row) => row.triggerId)).toEqual(['boundary'])
+    expect(result.deletedWorkItemCount).toBe(1)
   })
 })

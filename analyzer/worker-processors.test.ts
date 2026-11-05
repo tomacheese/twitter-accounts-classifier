@@ -64,18 +64,10 @@ function makeSettledWorkItem(overrides: {
     triggerType: overrides.triggerType,
     triggerId: 'trigger-1',
     status: 'succeeded',
-    priority: 0,
-    availableAt: new Date(),
-    leaseOwner: null,
-    leaseExpiresAt: null,
     attemptCount: 1,
-    maxAttempts: 5,
-    dependencyKey: null,
-    staleRequestedAt: null,
     lastErrorCode: null,
     lastErrorSummary: null,
     createdAt: new Date(),
-    updatedAt: new Date(),
   }
 }
 
@@ -87,6 +79,7 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     await prisma.operationalIssue.deleteMany()
     await prisma.analysisRun.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.attentionItemCurrent.deleteMany()
     await prisma.overviewSnapshot.deleteMany()
     await prisma.blockRelationCurrent.deleteMany()
@@ -223,18 +216,10 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
         triggerType: 'unhandled_trigger_type',
         triggerId: 'trigger-1',
         status: 'succeeded',
-        priority: 0,
-        availableAt: new Date(),
-        leaseOwner: null,
-        leaseExpiresAt: null,
         attemptCount: 1,
-        maxAttempts: 5,
-        dependencyKey: null,
-        staleRequestedAt: null,
         lastErrorCode: null,
         lastErrorSummary: null,
         createdAt: new Date(),
-        updatedAt: new Date(),
       },
       { status: 'succeeded' },
     )
@@ -276,12 +261,15 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
   })
 
   it('processPostCompletionRefresh は元 WorkItem の終了状態を復元して Attention/Overview を publish する', async () => {
-    const originalWorkItem = await prisma.analysisWorkItem.create({
+    // succeeded はキュー表から消えて台帳へ移るため、元 WorkItem は台帳から復元される。
+    const originalWorkItem = await prisma.analysisWorkItemDone.create({
       data: {
         kind: 'read_model_refresh',
         triggerType: 'unhandled_trigger_type',
         triggerId: `trigger-${randomUUID()}`,
-        status: 'succeeded',
+        workItemId: createSyntheticSerialId(),
+        attemptCount: 1,
+        createdAt: new Date(),
       },
     })
 
@@ -289,7 +277,7 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
       id: createSyntheticSerialId(),
       kind: 'post_completion_refresh',
       triggerType: 'work_item_completion',
-      triggerId: String(originalWorkItem.id),
+      triggerId: String(originalWorkItem.workItemId),
       status: 'succeeded',
       priority: 0,
       availableAt: new Date(),
@@ -313,6 +301,30 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     })
     expect(attentionPointer).not.toBeNull()
     expect(overviewPointer).not.toBeNull()
+  })
+
+  it('processPostCompletionRefresh は元 WorkItem がキュー表にも台帳にも無ければ例外にする', async () => {
+    await expect(
+      processPostCompletionRefresh(prisma, {
+        id: createSyntheticSerialId(),
+        kind: 'post_completion_refresh',
+        triggerType: 'work_item_completion',
+        triggerId: '2000000000',
+        status: 'leased',
+        priority: 0,
+        availableAt: new Date(),
+        leaseOwner: 'worker-1',
+        leaseExpiresAt: new Date(),
+        attemptCount: 1,
+        maxAttempts: 5,
+        dependencyKey: null,
+        staleRequestedAt: null,
+        lastErrorCode: null,
+        lastErrorSummary: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    ).rejects.toThrow('settled work item 2000000000 not found in queue or completion ledger')
   })
 
   it('processPostCompletionRefresh は元 WorkItem の lastErrorCode も復元し、generic issue を新規作成しない', async () => {
@@ -435,6 +447,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     await prisma.accountLabelState.deleteMany()
     await prisma.accountClassificationObservation.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.readModelState.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
@@ -754,6 +767,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () =>
     await prisma.accountLabelState.deleteMany()
     await prisma.accountClassificationObservation.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.readModelState.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
@@ -905,6 +919,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processLabelAggregateRefresh', () =>
     await prisma.accountLabelState.deleteMany()
     await prisma.readModelState.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.labelDefinition.deleteMany()
   })
 

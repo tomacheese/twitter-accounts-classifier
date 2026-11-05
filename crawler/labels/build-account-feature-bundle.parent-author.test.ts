@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest'
-import type { Account, Tweet } from '../generated/prisma'
+import type { Tweet } from '../generated/prisma'
+import type { AccountWithCrawlState } from '../db/account-repository'
 import { buildBioDuplicateIndex } from './bio-duplicate-index'
 import { buildAccountFeatureBundle } from './build-account-feature-bundle'
 import { buildDuplicateReplyIndex } from './duplicate-reply-index'
@@ -18,7 +19,8 @@ it('parent tweet author id is exposed for reply classification', () => {
     accountCreatedAt: new Date('2026-01-01T00:00:00Z'),
     isBlueVerified: false,
     verifiedType: null,
-  } as Account
+    crawlState: null,
+  } as AccountWithCrawlState
   const tweet = {
     id: 'reply-1',
     accountId: 'acct-1',

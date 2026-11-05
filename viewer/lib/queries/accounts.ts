@@ -36,6 +36,11 @@ export interface AccountListResult {
   totalCount: number
 }
 
+// 全件ソートが想定外に長引いたときに DB を占有し続けないよう、一覧の取得に上限時間を設ける。
+const ACCOUNT_LIST_STATEMENT_TIMEOUT_MS = 20_000
+// Prisma の対話型 transaction は既定 5 秒で閉じるため、2 文分の statement_timeout より長くする。
+const ACCOUNT_LIST_TRANSACTION_TIMEOUT_MS = ACCOUNT_LIST_STATEMENT_TIMEOUT_MS * 2 + 5000
+
 interface MatchingAccountIdRow {
   accountId: string
 }
@@ -43,6 +48,34 @@ interface MatchingAccountIdRow {
 interface ActiveLabelRow {
   accountId: string
   key: string
+}
+
+/**
+ * 同値の行でページ境界が揺れないよう、id を第 2 キーにして順序を決定的にする。
+ * @param sortBy - ソート対象の列
+ * @param direction - ソート方向
+ * @returns Prisma の orderBy
+ */
+export function buildAccountOrderBy(
+  sortBy: AccountSortField,
+  direction: SortDirection,
+): Prisma.AccountOrderByWithRelationInput[] {
+  return [
+    sortBy === 'lastCrawledAt'
+      ? { crawlState: { lastCrawledAt: direction } }
+      : { [sortBy]: direction },
+    { id: 'asc' },
+  ]
+}
+
+function requireLastCrawledAt(row: {
+  id: string
+  crawlState: { lastCrawledAt: Date } | null
+}): Date {
+  if (row.crawlState === null) {
+    throw new Error(`AccountCrawlState row is missing for account ${row.id}`)
+  }
+  return row.crawlState.lastCrawledAt
 }
 
 /**
@@ -135,16 +168,22 @@ export async function listAccounts(
   }
 
   const where = accountIdFilter ? { id: { in: accountIdFilter } } : {}
+  const orderBy = buildAccountOrderBy(filters.sortBy, filters.sortDirection)
 
-  const [rows, totalCount] = await Promise.all([
-    prisma.account.findMany({
-      where,
-      orderBy: { [filters.sortBy]: filters.sortDirection },
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
-    }),
-    prisma.account.count({ where }),
-  ])
+  const [rows, totalCount] = await prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT set_config('statement_timeout', ${String(ACCOUNT_LIST_STATEMENT_TIMEOUT_MS)}, true)`
+      const pageRows = await tx.account.findMany({
+        where,
+        orderBy,
+        skip: (filters.page - 1) * filters.pageSize,
+        take: filters.pageSize,
+        include: { crawlState: { select: { lastCrawledAt: true } } },
+      })
+      return [pageRows, await tx.account.count({ where })] as const
+    },
+    { timeout: ACCOUNT_LIST_TRANSACTION_TIMEOUT_MS },
+  )
 
   const activeLabelsByAccount = await getActiveLabelKeysByAccount(
     prisma,
@@ -158,7 +197,7 @@ export async function listAccounts(
       displayName: row.displayName,
       followersCount: row.followersCount,
       tweetCount: row.tweetCount,
-      lastCrawledAt: row.lastCrawledAt,
+      lastCrawledAt: requireLastCrawledAt(row),
       isBlueVerified: row.isBlueVerified,
       activeLabelKeys: activeLabelsByAccount.get(row.id) ?? [],
     })),

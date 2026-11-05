@@ -12,7 +12,12 @@ import {
   FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS,
 } from './follow-churn-observation'
 import type { FollowListResult } from '../twitter/follows'
-import { upsertAccount, upsertAccountsBulk, type AccountProfileInput } from './account-repository'
+import {
+  recordRecentTweetsFetchSuccess,
+  upsertAccount,
+  upsertAccountsBulk,
+  type AccountProfileInput,
+} from './account-repository'
 import { upsertAccountRequestingRelabelIfChanged } from './account-relabel-on-change'
 import {
   upsertTweet,
@@ -114,20 +119,15 @@ export async function persistAuthorResultAtomic(
     async (tx) => {
       const txClient = tx as unknown as PrismaClient
 
-      const { account: accountBeforeFetchStatusUpdate } = await upsertAccount(
-        txClient,
-        params.profile,
-      )
+      const { account: upsertedAccount } = await upsertAccount(txClient, params.profile)
       // `upsertAccount` の戻り値は `recentTweetsFetchStatus: 'success'` を反映する前の状態のため、
-      // 以降のラベル評価には必ず update 後の戻り値を使う。
-      const account = await txClient.account.update({
-        where: { id: accountBeforeFetchStatusUpdate.id },
-        data: {
-          lastRecentTweetsAttemptedAt: params.recentTweetsFetchedAt ?? new Date(),
-          lastRecentTweetsFetchedAt: params.recentTweetsFetchedAt ?? new Date(),
-          recentTweetsFetchStatus: 'success',
-        },
-      })
+      // 以降のラベル評価には必ず crawl state の更新後の値を載せた account を使う。
+      const crawlState = await recordRecentTweetsFetchSuccess(
+        txClient,
+        upsertedAccount.id,
+        params.recentTweetsFetchedAt ?? new Date(),
+      )
+      const account = { ...upsertedAccount, crawlState }
       // `recentTweets` には他者に帰属する会話コンテキストの Tweet が混在するため、
       // Tweet.accountId の FK を満たすには対応する Account を先に用意しておく必要がある。
       // この account 自身は今回の crawl 対象ではなく、このループでしか profile 更新を観測できないため、

@@ -11,7 +11,8 @@ GROUP BY "labelDefinitionId";
 
 -- accounts.ts の一覧相当 (offset pagination の実行計画を確認する目的)
 EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
-SELECT "id", "screenName", "displayName"
-FROM "Account"
-ORDER BY "lastCrawledAt" DESC
+SELECT a."id", a."screenName", a."displayName"
+FROM "Account" a
+JOIN "AccountCrawlState" cs ON cs."accountId" = a."id"
+ORDER BY cs."lastCrawledAt" DESC, a."id"
 LIMIT 25 OFFSET 50000;

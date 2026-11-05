@@ -134,7 +134,7 @@ pending_ids() {
   local ids=$1
   [[ "$ids" =~ ^[0-9]+(,[0-9]+)*$ ]] || { printf ''; return 1; }
   docker compose exec -T postgres sh -lc \
-    "psql -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT COALESCE(string_agg(id, ',' ORDER BY id), '') FROM \\\"Account\\\" WHERE id = ANY(string_to_array('$ids', ',')) AND \\\"lastRecentTweetsAttemptedAt\\\" IS NULL;\"" \
+    "psql -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT COALESCE(string_agg(\\\"accountId\\\"::text, ',' ORDER BY \\\"accountId\\\"), '') FROM \\\"AccountCrawlState\\\" WHERE \\\"accountId\\\" = ANY(string_to_array('$ids', ',')::bigint[]) AND \\\"lastRecentTweetsAttemptedAt\\\" IS NULL;\"" \
     2>/dev/null | tail -1
 }
 cooldown_wait() {

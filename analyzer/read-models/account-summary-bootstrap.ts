@@ -9,6 +9,7 @@ import {
   type AccountClassificationLatestRow,
   type UpsertAccountSummaryLatestInput,
 } from './account-summary-latest'
+import { enqueueWorkItem } from '../queue/work-item-repository'
 
 const logger = Logger.configure('analyzer:account-summary-bootstrap')
 
@@ -370,20 +371,10 @@ async function processLegacyChunk(tx: PrismaClient, chunkSize: number): Promise<
   // 分岐先の await 呼び出しがそれぞれ複数行のため、三項演算子にすると可読性が落ちる。
   // eslint-disable-next-line unicorn/prefer-ternary
   if (isDone) {
-    await tx.analysisWorkItem.upsert({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'label_aggregate_refresh',
-          triggerType: 'bootstrap_completion',
-          triggerId: 'account_summary:bootstrap_completed',
-        },
-      },
-      create: {
-        kind: 'label_aggregate_refresh',
-        triggerType: 'bootstrap_completion',
-        triggerId: 'account_summary:bootstrap_completed',
-      },
-      update: {},
+    await enqueueWorkItem(tx, {
+      kind: 'label_aggregate_refresh',
+      triggerType: 'bootstrap_completion',
+      triggerId: 'account_summary:bootstrap_completed',
     })
   } else {
     await tx.analysisWorkItem.create({
@@ -490,20 +481,10 @@ async function processSamplingChunk(tx: PrismaClient, chunkSize: number): Promis
       VALUES ('account_summary_latest', ${ACCOUNT_SUMMARY_LATEST_SCHEMA_VERSION}, 'healthy')
       ON CONFLICT ("modelKey") DO UPDATE SET "schemaVersion" = ${ACCOUNT_SUMMARY_LATEST_SCHEMA_VERSION}
     `
-    await tx.analysisWorkItem.upsert({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'label_aggregate_refresh',
-          triggerType: 'bootstrap_completion',
-          triggerId: 'account_summary:bootstrap_completed',
-        },
-      },
-      create: {
-        kind: 'label_aggregate_refresh',
-        triggerType: 'bootstrap_completion',
-        triggerId: 'account_summary:bootstrap_completed',
-      },
-      update: {},
+    await enqueueWorkItem(tx, {
+      kind: 'label_aggregate_refresh',
+      triggerType: 'bootstrap_completion',
+      triggerId: 'account_summary:bootstrap_completed',
     })
   } else {
     await tx.analysisWorkItem.create({

@@ -8,6 +8,7 @@ import { buildReplyHijackIndex } from '../labels/reply-hijack-index'
 import { buildSelfReplyPromoIndex } from '../labels/self-reply-promo-index'
 import { replyHijackSwarmRule } from '../labels/rules/reply-hijack-swarm'
 import { ensureLabelDefinitionsForRules } from './label-repository'
+import * as accountRepository from './account-repository'
 import * as labelRepository from './label-repository'
 import * as evidenceRepository from './reply-hijack-evidence-repository'
 import * as workItemRepository from './analysis-work-item-repository'
@@ -83,9 +84,39 @@ function emptyRegistryParams() {
   }
 }
 
+let upsertAccountSpy: ReturnType<typeof mockAccountRepository>['upsertAccountSpy']
+
+/**
+ * Account の永続化は account-repository 側のテストで検証済みのため、
+ * ここでは呼び出しの順序と回数だけを観測できる形に差し替える。
+ * @returns 差し替えた upsertAccount のスパイ
+ */
+function mockAccountRepository() {
+  const upsertAccountSpy = vi
+    .spyOn(accountRepository, 'upsertAccount')
+    .mockImplementation((_prisma, input) =>
+      Promise.resolve({
+        account: { ...profile(input.id), crawlState: null } as never,
+        changed: false,
+      }),
+    )
+  vi.spyOn(accountRepository, 'recordRecentTweetsFetchSuccess').mockImplementation(
+    (_prisma, accountId, fetchedAt) =>
+      Promise.resolve({
+        accountId,
+        lastCrawledAt: fetchedAt,
+        lastRecentTweetsAttemptedAt: fetchedAt,
+        lastRecentTweetsFetchedAt: fetchedAt,
+        recentTweetsFetchStatus: 'success' as const,
+      }),
+  )
+  return { upsertAccountSpy }
+}
+
 beforeEach(() => {
   // 個別のテストで上書きしない限り、期間内のプロモ投稿の DB 集計は 0 件の前提にする。
   vi.spyOn(tweetRepository, 'loadPromotedTweetCountsForAccounts').mockResolvedValue(new Map())
+  ;({ upsertAccountSpy } = mockAccountRepository())
 })
 
 afterEach(() => {
@@ -104,11 +135,6 @@ describe('persistAuthorResultAtomic', () => {
     )
     const authorProfile = profile('author1')
     const txClient = {
-      account: {
-        upsert: vi.fn().mockResolvedValue(authorProfile),
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockResolvedValue({ ...authorProfile, recentTweetsFetchStatus: 'success' }),
-      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
@@ -199,11 +225,6 @@ describe('persistAuthorResultAtomic', () => {
     )
     const authorProfile = profile('author1')
     const txClient = {
-      account: {
-        upsert: vi.fn().mockResolvedValue(authorProfile),
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockResolvedValue({ ...authorProfile, recentTweetsFetchStatus: 'success' }),
-      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
@@ -271,11 +292,13 @@ describe('persistAuthorResultAtomic', () => {
 
   it('upserts the fallback author before the context tweet that references it', async () => {
     const calls: string[] = []
-    const accountUpsert = vi.fn((args: { where: { id: string } }) => {
-      calls.push(`account:${args.where.id}`)
-      return Promise.resolve({})
+    upsertAccountSpy.mockImplementation((_prisma, input) => {
+      calls.push(`account:${input.id}`)
+      return Promise.resolve({
+        account: { ...profile(input.id), crawlState: null } as never,
+        changed: false,
+      })
     })
-    const accountFindUnique = vi.fn().mockResolvedValue(null)
     const tweetFindUnique = vi.fn().mockResolvedValue(null)
     const tweetUpsert = vi.fn((args: { where: { id: string } }) => {
       calls.push(`tweet:${args.where.id}`)
@@ -284,11 +307,6 @@ describe('persistAuthorResultAtomic', () => {
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const queryRaw = vi.fn().mockResolvedValue([])
     const txClient = {
-      account: {
-        upsert: accountUpsert,
-        findUnique: accountFindUnique,
-        update: vi.fn().mockResolvedValue({ id: 'author1' }),
-      },
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
       accountLabelState: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
@@ -320,7 +338,7 @@ describe('persistAuthorResultAtomic', () => {
     expect(result).toEqual({ observationId: null, labelsAppliedCount: 0 })
     expect(calls.indexOf('account:context1')).toBeGreaterThanOrEqual(0)
     expect(calls.indexOf('account:context1')).toBeLessThan(calls.indexOf('tweet:tweet2'))
-    expect(accountUpsert).toHaveBeenCalledTimes(2)
+    expect(upsertAccountSpy).toHaveBeenCalledTimes(2)
     expect(authorCheckpointUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
@@ -365,11 +383,6 @@ describe('persistAuthorResultAtomic', () => {
       })
     })
     const txClient = {
-      account: {
-        upsert: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockResolvedValue({ id: 'author1' }),
-      },
       tweet: { findUnique: vi.fn().mockResolvedValue(null), upsert: tweetUpsert },
       accountLabelState: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
@@ -435,11 +448,6 @@ describe('persistAuthorResultAtomic', () => {
       { id: 'root1', fullText: '既に DB にある会話 root です', accountId: 'author1' },
     ])
     const txClient = {
-      account: {
-        upsert: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockResolvedValue({ id: 'author1' }),
-      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: tweetUpsert,
@@ -502,22 +510,9 @@ describe('persistAuthorResultAtomic', () => {
     const registry = new LabelRuleRegistry()
     registry.register(rule)
 
-    // upsertAccount 直後の戻り値は今回の fetch 前の状態(未取得)を表し、
-    // 直後の update で 'success' に変わることを再現する。
-    const accountUpsert = vi.fn().mockResolvedValue({
-      id: 'author1',
-      recentTweetsFetchStatus: null,
-    })
-    const accountUpdate = vi.fn().mockResolvedValue({
-      id: 'author1',
-      recentTweetsFetchStatus: 'success',
-    })
+    // upsertAccount 直後の account は今回の fetch 前の状態 (crawlState なし) を表し、
+    // 直後の crawl state の更新で 'success' に変わることを再現する。
     const txClient = {
-      account: {
-        upsert: accountUpsert,
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: accountUpdate,
-      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
@@ -554,18 +549,11 @@ describe('persistAuthorResultAtomic', () => {
   })
 
   it('skips the followee account upsert when followSample is null, without failing the transaction', async () => {
-    const accountUpsert = vi.fn().mockResolvedValue({})
-    const accountFindUnique = vi.fn().mockResolvedValue(null)
     const tweetFindUnique = vi.fn().mockResolvedValue(null)
     const tweetUpsert = vi.fn().mockResolvedValue({ accountId: 'author1' })
     const followeeUpsertQueryRaw = vi.fn()
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
-      account: {
-        upsert: accountUpsert,
-        findUnique: accountFindUnique,
-        update: vi.fn().mockResolvedValue({ id: 'author1' }),
-      },
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
@@ -609,15 +597,9 @@ describe('persistAuthorResultAtomic', () => {
   })
 
   it('upserts the followee accounts outside the transaction when followSample is provided', async () => {
-    const accountUpsert = vi.fn().mockResolvedValue({})
     const followUpsertQueryRaw = vi.fn().mockResolvedValue([{ id: 'followee1' }])
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
-      account: {
-        upsert: accountUpsert,
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockResolvedValue({ id: 'author1' }),
-      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
@@ -654,11 +636,6 @@ describe('persistAuthorResultAtomic', () => {
 
   it('opens the transaction with an extended budget for the combined write', async () => {
     const txClient = {
-      account: {
-        upsert: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockResolvedValue({ id: 'author1' }),
-      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
@@ -693,13 +670,7 @@ describe('persistAuthorResultAtomic', () => {
   })
 
   it('upserts each fallback author only once even if it appears against multiple context tweets', async () => {
-    const accountUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
-      account: {
-        upsert: accountUpsert,
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockResolvedValue({ id: 'author1' }),
-      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),
@@ -729,32 +700,20 @@ describe('persistAuthorResultAtomic', () => {
     })
 
     // author1 (自分) 用に 1 回 + context1 用に 1 回のみ。重複したままだと 3 回目が呼ばれる。
-    expect(accountUpsert).toHaveBeenCalledTimes(2)
+    expect(upsertAccountSpy).toHaveBeenCalledTimes(2)
   })
 
   it('fallback author のラベル評価に影響するフィールドが変化していて既存ラベルがあれば account_relabel を要求する', async () => {
     const requestRelabelSpy = vi
       .spyOn(workItemRepository, 'requestAccountRelabel')
       .mockResolvedValue()
+    upsertAccountSpy.mockImplementation((_prisma, input) =>
+      Promise.resolve({
+        account: { ...profile(input.id), crawlState: null } as never,
+        changed: input.id === 'context1',
+      }),
+    )
     const txClient = {
-      account: {
-        upsert: vi.fn((args: { where: { id: string } }) => Promise.resolve({ id: args.where.id })),
-        // fallback author (context1) の変化検知用。bio 以外は入力と一致させ、
-        // bio の変化だけを検知させる。
-        findUnique: vi.fn().mockResolvedValue({
-          screenName: 'user_context1',
-          displayName: 'User context1',
-          bio: 'old bio',
-          followersCount: 0,
-          followingCount: 0,
-          tweetCount: 0,
-          isBlueVerified: false,
-          verifiedType: null,
-          professionalType: null,
-          parodyCommentaryFanLabel: null,
-        }),
-        update: vi.fn().mockResolvedValue({ id: 'author1' }),
-      },
       tweet: {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),
@@ -793,6 +752,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
     const prisma = getPrismaClient()
 
     beforeEach(async () => {
+      // 実 DB で Account と crawl state の永続化まで通すため、共通のスパイを外す。
+      vi.mocked(accountRepository.upsertAccount).mockRestore()
+      vi.mocked(accountRepository.recordRecentTweetsFetchSuccess).mockRestore()
       // Block は他の統合テストファイルが残す可能性があり、
       // account 削除時の FK 違反を避けるため先に消しておく。
       await prisma.block.deleteMany()
@@ -802,6 +764,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await prisma.crawlAuthorCheckpoint.deleteMany()
       await prisma.crawlAccountLabelRun.deleteMany()
       await prisma.crawlRun.deleteMany()
+      await prisma.accountCrawlState.deleteMany()
       await prisma.account.deleteMany()
     })
 
@@ -919,11 +882,6 @@ it('crawl-time label evaluation receives the resolved parent author id', async (
     return Promise.resolve([{ id: 'parent-1', fullText: 'parent text' }])
   })
   const txClient = {
-    account: {
-      upsert: vi.fn().mockResolvedValue(authorProfile),
-      findUnique: vi.fn().mockResolvedValue(null),
-      update: vi.fn().mockResolvedValue({ ...authorProfile, recentTweetsFetchStatus: 'success' }),
-    },
     tweet: {
       findUnique: vi.fn().mockResolvedValue(null),
       findMany,
