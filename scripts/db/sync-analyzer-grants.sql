@@ -1,8 +1,8 @@
 -- analyzer は正本テーブルへ SELECT のみ、分析・read model テーブルへ INSERT/UPDATE/DELETE を持つ。
 -- 正本テーブル (Account, Tweet, AccountLabelLatest, Follow, CrawlRun,
--- CrawlAccountRun, CrawlAccountCheckpoint, CrawlAccountLabelRun, WeeklyAnalysisRun,
--- Block, BlockRun, BlockAccountRun, BlockAction, LabelDefinition)
--- は書き込ませない。
+-- CrawlAccountRun, CrawlAccountCheckpoint, CrawlAccountLabelRun, CrawlAuthorCheckpoint,
+-- WeeklyAnalysisRun, Block, BlockRun, BlockAccountRun, BlockAction, LabelDefinition)
+-- は書き込ませない。ただし Checkpoint 系 3 表は retention sweep のため DELETE だけを許す (下記)。
 
 BEGIN;
 
