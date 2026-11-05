@@ -11,7 +11,7 @@ export interface GlobalSearchAccountResult {
 
 /** 横断検索のラベル結果 1 件。 */
 export interface GlobalSearchLabelResult {
-  id: string
+  id: number
   key: string
 }
 

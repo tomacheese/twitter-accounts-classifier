@@ -23,6 +23,7 @@ function createMockPrismaClient(): {
   return {
     prisma: {
       analysisWorkItem: { findUnique },
+      analysisRun: { findFirst: vi.fn().mockResolvedValue(null) },
       operationStage: { deleteMany },
     } as unknown as PrismaClient,
     findUnique,
@@ -92,11 +93,11 @@ describe('deriveWorkItemStage', () => {
   it('WorkItem が存在する場合 workItemExists: true を返す', async () => {
     const { prisma, findUnique } = createMockPrismaClient()
     findUnique.mockResolvedValue({
+      id: 1,
       status: 'succeeded',
       attemptCount: 1,
       lastErrorCode: null,
       lastErrorSummary: null,
-      runs: [],
     } as never)
 
     const stage = await deriveWorkItemStage(prisma, 'label_aggregate_refresh', 'crawl_run', 'run-1')
@@ -142,7 +143,7 @@ describe('applyUpstreamBlocking', () => {
       attemptCount: 1,
       errorCode: undefined,
       errorSummary: undefined,
-      analysisRunId: 'run-1',
+      analysisRunId: 1,
       startedAt: new Date(),
       finishedAt: new Date(),
       workItemExists: true,

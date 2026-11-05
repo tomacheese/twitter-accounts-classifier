@@ -180,7 +180,7 @@ describe.skipIf(!process.env.DATABASE_URL)('sweepAccountClassificationObservatio
 
   it('nonterminalなaccount_summary_refresh WorkItemが参照する古い行は削除しない', async () => {
     const observation = await prisma.accountClassificationObservation.create({
-      data: { accountId: 'acct_retained', observedAt: OLD, labelCount: 0 },
+      data: { accountId: '100400897880', observedAt: OLD, labelCount: 0 },
     })
     await prisma.analysisWorkItem.create({
       data: {
@@ -201,7 +201,7 @@ describe.skipIf(!process.env.DATABASE_URL)('sweepAccountClassificationObservatio
 
   it('参照するWorkItemがsucceeded/deadのみの古い行は削除する', async () => {
     const observation = await prisma.accountClassificationObservation.create({
-      data: { accountId: 'acct_terminal_only', observedAt: OLD, labelCount: 0 },
+      data: { accountId: '100538243087', observedAt: OLD, labelCount: 0 },
     })
     await prisma.analysisWorkItem.create({
       data: {
@@ -222,7 +222,7 @@ describe.skipIf(!process.env.DATABASE_URL)('sweepAccountClassificationObservatio
 
   it('参照するWorkItemが無い古い行は削除する', async () => {
     const observation = await prisma.accountClassificationObservation.create({
-      data: { accountId: 'acct_unreferenced', observedAt: OLD, labelCount: 0 },
+      data: { accountId: '100197102322', observedAt: OLD, labelCount: 0 },
     })
 
     await runRetentionSweep(prisma, now)
@@ -235,7 +235,7 @@ describe.skipIf(!process.env.DATABASE_URL)('sweepAccountClassificationObservatio
 
   it('保持期間内の新しい行はWorkItemの有無に関わらず削除しない', async () => {
     const observation = await prisma.accountClassificationObservation.create({
-      data: { accountId: 'acct_recent', observedAt: now, labelCount: 0 },
+      data: { accountId: '100427505903', observedAt: now, labelCount: 0 },
     })
 
     await runRetentionSweep(prisma, now)

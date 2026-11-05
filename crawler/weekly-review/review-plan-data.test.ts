@@ -9,10 +9,10 @@ import {
 describe('assemblePlanningData', () => {
   it('snapshot は observedAt の新しい順で latest/previous に割り当て、trueCount/totalCountも最新snapshotから導出する', () => {
     const rows: PlanningDataRows = {
-      definitions: [{ id: 'l1', key: 'topic_alpha', currentRuleVersion: '2.0.0' }],
+      definitions: [{ id: 1, key: 'topic_alpha', currentRuleVersion: '2.0.0' }],
       snapshots: [
         {
-          labelDefinitionId: 'l1',
+          labelDefinitionId: 1,
           observedAt: new Date('2026-08-01T00:00:00Z'),
           prevalence: 0.1,
           coverage: 0.9,
@@ -21,7 +21,7 @@ describe('assemblePlanningData', () => {
           evaluatedCount: 50,
         },
         {
-          labelDefinitionId: 'l1',
+          labelDefinitionId: 1,
           observedAt: new Date('2026-08-08T00:00:00Z'),
           prevalence: 0.2,
           coverage: 0.8,
@@ -30,8 +30,8 @@ describe('assemblePlanningData', () => {
           evaluatedCount: 100,
         },
       ],
-      activeFindingCounts: [{ labelDefinitionId: 'l1', count: 2 }],
-      recentChangeCounts: [{ labelDefinitionId: 'l1', count: 4 }],
+      activeFindingCounts: [{ labelDefinitionId: 1, count: 2 }],
+      recentChangeCounts: [{ labelDefinitionId: 1, count: 4 }],
       candidates: [],
       changeCandidates: [],
       populationCounts: [],
@@ -40,7 +40,7 @@ describe('assemblePlanningData', () => {
     const result = assemblePlanningData(rows)
 
     expect(result.labels[0]).toMatchObject({
-      id: 'l1',
+      id: 1,
       key: 'topic_alpha',
       currentRuleVersion: '2.0.0',
       trueCount: 20,
@@ -55,7 +55,7 @@ describe('assemblePlanningData', () => {
   it('change candidate は同一 account/label の通常 candidate に changeType を付与する', () => {
     const common = {
       accountId: 'a1',
-      labelDefinitionId: 'l1',
+      labelDefinitionId: 1,
       labelKey: 'spam_alpha',
       value: false,
       confidence: 0.6,
@@ -65,7 +65,7 @@ describe('assemblePlanningData', () => {
       evaluable: true,
     }
     const rows: PlanningDataRows = {
-      definitions: [{ id: 'l1', key: 'spam_alpha', currentRuleVersion: '1.0.0' }],
+      definitions: [{ id: 1, key: 'spam_alpha', currentRuleVersion: '1.0.0' }],
       snapshots: [],
       activeFindingCounts: [],
       recentChangeCounts: [],
@@ -81,7 +81,7 @@ describe('assemblePlanningData', () => {
 
   it('snapshot が無い新規ラベルも zero count で計画対象に残す', () => {
     const rows: PlanningDataRows = {
-      definitions: [{ id: 'new', key: 'topic_new', currentRuleVersion: null }],
+      definitions: [{ id: 2, key: 'topic_new', currentRuleVersion: null }],
       snapshots: [],
       activeFindingCounts: [],
       recentChangeCounts: [],
@@ -93,7 +93,7 @@ describe('assemblePlanningData', () => {
     const result = assemblePlanningData(rows)
 
     expect(result.labels[0]).toMatchObject({
-      id: 'new',
+      id: 2,
       currentRuleVersion: 'unknown',
       trueCount: 0,
       totalCount: 0,

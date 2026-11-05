@@ -1,20 +1,20 @@
 import type { PlanningCandidate, PlanningLabel, PlanningMetrics } from './review-plan'
 
 export interface PlanningDefinitionRow {
-  id: string
+  id: number
   key: string
   currentRuleVersion: string | null
 }
 
 export interface PlanningSnapshotRow extends PlanningMetrics {
-  labelDefinitionId: string
+  labelDefinitionId: number
   observedAt: Date
   trueCount: number
   evaluatedCount: number
 }
 
 export interface PlanningCountRow {
-  labelDefinitionId: string
+  labelDefinitionId: number
   count: number
 }
 
@@ -23,7 +23,7 @@ export interface PlanningCandidateRow extends Omit<PlanningCandidate, 'changeTyp
 }
 
 export interface PlanningPopulationCountRow {
-  labelDefinitionId: string
+  labelDefinitionId: number
   value: boolean
   count: number
 }
@@ -60,7 +60,7 @@ export function assemblePlanningData(rows: PlanningDataRows): PlanningData {
   const recentChangeCounts = new Map(
     rows.recentChangeCounts.map((row) => [row.labelDefinitionId, row.count]),
   )
-  const snapshots = new Map<string, PlanningSnapshotRow[]>()
+  const snapshots = new Map<number, PlanningSnapshotRow[]>()
   for (const row of rows.snapshots) {
     const existing = snapshots.get(row.labelDefinitionId) ?? []
     existing.push(row)

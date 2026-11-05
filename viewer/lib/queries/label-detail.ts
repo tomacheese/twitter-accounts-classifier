@@ -78,7 +78,7 @@ export async function getLabelDetail(
     prisma.reviewFinding.findMany({
       where: {
         primaryScopeType: 'label',
-        primaryScopeId: labelDefinition.id,
+        primaryScopeId: String(labelDefinition.id),
         status: { in: ['active', 'recurring'] },
       },
       orderBy: [{ lastDetectedAt: 'desc' }],

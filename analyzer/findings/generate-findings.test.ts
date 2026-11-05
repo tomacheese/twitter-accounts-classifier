@@ -1,12 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { getPrismaClient } from '../db/client'
-import {
-  generateFindingsForCrawlCycle,
-  generateFindingsForAggregateRefresh,
-} from './generate-findings'
+import { generateFindingsForAggregateRefresh } from './generate-findings'
 import { computeFingerprint } from './fingerprint'
 import type { DetectionPolicy, DetectionPolicyRule } from '../policy/schema'
 import { randomUUID } from 'node:crypto'
+import { createSyntheticSerialId } from 'id-boundary'
 
 const loggerWarn = vi.fn()
 
@@ -40,9 +38,37 @@ const policy: DetectionPolicy = {
   rules: [labelCountDropRule],
 }
 
+const workItemIds = new Map<string, number>()
+
+/**
+ * crawl run ごとに、snapshot の識別子 (int4 の WorkItem ID) を 1 つ割り当てる。
+ * @param crawlRunId - テスト内で crawl run を区別する文字列
+ * @returns その crawl run に対応する WorkItem ID
+ */
+function workItemIdFor(crawlRunId: string): number {
+  const existing = workItemIds.get(crawlRunId)
+  if (existing !== undefined) return existing
+  const created = createSyntheticSerialId()
+  workItemIds.set(crawlRunId, created)
+  return created
+}
+
+async function generateFindingsForCrawlCycle(
+  prisma: ReturnType<typeof getPrismaClient>,
+  input: Omit<Parameters<typeof generateFindingsForAggregateRefresh>[1], 'triggerWorkItemId'> & {
+    crawlRunId: string
+  },
+): Promise<void> {
+  const { crawlRunId, ...rest } = input
+  await generateFindingsForAggregateRefresh(prisma, {
+    ...rest,
+    triggerWorkItemId: workItemIdFor(crawlRunId),
+  })
+}
+
 describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () => {
   const prisma = getPrismaClient()
-  let labelDefinitionId: string
+  let labelDefinitionId: number
 
   beforeEach(async () => {
     await prisma.findingEvidence.deleteMany()
@@ -67,7 +93,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
   ) {
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: crawlRunId,
+        triggerWorkItemId: workItemIdFor(crawlRunId),
         sourceCrawlRunId: crawlRunId,
         labelDefinitionId,
         observedAt,
@@ -101,7 +127,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
       detectorVersion: 'v1',
     })
     const afterFirst = await prisma.reviewFinding.findMany({
-      where: { primaryScopeId: labelDefinitionId },
+      where: { primaryScopeId: String(labelDefinitionId) },
     })
     expect(afterFirst).toHaveLength(0)
 
@@ -112,7 +138,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
       detectorVersion: 'v1',
     })
     const afterSecond = await prisma.reviewFinding.findMany({
-      where: { primaryScopeId: labelDefinitionId },
+      where: { primaryScopeId: String(labelDefinitionId) },
     })
     expect(afterSecond).toHaveLength(1)
     expect(afterSecond[0]?.status).toBe('active')
@@ -139,7 +165,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
     }
 
     const findings = await prisma.reviewFinding.findMany({
-      where: { primaryScopeId: labelDefinitionId },
+      where: { primaryScopeId: String(labelDefinitionId) },
     })
     expect(findings).toHaveLength(1)
 
@@ -156,7 +182,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
     await makeSnapshot(run1, 100, new Date('2026-08-01T00:00:00Z'))
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: run2,
+        triggerWorkItemId: workItemIdFor(run2),
         sourceCrawlRunId: run2,
         labelDefinitionId,
         observedAt: new Date('2026-08-02T00:00:00Z'),
@@ -237,7 +263,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
     }
 
     const findings = await prisma.reviewFinding.findMany({
-      where: { primaryScopeId: labelDefinitionId },
+      where: { primaryScopeId: String(labelDefinitionId) },
     })
     expect(findings).toHaveLength(1)
     expect(findings[0]?.status).toBe('active')
@@ -287,7 +313,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
       })
     }
     const afterResolve = await prisma.reviewFinding.findMany({
-      where: { primaryScopeId: labelDefinitionId },
+      where: { primaryScopeId: String(labelDefinitionId) },
     })
     expect(afterResolve[0]?.status).toBe('resolved')
 
@@ -298,7 +324,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
       detectorVersion: 'v1',
     })
     const afterRecur = await prisma.reviewFinding.findMany({
-      where: { primaryScopeId: labelDefinitionId },
+      where: { primaryScopeId: String(labelDefinitionId) },
     })
     expect(afterRecur[0]?.status).toBe('recurring')
     expect(afterRecur[0]?.recurrenceCount).toBe(1)
@@ -310,7 +336,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
       detectorVersion: 'v1',
     })
     const stillRecurring = await prisma.reviewFinding.findMany({
-      where: { primaryScopeId: labelDefinitionId },
+      where: { primaryScopeId: String(labelDefinitionId) },
     })
     expect(stillRecurring[0]?.status).toBe('recurring')
     expect(stillRecurring[0]?.recurrenceCount).toBe(1)
@@ -322,7 +348,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
       detectorVersion: 'v1',
     })
     const resolvedAgain = await prisma.reviewFinding.findMany({
-      where: { primaryScopeId: labelDefinitionId },
+      where: { primaryScopeId: String(labelDefinitionId) },
     })
     expect(resolvedAgain[0]?.status).toBe('resolved')
   })
@@ -374,11 +400,11 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
     }
 
     const bioFingerprint = computeFingerprint('reason_distribution_shift', {
-      label: labelDefinitionId,
+      label: String(labelDefinitionId),
       reason: 'bio_pattern',
     })
     const screenNameFingerprint = computeFingerprint('reason_distribution_shift', {
-      label: labelDefinitionId,
+      label: String(labelDefinitionId),
       reason: 'screen_name_pattern',
     })
 
@@ -396,7 +422,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForCrawlCycle', () =
 
 describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForAggregateRefresh', () => {
   const prisma = getPrismaClient()
-  let labelDefinitionId: string
+  let labelDefinitionId: number
 
   beforeEach(async () => {
     await prisma.findingEvidence.deleteMany()
@@ -414,7 +440,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForAggregateRefresh'
   })
 
   async function makeSnapshot(
-    triggerWorkItemId: string,
+    triggerWorkItemId: number,
     trueCount: number,
     observedAt: Date,
     sourceCrawlRunId?: string,
@@ -438,13 +464,10 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForAggregateRefresh'
 
   it('uses triggerWorkItemId as the DetectorEvaluation/ReviewFindingOccurrence idempotency key', async () => {
     const run1 = `crawl-${randomUUID()}`
-    await makeSnapshot(
-      `work_item_finding_baseline_${randomUUID()}`,
-      100,
-      new Date('2026-08-01T00:00:00Z'),
-      run1,
-    )
-    await makeSnapshot('work_item_finding_1', 50, new Date('2026-08-02T00:00:00Z'), run1)
+    const baselineWorkItemId = createSyntheticSerialId()
+    const findingWorkItemId = baselineWorkItemId + 1
+    await makeSnapshot(baselineWorkItemId, 100, new Date('2026-08-01T00:00:00Z'), run1)
+    await makeSnapshot(findingWorkItemId, 50, new Date('2026-08-02T00:00:00Z'), run1)
 
     const activateImmediatelyPolicy: DetectionPolicy = {
       ...policy,
@@ -453,7 +476,7 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForAggregateRefresh'
 
     for (let attempt = 0; attempt < 2; attempt++) {
       await generateFindingsForAggregateRefresh(prisma, {
-        triggerWorkItemId: 'work_item_finding_1',
+        triggerWorkItemId: findingWorkItemId,
         policy: activateImmediatelyPolicy,
         policyHash: 'hash-1',
         detectorVersion: 'v1',
@@ -461,16 +484,18 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForAggregateRefresh'
     }
 
     const evaluations = await prisma.detectorEvaluation.findMany({
-      where: { sourceId: 'work_item_finding_1' },
+      where: { sourceId: String(findingWorkItemId) },
     })
     expect(evaluations).toHaveLength(1)
   })
 
   it('does not select a schedule/weekly/bootstrap snapshot as the previous_cycle baseline', async () => {
     // sourceCrawlRunId を持たない = crawl 起因ではない snapshot。
-    await makeSnapshot('work_item_finding_schedule', 100, new Date('2026-08-01T00:00:00Z'))
+    const scheduleWorkItemId = createSyntheticSerialId()
+    const crawlWorkItemId = scheduleWorkItemId + 1
+    await makeSnapshot(scheduleWorkItemId, 100, new Date('2026-08-01T00:00:00Z'))
     const run2 = `crawl-${randomUUID()}`
-    await makeSnapshot('work_item_finding_crawl', 20, new Date('2026-08-02T00:00:00Z'), run2)
+    await makeSnapshot(crawlWorkItemId, 20, new Date('2026-08-02T00:00:00Z'), run2)
 
     const activateImmediatelyPolicy: DetectionPolicy = {
       ...policy,
@@ -478,14 +503,14 @@ describe.skipIf(!process.env.DATABASE_URL)('generateFindingsForAggregateRefresh'
     }
 
     await generateFindingsForAggregateRefresh(prisma, {
-      triggerWorkItemId: 'work_item_finding_crawl',
+      triggerWorkItemId: crawlWorkItemId,
       policy: activateImmediatelyPolicy,
       policyHash: 'hash-1',
       detectorVersion: 'v1',
     })
 
     const findings = await prisma.reviewFinding.findMany({
-      where: { primaryScopeId: labelDefinitionId },
+      where: { primaryScopeId: String(labelDefinitionId) },
     })
     expect(findings).toHaveLength(0)
   })

@@ -70,7 +70,7 @@ export async function runTextOnlyMediaBackfill(
   deps: TextOnlyBackfillDependencies,
 ): Promise<void> {
   const { prisma } = deps
-  let afterId = options.afterId ?? ''
+  let afterId = options.afterId ?? '0'
   let batches = 0
   let scanned = 0
   let candidates = 0
@@ -78,7 +78,7 @@ export async function runTextOnlyMediaBackfill(
 
   while (options.maxBatches === undefined || batches < options.maxBatches) {
     const window = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
-      SELECT "id" FROM "Tweet" WHERE "id" > ${afterId} ORDER BY "id" LIMIT ${options.batchSize}
+      SELECT "id"::text AS "id" FROM "Tweet" WHERE "id" > ${afterId}::bigint ORDER BY "Tweet"."id" LIMIT ${options.batchSize}
     `)
     if (window.length === 0) break
     const ids = window.map((row) => row.id)
@@ -94,7 +94,7 @@ export async function runTextOnlyMediaBackfill(
             WHEN "collectedAt" >= ${options.hasMediaSince} AND "hasMedia" IS NULL THEN false
             ELSE "hasMedia"
           END
-        WHERE "id" = ANY(${ids}::text[])
+        WHERE "id" = ANY(${ids}::bigint[])
           AND "foreignVideoSourceCount" IS NULL
           AND "collectedAt" >= ${options.foreignVideoSince}
       `)
@@ -105,7 +105,7 @@ export async function runTextOnlyMediaBackfill(
     } else {
       const [row] = await prisma.$queryRaw<{ count: bigint }[]>(Prisma.sql`
         SELECT count(*) AS "count" FROM "Tweet"
-        WHERE "id" = ANY(${ids}::text[])
+        WHERE "id" = ANY(${ids}::bigint[])
           AND "foreignVideoSourceCount" IS NULL
           AND "collectedAt" >= ${options.foreignVideoSince}
       `)
@@ -119,7 +119,7 @@ export async function runTextOnlyMediaBackfill(
       batches,
       scanned,
       ...(options.execute ? { updated } : { candidates }),
-      lastId: afterId === '' ? undefined : afterId,
+      lastId: afterId === '0' ? undefined : afterId,
     }),
   )
 }

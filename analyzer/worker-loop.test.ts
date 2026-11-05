@@ -46,7 +46,7 @@ vi.mock('./queue/work-item-repository', () => ({
  */
 function makeWorkItem(overrides: Partial<AnalysisWorkItem>): AnalysisWorkItem {
   return {
-    id: 'work-item-1',
+    id: 1,
     kind: 'label_aggregate_refresh',
     triggerType: 'crawl_run',
     triggerId: 'crawl-1',
@@ -114,7 +114,7 @@ describe('runWorkerLoopOnce', () => {
     expect(startAnalysisRun).not.toHaveBeenCalled()
     expect(deps.onWorkItemSettled).toHaveBeenCalledWith(
       prisma,
-      expect.objectContaining({ id: 'work-item-1', status: 'dead' }),
+      expect.objectContaining({ id: 1, status: 'dead' }),
       expect.objectContaining({ status: 'dead' }),
     )
   })
@@ -135,7 +135,7 @@ describe('runWorkerLoopOnce', () => {
 
     expect(deps.onWorkItemSettled).toHaveBeenCalledWith(
       prisma,
-      expect.objectContaining({ id: 'work-item-1' }),
+      expect.objectContaining({ id: 1 }),
       expect.objectContaining({ status: 'dead', errorCode: 'label_aggregate_snapshot_failed' }),
     )
   })
@@ -168,7 +168,7 @@ describe('runWorkerLoopOnce', () => {
     expect(deps[depKey]).toHaveBeenCalledTimes(1)
     expect(completeWorkItem).toHaveBeenCalledWith(
       prisma,
-      expect.objectContaining({ workItemId: 'work-item-1', status: 'succeeded' }),
+      expect.objectContaining({ workItemId: 1, status: 'succeeded' }),
     )
   })
 
@@ -206,7 +206,7 @@ describe('runWorkerLoopOnce', () => {
 
     await runWorkerLoopOnce(prisma, deps)
 
-    expect(loggerError).toHaveBeenCalledWith(expect.stringContaining('work-item-1'), error)
+    expect(loggerError).toHaveBeenCalledWith(expect.stringContaining('work item 1 '), error)
   })
 
   it('長時間処理中は lease を期限前に更新する', async () => {
@@ -230,7 +230,7 @@ describe('runWorkerLoopOnce', () => {
     try {
       await new Promise((resolve) => setTimeout(resolve, 20))
       expect(renewWorkItemLease).toHaveBeenCalledWith(leasePrisma, {
-        workItemId: 'work-item-1',
+        workItemId: 1,
         leaseOwner: 'worker-1',
         leaseDurationMs: 100,
       })
@@ -257,7 +257,7 @@ describe('runWorkerLoopOnce', () => {
     await runWorkerLoopOnce(prisma, deps)
 
     expect(startAnalysisRun).toHaveBeenCalledWith(prisma, {
-      workItemId: 'work-item-1',
+      workItemId: 1,
       attemptNumber: 3,
     })
     expect(finishAnalysisRun).toHaveBeenCalledWith(
@@ -300,7 +300,7 @@ describe('runWorkerLoopOnce', () => {
 
     expect(deps.onWorkItemSettled).toHaveBeenCalledWith(
       prisma,
-      expect.objectContaining({ id: 'work-item-1' }),
+      expect.objectContaining({ id: 1 }),
       { status: 'succeeded', errorSummary: undefined },
     )
   })
@@ -330,7 +330,7 @@ describe('runWorkerLoopOnce', () => {
   })
 
   it('onWorkItemSettled が例外を投げたら post_completion_refresh を durable な WorkItem として積む', async () => {
-    claimNextWorkItem.mockResolvedValue(makeWorkItem({ id: 'work-item-1' }))
+    claimNextWorkItem.mockResolvedValue(makeWorkItem({ id: 1 }))
     const deps = makeDeps()
     deps.onWorkItemSettled.mockRejectedValue(new Error('hook failed'))
 
@@ -339,7 +339,7 @@ describe('runWorkerLoopOnce', () => {
     expect(enqueueWorkItem).toHaveBeenCalledWith(prisma, {
       kind: POST_COMPLETION_REFRESH_KIND,
       triggerType: WORK_ITEM_COMPLETION_TRIGGER_TYPE,
-      triggerId: 'work-item-1',
+      triggerId: '1',
     })
   })
 

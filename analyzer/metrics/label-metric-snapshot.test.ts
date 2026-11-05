@@ -14,7 +14,7 @@ import {
  * @param labelDefinitionId - 対象の labelDefinitionId
  * @returns value ごとの件数マップ
  */
-async function naiveValueCounts(labelDefinitionId: string): Promise<Map<boolean, number>> {
+async function naiveValueCounts(labelDefinitionId: number): Promise<Map<boolean, number>> {
   const prisma = getPrismaClient()
   const rows = await prisma.$queryRaw<{ value: boolean; count: bigint }[]>`
     SELECT "value", COUNT(*) AS count FROM "AccountClassificationLatest"
@@ -77,7 +77,7 @@ describe('buildLabelAggregateSnapshotSet aggregation shape', () => {
     }
 
     await buildLabelAggregateSnapshotSet(fakePrisma as never, {
-      triggerWorkItemId: 'work_item_single_scan',
+      triggerWorkItemId: 700_010,
       policyHash: 'hash',
       analyzerVersion: 'test',
       thresholds: { minCoverage: 0, maxStaleRatio: 1 },
@@ -112,7 +112,7 @@ describe('buildLabelAggregateSnapshotSet freshness threshold assertions', () => 
   it('staleAfterMs が7日を超えると例外を投げる', async () => {
     await expect(
       buildLabelAggregateSnapshotSet(fakePrisma as never, {
-        triggerWorkItemId: 'work_item_stale_too_large',
+        triggerWorkItemId: 700_009,
         policyHash: 'hash',
         analyzerVersion: 'test',
         thresholds: { minCoverage: 0, maxStaleRatio: 1 },
@@ -127,7 +127,7 @@ describe('buildLabelAggregateSnapshotSet freshness threshold assertions', () => 
   it('delayedAfterMs が分単位丸めの粒度未満だと例外を投げる', async () => {
     await expect(
       buildLabelAggregateSnapshotSet(fakePrisma as never, {
-        triggerWorkItemId: 'work_item_delayed_too_small',
+        triggerWorkItemId: 700_014,
         policyHash: 'hash',
         analyzerVersion: 'test',
         thresholds: { minCoverage: 0, maxStaleRatio: 1 },
@@ -147,7 +147,7 @@ describe('buildLabelAggregateSnapshotSet transaction options', () => {
     }
 
     await buildLabelAggregateSnapshotSet(fakePrisma as never, {
-      triggerWorkItemId: 'work_item_timeout',
+      triggerWorkItemId: 700_008,
       policyHash: 'hash',
       analyzerVersion: 'test',
       thresholds: { minCoverage: 0, maxStaleRatio: 1 },
@@ -188,7 +188,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     })
     const account = await prisma.account.create({
       data: {
-        id: 'acct_snapshot',
+        id: '100472416641',
         screenName: 'grace',
         displayName: 'Grace',
         followersCount: 0,
@@ -224,7 +224,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     })
 
     const result = await buildLabelAggregateSnapshotSet(prisma, {
-      triggerWorkItemId: 'work_item_1',
+      triggerWorkItemId: 700_006,
       policyHash: 'hash',
       analyzerVersion: 'test',
       thresholds: { minCoverage: 0, maxStaleRatio: 1 },
@@ -236,7 +236,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
 
     expect(result.reused).toBe(false)
     const snapshots = await prisma.labelMetricSnapshot.findMany({
-      where: { triggerWorkItemId: 'work_item_1' },
+      where: { triggerWorkItemId: 700_006 },
     })
     expect(snapshots).toHaveLength(2)
     expect(new Set(snapshots.map((s) => s.observedAt.getTime()))).toEqual(
@@ -250,7 +250,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
       data: { key: 'test_snapshot_reuse', description: 'テスト用ラベル' },
     })
     const buildInput = {
-      triggerWorkItemId: 'work_item_reuse',
+      triggerWorkItemId: 700_011,
       policyHash: 'hash',
       analyzerVersion: 'test',
       thresholds: { minCoverage: 0, maxStaleRatio: 1 },
@@ -274,9 +274,9 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     const delayedAt = new Date(now.getTime() - 6 * 60 * 60 * 1000)
     const staleAt = new Date(now.getTime() - 24 * 60 * 60 * 1000)
     for (const [id, observedAt] of [
-      ['acct_fresh_current', currentAt],
-      ['acct_fresh_delayed', delayedAt],
-      ['acct_fresh_stale', staleAt],
+      ['100830781453', currentAt],
+      ['100744236081', delayedAt],
+      ['100806510365', staleAt],
     ] as const) {
       await prisma.account.create({
         data: {
@@ -305,7 +305,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     }
 
     const result = await buildLabelAggregateSnapshotSet(prisma, {
-      triggerWorkItemId: 'work_item_freshness',
+      triggerWorkItemId: 700_004,
       policyHash: 'hash',
       analyzerVersion: 'test',
       thresholds: { minCoverage: 0, maxStaleRatio: 1 },
@@ -316,7 +316,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     })
 
     const snapshot = await prisma.labelMetricSnapshot.findFirstOrThrow({
-      where: { triggerWorkItemId: 'work_item_freshness', labelDefinitionId: label.id },
+      where: { triggerWorkItemId: 700_004, labelDefinitionId: label.id },
     })
     expect(result.reused).toBe(false)
     expect(snapshot.currentCount).toBe(1)
@@ -329,7 +329,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     const label = await prisma.labelDefinition.create({
       data: { key: 'test_population_equiv', description: 'テスト用ラベル' },
     })
-    for (const id of ['acct_pop_1', 'acct_pop_2', 'acct_pop_3']) {
+    for (const id of ['100005423728', '100044254154', '100430584668']) {
       await prisma.account.create({
         data: {
           id,
@@ -371,9 +371,9 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     // 行がない) が母集団を膨らませないことも同時に確認する。
     await prisma.account.create({
       data: {
-        id: 'acct_pop_unclassified',
-        screenName: 'acct_pop_unclassified',
-        displayName: 'acct_pop_unclassified',
+        id: '100628267520',
+        screenName: '100628267520',
+        displayName: '100628267520',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
@@ -383,10 +383,10 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     })
     await prisma.accountSummaryLatest.create({
       data: {
-        accountId: 'acct_pop_unclassified',
-        normalizedScreenName: 'acct_pop_unclassified',
-        normalizedDisplayName: 'acct_pop_unclassified',
-        searchDocument: 'acct_pop_unclassified',
+        accountId: '100628267520',
+        normalizedScreenName: '100628267520',
+        normalizedDisplayName: '100628267520',
+        searchDocument: '100628267520',
         profileObservedAt: new Date(),
         activeLabelKeys: [],
         activeLabelCount: 0,
@@ -395,7 +395,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     })
 
     const result = await buildLabelAggregateSnapshotSet(prisma, {
-      triggerWorkItemId: 'work_item_population_equiv',
+      triggerWorkItemId: 700_001,
       policyHash: 'hash',
       analyzerVersion: 'test',
       thresholds: { minCoverage: 0, maxStaleRatio: 1 },
@@ -407,7 +407,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
 
     expect(result.reused).toBe(false)
     const snapshot = await prisma.labelMetricSnapshot.findFirstOrThrow({
-      where: { triggerWorkItemId: 'work_item_population_equiv', labelDefinitionId: label.id },
+      where: { triggerWorkItemId: 700_001, labelDefinitionId: label.id },
     })
     expect(snapshot.populationCount).toBe(3)
   })
@@ -432,7 +432,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const label = await prisma.labelDefinition.create({
       data: { key: 'test_trigger_correctness', description: 'テスト用ラベル' },
     })
-    for (const id of ['acct_trig_1', 'acct_trig_2']) {
+    for (const id of ['100747513031', '100345553533']) {
       await prisma.account.create({
         data: {
           id,
@@ -449,7 +449,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
 
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_1',
+        accountId: '100747513031',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.9,
@@ -462,7 +462,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
       {
-        accountId: 'acct_trig_2',
+        accountId: '100345553533',
         labelDefinitionId: label.id,
         value: false,
         confidence: 0.2,
@@ -478,7 +478,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     // acct_trig_1 を false へ更新する (value のトリガー decrement/increment を経由させる)。
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_1',
+        accountId: '100747513031',
         labelDefinitionId: label.id,
         value: false,
         confidence: 0.3,
@@ -506,7 +506,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const label = await prisma.labelDefinition.create({
       data: { key: 'test_trigger_delete', description: 'テスト用ラベル' },
     })
-    for (const id of ['acct_trig_del_1', 'acct_trig_del_2']) {
+    for (const id of ['100311054294', '100712006508']) {
       await prisma.account.create({
         data: {
           id,
@@ -522,7 +522,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     }
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_del_1',
+        accountId: '100311054294',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.9,
@@ -535,7 +535,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
       {
-        accountId: 'acct_trig_del_2',
+        accountId: '100712006508',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.9,
@@ -551,7 +551,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
 
     await prisma.accountClassificationLatest.delete({
       where: {
-        accountId_labelDefinitionId: { accountId: 'acct_trig_del_1', labelDefinitionId: label.id },
+        accountId_labelDefinitionId: { accountId: '100311054294', labelDefinitionId: label.id },
       },
     })
 
@@ -588,9 +588,9 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await prisma.account.create({
       data: {
-        id: 'acct_trig_del_false_sibling',
-        screenName: 'acct_trig_del_false_sibling',
-        displayName: 'acct_trig_del_false_sibling',
+        id: '100254869385',
+        screenName: '100254869385',
+        displayName: '100254869385',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
@@ -600,9 +600,9 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await prisma.account.create({
       data: {
-        id: 'acct_trig_del_false',
-        screenName: 'acct_trig_del_false',
-        displayName: 'acct_trig_del_false',
+        id: '100474213917',
+        screenName: '100474213917',
+        displayName: '100474213917',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
@@ -612,7 +612,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_del_false_sibling',
+        accountId: '100254869385',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.9,
@@ -627,7 +627,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     ])
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_del_false',
+        accountId: '100474213917',
         labelDefinitionId: label.id,
         value: false,
         confidence: 0.1,
@@ -644,7 +644,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     await prisma.accountClassificationLatest.delete({
       where: {
         accountId_labelDefinitionId: {
-          accountId: 'acct_trig_del_false',
+          accountId: '100474213917',
           labelDefinitionId: label.id,
         },
       },
@@ -664,9 +664,9 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await prisma.account.create({
       data: {
-        id: 'acct_trig_noop',
-        screenName: 'acct_trig_noop',
-        displayName: 'acct_trig_noop',
+        id: '100473489351',
+        screenName: '100473489351',
+        displayName: '100473489351',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
@@ -676,7 +676,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_noop',
+        accountId: '100473489351',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.9,
@@ -693,7 +693,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     // ruleVersion/reason は変えない。
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_noop',
+        accountId: '100473489351',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.9,
@@ -720,7 +720,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
 
     const row = await prisma.accountClassificationLatest.findUniqueOrThrow({
       where: {
-        accountId_labelDefinitionId: { accountId: 'acct_trig_noop', labelDefinitionId: label.id },
+        accountId_labelDefinitionId: { accountId: '100473489351', labelDefinitionId: label.id },
       },
     })
     expect(row.observedAt.toISOString()).toBe('2026-08-13T00:00:40.000Z')
@@ -737,9 +737,9 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await prisma.account.create({
       data: {
-        id: 'acct_trig_reason_change',
-        screenName: 'acct_trig_reason_change',
-        displayName: 'acct_trig_reason_change',
+        id: '100177614239',
+        screenName: '100177614239',
+        displayName: '100177614239',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
@@ -749,7 +749,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_reason_change',
+        accountId: '100177614239',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.9,
@@ -764,7 +764,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     ])
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_reason_change',
+        accountId: '100177614239',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.9,
@@ -795,9 +795,9 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await prisma.account.create({
       data: {
-        id: 'acct_trig_reason_transition',
-        screenName: 'acct_trig_reason_transition',
-        displayName: 'acct_trig_reason_transition',
+        id: '100029205112',
+        screenName: '100029205112',
+        displayName: '100029205112',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
@@ -807,7 +807,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_reason_transition',
+        accountId: '100029205112',
         labelDefinitionId: label.id,
         value: false,
         confidence: 0.1,
@@ -829,7 +829,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
 
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_reason_transition',
+        accountId: '100029205112',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.8,
@@ -849,7 +849,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
 
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_trig_reason_transition',
+        accountId: '100029205112',
         labelDefinitionId: label.id,
         value: false,
         confidence: 0.1,
@@ -880,9 +880,9 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await prisma.account.create({
       data: {
-        id: 'acct_concurrent',
-        screenName: 'acct_concurrent',
-        displayName: 'acct_concurrent',
+        id: '100857991197',
+        screenName: '100857991197',
+        displayName: '100857991197',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
@@ -892,7 +892,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_concurrent',
+        accountId: '100857991197',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.5,
@@ -913,7 +913,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
       await tx.$executeRaw`
         UPDATE "AccountClassificationLatest" SET "value" = false, "confidence" = 0.1,
           "observedAt" = ${new Date('2026-08-13T00:01:00Z')}
-        WHERE "accountId" = 'acct_concurrent' AND "labelDefinitionId" = ${label.id}
+        WHERE "accountId" = '100857991197' AND "labelDefinitionId" = ${label.id}
       `
       await new Promise((resolve) => setTimeout(resolve, 200))
     })
@@ -922,7 +922,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
       await tx.$executeRaw`
         UPDATE "AccountClassificationLatest" SET "value" = true, "confidence" = 0.2,
           "observedAt" = ${new Date('2026-08-13T00:02:00Z')}
-        WHERE "accountId" = 'acct_concurrent' AND "labelDefinitionId" = ${label.id}
+        WHERE "accountId" = '100857991197' AND "labelDefinitionId" = ${label.id}
       `
     })
     await Promise.all([txA, txB])
@@ -942,9 +942,9 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await prisma.account.create({
       data: {
-        id: 'acct_concurrent_insert',
-        screenName: 'acct_concurrent_insert',
-        displayName: 'acct_concurrent_insert',
+        id: '100481023488',
+        screenName: '100481023488',
+        displayName: '100481023488',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
@@ -959,7 +959,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
           tx.$executeRaw`
           INSERT INTO "AccountClassificationLatest"
             ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "observedAt")
-          VALUES ('acct_concurrent_insert', ${label.id}, ${value}, 0.5, 'r', 'rule', 'v1', ${observedAt})
+          VALUES ('100481023488', ${label.id}, ${value}, 0.5, 'r', 'rule', 'v1', ${observedAt})
           ON CONFLICT ("accountId", "labelDefinitionId") DO UPDATE SET
             "value" = EXCLUDED."value", "confidence" = EXCLUDED."confidence", "observedAt" = EXCLUDED."observedAt"
           WHERE "AccountClassificationLatest"."observedAt" <= EXCLUDED."observedAt"
@@ -977,7 +977,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const finalRow = await prisma.accountClassificationLatest.findUniqueOrThrow({
       where: {
         accountId_labelDefinitionId: {
-          accountId: 'acct_concurrent_insert',
+          accountId: '100481023488',
           labelDefinitionId: label.id,
         },
       },
@@ -1033,7 +1033,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const label = await prisma.labelDefinition.create({
       data: { key: 'test_freshness_boundary', description: 'テスト用ラベル' },
     })
-    for (const id of ['acct_boundary_fresh', 'acct_boundary_stale']) {
+    for (const id of ['100291425283', '100322983634']) {
       await prisma.account.create({
         data: {
           id,
@@ -1052,7 +1052,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
 
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_boundary_fresh',
+        accountId: '100291425283',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.5,
@@ -1065,7 +1065,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         labeledAt: justUnder7Days,
       },
       {
-        accountId: 'acct_boundary_stale',
+        accountId: '100322983634',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.5,
@@ -1097,9 +1097,9 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await prisma.account.create({
       data: {
-        id: 'acct_compaction_stale',
-        screenName: 'acct_compaction_stale',
-        displayName: 'acct_compaction_stale',
+        id: '100375434720',
+        screenName: '100375434720',
+        displayName: '100375434720',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
@@ -1110,7 +1110,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const freshAt = new Date(Date.now() - 60 * 60 * 1000)
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_compaction_stale',
+        accountId: '100375434720',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.5,
@@ -1148,7 +1148,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const label = await prisma.labelDefinition.create({
       data: { key: 'test_compaction_concurrent', description: 'テスト用ラベル' },
     })
-    for (const id of ['acct_compaction_a', 'acct_compaction_b']) {
+    for (const id of ['100063420042', '100528823600']) {
       await prisma.account.create({
         data: {
           id,
@@ -1165,7 +1165,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const staleAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_compaction_a',
+        accountId: '100063420042',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.5,
@@ -1188,7 +1188,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     // (トリガー側も sentinel を触るケース) を同時に発火させる。
     const trigger = upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_compaction_b',
+        accountId: '100528823600',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.5,
@@ -1219,9 +1219,9 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     })
     await prisma.account.create({
       data: {
-        id: 'acct_uncompacted',
-        screenName: 'acct_uncompacted',
-        displayName: 'acct_uncompacted',
+        id: '100212819355',
+        screenName: '100212819355',
+        displayName: '100212819355',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
@@ -1232,7 +1232,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const freshAt = new Date(Date.now() - 60 * 60 * 1000)
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_uncompacted',
+        accountId: '100212819355',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.5,
@@ -1259,7 +1259,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
       await tx.$executeRaw`ALTER TABLE "AccountClassificationLatest" DISABLE TRIGGER account_classification_latest_aggregate_trigger`
       await tx.$executeRaw`
         UPDATE "AccountClassificationLatest" SET "observedAt" = ${agedLiteralBucket}
-        WHERE "accountId" = 'acct_uncompacted' AND "labelDefinitionId" = ${label.id}
+        WHERE "accountId" = '100212819355' AND "labelDefinitionId" = ${label.id}
       `
       await tx.$executeRaw`
         UPDATE "AccountClassificationFreshnessBucket" SET "observedAtBucket" = ${agedLiteralBucket}
@@ -1275,7 +1275,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     // sentinel が誤って減算されないことで確認する。
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_uncompacted',
+        accountId: '100212819355',
         labelDefinitionId: label.id,
         value: false,
         confidence: 0.9,
@@ -1325,7 +1325,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const label = await prisma.labelDefinition.create({
       data: { key: 'test_bucket_split_consistency', description: 'テスト用ラベル' },
     })
-    for (const id of ['acct_split_a', 'acct_split_b']) {
+    for (const id of ['100392437146', '100463781408']) {
       await prisma.account.create({
         data: {
           id,
@@ -1342,7 +1342,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const freshAt = new Date(Date.now() - 60 * 60 * 1000)
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_split_a',
+        accountId: '100392437146',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.5,
@@ -1368,7 +1368,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     // bootstrap 相当の初回 insert する。
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_split_b',
+        accountId: '100463781408',
         labelDefinitionId: label.id,
         value: true,
         confidence: 0.6,
@@ -1405,7 +1405,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     // B の分類を更新し、その decrement も同じバケット行から行われることを確認する。
     await upsertAccountClassificationLatest(prisma, [
       {
-        accountId: 'acct_split_b',
+        accountId: '100463781408',
         labelDefinitionId: label.id,
         value: false,
         confidence: 0.1,
@@ -1446,7 +1446,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const labelY = await prisma.labelDefinition.create({
       data: { key: 'test_deadlock_y', description: 'テスト用ラベルY' },
     })
-    for (const id of ['acct_deadlock_1', 'acct_deadlock_2']) {
+    for (const id of ['100001562341', '100466965855']) {
       await prisma.account.create({
         data: {
           id,
@@ -1461,7 +1461,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
       })
     }
     const now = new Date()
-    const baseRow = (accountId: string, labelDefinitionId: string, value: boolean) => ({
+    const baseRow = (accountId: string, labelDefinitionId: number, value: boolean) => ({
       accountId,
       labelDefinitionId,
       value,
@@ -1475,10 +1475,10 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
       labeledAt: now,
     })
     await upsertAccountClassificationLatest(prisma, [
-      baseRow('acct_deadlock_1', labelX.id, true),
-      baseRow('acct_deadlock_1', labelY.id, true),
-      baseRow('acct_deadlock_2', labelX.id, true),
-      baseRow('acct_deadlock_2', labelY.id, true),
+      baseRow('100001562341', labelX.id, true),
+      baseRow('100001562341', labelY.id, true),
+      baseRow('100466965855', labelX.id, true),
+      baseRow('100466965855', labelY.id, true),
     ])
 
     // labelDefinitionId をまたぐロック順序の一貫性は、トリガー自体ではなく
@@ -1490,17 +1490,15 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     const later = new Date(now.getTime() + 60 * 1000)
     const updateForward = upsertAccountClassificationLatest(
       prisma,
-      [
-        baseRow('acct_deadlock_1', labelY.id, false),
-        baseRow('acct_deadlock_1', labelX.id, false),
-      ].map((row) => ({ ...row, observedAt: later })),
+      [baseRow('100001562341', labelY.id, false), baseRow('100001562341', labelX.id, false)].map(
+        (row) => ({ ...row, observedAt: later }),
+      ),
     )
     const updateBackward = upsertAccountClassificationLatest(
       prisma,
-      [
-        baseRow('acct_deadlock_2', labelX.id, false),
-        baseRow('acct_deadlock_2', labelY.id, false),
-      ].map((row) => ({ ...row, observedAt: later })),
+      [baseRow('100466965855', labelX.id, false), baseRow('100466965855', labelY.id, false)].map(
+        (row) => ({ ...row, observedAt: later }),
+      ),
     )
 
     await expect(Promise.all([updateForward, updateBackward])).resolves.toBeDefined()
@@ -1542,9 +1540,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
       })
       const now = new Date()
       for (const [id, value, confidence, ruleVersion, ageMs] of [
-        ['acct_compat_1', true, 0.91, 'v1', 60 * 60 * 1000],
-        ['acct_compat_2', true, 0.42, 'v2', 6 * 60 * 60 * 1000],
-        ['acct_compat_3', false, 0.15, 'v1', 24 * 60 * 60 * 1000],
+        ['100691084169', true, 0.91, 'v1', 60 * 60 * 1000],
+        ['100493985331', true, 0.42, 'v2', 6 * 60 * 60 * 1000],
+        ['100605140901', false, 0.15, 'v1', 24 * 60 * 60 * 1000],
       ] as const) {
         await prisma.account.create({
           data: {
@@ -1589,14 +1587,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
         staleAfterMs: 12 * 60 * 60 * 1000,
       }
       const result = await buildLabelAggregateSnapshotSet(prisma, {
-        triggerWorkItemId: 'work_item_output_compat',
+        triggerWorkItemId: 700_002,
         policyHash: 'hash',
         analyzerVersion: 'test',
         thresholds: { minCoverage: 0, maxStaleRatio: 1 },
         freshnessThresholdsMs,
       })
       const snapshot = await prisma.labelMetricSnapshot.findFirstOrThrow({
-        where: { triggerWorkItemId: 'work_item_output_compat', labelDefinitionId: label.id },
+        where: { triggerWorkItemId: 700_002, labelDefinitionId: label.id },
       })
 
       // 旧実装と同じ SQL 形状 (AccountClassificationLatest を直接 GROUP BY) で

@@ -39,10 +39,10 @@ export async function syncFollowing(
         const newIds = safeIds.map(() => randomUUID())
         const addedEdges = await tx.$queryRaw<FollowEdge[]>`
           INSERT INTO "Follow" ("id", "followerId", "followeeId", "firstSeenAt", "lastSeenAt")
-          SELECT input."id", ${followerId}, input."followeeId", ${now}, ${now}
-          FROM UNNEST(${newIds}::text[], ${safeIds}::text[]) AS input("id", "followeeId")
+          SELECT input."id", ${followerId}::bigint, input."followeeId", ${now}, ${now}
+          FROM UNNEST(${newIds}::text[], ${safeIds}::bigint[]) AS input("id", "followeeId")
           ON CONFLICT ("followerId", "followeeId") DO NOTHING
-          RETURNING "followerId", "followeeId"
+          RETURNING "followerId"::text AS "followerId", "followeeId"::text AS "followeeId"
         `
         if (addedEdges.length > 0) {
           await tx.followStateChange.createMany({
@@ -60,8 +60,8 @@ export async function syncFollowing(
       if (result.reachedEnd && safeIds.length > 0 && isCompleteObservation) {
         const removedEdges = await tx.$queryRaw<FollowEdge[]>`
           DELETE FROM "Follow"
-          WHERE "followerId" = ${followerId} AND "followeeId" <> ALL(${safeIds}::text[])
-          RETURNING "followerId", "followeeId"
+          WHERE "followerId" = ${followerId}::bigint AND "followeeId" <> ALL(${safeIds}::bigint[])
+          RETURNING "followerId"::text AS "followerId", "followeeId"::text AS "followeeId"
         `
         if (removedEdges.length > 0) {
           await tx.followStateChange.createMany({
@@ -102,10 +102,10 @@ export async function syncFollowers(
         const newIds = safeIds.map(() => randomUUID())
         const addedEdges = await tx.$queryRaw<FollowEdge[]>`
           INSERT INTO "Follow" ("id", "followerId", "followeeId", "firstSeenAt", "lastSeenAt")
-          SELECT input."id", input."followerId", ${followeeId}, ${now}, ${now}
-          FROM UNNEST(${newIds}::text[], ${safeIds}::text[]) AS input("id", "followerId")
+          SELECT input."id", input."followerId", ${followeeId}::bigint, ${now}, ${now}
+          FROM UNNEST(${newIds}::text[], ${safeIds}::bigint[]) AS input("id", "followerId")
           ON CONFLICT ("followerId", "followeeId") DO NOTHING
-          RETURNING "followerId", "followeeId"
+          RETURNING "followerId"::text AS "followerId", "followeeId"::text AS "followeeId"
         `
         if (addedEdges.length > 0) {
           await tx.followStateChange.createMany({
@@ -122,8 +122,8 @@ export async function syncFollowers(
       if (result.reachedEnd && safeIds.length > 0 && isCompleteObservation) {
         const removedEdges = await tx.$queryRaw<FollowEdge[]>`
           DELETE FROM "Follow"
-          WHERE "followeeId" = ${followeeId} AND "followerId" <> ALL(${safeIds}::text[])
-          RETURNING "followerId", "followeeId"
+          WHERE "followeeId" = ${followeeId}::bigint AND "followerId" <> ALL(${safeIds}::bigint[])
+          RETURNING "followerId"::text AS "followerId", "followeeId"::text AS "followeeId"
         `
         if (removedEdges.length > 0) {
           await tx.followStateChange.createMany({

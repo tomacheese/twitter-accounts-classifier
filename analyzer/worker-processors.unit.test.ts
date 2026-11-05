@@ -24,7 +24,7 @@ function makeLabelAggregatePrisma(
 
 function mockLabelAggregateDependencies() {
   vi.spyOn(labelMetricSnapshotModule, 'buildLabelAggregateSnapshotSet').mockResolvedValue({
-    triggerWorkItemId: 'work-1',
+    triggerWorkItemId: 1,
     snapshotAt: new Date('2026-08-15T00:00:00Z'),
     reused: false,
   })
@@ -66,7 +66,7 @@ describe('processAccountSummaryRefresh transaction budget', () => {
     } as unknown as PrismaClient
 
     await processAccountSummaryRefresh(prisma, {
-      id: 'work-1',
+      id: 1,
       triggerId: 'observation-1',
     } as never)
 
@@ -86,7 +86,7 @@ describe('processLabelAggregateRefresh evidence eligibility', () => {
     const runFindings = mockLabelAggregateDependencies()
 
     await processLabelAggregateRefresh(makeLabelAggregatePrisma('partial', 1), {
-      id: 'work-1',
+      id: 1,
       triggerType: 'crawl_run',
       triggerId: 'crawl-1',
     } as never)
@@ -98,7 +98,7 @@ describe('processLabelAggregateRefresh evidence eligibility', () => {
     const runFindings = mockLabelAggregateDependencies()
 
     await processLabelAggregateRefresh(makeLabelAggregatePrisma('partial', 0), {
-      id: 'work-1',
+      id: 1,
       triggerType: 'crawl_run',
       triggerId: 'crawl-1',
     } as never)
@@ -110,7 +110,7 @@ describe('processLabelAggregateRefresh evidence eligibility', () => {
     const runFindings = mockLabelAggregateDependencies()
 
     await processLabelAggregateRefresh(makeLabelAggregatePrisma('failed', 1), {
-      id: 'work-1',
+      id: 1,
       triggerType: 'crawl_run',
       triggerId: 'crawl-1',
     } as never)
@@ -122,7 +122,7 @@ describe('processLabelAggregateRefresh evidence eligibility', () => {
     const runFindings = mockLabelAggregateDependencies()
 
     await processLabelAggregateRefresh(makeLabelAggregatePrisma('success', 1), {
-      id: 'work-1',
+      id: 1,
       triggerType: 'crawl_run',
       triggerId: 'crawl-1',
     } as never)

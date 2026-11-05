@@ -18,7 +18,7 @@ describe('LabelsPage', () => {
       readiness: 'ready',
       items: [
         {
-          labelDefinitionId: 'label-1',
+          labelDefinitionId: 1,
           labelKey: 'spam',
           labelDescription: 'Likely spam account',
           evaluatedCount: 80,
@@ -50,7 +50,7 @@ describe('LabelsPage', () => {
       readiness: 'ready',
       items: [
         {
-          labelDefinitionId: 'label-1',
+          labelDefinitionId: 1,
           labelKey: 'spam',
           labelDescription: 'Likely spam account',
           evaluatedCount: 0,

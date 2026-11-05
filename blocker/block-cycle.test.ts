@@ -80,8 +80,8 @@ describe('runBlockAccountCycle', () => {
 
   it('blocks each candidate sequentially and records success/failure independently', async () => {
     const candidates = [
-      { accountId: 'spam-1', labelDefinitionId: 'label-spam', confidence: 0.95 },
-      { accountId: 'spam-2', labelDefinitionId: 'label-spam', confidence: 0.9 },
+      { accountId: 'spam-1', labelDefinitionId: 3, confidence: 0.95 },
+      { accountId: 'spam-2', labelDefinitionId: 3, confidence: 0.9 },
     ]
     const client = {
       client: {
@@ -125,8 +125,8 @@ describe('runBlockAccountCycle', () => {
 
   it('waits actionDelayMs between block attempts', async () => {
     const candidates = [
-      { accountId: 'spam-1', labelDefinitionId: 'label-spam', confidence: 0.95 },
-      { accountId: 'spam-2', labelDefinitionId: 'label-spam', confidence: 0.9 },
+      { accountId: 'spam-1', labelDefinitionId: 3, confidence: 0.95 },
+      { accountId: 'spam-2', labelDefinitionId: 3, confidence: 0.9 },
     ]
     const deps = fakeDeps({
       selectBlockCandidates: vi.fn().mockResolvedValue(candidates),
@@ -145,8 +145,8 @@ describe('runBlockAccountCycle', () => {
 
   it('1件目の remote_skipped 永続化が失敗しても2件目以降の候補処理と finishBlockAccountRun を継続する', async () => {
     const candidates = [
-      { accountId: 'spam-1', labelDefinitionId: 'label-spam', confidence: 0.95 },
-      { accountId: 'spam-2', labelDefinitionId: 'label-spam', confidence: 0.9 },
+      { accountId: 'spam-1', labelDefinitionId: 3, confidence: 0.95 },
+      { accountId: 'spam-2', labelDefinitionId: 3, confidence: 0.9 },
     ]
     const client = {
       client: {
@@ -218,7 +218,7 @@ describe('attemptBlock', () => {
       'blocker-1',
       {
         accountId: 'blocked-1',
-        labelDefinitionId: 'label-1',
+        labelDefinitionId: 1,
         confidence: 0.9,
       },
       'alice',
@@ -243,7 +243,7 @@ describe('attemptBlock', () => {
       'blocker-1',
       {
         accountId: 'blocked-1',
-        labelDefinitionId: 'label-1',
+        labelDefinitionId: 1,
         confidence: 0.9,
       },
       'alice',
@@ -264,7 +264,7 @@ describe('attemptBlock', () => {
       'blocker-1',
       {
         accountId: 'blocked-1',
-        labelDefinitionId: 'label-1',
+        labelDefinitionId: 1,
         confidence: 0.9,
       },
       'alice',
@@ -289,7 +289,7 @@ describe('attemptBlock', () => {
       'blocker-1',
       {
         accountId: 'blocked-1',
-        labelDefinitionId: 'label-1',
+        labelDefinitionId: 1,
         confidence: 0.9,
       },
       'alice',
@@ -320,7 +320,7 @@ describe('attemptBlock', () => {
       'blocker-1',
       {
         accountId: 'blocked-1',
-        labelDefinitionId: 'label-1',
+        labelDefinitionId: 1,
         confidence: 0.9,
       },
       'alice',
@@ -346,7 +346,7 @@ describe('attemptBlock', () => {
       'blocker-1',
       {
         accountId: 'blocked-1',
-        labelDefinitionId: 'label-1',
+        labelDefinitionId: 1,
         confidence: 0.9,
       },
       'alice',
@@ -371,7 +371,7 @@ describe('attemptBlock', () => {
       'blocker-1',
       {
         accountId: 'blocked-1',
-        labelDefinitionId: 'label-1',
+        labelDefinitionId: 1,
         confidence: 0.9,
       },
       'alice',
@@ -402,7 +402,7 @@ describe('attemptBlock', () => {
       'blocker-1',
       {
         accountId: 'blocked-1',
-        labelDefinitionId: 'label-1',
+        labelDefinitionId: 1,
         confidence: 0.9,
       },
       'alice',
@@ -429,7 +429,7 @@ describe('attemptBlock', () => {
       'blocker-1',
       {
         accountId: 'blocked-1',
-        labelDefinitionId: 'label-1',
+        labelDefinitionId: 1,
         confidence: 0.9,
       },
       'alice',

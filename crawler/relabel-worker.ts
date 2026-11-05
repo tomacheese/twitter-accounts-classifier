@@ -80,7 +80,7 @@ export async function peekAccountRelabelCandidates(
 }
 
 export interface ClaimAccountRelabelBatchByIdsOptions {
-  ids: string[]
+  ids: number[]
   leaseOwner: string
 }
 
@@ -103,7 +103,7 @@ export async function claimAccountRelabelBatchByIds(
 
 export interface EvaluateAccountRelabelItemsOptions {
   registry: LabelRuleRegistry
-  labelDefinitionIds: Map<string, string>
+  labelDefinitionIds: Map<string, number>
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
@@ -210,7 +210,7 @@ async function evaluateAccountRelabelItemGroup(
 
   const labelsByAccountId = new Map<string, AccountLabelBulkInput[]>()
   const replyHijackEvidenceByAccountId = new Map<string, ReplyHijackEvidenceInput>()
-  const failedItemIds = new Set<string>()
+  const failedItemIds = new Set<number>()
   for (const item of group) {
     // account が既に削除されている場合、これ以上評価しようがないため succeeded 扱いで終端する。
     const account = accountById.get(item.triggerId)
@@ -233,7 +233,7 @@ async function evaluateAccountRelabelItemGroup(
       const appliedRules = options.registry.applyAll(bundle)
       for (const { rule, result } of appliedRules) {
         const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
-        if (!labelDefinitionId) continue
+        if (labelDefinitionId === undefined) continue
         labels.push({
           accountId: account.id,
           labelDefinitionId,
@@ -391,7 +391,7 @@ interface StaleAccountRow {
 
 export interface ScanForStaleAccountsOptions {
   registry: LabelRuleRegistry
-  labelDefinitionIds: Map<string, string>
+  labelDefinitionIds: Map<string, number>
   batchSize: number
 }
 
@@ -443,9 +443,9 @@ export async function scanForStaleAccounts(
   const accountIds = targets.map((account) => account.id)
   const targetLabelDefinitionIds = rules
     .map((rule) => options.labelDefinitionIds.get(rule.key))
-    .filter((id): id is string => id !== undefined)
+    .filter((id): id is number => id !== undefined)
   const lookupChunkSize = getRelabelerLabelLookupChunkSize()
-  const latestRows: { accountId: string; labelDefinitionId: string; ruleVersion: string }[] = []
+  const latestRows: { accountId: string; labelDefinitionId: number; ruleVersion: string }[] = []
   // stale 判定対象のルールが 1 つも無ければ、どの account も stale になり得ないため lookup 自体を省略する。
   if (rules.length > 0) {
     for (let i = 0; i < accountIds.length; i += lookupChunkSize) {
@@ -465,7 +465,7 @@ export async function scanForStaleAccounts(
   for (const account of targets) {
     const isStale = rules.some((rule) => {
       const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
-      if (!labelDefinitionId) return false
+      if (labelDefinitionId === undefined) return false
       return latestByKey.get(`${account.id}:${labelDefinitionId}`) !== rule.version
     })
     if (isStale) staleAccountIds.push(account.id)

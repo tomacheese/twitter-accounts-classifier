@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { Prisma, PrismaClient } from '../generated/prisma'
+import { createSyntheticId } from 'id-boundary'
+import { Prisma, type PrismaClient } from '../generated/prisma'
+import { getPrismaClient } from './client'
 import { selectRecentTweetsBackfillCandidates } from './recent-tweets-backfill-repository'
 
-const prisma = new PrismaClient()
+const prisma = getPrismaClient()
 
 describe('recent tweets backfill 部分index migration', () => {
   it('AccountLabelLatest_backfill_label_evaluable_idx を期待する列順・述語で定義する', () => {
@@ -45,7 +47,7 @@ describe('selectRecentTweetsBackfillCandidates query shape', () => {
   it('Account を起点に LATERAL fence 付き EXISTS 相当で対象ラベルの有無を probe する', async () => {
     const queryRaw = vi
       .fn()
-      .mockResolvedValueOnce([{ id: 'ld-bot' }, { id: 'ld-rf' }, { id: 'ld-rh' }, { id: 'ld-ai' }])
+      .mockResolvedValueOnce([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }])
       .mockResolvedValueOnce([])
     const mockPrisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
@@ -91,20 +93,20 @@ interface SyntheticAccountOptions {
 async function createSyntheticTables(tx: Prisma.TransactionClient): Promise<void> {
   await tx.$executeRaw`
     CREATE TEMPORARY TABLE "Account" (
-      "id" text PRIMARY KEY,
+      "id" bigint PRIMARY KEY,
       "lastRecentTweetsAttemptedAt" timestamptz
     ) ON COMMIT DROP
   `
   await tx.$executeRaw`
     CREATE TEMPORARY TABLE "LabelDefinition" (
-      "id" text PRIMARY KEY,
+      "id" smallint PRIMARY KEY,
       "key" text NOT NULL UNIQUE
     ) ON COMMIT DROP
   `
   await tx.$executeRaw`
     CREATE TEMPORARY TABLE "AccountLabelLatest" (
-      "accountId" text NOT NULL,
-      "labelDefinitionId" text NOT NULL,
+      "accountId" bigint NOT NULL,
+      "labelDefinitionId" smallint NOT NULL,
       "evaluable" boolean NOT NULL,
       PRIMARY KEY ("accountId", "labelDefinitionId")
     ) ON COMMIT DROP
@@ -119,19 +121,19 @@ async function seedSyntheticAccount(
   const attemptedAt = options.attempted ? new Date('2026-08-24T00:00:00Z') : null
   await tx.$executeRaw`
     INSERT INTO "Account" ("id", "lastRecentTweetsAttemptedAt")
-    VALUES (${id}, ${attemptedAt})
+    VALUES (${id}::bigint, ${attemptedAt})
   `
 }
 
 async function seedSyntheticLatestLabel(
   tx: Prisma.TransactionClient,
   accountId: string,
-  labelDefinitionId: string,
+  labelDefinitionId: number,
   evaluable: boolean,
 ): Promise<void> {
   await tx.$executeRaw`
     INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "evaluable")
-    VALUES (${accountId}, ${labelDefinitionId}, ${evaluable})
+    VALUES (${accountId}::bigint, ${labelDefinitionId}::smallint, ${evaluable})
   `
 }
 
@@ -146,24 +148,25 @@ describe.skipIf(!process.env.DATABASE_URL)('selectRecentTweetsBackfillCandidates
       await prisma.$transaction(async (tx) => {
         await createSyntheticTables(tx)
         const runId = randomUUID()
+        const baseId = BigInt(createSyntheticId())
         const ids = {
-          accountA: `synthetic_recent_backfill_${runId}_a`,
-          accountB: `synthetic_recent_backfill_${runId}_b`,
-          accountC: `synthetic_recent_backfill_${runId}_c`,
-          attempted: `synthetic_recent_backfill_${runId}_d_attempted`,
-          evaluable: `synthetic_recent_backfill_${runId}_e_evaluable`,
-          wrongLabel: `synthetic_recent_backfill_${runId}_f_wrong_label`,
-          noLabel: `synthetic_recent_backfill_${runId}_g_no_label`,
+          accountA: String(baseId + 1n),
+          accountB: String(baseId + 2n),
+          accountC: String(baseId + 3n),
+          attempted: String(baseId + 4n),
+          evaluable: String(baseId + 5n),
+          wrongLabel: String(baseId + 6n),
+          noLabel: String(baseId + 7n),
         }
         for (const [key, id] of Object.entries(ids)) {
           await seedSyntheticAccount(tx, id, { attempted: key === 'attempted' })
         }
 
-        const botDefinitionId = `synthetic_definition_${runId}_bot`
-        const replyFarmingDefinitionId = `synthetic_definition_${runId}_reply_farming`
-        const replyHijackDefinitionId = `synthetic_definition_${runId}_reply_hijack`
-        const aiMediaDefinitionId = `synthetic_definition_${runId}_ai_media`
-        const wrongDefinitionId = `synthetic_definition_${runId}_wrong`
+        const botDefinitionId = 1
+        const replyFarmingDefinitionId = 2
+        const replyHijackDefinitionId = 3
+        const aiMediaDefinitionId = 4
+        const wrongDefinitionId = 5
         await tx.$executeRaw`
           INSERT INTO "LabelDefinition" ("id", "key")
           VALUES

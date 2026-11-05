@@ -101,7 +101,7 @@ describe('resolveDisplayState', () => {
       resolveDisplayState({
         isLoading: false,
         error: null,
-        result: { ...emptyResult, labels: [{ id: 'label-1', key: 'spam' }] },
+        result: { ...emptyResult, labels: [{ id: 1, key: 'spam' }] },
       }),
     ).toBe('results')
   })

@@ -132,14 +132,14 @@ describe('getAccountClassification', () => {
     const { prisma } = createMockPrisma({
       classifications: [
         {
-          labelDefinitionId: 'label-1',
+          labelDefinitionId: 1,
           value: true,
           confidence: 0.9,
           reason: 'matched',
           observedAt: new Date('2026-01-01T00:00:00Z'),
         },
       ],
-      labelDefinitions: [{ id: 'label-1', key: 'spam' }],
+      labelDefinitions: [{ id: 1, key: 'spam' }],
     })
 
     const result = await getAccountClassification(prisma, 'account-1')
@@ -153,15 +153,15 @@ describe('getAccountClassification', () => {
     const { prisma } = createMockPrisma({
       classifications: [
         {
-          labelDefinitionId: 'label-1',
+          labelDefinitionId: 1,
           value: true,
           confidence: 0.9,
           reason: 'matched',
           observedAt,
         },
       ],
-      labelDefinitions: [{ id: 'label-1', key: 'spam' }],
-      classificationLastChanges: [{ labelDefinitionId: 'label-1', _max: { changedAt } }],
+      labelDefinitions: [{ id: 1, key: 'spam' }],
+      classificationLastChanges: [{ labelDefinitionId: 1, _max: { changedAt } }],
     })
 
     const result = await getAccountClassification(prisma, 'account-1')
@@ -175,14 +175,14 @@ describe('getAccountClassification', () => {
     const { prisma } = createMockPrisma({
       classifications: [
         {
-          labelDefinitionId: 'label-1',
+          labelDefinitionId: 1,
           value: false,
           confidence: 0.5,
           reason: 'stable',
           observedAt: now,
         },
       ],
-      labelDefinitions: [{ id: 'label-1', key: 'spam' }],
+      labelDefinitions: [{ id: 1, key: 'spam' }],
       classificationLastChanges: [],
     })
 
@@ -385,14 +385,14 @@ describe('getAccountHistory', () => {
       changes: [
         {
           id: 'change-1',
-          labelDefinitionId: 'label-1',
+          labelDefinitionId: 1,
           changeType: 'updated',
           previousValue: false,
           newValue: true,
           changedAt,
         },
       ],
-      labelDefinitions: [{ id: 'label-1', key: 'spam' }],
+      labelDefinitions: [{ id: 1, key: 'spam' }],
     })
 
     expect(await getAccountHistory(prisma, 'account-1')).toEqual([

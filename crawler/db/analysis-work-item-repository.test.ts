@@ -556,8 +556,8 @@ describe('peekWorkItemCandidates (mock)', () => {
 
   it('$queryRaw が返した id・triggerId をそのまま返す (lease は更新しない)', async () => {
     const queryRaw = vi.fn().mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' },
-      { id: 'wi-2', triggerId: 'bob' },
+      { id: 1, triggerId: 'alice' },
+      { id: 2, triggerId: 'bob' },
     ])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
@@ -567,8 +567,8 @@ describe('peekWorkItemCandidates (mock)', () => {
     })
 
     expect(result).toEqual([
-      { id: 'wi-1', triggerId: 'alice' },
-      { id: 'wi-2', triggerId: 'bob' },
+      { id: 1, triggerId: 'alice' },
+      { id: 2, triggerId: 'bob' },
     ])
     expect(queryRaw).toHaveBeenCalledTimes(1)
     const sql = (queryRaw.mock.calls[0][0] as unknown[]).join('')
@@ -593,12 +593,12 @@ describe('claimWorkItemBatchByIds (mock)', () => {
   })
 
   it('id = ANY(...) を条件に FOR UPDATE SKIP LOCKED で claim する', async () => {
-    const claimedRow = { id: 'wi-1', triggerId: 'alice', status: 'leased' }
+    const claimedRow = { id: 1, triggerId: 'alice', status: 'leased' }
     const queryRaw = vi.fn().mockResolvedValue([claimedRow])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
     const result = await claimWorkItemBatchByIds(prisma, {
-      ids: ['wi-1', 'wi-2'],
+      ids: [1, 2],
       leaseOwner: 'worker-1',
       leaseDurationMs: 60_000,
     })
@@ -627,20 +627,20 @@ describe('completeAccountRelabelWorkItemsBulk (mock)', () => {
 
   it('id = ANY(...) と leaseOwner 一致を条件に 1 回の UPDATE でまとめて完了させる', async () => {
     const queryRaw = vi.fn().mockResolvedValue([
-      { id: 'wi-1', status: 'succeeded' },
-      { id: 'wi-2', status: 'queued' },
+      { id: 1, status: 'succeeded' },
+      { id: 2, status: 'queued' },
     ])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
     const result = await completeAccountRelabelWorkItemsBulk(prisma, {
-      workItemIds: ['wi-1', 'wi-2', 'wi-3'],
+      workItemIds: [1, 2, 3],
       leaseOwner: 'worker-1',
     })
 
     // wi-3 は結果に含まれない = lease を失っていた ('lease_lost' 相当)。
     expect(result).toEqual([
-      { id: 'wi-1', status: 'succeeded' },
-      { id: 'wi-2', status: 'requeued' },
+      { id: 1, status: 'succeeded' },
+      { id: 2, status: 'requeued' },
     ])
     expect(queryRaw).toHaveBeenCalledTimes(1)
     const sql = (queryRaw.mock.calls[0][0] as unknown[]).join('')

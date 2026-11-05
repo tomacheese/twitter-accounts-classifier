@@ -377,11 +377,11 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
   describe('weekly_review_sample_bucket parity', () => {
     it('TS の assignBucket と DB の weekly_review_sample_bucket は SHA-256 先頭 32bit 由来の bucket を返す', async () => {
       const accountIds = [
-        'bucket_parity_alpha',
-        'bucket_parity_beta',
-        'bucket_parity_gamma',
-        'bucket_parity_delta',
-        'bucket_parity_epsilon',
+        '1234567890123456780',
+        '1234567890123456817',
+        '1234567890123456854',
+        '1234567890123456891',
+        '1234567890123456928',
       ]
 
       for (const accountId of accountIds) {
@@ -390,7 +390,7 @@ describe.skipIf(!process.env.DATABASE_URL)('PrismaWeeklyReviewPlanningDataSource
           (BUCKET_COUNT - 1)
 
         const [row] = await prisma.$queryRaw<{ bucket: number }[]>(
-          Prisma.sql`SELECT weekly_review_sample_bucket(${accountId}) AS bucket`,
+          Prisma.sql`SELECT weekly_review_sample_bucket(${accountId}::bigint) AS bucket`,
         )
         expect(row.bucket).toBe(expectedBucket)
         expect(assignBucket(accountId)).toBe(expectedBucket)

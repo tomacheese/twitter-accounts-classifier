@@ -171,7 +171,7 @@ async function upsertAccountsBulkQuery(
     ),
     input_rows AS (
       SELECT * FROM UNNEST(
-        ${ids}::text[], ${screenNames}::text[], ${displayNames}::text[], ${bios}::text[],
+        ${ids}::bigint[], ${screenNames}::text[], ${displayNames}::text[], ${bios}::text[],
         ${profileImageUrls}::text[], ${followersCounts}::int[], ${followingCounts}::int[],
         ${tweetCounts}::int[], ${accountCreatedAts}::timestamptz[], ${locations}::text[],
         ${urls}::text[], ${isBlueVerifieds}::boolean[], ${verifiedTypes}::text[],
@@ -208,7 +208,7 @@ async function upsertAccountsBulkQuery(
       "parodyCommentaryFanLabel" = EXCLUDED."parodyCommentaryFanLabel",
       "lastCrawledAt" = EXCLUDED."lastCrawledAt",
       "updatedAt" = EXCLUDED."updatedAt"
-    RETURNING "id"
+    RETURNING "id"::text AS "id"
   `
 }
 

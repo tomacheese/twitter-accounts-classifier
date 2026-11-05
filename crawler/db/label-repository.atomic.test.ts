@@ -20,14 +20,14 @@ function createDeferred() {
 async function waitForLatestRowToBeLocked(
   prisma: PrismaClient,
   accountId: string,
-  labelDefinitionId: string,
+  labelDefinitionId: number,
 ): Promise<boolean> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     try {
       await prisma.$queryRaw`
         SELECT 1
         FROM "AccountLabelLatest"
-        WHERE "accountId" = ${accountId} AND "labelDefinitionId" = ${labelDefinitionId}
+        WHERE "accountId" = ${accountId}::bigint AND "labelDefinitionId" = ${labelDefinitionId}::smallint
         FOR UPDATE NOWAIT
       `
     } catch (error) {
@@ -230,7 +230,7 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
     })
     expect(firstObservation.snapshotVersion).toBe(1)
     const firstSnapshot = firstObservation.classificationSnapshot as unknown as {
-      labelDefinitionId: string
+      labelDefinitionId: number
       value: boolean
     }[]
     expect(firstSnapshot).toHaveLength(2)
@@ -260,7 +260,7 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
       where: { id: secondObservationId ?? '' },
     })
     const secondSnapshot = secondObservation.classificationSnapshot as unknown as {
-      labelDefinitionId: string
+      labelDefinitionId: number
       value: boolean
       confidence: number
     }[]
@@ -334,7 +334,7 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
       where: { id: observationId ?? '' },
     })
     const snapshot = observation.classificationSnapshot as unknown as {
-      labelDefinitionId: string
+      labelDefinitionId: number
       value: boolean
       confidence: number
       reason: string
@@ -414,7 +414,7 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
       where: { id: resumedObservationId ?? '' },
     })
     const resumedSnapshot = resumedObservation.classificationSnapshot as unknown as {
-      labelDefinitionId: string
+      labelDefinitionId: number
       value: boolean
     }[]
     // labelB (今回 claim) だけでなく、labelA (前回 claim・AccountLabelLatest から補完) も含む。
@@ -443,7 +443,7 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
         data: { key: 'test_label_lock_order_b', description: 'lock order test label B' },
       }),
     ])
-    const [firstLabel, secondLabel] = labelDefinitions.toSorted((a, b) => a.id.localeCompare(b.id))
+    const [firstLabel, secondLabel] = labelDefinitions.toSorted((a, b) => a.id - b.id)
     const crawlRun = await prisma.crawlRun.create({
       data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
     })

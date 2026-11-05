@@ -720,7 +720,7 @@ export async function handleWorkItemSettled(
 
   await detectAnalysisStageFailure(prisma, {
     kind: workItem.kind,
-    workItemId: workItem.id,
+    workItemId: String(workItem.id),
     attemptNumber: workItem.attemptCount,
     status: outcome.status,
     errorSummary: outcome.errorSummary,
@@ -770,7 +770,7 @@ export async function processPostCompletionRefresh(
   workItem: AnalysisWorkItem,
 ): Promise<void> {
   const originalWorkItem = await prisma.analysisWorkItem.findUniqueOrThrow({
-    where: { id: workItem.triggerId },
+    where: { id: Number(workItem.triggerId) },
   })
   const outcome: WorkItemOutcome = {
     status: originalWorkItem.status as WorkItemOutcome['status'],

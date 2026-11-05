@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Logger } from '@book000/node-utils'
 import type { LabelDefinition, Prisma, PrismaClient } from '../generated/prisma'
 import type { LabelRule, LabelRuleResult } from '../labels/types'
+import { compareIds } from 'id-boundary'
 import { enqueueWorkItem } from './analysis-work-item-repository'
 
 const logger = Logger.configure('label-repository')
@@ -31,7 +32,7 @@ export async function ensureLabelDefinition(
 export async function ensureLabelDefinitionsForRules(
   prisma: PrismaClient,
   rules: LabelRule[],
-): Promise<Map<string, string>> {
+): Promise<Map<string, number>> {
   const entries = await Promise.all(
     rules.map(async (rule) => {
       const definition = await ensureLabelDefinition(prisma, {
@@ -51,7 +52,7 @@ export async function ensureLabelDefinitionsForRules(
  * `snapshotVersion` とセットで保存する。
  */
 export interface ClassificationSnapshotEntry {
-  labelDefinitionId: string
+  labelDefinitionId: number
   value: boolean
   confidence: number
   reason: string
@@ -66,7 +67,7 @@ export const ACCOUNT_CLASSIFICATION_SNAPSHOT_VERSION = 1
 
 export interface AccountLabelBulkInput {
   accountId: string
-  labelDefinitionId: string
+  labelDefinitionId: number
   result: LabelRuleResult
   method: string
   ruleVersion: string
@@ -76,8 +77,8 @@ export interface AccountLabelBulkInput {
 function orderAccountLabelBulkInputs(labels: AccountLabelBulkInput[]): AccountLabelBulkInput[] {
   return labels.toSorted(
     (left, right) =>
-      left.accountId.localeCompare(right.accountId) ||
-      left.labelDefinitionId.localeCompare(right.labelDefinitionId),
+      compareIds(left.accountId, right.accountId) ||
+      left.labelDefinitionId - right.labelDefinitionId,
   )
 }
 
@@ -130,13 +131,13 @@ export async function recordAccountLabelsBulkLatestOnlyForAccounts(
     const { sourceKind, sourceId, sourceUsername } = params
 
     const rows = await prisma.$queryRaw<
-      { accountId: string; labelDefinitionId: string; latestUpserted: boolean }[]
+      { accountId: string; labelDefinitionId: number; latestUpserted: boolean }[]
     >`
       WITH shared_now AS (
         SELECT now() AS "labeledAt"
       ),
       input_rows AS (
-        SELECT * FROM UNNEST(${accountIds}::text[], ${labelDefinitionIds}::text[], ${values}::boolean[], ${confidences}::double precision[], ${reasons}::text[], ${methods}::text[], ${ruleVersions}::text[], ${evaluables}::boolean[])
+        SELECT * FROM UNNEST(${accountIds}::bigint[], ${labelDefinitionIds}::smallint[], ${values}::boolean[], ${confidences}::double precision[], ${reasons}::text[], ${methods}::text[], ${ruleVersions}::text[], ${evaluables}::boolean[])
           AS u("accountId", "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable")
       ),
       to_upsert AS (
@@ -168,7 +169,7 @@ export async function recordAccountLabelsBulkLatestOnlyForAccounts(
         WHERE "AccountLabelLatest"."labeledAt" <= EXCLUDED."labeledAt"
         RETURNING "accountId", "labelDefinitionId"
       )
-      SELECT tu."accountId", tu."labelDefinitionId",
+      SELECT tu."accountId"::text AS "accountId", tu."labelDefinitionId",
         EXISTS (
           SELECT 1 FROM upserted u
           WHERE u."accountId" = tu."accountId" AND u."labelDefinitionId" = tu."labelDefinitionId"
@@ -195,7 +196,7 @@ export interface RecordCrawlAccountLabelsAtomicParams {
   username: string
   /** author 1 件分のルール適用結果一覧。 */
   labels: {
-    labelDefinitionId: string
+    labelDefinitionId: number
     result: LabelRuleResult
     method: string
     ruleVersion: string
@@ -204,7 +205,7 @@ export interface RecordCrawlAccountLabelsAtomicParams {
 
 /** `CrawlAccountLabelRun` への claim に成功した 1 ルール分の結果。 */
 interface ClaimedLabelRow {
-  labelDefinitionId: string
+  labelDefinitionId: number
   method: string
   ruleVersion: string
   result: LabelRuleResult
@@ -234,7 +235,7 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
   const ruleVersions = params.labels.map((label) => label.ruleVersion)
 
   const claimedRows = await prisma.$queryRaw<
-    { labelDefinitionId: string; method: string; ruleVersion: string }[]
+    { labelDefinitionId: number; method: string; ruleVersion: string }[]
   >`
     INSERT INTO "CrawlAccountLabelRun"
       ("id", "crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion")
@@ -242,8 +243,8 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
       ${claimIds}::text[],
       ARRAY(SELECT ${params.crawlRunId} FROM generate_series(1, ${params.labels.length})),
       ARRAY(SELECT ${params.username} FROM generate_series(1, ${params.labels.length})),
-      ARRAY(SELECT ${params.accountId} FROM generate_series(1, ${params.labels.length})),
-      ${labelDefinitionIds}::text[],
+      ARRAY(SELECT ${params.accountId}::bigint FROM generate_series(1, ${params.labels.length})),
+      ${labelDefinitionIds}::smallint[],
       ${methods}::text[],
       ${ruleVersions}::text[]
     ) AS u("id", "crawlRunId", "username", "accountId", "labelDefinitionId", "method", "ruleVersion")
@@ -268,7 +269,7 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
 
   const snapshotLabelDefinitionIds = [
     ...new Set(params.labels.map((label) => label.labelDefinitionId)),
-  ].toSorted((left, right) => left.localeCompare(right))
+  ].toSorted((left, right) => left - right)
 
   // 部分 resume は今回 claim できた subset だけを書き込む一方で、snapshot には active
   // label 全件を含める。subset を先に UPSERT してから残りを lock すると、別 writer が
@@ -277,8 +278,8 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
   await prisma.$queryRaw`
     SELECT "labelDefinitionId"
     FROM "AccountLabelLatest"
-    WHERE "accountId" = ${params.accountId}
-      AND "labelDefinitionId" = ANY(${snapshotLabelDefinitionIds}::text[])
+    WHERE "accountId" = ${params.accountId}::bigint
+      AND "labelDefinitionId" = ANY(${snapshotLabelDefinitionIds}::smallint[])
     ORDER BY "labelDefinitionId"
     FOR UPDATE
   `
@@ -301,7 +302,7 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
   // transaction の commit まで保持される。今回新規作成した Latest row もここで含める。
   const latestRows = await prisma.$queryRaw<
     {
-      labelDefinitionId: string
+      labelDefinitionId: number
       value: boolean
       confidence: number
       reason: string
@@ -314,8 +315,8 @@ export async function recordCrawlAccountLabelsAtomicWithinTx(
     SELECT
       "labelDefinitionId", "value", "confidence", "reason", "method", "ruleVersion", "evaluable", "labeledAt"
     FROM "AccountLabelLatest"
-    WHERE "accountId" = ${params.accountId}
-      AND "labelDefinitionId" = ANY(${snapshotLabelDefinitionIds}::text[])
+    WHERE "accountId" = ${params.accountId}::bigint
+      AND "labelDefinitionId" = ANY(${snapshotLabelDefinitionIds}::smallint[])
     ORDER BY "labelDefinitionId"
     FOR UPDATE
   `

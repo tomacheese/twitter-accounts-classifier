@@ -69,12 +69,12 @@ describe('evaluateAccountRelabelItems', () => {
     vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
     vi.spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts').mockResolvedValue()
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
-      { id: 'wi-1', status: 'succeeded' },
+      { id: 1, status: 'succeeded' },
     ])
 
-    await evaluateAccountRelabelItems(prisma, [{ id: 'wi-1', triggerId: 'account-1' } as never], {
+    await evaluateAccountRelabelItems(prisma, [{ id: 1, triggerId: 'account-1' } as never], {
       registry,
-      labelDefinitionIds: new Map([['promoted_count_probe', 'def-1']]),
+      labelDefinitionIds: new Map([['promoted_count_probe', 1]]),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
       bioDuplicateIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: {
@@ -121,14 +121,14 @@ describe('evaluateAccountRelabelItems', () => {
       .mockResolvedValue()
     const completeSpy = vi
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
-      .mockResolvedValue([{ id: 'wi-1', status: 'succeeded' }])
+      .mockResolvedValue([{ id: 1, status: 'succeeded' }])
 
     const result = await evaluateAccountRelabelItems(
       prisma,
-      [{ id: 'wi-1', triggerId: 'account-1' } as never],
+      [{ id: 1, triggerId: 'account-1' } as never],
       {
         registry,
-        labelDefinitionIds: new Map([['reply_hijack_swarm', 'def-1']]),
+        labelDefinitionIds: new Map([['reply_hijack_swarm', 1]]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
         bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
@@ -160,7 +160,7 @@ describe('evaluateAccountRelabelItems', () => {
       replyTweetIds: ['reply-1', 'reply-2'],
     })
     expect(completeSpy).toHaveBeenCalledWith(prisma, {
-      workItemIds: ['wi-1'],
+      workItemIds: [1],
       leaseOwner: 'test-worker',
     })
     // lease (5分) より十分短い timeout でサブバッチ transaction が完結する設計になっている。
@@ -198,12 +198,12 @@ describe('evaluateAccountRelabelItems', () => {
       .spyOn(evidenceRepository, 'upsertReplyHijackEvidence')
       .mockResolvedValue()
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
-      { id: 'wi-1', status: 'succeeded' },
+      { id: 1, status: 'succeeded' },
     ])
 
-    await evaluateAccountRelabelItems(prisma, [{ id: 'wi-1', triggerId: 'account-1' } as never], {
+    await evaluateAccountRelabelItems(prisma, [{ id: 1, triggerId: 'account-1' } as never], {
       registry,
-      labelDefinitionIds: new Map([['reply_hijack_swarm', 'def-1']]),
+      labelDefinitionIds: new Map([['reply_hijack_swarm', 1]]),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
       bioDuplicateIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: {
@@ -260,10 +260,10 @@ describe('evaluateAccountRelabelItems', () => {
 
     const result = await evaluateAccountRelabelItems(
       prisma,
-      [{ id: 'wi-1', triggerId: 'account-1' } as never],
+      [{ id: 1, triggerId: 'account-1' } as never],
       {
         registry,
-        labelDefinitionIds: new Map([['reply_hijack_swarm', 'def-1']]),
+        labelDefinitionIds: new Map([['reply_hijack_swarm', 1]]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
         bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
@@ -290,7 +290,7 @@ describe('evaluateAccountRelabelItems', () => {
     expect(recordLabelsSpy).toHaveBeenCalledWith(prisma, expect.anything())
     expect(completeSpy).not.toHaveBeenCalled()
     expect(updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ['wi-1'] }, status: { not: 'succeeded' } },
+      where: { id: { in: [1] }, status: { not: 'succeeded' } },
       data: { lastErrorSummary: expect.stringContaining('evidence write failed') as string },
     })
   })
@@ -320,21 +320,16 @@ describe('evaluateAccountRelabelItems', () => {
       .mockResolvedValue()
     const completeSpy = vi
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
-      .mockResolvedValue([{ id: 'wi-bob', status: 'succeeded' }])
+      .mockResolvedValue([{ id: 12, status: 'succeeded' }])
     // alice の work item だけ lease を失っている状態を模擬する (bob は保持したまま)。
-    vi.spyOn(workItemRepository, 'claimStillLeasedWorkItemIdsForUpdate').mockResolvedValue([
-      'wi-bob',
-    ])
+    vi.spyOn(workItemRepository, 'claimStillLeasedWorkItemIdsForUpdate').mockResolvedValue([12])
 
     const result = await evaluateAccountRelabelItems(
       prisma,
-      [
-        { id: 'wi-alice', triggerId: 'alice' } as never,
-        { id: 'wi-bob', triggerId: 'bob' } as never,
-      ],
+      [{ id: 11, triggerId: 'alice' } as never, { id: 12, triggerId: 'bob' } as never],
       {
         registry,
-        labelDefinitionIds: new Map([['test_rule', 'def-1']]),
+        labelDefinitionIds: new Map([['test_rule', 1]]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
         bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
@@ -354,7 +349,7 @@ describe('evaluateAccountRelabelItems', () => {
       labels: [
         {
           accountId: 'bob',
-          labelDefinitionId: 'def-1',
+          labelDefinitionId: 1,
           method: 'test_rule',
           ruleVersion: '1.0.0',
           result: { value: true, confidence: 1, reason: 'test' },
@@ -362,7 +357,7 @@ describe('evaluateAccountRelabelItems', () => {
       ],
     })
     expect(completeSpy).toHaveBeenCalledWith(prisma, {
-      workItemIds: ['wi-bob'],
+      workItemIds: [12],
       leaseOwner: 'test-worker',
     })
   })
@@ -379,7 +374,7 @@ describe('evaluateAccountRelabelItems', () => {
 
     const completeSpy = vi
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
-      .mockResolvedValue([{ id: 'wi-1', status: 'succeeded' }])
+      .mockResolvedValue([{ id: 1, status: 'succeeded' }])
     const recordLabelsSpy = vi
       .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
       .mockResolvedValue()
@@ -391,10 +386,10 @@ describe('evaluateAccountRelabelItems', () => {
 
     const result = await evaluateAccountRelabelItems(
       prisma,
-      [{ id: 'wi-1', triggerId: 'alice' } as never],
+      [{ id: 1, triggerId: 'alice' } as never],
       {
         registry,
-        labelDefinitionIds: new Map([['test_rule', 'def-1']]),
+        labelDefinitionIds: new Map([['test_rule', 1]]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
         bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
@@ -414,7 +409,7 @@ describe('evaluateAccountRelabelItems', () => {
       labels: [
         {
           accountId: 'alice',
-          labelDefinitionId: 'def-1',
+          labelDefinitionId: 1,
           method: 'test_rule',
           ruleVersion: '1.0.0',
           result: { value: true, confidence: 1, reason: 'test' },
@@ -422,7 +417,7 @@ describe('evaluateAccountRelabelItems', () => {
       ],
     })
     expect(completeSpy).toHaveBeenCalledWith(prisma, {
-      workItemIds: ['wi-1'],
+      workItemIds: [1],
       leaseOwner: 'test-worker',
     })
   })
@@ -442,7 +437,7 @@ describe('evaluateAccountRelabelItems', () => {
     registry.register(rule)
 
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
-      { id: 'wi-1', status: 'succeeded' },
+      { id: 1, status: 'succeeded' },
     ])
     vi.spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts').mockResolvedValue()
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(
@@ -468,9 +463,9 @@ describe('evaluateAccountRelabelItems', () => {
       account: { findMany: vi.fn().mockResolvedValue([{ id: 'alice' }]) },
     })
 
-    await evaluateAccountRelabelItems(prisma, [{ id: 'wi-1', triggerId: 'alice' } as never], {
+    await evaluateAccountRelabelItems(prisma, [{ id: 1, triggerId: 'alice' } as never], {
       registry,
-      labelDefinitionIds: new Map([['capture_rule', 'def-1']]),
+      labelDefinitionIds: new Map([['capture_rule', 1]]),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
       bioDuplicateIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: {
@@ -489,7 +484,7 @@ describe('evaluateAccountRelabelItems', () => {
   it('account が既に削除されている場合は評価をスキップして succeeded 扱いにする', async () => {
     const completeSpy = vi
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
-      .mockResolvedValue([{ id: 'wi-1', status: 'succeeded' }])
+      .mockResolvedValue([{ id: 1, status: 'succeeded' }])
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
 
     const prisma = makeTransactionalPrisma({
@@ -498,7 +493,7 @@ describe('evaluateAccountRelabelItems', () => {
 
     const result = await evaluateAccountRelabelItems(
       prisma,
-      [{ id: 'wi-1', triggerId: 'deleted-account' } as never],
+      [{ id: 1, triggerId: 'deleted-account' } as never],
       {
         registry: new LabelRuleRegistry(),
         labelDefinitionIds: new Map(),
@@ -517,7 +512,7 @@ describe('evaluateAccountRelabelItems', () => {
 
     expect(result.succeeded).toBe(1)
     expect(completeSpy).toHaveBeenCalledWith(prisma, {
-      workItemIds: ['wi-1'],
+      workItemIds: [1],
       leaseOwner: 'test-worker',
     })
   })
@@ -543,10 +538,10 @@ describe('evaluateAccountRelabelItems', () => {
     })
 
     const items = [
-      { id: 'wi-1', triggerId: 'alice' },
-      { id: 'wi-2', triggerId: 'bob' },
-      { id: 'wi-3', triggerId: 'carol' },
-      { id: 'wi-4', triggerId: 'dave' },
+      { id: 1, triggerId: 'alice' },
+      { id: 2, triggerId: 'bob' },
+      { id: 3, triggerId: 'carol' },
+      { id: 4, triggerId: 'dave' },
     ] as never[]
 
     const resultPromise = evaluateAccountRelabelItems(prisma, items, {
@@ -617,10 +612,10 @@ describe('evaluateAccountRelabelItems', () => {
 
     const result = await evaluateAccountRelabelItems(
       prisma,
-      [{ id: 'wi-1', triggerId: 'alice' } as never, { id: 'wi-2', triggerId: 'bob' } as never],
+      [{ id: 1, triggerId: 'alice' } as never, { id: 2, triggerId: 'bob' } as never],
       {
         registry,
-        labelDefinitionIds: new Map([['tweet_count_rule', 'def-1']]),
+        labelDefinitionIds: new Map([['tweet_count_rule', 1]]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
         bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
@@ -640,14 +635,14 @@ describe('evaluateAccountRelabelItems', () => {
       labels: [
         {
           accountId: 'alice',
-          labelDefinitionId: 'def-1',
+          labelDefinitionId: 1,
           method: 'tweet_count_rule',
           ruleVersion: '1.0.0',
           result: { value: true, confidence: 1, reason: 'tweet-alice-1' },
         },
         {
           accountId: 'bob',
-          labelDefinitionId: 'def-1',
+          labelDefinitionId: 1,
           method: 'tweet_count_rule',
           ruleVersion: '1.0.0',
           result: { value: false, confidence: 1, reason: '' },
@@ -689,10 +684,10 @@ describe('evaluateAccountRelabelItems', () => {
 
     const result = await evaluateAccountRelabelItems(
       prisma,
-      [{ id: 'wi-1', triggerId: 'alice' } as never, { id: 'wi-2', triggerId: 'bob' } as never],
+      [{ id: 1, triggerId: 'alice' } as never, { id: 2, triggerId: 'bob' } as never],
       {
         registry,
-        labelDefinitionIds: new Map([['throwing_rule', 'def-1']]),
+        labelDefinitionIds: new Map([['throwing_rule', 1]]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
         bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
@@ -713,7 +708,7 @@ describe('evaluateAccountRelabelItems', () => {
       labels: [
         {
           accountId: 'alice',
-          labelDefinitionId: 'def-1',
+          labelDefinitionId: 1,
           method: 'throwing_rule',
           ruleVersion: '1.0.0',
           result: { value: true, confidence: 1, reason: 'test' },
@@ -721,11 +716,11 @@ describe('evaluateAccountRelabelItems', () => {
       ],
     })
     expect(completeSpy).toHaveBeenCalledWith(prisma, {
-      workItemIds: ['wi-1'],
+      workItemIds: [1],
       leaseOwner: 'test-worker',
     })
     expect(updateSpy).toHaveBeenCalledWith({
-      where: { id: 'wi-2' },
+      where: { id: 2 },
       data: { lastErrorSummary: expect.stringContaining('broken account data') as string },
     })
   })
@@ -767,7 +762,7 @@ describe('evaluateAccountRelabelItems', () => {
 
     const result = await evaluateAccountRelabelItems(prisma, items, {
       registry,
-      labelDefinitionIds: new Map([['test_rule', 'def-1']]),
+      labelDefinitionIds: new Map([['test_rule', 1]]),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
       bioDuplicateIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: {
@@ -820,10 +815,10 @@ describe('evaluateAccountRelabelItems', () => {
 
     const result = await evaluateAccountRelabelItems(
       prisma,
-      [{ id: 'wi-1', triggerId: 'alice' } as never, { id: 'wi-2', triggerId: 'bob' } as never],
+      [{ id: 1, triggerId: 'alice' } as never, { id: 2, triggerId: 'bob' } as never],
       {
         registry,
-        labelDefinitionIds: new Map([['test_rule', 'def-1']]),
+        labelDefinitionIds: new Map([['test_rule', 1]]),
         duplicateReplyIndex: { countOtherAccounts: () => 0 },
         bioDuplicateIndex: { countOtherAccounts: () => 0 },
         replyHijackIndex: {
@@ -841,7 +836,7 @@ describe('evaluateAccountRelabelItems', () => {
     expect(recordLabelsSpy).not.toHaveBeenCalled()
     expect(completeSpy).not.toHaveBeenCalled()
     expect(updateManySpy).toHaveBeenCalledWith({
-      where: { id: { in: ['wi-1', 'wi-2'] }, status: { not: 'succeeded' } },
+      where: { id: { in: [1, 2] }, status: { not: 'succeeded' } },
       data: { lastErrorSummary: expect.stringContaining('connection reset') as string },
     })
   })
@@ -864,12 +859,12 @@ describe('evaluateAccountRelabelItems', () => {
       .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
       .mockResolvedValue()
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
-      { id: 'wi-1', status: 'succeeded' },
+      { id: 1, status: 'succeeded' },
     ])
 
-    await evaluateAccountRelabelItems(prisma, [{ id: 'wi-1', triggerId: 'account-1' } as never], {
+    await evaluateAccountRelabelItems(prisma, [{ id: 1, triggerId: 'account-1' } as never], {
       registry,
-      labelDefinitionIds: new Map([['test_rule', 'def-1']]),
+      labelDefinitionIds: new Map([['test_rule', 1]]),
       duplicateReplyIndex: { countOtherAccounts: () => 0 },
       bioDuplicateIndex: { countOtherAccounts: () => 0 },
       replyHijackIndex: {
@@ -908,9 +903,7 @@ describe('scanForStaleAccounts', () => {
       accountLabelLatest: {
         findMany: vi
           .fn()
-          .mockResolvedValue([
-            { accountId: 'acct-1', labelDefinitionId: 'def-1', ruleVersion: '1.0.0' },
-          ]),
+          .mockResolvedValue([{ accountId: 'acct-1', labelDefinitionId: 1, ruleVersion: '1.0.0' }]),
       },
     } as unknown as PrismaClient
 
@@ -925,7 +918,7 @@ describe('scanForStaleAccounts', () => {
 
     const result = await scanForStaleAccounts(prisma, {
       registry,
-      labelDefinitionIds: new Map([['test_rule', 'def-1']]),
+      labelDefinitionIds: new Map([['test_rule', 1]]),
       batchSize: 500,
     })
 
@@ -968,7 +961,7 @@ describe('scanForStaleAccounts', () => {
 
     const result = await scanForStaleAccounts(prisma, {
       registry,
-      labelDefinitionIds: new Map([['shadow_rule', 'def-shadow']]),
+      labelDefinitionIds: new Map([['shadow_rule', 2]]),
       batchSize: 500,
     })
 
@@ -1009,7 +1002,7 @@ describe('scanForStaleAccounts', () => {
 
     await scanForStaleAccounts(prisma, {
       registry,
-      labelDefinitionIds: new Map([['test_rule', 'def-1']]),
+      labelDefinitionIds: new Map([['test_rule', 1]]),
       batchSize: 500,
     })
 
@@ -1017,7 +1010,7 @@ describe('scanForStaleAccounts', () => {
     expect(findManyCalls).toHaveLength(2)
     for (const call of findManyCalls) {
       const where = (call as { where: { labelDefinitionId: { in: string[] } } }).where
-      expect(where.labelDefinitionId).toEqual({ in: ['def-1'] })
+      expect(where.labelDefinitionId).toEqual({ in: [1] })
     }
   })
 })
@@ -1097,7 +1090,7 @@ describe('runRelabelWorkerCycleOnce', () => {
     // (実体は analysis-work-item-repository.test.ts の DB テストで検証する)。
     const peekSpy = vi
       .spyOn(workItemRepository, 'peekWorkItemCandidates')
-      .mockResolvedValue([{ id: 'wi-recovered', triggerId: 'alice' }])
+      .mockResolvedValue([{ id: 13, triggerId: 'alice' }])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
     vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
@@ -1110,10 +1103,7 @@ describe('runRelabelWorkerCycleOnce', () => {
     await runRelabelWorkerCycleOnce(prisma)
 
     expect(peekSpy).toHaveBeenCalled()
-    expect(claimSpy).toHaveBeenCalledWith(
-      prisma,
-      expect.objectContaining({ ids: ['wi-recovered'] }),
-    )
+    expect(claimSpy).toHaveBeenCalledWith(prisma, expect.objectContaining({ ids: [13] }))
   })
 
   it('recoverExhaustedExpiredWorkItems が失敗しても通常の claimable drain は継続する (fail-open)', async () => {
@@ -1123,7 +1113,7 @@ describe('runRelabelWorkerCycleOnce', () => {
     )
     const peekSpy = vi
       .spyOn(workItemRepository, 'peekWorkItemCandidates')
-      .mockResolvedValue([{ id: 'wi-1', triggerId: 'alice' }])
+      .mockResolvedValue([{ id: 1, triggerId: 'alice' }])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
     vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
@@ -1143,8 +1133,8 @@ describe('runRelabelWorkerCycleOnce', () => {
     vi.stubEnv('RELABELER_WORKER_BATCH_SIZE', '2')
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
     const peekSpy = vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' },
-      { id: 'wi-2', triggerId: 'bob' },
+      { id: 1, triggerId: 'alice' },
+      { id: 2, triggerId: 'bob' },
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
@@ -1173,7 +1163,7 @@ describe('runRelabelWorkerCycleOnce', () => {
     const peekSpy = vi
       .spyOn(workItemRepository, 'peekWorkItemCandidates')
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: 'wi-1', triggerId: 'alice' }])
+      .mockResolvedValueOnce([{ id: 1, triggerId: 'alice' }])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
     vi.spyOn(selfReplyPromoCorpusModule, 'loadSelfReplyPromoCorpus').mockResolvedValue({
@@ -1214,7 +1204,7 @@ describe('runRelabelWorkerCycleOnce', () => {
   it('index 構築が候補確定後・claim 前に失敗した場合、1 件も claim されず lastErrorSummary も書かれない', async () => {
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
     vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' },
+      { id: 1, triggerId: 'alice' },
     ])
     const claimSpy = vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds')
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockRejectedValue(new Error('db timeout'))
@@ -1231,9 +1221,9 @@ describe('runRelabelWorkerCycleOnce', () => {
     vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '2')
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
     vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' },
-      { id: 'wi-2', triggerId: 'bob' },
-      { id: 'wi-3', triggerId: 'carol' },
+      { id: 1, triggerId: 'alice' },
+      { id: 2, triggerId: 'bob' },
+      { id: 3, triggerId: 'carol' },
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
@@ -1259,20 +1249,16 @@ describe('runRelabelWorkerCycleOnce', () => {
     await runRelabelWorkerCycleOnce(prisma)
 
     expect(claimSpy).toHaveBeenCalledTimes(2)
-    expect(claimSpy).toHaveBeenNthCalledWith(
-      1,
-      prisma,
-      expect.objectContaining({ ids: ['wi-1', 'wi-2'] }),
-    )
-    expect(claimSpy).toHaveBeenNthCalledWith(2, prisma, expect.objectContaining({ ids: ['wi-3'] }))
+    expect(claimSpy).toHaveBeenNthCalledWith(1, prisma, expect.objectContaining({ ids: [1, 2] }))
+    expect(claimSpy).toHaveBeenNthCalledWith(2, prisma, expect.objectContaining({ ids: [3] }))
   })
 
   it('競合で一部の候補が claim できなかった場合、その分を他の WorkItem で補充しない', async () => {
     vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '2')
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
     vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' },
-      { id: 'wi-2', triggerId: 'bob' },
+      { id: 1, triggerId: 'alice' },
+      { id: 2, triggerId: 'bob' },
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
@@ -1282,10 +1268,10 @@ describe('runRelabelWorkerCycleOnce', () => {
     })
     const completeSpy = vi
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
-      .mockResolvedValue([{ id: 'wi-1', status: 'succeeded' }])
+      .mockResolvedValue([{ id: 1, status: 'succeeded' }])
     // wi-2 は別ワーカーとの競合で SKIP LOCKED により claim できなかったことを模す。
     vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' } as never,
+      { id: 1, triggerId: 'alice' } as never,
     ])
     const prisma = makeCursorPrisma({
       account: {
@@ -1297,7 +1283,7 @@ describe('runRelabelWorkerCycleOnce', () => {
 
     expect(completeSpy).toHaveBeenCalledTimes(1)
     expect(completeSpy).toHaveBeenCalledWith(prisma, {
-      workItemIds: ['wi-1'],
+      workItemIds: [1],
       leaseOwner: expect.any(String),
     })
   })
@@ -1306,8 +1292,8 @@ describe('runRelabelWorkerCycleOnce', () => {
     vi.stubEnv('RELABELER_WORKER_CHUNK_SIZE', '1')
     vi.spyOn(labelRepository, 'ensureLabelDefinitionsForRules').mockResolvedValue(new Map())
     vi.spyOn(workItemRepository, 'peekWorkItemCandidates').mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' },
-      { id: 'wi-2', triggerId: 'bob' },
+      { id: 1, triggerId: 'alice' },
+      { id: 2, triggerId: 'bob' },
     ])
     vi.spyOn(replyCorpusModule, 'loadReplyCorpus').mockResolvedValue([])
     vi.spyOn(bioCorpusModule, 'loadBioCorpus').mockResolvedValue([])
@@ -1317,9 +1303,9 @@ describe('runRelabelWorkerCycleOnce', () => {
     })
     const completeSpy = vi
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
-      .mockResolvedValue([{ id: 'wi-1', status: 'succeeded' }])
+      .mockResolvedValue([{ id: 1, status: 'succeeded' }])
     vi.spyOn(workItemRepository, 'claimWorkItemBatchByIds')
-      .mockResolvedValueOnce([{ id: 'wi-1', triggerId: 'alice' } as never])
+      .mockResolvedValueOnce([{ id: 1, triggerId: 'alice' } as never])
       .mockRejectedValueOnce(new Error('claim crashed'))
     const prisma = makeCursorPrisma({
       account: {
@@ -1333,7 +1319,7 @@ describe('runRelabelWorkerCycleOnce', () => {
     // 1 chunk 目 (wi-1) は既に complete 済みで、2 chunk 目の失敗による影響を受けない。
     expect(completeSpy).toHaveBeenCalledTimes(1)
     expect(completeSpy).toHaveBeenCalledWith(prisma, {
-      workItemIds: ['wi-1'],
+      workItemIds: [1],
       leaseOwner: expect.any(String),
     })
   })

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { createSyntheticSerialId } from 'id-boundary'
 import { getPrismaClient } from '../db/client'
 import { runBacktest } from './run-backtest'
 import type { DetectionPolicy } from '../policy/schema'
@@ -10,12 +11,14 @@ const prisma = getPrismaClient()
  * @param labelDefinitionId - snapshot の対象ラベル
  * @returns 直前 snapshot に対し 20% の低下となる 2 件の snapshot
  */
-async function seedSnapshots(labelDefinitionId: string): Promise<void> {
+async function seedSnapshots(labelDefinitionId: number): Promise<void> {
   const crawlRunA = `crawl-${randomUUID()}`
   const crawlRunB = `crawl-${randomUUID()}`
+  const workItemA = createSyntheticSerialId()
+  const workItemB = workItemA + 1
   await prisma.labelMetricSnapshot.create({
     data: {
-      triggerWorkItemId: crawlRunA,
+      triggerWorkItemId: workItemA,
       sourceCrawlRunId: crawlRunA,
       labelDefinitionId,
       observedAt: new Date('2026-08-01T00:00:00Z'),
@@ -30,7 +33,7 @@ async function seedSnapshots(labelDefinitionId: string): Promise<void> {
   })
   await prisma.labelMetricSnapshot.create({
     data: {
-      triggerWorkItemId: crawlRunB,
+      triggerWorkItemId: workItemB,
       sourceCrawlRunId: crawlRunB,
       labelDefinitionId,
       observedAt: new Date('2026-08-02T00:00:00Z'),
@@ -81,7 +84,7 @@ describe.skipIf(!process.env.DATABASE_URL)('runBacktest', () => {
   })
 
   it('backtest 実行中に ReviewFinding テーブルへは一切書き込まれない', async () => {
-    const labelDefinitionId = `label-${randomUUID()}`
+    const labelDefinitionId = createSyntheticSerialId() % 30_000
     await seedSnapshots(labelDefinitionId)
 
     await runBacktest(prisma, {
@@ -97,7 +100,7 @@ describe.skipIf(!process.env.DATABASE_URL)('runBacktest', () => {
   })
 
   it('candidatePolicy だけが検出する差分を new_in_candidate として記録する', async () => {
-    const labelDefinitionId = `label-${randomUUID()}`
+    const labelDefinitionId = createSyntheticSerialId() % 30_000
     await seedSnapshots(labelDefinitionId)
 
     const runId = await runBacktest(prisma, {
@@ -114,7 +117,7 @@ describe.skipIf(!process.env.DATABASE_URL)('runBacktest', () => {
   })
 
   it('同一入力・同一 policyHash で 2 回実行すると同じ PolicyBacktestFinding 件数になる', async () => {
-    const labelDefinitionId = `label-${randomUUID()}`
+    const labelDefinitionId = createSyntheticSerialId() % 30_000
     await seedSnapshots(labelDefinitionId)
 
     const input = {

@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { Prisma } from '../generated/prisma'
 import type { AnalysisWorkItem, PrismaClient } from '../generated/prisma'
 
@@ -111,7 +110,6 @@ export async function requestAccountRelabelBulk(
 ): Promise<void> {
   if (accountIds.length === 0) return
 
-  const ids = accountIds.map(() => randomUUID())
   const resetCondition = Prisma.sql`(
     "AnalysisWorkItem"."status" = ANY(${TERMINAL_STATUSES})
     OR (
@@ -124,9 +122,9 @@ export async function requestAccountRelabelBulk(
     )
   )`
   await prisma.$executeRaw`
-    INSERT INTO "AnalysisWorkItem" ("id", "kind", "triggerType", "triggerId", "updatedAt")
-    SELECT u."id", ${ACCOUNT_RELABEL_KIND}, ${ACCOUNT_RELABEL_TRIGGER_TYPE}, u."triggerId", now()
-    FROM UNNEST(${ids}::text[], ${accountIds}::text[]) AS u("id", "triggerId")
+    INSERT INTO "AnalysisWorkItem" ("kind", "triggerType", "triggerId", "updatedAt")
+    SELECT ${ACCOUNT_RELABEL_KIND}, ${ACCOUNT_RELABEL_TRIGGER_TYPE}, u."triggerId", now()
+    FROM UNNEST(${accountIds}::text[]) AS u("triggerId")
     ON CONFLICT ("kind", "triggerType", "triggerId") DO UPDATE
     SET
       "status" = CASE WHEN ${resetCondition} THEN 'queued' ELSE "AnalysisWorkItem"."status" END,
@@ -149,7 +147,7 @@ export interface ClaimNextWorkItemInput {
 }
 
 export interface WorkItemCandidate {
-  id: string
+  id: number
   triggerId: string
 }
 
@@ -186,7 +184,7 @@ export async function peekWorkItemCandidates(
 }
 
 export interface ClaimWorkItemBatchByIdsInput {
-  ids: string[]
+  ids: number[]
   leaseOwner: string
   leaseDurationMs: number
 }
@@ -249,7 +247,7 @@ export async function claimNextWorkItem(
 
   return prisma.$transaction(
     async (tx) => {
-      const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
+      const rows = await tx.$queryRawUnsafe<{ id: number }[]>(
         `SELECT "id" FROM "AnalysisWorkItem"
        WHERE "kind" = ANY($1)
          AND "status" IN ('queued', 'leased', 'failed')
@@ -280,7 +278,7 @@ export async function claimNextWorkItem(
 }
 
 export interface CompleteAccountRelabelWorkItemInput {
-  workItemId: string
+  workItemId: number
   leaseOwner: string
 }
 
@@ -315,7 +313,7 @@ export async function completeAccountRelabelWorkItem(
 }
 
 export interface CompleteAccountRelabelWorkItemsBulkInput {
-  workItemIds: string[]
+  workItemIds: number[]
   leaseOwner: string
 }
 
@@ -331,10 +329,10 @@ export interface CompleteAccountRelabelWorkItemsBulkInput {
 export async function completeAccountRelabelWorkItemsBulk(
   prisma: PrismaClient | Prisma.TransactionClient,
   input: CompleteAccountRelabelWorkItemsBulkInput,
-): Promise<{ id: string; status: 'succeeded' | 'requeued' }[]> {
+): Promise<{ id: number; status: 'succeeded' | 'requeued' }[]> {
   if (input.workItemIds.length === 0) return []
 
-  const rows = await prisma.$queryRaw<{ id: string; status: string }[]>`
+  const rows = await prisma.$queryRaw<{ id: number; status: string }[]>`
     UPDATE "AnalysisWorkItem"
     SET
       "status" = CASE WHEN "staleRequestedAt" IS NOT NULL THEN 'queued' ELSE 'succeeded' END,
@@ -353,7 +351,7 @@ export async function completeAccountRelabelWorkItemsBulk(
 }
 
 export interface ClaimStillLeasedWorkItemIdsForUpdateInput {
-  workItemIds: string[]
+  workItemIds: number[]
   leaseOwner: string
 }
 
@@ -376,10 +374,10 @@ export interface ClaimStillLeasedWorkItemIdsForUpdateInput {
 export async function claimStillLeasedWorkItemIdsForUpdate(
   tx: Prisma.TransactionClient,
   input: ClaimStillLeasedWorkItemIdsForUpdateInput,
-): Promise<string[]> {
+): Promise<number[]> {
   if (input.workItemIds.length === 0) return []
 
-  const rows = await tx.$queryRaw<{ id: string }[]>`
+  const rows = await tx.$queryRaw<{ id: number }[]>`
     SELECT "id"
     FROM "AnalysisWorkItem"
     WHERE "id" = ANY(${input.workItemIds})

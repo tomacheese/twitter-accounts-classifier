@@ -19,7 +19,7 @@ function createMockPrisma(overrides: { pointer?: unknown; rows?: unknown[]; labe
 
 function makeRow(overrides: Partial<Record<string, unknown>>) {
   return {
-    labelDefinitionId: 'label-1',
+    labelDefinitionId: 1,
     evaluatedCount: 100,
     trueCount: 10,
     populationCount: 100,
@@ -53,7 +53,7 @@ describe('listLabelSummaries', () => {
     const rows = [
       makeRow({ evaluatedCount: 80, trueCount: 8, populationCount: 100, coverage: 0.8 }),
     ]
-    const labels = [{ id: 'label-1', key: 'label-key' }]
+    const labels = [{ id: 1, key: 'label-key' }]
     const { prisma } = createMockPrisma({
       pointer: { currentGenerationId: 'generation-1' },
       rows,
@@ -72,8 +72,8 @@ describe('listLabelSummaries', () => {
 
   it('LabelDefinition.description 由来の labelDescription を返す', async () => {
     vi.mocked(getReadModelReadiness).mockResolvedValue({ accounts: 'ready', labels: 'ready' })
-    const rows = [makeRow({ labelDefinitionId: 'label-1' })]
-    const labels = [{ id: 'label-1', key: 'label-key', description: 'テスト用ラベルの説明文' }]
+    const rows = [makeRow({ labelDefinitionId: 1 })]
+    const labels = [{ id: 1, key: 'label-key', description: 'テスト用ラベルの説明文' }]
     const { prisma } = createMockPrisma({
       pointer: { currentGenerationId: 'generation-1' },
       rows,

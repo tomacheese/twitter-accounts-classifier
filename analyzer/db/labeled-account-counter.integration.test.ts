@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createSyntheticId } from 'id-boundary'
 import { describe, expect, it, beforeEach } from 'vitest'
 import { getPrismaClient } from './client'
 
@@ -13,7 +13,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
   'account_summary_latest_labeled_counter_trigger (integration)',
   () => {
     const prisma = getPrismaClient()
-    const accountId = `test_labeled_counter_${randomUUID().slice(0, 8)}`
+    const accountId = createSyntheticId()
 
     beforeEach(async () => {
       await prisma.accountSummaryLatest.deleteMany({ where: { accountId } })

@@ -150,7 +150,7 @@ async function runPostCompletionHook(
     await enqueueWorkItem(prisma, {
       kind: POST_COMPLETION_REFRESH_KIND,
       triggerType: WORK_ITEM_COMPLETION_TRIGGER_TYPE,
-      triggerId: workItem.id,
+      triggerId: String(workItem.id),
     })
   }
 }

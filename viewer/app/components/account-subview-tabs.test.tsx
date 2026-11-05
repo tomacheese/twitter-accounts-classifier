@@ -236,7 +236,7 @@ describe('HistoryView', () => {
   it('labelKey を表示する', () => {
     const entries: AccountLabelChangeView[] = [
       {
-        id: 'change-1',
+        id: 1,
         labelKey: 'spam',
         changeType: 'updated',
         previousValue: false,

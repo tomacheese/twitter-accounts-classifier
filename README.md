@@ -10,6 +10,7 @@ Twitter をクロールしてツイート・アカウント情報を収集し、
 - `viewer/`: 収集結果をダッシュボード表示する Next.js アプリ。
 - `twitter-client/`: crawler・blocker が共有する Twitter/X クライアントのライブラリ。
 - `pipeline-health/`: viewer が使うパイプライン健全性判定のライブラリ。
+- `id-boundary/`: Twitter/X の ID (bigint) とアプリケーション内の 10 進文字列を Prisma の境界で相互変換するライブラリ。各パッケージの Prisma クライアントが利用する。
 - `prisma/`: crawler・viewer が共有する Postgres スキーマ。リポジトリルート直下に置き、両アプリから `--schema=../prisma/schema.prisma` で相対参照する。
 - 詳細な設計判断・背景は [SPEC.md](./SPEC.md) を参照。
 
