@@ -3,7 +3,7 @@
 #
 # 使い方: ops/db-rebuild/cutover/rollback.sh --reason <理由> [--dry-run] [--yes] [--force-late]
 #   理由: gate-failed (検証ゲートの再実行が失敗)、errors-1h (切り替え後 1 時間以内にエラーが継続)、
-#         abort-before-cutover (切り替え前の中断: 予算超過、ゲート失敗、判断による中止)、manual
+#         abort-before-cutover (切り替え前の中断: 検証ゲートの失敗、凍結の喪失、判断による中止)、manual
 #   --force-late  切り替えから 1 時間を過ぎた後にも実行する。切り替え後に新 DB へ書かれたデータは失われる
 #
 # 守ること:
@@ -127,7 +127,7 @@ if [ "$DRY_RUN" != 1 ]; then
     # 次の試行のために、今回の記録を履歴へ退避する
     hist="$STATE_DIR/history/$(date -u +%Y%m%dT%H%M%SZ)-$REASON"
     (umask 077 && mkdir -p "$hist")
-    for f in steps window_start switched_at ABORTED blocker.last.log verify.cutover.tsv newdb-counts.pre newdb-counts.post compose.new.yaml timeline.tsv freeze-counts.tsv old-acl.tsv; do
+    for f in steps window_start switched_at blocker.last.log verify.cutover.tsv newdb-counts.pre newdb-counts.post compose.new.yaml timeline.tsv freeze-counts.tsv old-acl.tsv; do
         [ ! -e "$STATE_DIR/$f" ] || mv "$STATE_DIR/$f" "$hist/"
     done
     for f in freeze-counts.expected freeze-counts.now; do

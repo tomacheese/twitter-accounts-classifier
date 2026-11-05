@@ -45,7 +45,6 @@ need() {
 : "${WORK_DIR:=$STATE_DIR/work}"
 : "${WINDOW_MINUTES:=240}"
 : "${BUDGET_PERCENT:=70}"
-: "${SWITCH_RESERVE_MINUTES:=40}"
 : "${STOP_TIMEOUT:=30}"
 : "${WATCHTOWER_CONTAINER:=watchtower}"
 : "${OLD_STMT_TIMEOUT:=30min}"
@@ -137,13 +136,16 @@ window_elapsed_secs() {
 }
 window_budget_secs() { echo $((WINDOW_MINUTES * 60 * BUDGET_PERCENT / 100)); }
 
-# 経過時間に、これから先の見積もりを足した値が予算 (停止枠の BUDGET_PERCENT %) を超えるなら 1 を返す。
-check_budget() {
-    local label="$1" remaining="$2" elapsed budget
+# 経過時間に残りの見積もりを足した値が目安 (停止枠の BUDGET_PERCENT %) を超えるときは警告を出す。止めない。
+report_budget() {
+    local label="$1" remaining="$2" elapsed budget total
     elapsed="$(window_elapsed_secs)"
     budget="$(window_budget_secs)"
-    log "budget [$label]: elapsed=${elapsed}s + remaining estimate=${remaining}s = $((elapsed + remaining))s, budget=${budget}s (${BUDGET_PERCENT}% of ${WINDOW_MINUTES}min)"
-    [ $((elapsed + remaining)) -le "$budget" ]
+    total=$((elapsed + remaining))
+    log "time [$label]: elapsed=${elapsed}s + remaining estimate=${remaining}s = ${total}s (reference ${budget}s = ${BUDGET_PERCENT}% of ${WINDOW_MINUTES}min)"
+    if [ "$total" -gt "$budget" ]; then
+        warn "the projected duration exceeds the reference (${total}s > ${budget}s). The cutover continues: it stops only for correctness failures"
+    fi
 }
 
 # ---- compose ----
@@ -354,7 +356,4 @@ require_step() {
             fi
         fi
     done
-}
-refuse_if_aborted() {
-    [ ! -f "$STATE_DIR/ABORTED" ] || die "the cutover was aborted: $(cat "$STATE_DIR/ABORTED") (run rollback.sh --reason abort-before-cutover)"
 }

@@ -3,6 +3,7 @@
 #
 # 使い方: ops/db-rebuild/cutover/freeze.sh [--dry-run] [--yes]
 #         ops/db-rebuild/cutover/freeze.sh --check     (旧 DB が freeze 時から変わっていないことの確認。読み取りのみ)
+#         ops/db-rebuild/cutover/freeze.sh --check-readonly   (旧 DB が書き込みを拒否していることだけの確認)
 #
 # 順序: blocker を最初に止め、実行中の呼び出しが無いこと (outbox の未解決 0、実行中の run 0) を確認してから、
 #       残りのサービスを止める。外部へ作用する blocker の停止が確定する前に、ほかを止めない。
@@ -12,10 +13,12 @@ set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
 CHECK_ONLY=0
+CHECK_RO=0
 parse_flags "$@"
 for a in ${ARGS[@]+"${ARGS[@]}"}; do
     case "$a" in
         --check) CHECK_ONLY=1 ;;
+        --check-readonly) CHECK_RO=1 ;;
         *) die "unknown argument: $a" ;;
     esac
 done
@@ -42,8 +45,25 @@ SQL
 }
 record_counts() { counts_sql | old_admin_psql -At -F$'\t'; }
 
+# 新しい接続で、書き込みが実際に拒否されることを確かめる。拒否されなければ凍結が失われている。
+check_readonly() {
+    local probe
+    if probe="$(old_plain_psql -c 'CREATE TABLE zz_freeze_probe (i int)' </dev/null 2>&1)"; then
+        old_admin_psql -c 'DROP TABLE zz_freeze_probe' </dev/null
+        die "the old DB accepts writes (the read-only freeze was lost, or default_transaction_read_only was not applied)"
+    fi
+    grep -q 'read-only transaction' <<<"$probe" || die "unexpected error while probing read-only: $probe"
+    log "old DB rejects writes: $(grep -o 'cannot execute[^.]*' <<<"$probe" | head -n1)"
+}
+
+if [ "$CHECK_RO" = 1 ]; then
+    check_readonly
+    exit 0
+fi
+
 if [ "$CHECK_ONLY" = 1 ]; then
     state_init
+    check_readonly
     [ -f "$STATE_DIR/freeze-counts.tsv" ] || die "no freeze record: $STATE_DIR/freeze-counts.tsv"
     # 推定行数 (2 列目) は autovacuum で動くため比べない。
     cut -f1,3,4 "$STATE_DIR/freeze-counts.tsv" >"$WORK_DIR/freeze-counts.expected"
@@ -57,7 +77,6 @@ fi
 
 need PROD_COMPOSE_DIR
 state_init
-refuse_if_aborted
 require_step preflight
 
 banner "0. window start"
@@ -151,13 +170,7 @@ else
     if [ -s "$STATE_DIR/old-acl.tsv" ]; then
         cut -f1 "$STATE_DIR/old-acl.tsv" | sed 's/$/;/' | old_admin_psql >/dev/null
     fi
-    # 新しい接続で、書き込みが実際に拒否されることを確認する
-    if probe="$(old_plain_psql -c 'CREATE TABLE zz_freeze_probe (i int)' </dev/null 2>&1)"; then
-        old_admin_psql -c 'DROP TABLE zz_freeze_probe' </dev/null
-        die "the old DB still accepts writes after default_transaction_read_only was set"
-    fi
-    grep -q 'read-only transaction' <<<"$probe" || die "unexpected error while probing read-only: $probe"
-    log "old DB rejects writes: $(grep -o 'cannot execute[^.]*' <<<"$probe" | head -n1)"
+    check_readonly
 fi
 
 banner "6. per-table counts and max ids"

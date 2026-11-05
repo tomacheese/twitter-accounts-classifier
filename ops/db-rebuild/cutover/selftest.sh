@@ -1,8 +1,8 @@
 #!/bin/bash
 # cutover スクリプトの自己テスト。scratch のコンテナだけを使い、本番には触れない (名前はすべて tac-t11st 始まり)。
 # 小さな架空の旧 DB (旧スキーマ + testdata/seed-old.sql) と、旧コードのつもりのダミーのサービス群を作り、
-#   1. 予算超過による中断 → ロールバック
-#   2. 通しの切り替え → postcheck → ロールバック
+#   1. 旧 DB の読み取り専用の凍結が失われた → 移行が進まない → ロールバック
+#   2. 時間の目安を超えても止まらない通しの切り替え (検証ゲートの FAIL では止まる) → postcheck → ロールバック
 #   3. 通しの切り替え → 24 時間後の blocker 起動 → ロールバック拒否 → watchtower の再開手順
 # を実行して、結果を検査する。
 #
@@ -58,6 +58,7 @@ env_override() {
 same() { [ "$2" = "$3" ] || fail "$1: expected '$2', got '$3'"; echo "ok: $1 = $3"; }
 
 compose() { docker compose -p "$P" -f "$W/prod/compose.yaml" "$@"; }
+old_rw_sql() { docker exec -i -e PGOPTIONS='-c default_transaction_read_only=off' "$P-postgres-1" psql -U crawler -d "$OLD_DB" -X -q -At -v ON_ERROR_STOP=1 "$@"; }
 old_sql() { docker exec -i "$P-postgres-1" psql -U crawler -d "$OLD_DB" -X -q -At -v ON_ERROR_STOP=1 "$@"; }
 svc_image() { docker inspect -f '{{.Config.Image}}' "$(compose ps -aq "$1")"; }
 svc_image_id() { docker inspect -f '{{.Image}}' "$(compose ps -aq "$1")"; }
@@ -259,15 +260,15 @@ expect_ok "$CUT/switch.sh" --dry-run
 expect_ok "$CUT/rollback.sh" --dry-run --reason manual
 same "blocker still running after the dry-runs" true "$(svc_state blocker)"
 
-say "scenario 1: the projection exceeds the budget -> abort -> rollback"
+say "scenario 1: the read-only freeze is lost -> the migration refuses to continue -> rollback"
 expect_ok "$CUT/freeze.sh" --yes
 same "old DB read-only after freeze" on "$(old_sql -c 'SHOW default_transaction_read_only')"
 same "blocker stopped" false "$(svc_state blocker)"
 same "viewer stopped" false "$(svc_state viewer)"
-rc=0
-env_override EST_LOAD_SECS=999999 "$CUT/run-migration.sh" || rc=$?
-same "run-migration exit status on budget overrun" 3 "$rc"
-[ -f "$W/state/ABORTED" ] || fail "ABORTED marker missing"
+old_rw_sql -c "ALTER DATABASE $OLD_DB RESET default_transaction_read_only" >/dev/null
+expect_fail "$CUT/freeze.sh" --check-readonly
+expect_fail "$CUT/run-migration.sh"
+[ ! -f "$W/state/steps/verified" ] || fail "verified marker exists although the migration refused to run"
 expect_fail "$CUT/switch.sh" --yes
 expect_fail "$CUT/rollback.sh" --reason nonsense --yes
 expect_ok "$CUT/rollback.sh" --reason abort-before-cutover --yes
@@ -288,10 +289,27 @@ old_sql -c "DELETE FROM \"BlockOutboxEntry\" WHERE id = 'zz_pending'" >/dev/null
 rm -f "$W/state/window_start"
 expect_ok "$CUT/freeze.sh" --yes
 expect_ok "$CUT/freeze.sh" --yes
-expect_ok "$CUT/run-migration.sh"
+# 時間の目安を超えても止まらず、完了まで進む (警告だけ出る)
+env_override WINDOW_MINUTES=1 "$CUT/run-migration.sh" >"$W/migration.log" 2>&1 || {
+    tail -n 30 "$W/migration.log"
+    fail "run-migration stopped although only the time reference was exceeded"
+}
+grep -q 'projected duration exceeds the reference' "$W/migration.log" || fail "no warning about the time reference"
 step="$W/state/steps"
 [ -f "$step/verified" ] || fail "verified marker missing"
-expect_ok "$CUT/switch.sh" --yes
+# 検証ゲートの FAIL は切り替えを止める
+docker exec "$NEWC" psql -U tac_owner -d twitter_accounts_classifier -At -c "INSERT INTO \"StorageCapacityState\" (id, \"availableGib\", \"usedPercent\", \"measuredAt\", \"updatedAt\") VALUES ('zz_tamper', 1, 1, now(), now())" >/dev/null
+expect_fail "$CUT/run-migration.sh" --from verify
+[ ! -f "$step/verified" ] || fail "verified marker exists after a failed gate"
+expect_fail "$CUT/switch.sh" --yes
+docker exec "$NEWC" psql -U tac_owner -d twitter_accounts_classifier -At -c "DELETE FROM \"StorageCapacityState\" WHERE id = 'zz_tamper'" >/dev/null
+expect_ok "$CUT/run-migration.sh" --from verify
+[ -f "$step/verified" ] || fail "verified marker missing after the gates passed again"
+env_override WINDOW_MINUTES=1 "$CUT/switch.sh" --yes >"$W/switch.log" 2>&1 || {
+    tail -n 30 "$W/switch.log"
+    fail "switch stopped although only the time reference was exceeded"
+}
+grep -q 'projected duration exceeds the reference' "$W/switch.log" || fail "no warning about the time reference before the switch"
 for s in crawler relabeler analyzer viewer storage-guard; do
     same "$s on the new image" "$P/$(case $s in relabeler | storage-guard) echo crawler ;; *) echo "$s" ;; esac):new" "$(svc_image "$s")"
     docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$(compose ps -aq "$s")" | grep -q "^DATABASE_URL=.*@$NEWC:5432/twitter_accounts_classifier" || fail "$s DATABASE_URL does not point at the new DB"

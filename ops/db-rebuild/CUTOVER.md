@@ -109,7 +109,7 @@ docker compose --project-name <COMPOSE_PROJECT> --project-directory <PROD_COMPOS
 | `run-migration.sh --init-only` | 新 DB の initdb、起動 (bulk)、baseline の適用 | A (前日まで) |
 | `preflight.sh` | 切り替え前の確認。`--stop-watchtower` で watchtower を止める | A (前日夜、停止枠の直前にもう一度) |
 | `freeze.sh` | 停止枠の開始。blocker を最初に止めて旧 DB を読み取り専用にし、件数と最大 ID を記録する。`--check` は凍結後に旧 DB が変わっていないことの確認 | B |
-| `run-migration.sh` | `load.sh` と `verify.sh` を、70% ルールの予算の中で実行する | B |
+| `run-migration.sh` | `load.sh` と `verify.sh` を、完了まで実行する (時間は目安であり、超えても止めない) | B |
 | `switch.sh` | `roles`、`steady`、`gate`、`finish`、`apps`、`blocker`。既定の `all` は blocker を含まない | B、C (24 時間後に `blocker`) |
 | `postcheck.sh` | 切り替え後の確認 | B 直後、C |
 | `rollback.sh` | 旧 DB と旧イメージへ戻す | 判断基準を満たしたとき |
@@ -134,21 +134,31 @@ docker compose --project-name <COMPOSE_PROJECT> --project-directory <PROD_COMPOS
 | `NEW_IMAGE_CRAWLER`、`_VIEWER`、`_BLOCKER`、`_ANALYZER` | `build-images.sh` の出力 | オーケストレーター |
 | `EST_PREPARE_SECS`、`EST_LOAD_SECS`、`EST_RESTORE_SECS`、`EST_VERIFY_SECS`、`EST_STEADY_SECS` | リハーサルの外挿値と fio を踏まえた見積もり (秒) | Task 9 の結果 |
 | `KEEP_UPDATED`、`ENUM_UPDATED` | 旧データの `changeType='updated'` を残すか | ユーザー (Task 9 の未決事項) |
-| `WINDOW_MINUTES`、`BUDGET_PERCENT` | 停止枠 (既定 240 分) と予算の割合 (既定 70) | ユーザー |
+| `WINDOW_MINUTES`、`BUDGET_PERCENT` | 停止枠 (既定 240 分) と、警告を出す目安の割合 (既定 70)。工程は止めない | ユーザー |
 
-## 5. 時間予算
+## 5. 時間の目安
 
-停止枠は 240 分で、予算は 70% の 168 分である。経過時間は `freeze.sh` の開始時刻から数える。
+停止枠は 240 分で、目安は 70% の 168 分である。経過時間は `freeze.sh` の開始時刻から数える。
 
-| 工程 | 目安 | 上限と扱い |
+**時間は警告にしか使わない。** 経過時間と残りの見積もり (`EST_*`) の合計が目安を超えると、`run-migration.sh` の各工程の前と `switch.sh` の前に警告を出すが、そのまま続ける。停止した後に時間を理由に中断すると、停止時間が無駄になって、もう一度停止が要るためである。移行は、時間がかかっても完了まで進める。
+
+| 工程 | 目安 | 扱い |
 | --- | --- | --- |
 | freeze (blocker の停止と確認、全サービスの停止、旧 DB の凍結、件数の記録) | 10〜15 分 | 30 分を超えるなら原因を調べる。blocker が実行中の run を終えない場合は先へ進まない |
-| run-migration (prepare、load、restore、verify) | `EST_*` の合計 | **経過 + 残りの見積もりが予算 (168 分) を超えると、各工程の前に中断する**。各工程には、予算の残りから後続の見積もりを引いた時間の `timeout` をかける |
-| switch (roles、steady、gate、finish、apps) | `EST_STEADY_SECS` + 約 10 分 | 残りが `SWITCH_RESERVE_MINUTES` (既定 40) 未満なら、switch へ進まない |
+| run-migration (prepare、load、restore、verify) | `EST_*` の合計 | 目安を超えても止めない。各工程の前に、経過時間と残りの見積もりを表示する |
+| switch (roles、steady、gate、finish、apps) | `EST_STEADY_SECS` + 約 10 分 | 目安を超えても止めない |
 | postcheck | 約 5 分 | 失敗したらロールバックの判断基準へ |
-| 予備 | 約 40 分 | ロールバックの実行に使う |
 
-予算超過で中断すると、`STATE_DIR/ABORTED` ができて `switch.sh` が拒否する。旧 DB は読み取り専用のままで、`DATABASE_URL` は変わっていない。`rollback.sh --reason abort-before-cutover` で停止前の状態へ戻す。
+**切り替えの前に止めるのは、正しさの失敗だけである。**
+
+- 検証ゲートの FAIL (件数、ハッシュ、ラベルの不一致、孤児、外部キーの失敗)
+- `preflight.sh` の安全確認の失敗 (ディスク容量、watchtower が止まっていない、blocker の実行中の呼び出し)
+- 旧 DB の読み取り専用の凍結が失われたこと (`freeze.sh --check-readonly` が、各工程の前に確かめる)
+- 工程そのものの失敗
+
+IO 圧力による中断は、稼働中の本番 DB を読むリハーサルだけで使う (`OLD_GUARD_SSH`)。サービスを止めた切り替えの間は使わない。`run-migration.sh` は IO 圧力を `STATE_DIR/psi.log` に記録するだけで、止めない。
+
+止めた場合、旧 DB は読み取り専用のままで、`DATABASE_URL` は変わっていない。原因を直して `run-migration.sh --from <工程>` で再開するか、`rollback.sh --reason abort-before-cutover` で停止前の状態へ戻す。
 
 ## 6. マスターチェックリスト
 
@@ -173,7 +183,7 @@ docker compose --project-name <COMPOSE_PROJECT> --project-directory <PROD_COMPOS
 | # | 担当 | 手順とコマンド | 期待される出力 | 停止条件 |
 | --- | --- | --- | --- | --- |
 | B1 | オーケストレーター | `cutover/freeze.sh --yes` (A9 の承認の後) | `blocker is stopped; unresolved outbox=0, running runs=0`、`old DB rejects writes: cannot execute CREATE TABLE in a read-only transaction`、`freeze complete` | blocker に未解決の outbox がある場合は 9.1。旧 DB が書き込みを受け付ける場合は先へ進まない |
-| B2 | オーケストレーター | `cutover/run-migration.sh` | 各工程の `phase ... finished`、`migration and verification gates passed after Ns of the window (budget 10080s)` | `ABORT before cutover` (予算超過) は 5 章。`the verification gates did not pass` は原因を究明し、窓内に直せなければロールバック |
+| B2 | オーケストレーター | `cutover/run-migration.sh` | 各工程の `phase ... finished`、`migration and verification gates passed after Ns of the window (reference 10080s)`。目安を超えると `WARN` が出るが続く | `the verification gates did not pass` は原因を究明して `--from verify` などで再開する。直せなければロールバック。`the read-only freeze was lost` は旧 DB が書き込みを受け付けているため、続けずに原因を調べる (5 章) |
 | B3 | オーケストレーター | `cutover/switch.sh --yes` (roles、steady、gate、finish、apps) | `role self-check` がすべて `ok`、`table counts are identical before and after the restart`、各サービスの `is up`、`services are on the new DB` | どの工程も失敗したらそこで止まる。`apps` より前の失敗は、アプリが止まったままで旧 DB も無傷。判断はロールバックか原因の修正 |
 | B4 | オーケストレーター | `cutover/postcheck.sh` | `postcheck: N PASS, N WARN, 0 FAIL` | FAIL があれば 7 章の判断基準へ |
 | B5 | ユーザー | postcheck の結果と、窓の残り時間を確認して、切り替えの成功を宣言する | | |
@@ -203,7 +213,7 @@ docker compose --project-name <COMPOSE_PROJECT> --project-directory <PROD_COMPOS
 
 - 検証ゲートの再実行が失敗した場合 (`switch.sh gate` が失敗した場合を含む)
 - 切り替え後 1 時間以内にエラーが継続した場合
-- 切り替え前の中断 (予算超過、ゲートの失敗、判断による中止)
+- 切り替え前の中断 (検証ゲートの失敗、凍結の喪失、判断による中止。時間の超過だけでは中断しない)
 
 ### 実行
 
@@ -228,8 +238,9 @@ ops/db-rebuild/cutover/rollback.sh --reason <gate-failed|errors-1h|abort-before-
 | watchtower が止まっていない、または止まったことを確認できない | `freeze.sh`、`switch.sh apps` に進まない |
 | ユーザーの承認が無い | 何も実行しない |
 | `preflight.sh` に FAIL がある | 停止枠を始めない |
-| 予算超過 (経過 + 残りの見積もりが 168 分を超える) | 切り替えを実施せず中断し、`rollback.sh --reason abort-before-cutover`。方式の見直しをユーザーに報告する |
-| 検証ゲートが通らない | 切り替えない。原因を究明する。窓内に直せなければロールバック |
+| 時間の目安の超過 (経過 + 残りの見積もりが 168 分を超える) | **止めない。** 警告を記録して続ける (5 章) |
+| 検証ゲートが通らない | 切り替えない。原因を究明して、直して再開する。直せなければロールバック |
+| 旧 DB の読み取り専用の凍結が失われた | 移行を続けない。原因を調べ、必要なら `freeze.sh` で凍結し直す |
 | blocker に未解決の outbox がある | 9.1 |
 | `switch.sh roles` の自己点検が失敗 | `apps` に進まない |
 | 新 DB が予期せず再起動した (crash recovery) | 破棄して作り直す (9.3)。復旧を試みない |
@@ -248,7 +259,7 @@ ops/db-rebuild/cutover/rollback.sh --reason <gate-failed|errors-1h|abort-before-
 
 ### 9.2 freeze の途中で失敗した
 
-`freeze.sh` を再実行する。停止済みのサービスは飛ばし、ACL の控えは最初の 1 回だけ書く。旧 DB が既に読み取り専用の場合も、そのまま続く。窓を使い切ったら `rollback.sh --reason abort-before-cutover`。
+`freeze.sh` を再実行する。停止済みのサービスは飛ばし、ACL の控えは最初の 1 回だけ書く。旧 DB が既に読み取り専用の場合も、そのまま続く。続けられない場合は `rollback.sh --reason abort-before-cutover`。
 
 ### 9.3 新 DB を破棄して作り直す
 
@@ -302,7 +313,8 @@ blocker の outbox の状態は新 DB にしか無い。旧 DB へ戻すと、bl
 `cutover/selftest.sh` は、scratch のコンテナ (名前は `tac-t11st` 始まり) だけで、次を通しで実行して検査する。本番には触れない。
 
 - dry-run が何も変えないこと。
-- 予算超過で中断し、`ABORTED` により `switch.sh` が拒否し、`rollback.sh` で旧状態へ戻ること。
+- 旧 DB の読み取り専用の凍結が失われると、移行が進まず `switch.sh` が拒否し、`rollback.sh` で旧状態へ戻ること。
+- 時間の目安を超えても、移行と切り替えが警告だけで完了まで進むこと。検証ゲートの FAIL では止まり、直すと再開できること。
 - 未解決の outbox があると `freeze.sh` が拒否し、blocker は止まるが他のサービスは止まらないこと。
 - 通しの切り替え (旧 DB はスキーマに migration を適用して架空のデータを入れたもの、新 DB は baseline に対して Task 9 の `load.sh` と `verify.sh` で投入)。各サービスのイメージと `DATABASE_URL` の書き換え (クエリ文字列と専用ロールの保持を含む)、アプリ用ロールが非スーパーユーザーで直接 DML が拒否されること、`wal_level=replica`、`postcheck.sh` の通過。
 - 切り替え後のロールバックで、旧イメージ、旧 DB、書き込み可、blocker 停止、他プロジェクトのコンテナの不変が成り立つこと。

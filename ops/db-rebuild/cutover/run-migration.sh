@@ -5,10 +5,10 @@
 #   --init-only  新 DB の initdb、起動、baseline の適用だけを行う (停止枠の前に、前日までに実施する)
 #   --from       途中から再開する。load.sh は step 単位で再開できるため、同じコマンドの再実行でもよい
 #
-# 70% ルール: 停止枠の BUDGET_PERCENT % を予算とする。
-# 経過時間に残りの工程の見積もり (EST_*_SECS、リハーサルの外挿) を足した値が予算を超える場合は、切り替えへ進まず中断する。
-# 中断しても旧 DB は読み取り専用のままで、ロールバックは rollback.sh。
-# 各工程には、予算の残りから後続の見積もりを引いた時間の上限 (timeout) をかける。
+# 時間は目安であり、工程を打ち切らない。経過時間と残りの見積もり (EST_*_SECS、リハーサルの外挿) の合計が
+# 停止枠の BUDGET_PERCENT % を超えるときは警告を出して続ける。
+# 切り替えの前に止めるのは、正しさの失敗だけ: 検証ゲートの FAIL、旧 DB の読み取り専用の凍結が失われたこと、工程の失敗。
+# 止めた場合、旧 DB は読み取り専用のままで、ロールバックは rollback.sh。
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -60,15 +60,7 @@ if [ "$INIT_ONLY" = 1 ]; then
     exit 0
 fi
 
-refuse_if_aborted
 require_step freeze
-
-abort_cutover() { # reason
-    log "ABORT before cutover: $1"
-    printf '%s\n' "$1" | write_state ABORTED
-    log "The old DB stays read-only and no DATABASE_URL was changed. Decide, then run rollback.sh --reason abort-before-cutover"
-    exit 3
-}
 
 banner "old DB must be unchanged since the freeze"
 [ "$DRY_RUN" = 1 ] || "$CUT_DIR/freeze.sh" --check
@@ -108,31 +100,16 @@ est_from() {
     done
     echo "$total"
 }
-# 指定した工程より後ろだけの合計。
-est_after() {
-    local p total=$EST_STEADY_SECS seen=0
-    for p in "${PHASES[@]}"; do
-        if [ "$seen" = 1 ] && ! step_done "migrate-$p"; then total=$((total + $(est_of "$p"))); fi
-        [ "$p" = "$1" ] && seen=1
-    done
-    echo "$total"
-}
-
-run_budgeted() { # phase command...
-    local ph="$1" cap
+run_phase() { # phase command...
+    local ph="$1" rc=0
     shift
     if [ "$DRY_RUN" = 1 ]; then
-        log "[dry-run] phase $ph: would check the budget (remaining estimate $(est_from "$ph")s) and run: $*"
+        log "[dry-run] phase $ph: would report the time projection (remaining estimate $(est_from "$ph")s) and run: $*"
         return 0
     fi
-    check_budget "before $ph" "$(est_from "$ph")" || abort_cutover "projected duration exceeds ${BUDGET_PERCENT}% of the ${WINDOW_MINUTES}min window before phase $ph"
-    cap=$(($(window_budget_secs) - $(window_elapsed_secs) - $(est_after "$ph")))
-    log "phase $ph is capped at ${cap}s"
-    local rc=0
-    phase "migrate: $ph" timeout -k 60 "${cap}s" "$@" || rc=$?
-    if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
-        abort_cutover "phase $ph exceeded its time cap (${cap}s)"
-    fi
+    report_budget "before $ph" "$(est_from "$ph")"
+    "$CUT_DIR/freeze.sh" --check-readonly
+    phase "migrate: $ph" "$@" || rc=$?
     [ "$rc" = 0 ] || die "phase $ph failed (rc=$rc); fix the cause and re-run with --from $ph"
     mark_done "migrate-$ph"
 }
@@ -151,14 +128,14 @@ for ph in "${PHASES[@]}"; do
         continue
     fi
     case "$ph" in
-        prepare) run_budgeted prepare "$RB_DIR/load.sh" prepare ;;
-        load) run_budgeted load "$RB_DIR/load.sh" load ;;
-        restore) run_budgeted restore "$RB_DIR/load.sh" restore ;;
+        prepare) run_phase prepare "$RB_DIR/load.sh" prepare ;;
+        load) run_phase load "$RB_DIR/load.sh" load ;;
+        restore) run_phase restore "$RB_DIR/load.sh" restore ;;
         verify)
             unmark verified
             if [ "$DRY_RUN" = 1 ]; then
                 log "[dry-run] phase verify: would run verify.sh (gates: counts and hashes, labels, invariants, EXPLAIN, size)"
-            elif run_budgeted verify "$RB_DIR/verify.sh"; then
+            elif run_phase verify "$RB_DIR/verify.sh"; then
                 cp "$WORK_DIR/verify.tsv" "$STATE_DIR/verify.cutover.tsv"
                 mark_done verified
             fi
@@ -168,6 +145,6 @@ done
 
 [ "$DRY_RUN" = 1 ] || {
     step_done verified || die "the verification gates did not pass; do not switch"
-    log "migration and verification gates passed after $(window_elapsed_secs)s of the window (budget $(window_budget_secs)s)"
+    log "migration and verification gates passed after $(window_elapsed_secs)s of the window (reference $(window_budget_secs)s)"
     log "Next: switch.sh"
 }

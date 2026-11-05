@@ -35,13 +35,9 @@ NEW_OVERRIDE="$STATE_DIR/compose.new.yaml"
 SCHEMA_FILE="$REPO_ROOT/prisma/baseline/functions.sql"
 
 precheck() {
-    refuse_if_aborted
     require_step freeze verified
     if [ "$DRY_RUN" != 1 ]; then
-        local left=$((WINDOW_MINUTES * 60 - $(window_elapsed_secs)))
-        if [ "$left" -lt $((SWITCH_RESERVE_MINUTES * 60)) ] && ! step_done switch_started; then
-            die "only $((left / 60)) min of the ${WINDOW_MINUTES}min window remain (< ${SWITCH_RESERVE_MINUTES} min reserve). Decide: rollback.sh --reason abort-before-cutover"
-        fi
+        report_budget "before the switch" "$EST_STEADY_SECS"
         "$CUT_DIR/freeze.sh" --check
     fi
 }
