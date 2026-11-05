@@ -19,3 +19,6 @@ data/
 
 # Crawl logs can contain real account usernames.
 logs/
+
+# 切り替え手順の設定。秘密を含む。
+ops/db-rebuild/cutover/cutover.env

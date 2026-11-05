@@ -13,6 +13,7 @@ DB 作り直しで使う新しい postgres コンテナの定義と運用スク�
 | `initdb.sh` | データディレクトリの初期化 (一度だけ) |
 | `switch-to-steady.sh` | bulk から steady への切り替えと最初のベースバックアップ |
 | `verify-restore.sh` | ベースバックアップを scratch へリストアして検証する |
+| `cutover/`、[CUTOVER.md](./CUTOVER.md) | 本番切り替えの手順書と、事前確認、凍結、移行、切り替え、ロールバック、事後確認のスクリプト |
 
 旧 DB から新 DB への移行ツール (`load.sh`、`verify.sh`、`rehearsal.sh` など) は [MIGRATION.md](./MIGRATION.md) を参照する。
 
@@ -109,5 +110,6 @@ ops/db-rebuild/verify-restore.sh /mnt/ssd/twitter-accounts-classifier/postgres-n
 
 ## 注意
 
+- 本番切り替えでは、`NEW_DB_USER` (initdb のブートストラップのスーパーユーザー) を `crawler` 以外 (例 `tac_owner`) にする。ブートストラップのスーパーユーザーは降格できず、アプリ用の `crawler` ロールがスーパーユーザーになると、`AccountLabelState` などへの直接 DML の REVOKE が効かない ([CUTOVER.md](./CUTOVER.md) の 2.3 章)。
 - 新 DB は、旧 DB と並べて `/mnt/ssd` の空き (約 145GB) に作る前提である。投入前に空きを確認する。
-- アプリのコンテナから新 DB へ接続する経路 (ネットワークの共有など) は、本ファイルでは定義していない。別途定める切り替え手順書で決める。
+- アプリのコンテナから新 DB へ接続する経路 (ネットワークの共有など) は、本ファイルでは定義していない。切り替え手順書 ([CUTOVER.md](./CUTOVER.md)) の 2.5 章で決めている。
