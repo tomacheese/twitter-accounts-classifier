@@ -1,11 +1,11 @@
 #!/bin/bash
-# 新スキーマ (prisma/baseline) の統合 smoke。使い捨ての DB を作り、本番と同じロール分離 (所有者、crawler、analyzer、viewer) で
-# crawler の永続化と relabel、analyzer の read model 更新、viewer のアカウントページ向けクエリを順に通す。
+# 新スキーマ (prisma/baseline) の統合 smoke。
+# 使い捨ての DB に本番と同じロール分離で接続し、crawler、analyzer、viewer の主要経路を順に通す。
 # 実データは使わず、架空のアカウントとツイートだけを投入する。Twitter/X には接続しない。
 #
 # 使い方: SMOKE_CONFIRM_SCRATCH=1 SMOKE_ADMIN_URL=postgresql://<superuser>:<password>@<host>:<port>/postgres scripts/db/e2e-smoke.sh
-# クラスタ全体のロール (crawler、analyzer、viewer) のパスワードを書き換えるため、本番では実行しない。
-# 使い捨てのクラスタであることを SMOKE_CONFIRM_SCRATCH=1 で明示する。
+# クラスタ全体のロールのパスワードを書き換えるため、本番では実行しない。
+# 使い捨てのクラスタであることを SMOKE_CONFIRM_SCRATCH=1 で明示し、接続先は localhost か 127.0.0.1 に限る。
 set -euo pipefail
 
 : "${SMOKE_ADMIN_URL:?SMOKE_ADMIN_URL must be set (a throwaway PostgreSQL cluster only)}"
@@ -14,6 +14,14 @@ DB="e2e_smoke_$$"
 BASE="${SMOKE_ADMIN_URL%/*}"
 scheme="${BASE%%://*}"
 hostport="${BASE#*@}"
+
+case "$hostport" in
+    localhost:* | 127.0.0.1:*) ;;
+    *)
+        echo "ERROR: SMOKE_ADMIN_URL must point at localhost or 127.0.0.1 (got: $hostport)" >&2
+        exit 1
+        ;;
+esac
 
 if [ "${SMOKE_CONFIRM_SCRATCH:-}" != "1" ]; then
     echo "ERROR: set SMOKE_CONFIRM_SCRATCH=1 to confirm the target is a throwaway cluster" >&2
