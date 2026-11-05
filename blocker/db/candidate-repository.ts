@@ -21,9 +21,9 @@ export interface BlockCandidate {
 }
 
 /**
- * 最新ラベル値と confidence は `AccountLabelLatest` に保持されているため、
- * 増え続ける `AccountLabel` 履歴は参照しない。対象ラベル (`rule.targetLabels`) と
- * confidence 閾値で `AccountLabelLatest` を直接絞り込み、アカウントごとに最も高い
+ * true のラベルと confidence は `AccountActiveLabel` に保持されているため、
+ * 評価状態の全体を持つ `AccountLabelState` は参照しない。対象ラベル (`rule.targetLabels`) と
+ * confidence 閾値で `AccountActiveLabel` を直接絞り込み、アカウントごとに最も高い
  * confidence のラベルだけを候補判定へ渡す。
  * @param prisma - Prisma クライアント
  * @param blockerId - このブロック実行を行うログインアカウントの `Account.id`
@@ -53,26 +53,23 @@ export async function selectBlockCandidates(
       SELECT * FROM unnest(${labels}::text[], ${thresholds}::float8[]) AS t(label_key, threshold)
     ),
     relevant_labels AS (
-      SELECT ld.id, ld."currentRuleVersion", rt.threshold
+      SELECT ld.id, ld."currentRuleVersionNo", rt.threshold
       FROM "LabelDefinition" ld
       JOIN rule_thresholds rt ON rt.label_key = ld.key
     ),
     best_label_per_account AS (
-      SELECT DISTINCT ON (all_latest."accountId")
-        all_latest."accountId",
-        all_latest."labelDefinitionId",
-        all_latest."confidence"
-      FROM "AccountLabelLatest" all_latest
-      JOIN relevant_labels rl ON rl.id = all_latest."labelDefinitionId"
-      -- ruleVersion 不一致の行は stale とみなし候補から除外する。
-      -- currentRuleVersion を一斉に上げるデプロイ直後は relabel が追いつくまで
-      -- 対象ラベルの候補が一時的にゼロになり得るため、大量バージョン更新時は relabel queue の
-      -- 進捗を並行して監視する。
-      WHERE all_latest."value" = true
-        AND all_latest."confidence" >= rl.threshold
-        AND all_latest."ruleVersion" = rl."currentRuleVersion"
-        AND all_latest."accountId" != ${blockerId}::bigint
-      ORDER BY all_latest."accountId", all_latest."confidence" DESC
+      SELECT DISTINCT ON (active."accountId")
+        active."accountId",
+        active."labelDefinitionId",
+        active."confidence"
+      FROM "AccountActiveLabel" active
+      JOIN relevant_labels rl ON rl.id = active."labelDefinitionId"
+      -- ruleVersionNo が現行と一致しない行は stale とみなし候補から除外する。
+      -- 版を一斉に上げた直後は、relabel が追いつくまで候補が一時的にゼロになり得る。
+      WHERE active."confidence" >= rl.threshold
+        AND active."ruleVersionNo" = rl."currentRuleVersionNo"
+        AND active."accountId" != ${blockerId}::bigint
+      ORDER BY active."accountId", active."confidence" DESC
     )
     SELECT b."accountId"::text AS "accountId", b."labelDefinitionId", b."confidence"
     FROM best_label_per_account b

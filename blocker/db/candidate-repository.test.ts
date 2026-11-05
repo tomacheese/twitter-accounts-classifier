@@ -1,9 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { readdirSync, readFileSync } from 'node:fs'
-import path from 'node:path'
 import { selectBlockCandidates } from './candidate-repository'
 import { createSyntheticId } from 'id-boundary'
 import { getPrismaClient } from './client'
+import { seedTrueLabel } from './label-test-support'
 
 function fakePrismaReturning(rows: unknown[]) {
   return {
@@ -144,7 +143,7 @@ describe('selectBlockCandidates', () => {
 })
 
 describe('selectBlockCandidates SQL shape', () => {
-  it('uses AccountLabelLatest confidence without scanning AccountLabel history', async () => {
+  it('uses AccountActiveLabel confidence without scanning the evaluation state of every account', async () => {
     const prisma = fakePrismaReturning([])
 
     await selectBlockCandidates(
@@ -158,8 +157,9 @@ describe('selectBlockCandidates SQL shape', () => {
 
     const [strings] = prisma.$queryRaw.mock.calls[0]
     const sql = (strings as readonly string[]).join('')
-    expect(sql).toContain('all_latest."confidence"')
-    expect(sql).not.toContain('FROM "AccountLabel"')
+    expect(sql).toContain('active."confidence"')
+    expect(sql).toContain('FROM "AccountActiveLabel" active')
+    expect(sql).not.toContain('"AccountLabelState"')
   })
 
   it('excludes rows via NOT EXISTS against Block, BlockAction, and Follow', async () => {
@@ -182,7 +182,7 @@ describe('selectBlockCandidates SQL shape', () => {
     expect(sql).toContain(`ba."result" = 'success'`)
   })
 
-  it('requires AccountLabelLatest.ruleVersion to match LabelDefinition.currentRuleVersion', async () => {
+  it('requires AccountActiveLabel.ruleVersionNo to match LabelDefinition.currentRuleVersionNo', async () => {
     const prisma = fakePrismaReturning([])
 
     await selectBlockCandidates(
@@ -196,7 +196,7 @@ describe('selectBlockCandidates SQL shape', () => {
 
     const [strings] = prisma.$queryRaw.mock.calls[0]
     const sql = (strings as readonly string[]).join('')
-    expect(sql).toContain('"ruleVersion" = rl."currentRuleVersion"')
+    expect(sql).toContain('"ruleVersionNo" = rl."currentRuleVersionNo"')
   })
 
   it('未解決 outbox entry がある候補を BlockOutboxEntry への NOT EXISTS で除外する', async () => {
@@ -240,32 +240,6 @@ describe('selectBlockCandidates SQL shape', () => {
   })
 })
 
-describe('AccountLabelLatest_block_candidate_idx migration', () => {
-  // tsconfig の module は CommonJS のため import.meta は使えない。
-  // eslint-disable-next-line unicorn/prefer-module
-  const migrationsDir = path.join(__dirname, '../../prisma/migrations')
-  const dirs = readdirSync(migrationsDir).filter((d) =>
-    d.includes('add_account_label_latest_block_candidate_index'),
-  )
-  const sql = readFileSync(path.join(migrationsDir, dirs[0], 'migration.sql'), 'utf8')
-
-  it('該当 migration がちょうど1件存在する', () => {
-    expect(dirs.length).toBe(1)
-  })
-
-  it('CREATE INDEX CONCURRENTLY で非トランザクション実行できる形にする', () => {
-    expect(sql).toContain('CREATE INDEX CONCURRENTLY IF NOT EXISTS')
-  })
-
-  it('label ごとの confidence 降順 Index Cond を成立させる列順にする', () => {
-    expect(sql).toContain('("labelDefinitionId", "ruleVersion", "confidence" DESC, "accountId")')
-  })
-
-  it('value = true の部分 index にする', () => {
-    expect(sql).toContain('WHERE "value" = true')
-  })
-})
-
 describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integration)', () => {
   const prisma = getPrismaClient()
 
@@ -275,7 +249,9 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
     await prisma.block.deleteMany()
     await prisma.blockAccountRun.deleteMany()
     await prisma.blockRun.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.account.deleteMany()
     await prisma.labelDefinition.deleteMany()
   })
@@ -306,19 +282,12 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'spam', description: '架空のテスト用ラベル' },
+      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersionNo: 1 },
     })
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId: blockedId,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.9,
-        reason: 'test',
-        method: 'rule',
-        ruleVersion: 'v1',
-        labeledAt: new Date(),
-      },
+    await seedTrueLabel(prisma, {
+      accountId: blockedId,
+      labelDefinitionId: labelDefinition.id,
+      confidence: 0.9,
     })
     const blockRun = await prisma.blockRun.create({
       data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
@@ -380,19 +349,12 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'spam', description: '架空のテスト用ラベル' },
+      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersionNo: 1 },
     })
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId: blockedId,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.9,
-        reason: 'test',
-        method: 'rule',
-        ruleVersion: 'v1',
-        labeledAt: new Date(),
-      },
+    await seedTrueLabel(prisma, {
+      accountId: blockedId,
+      labelDefinitionId: labelDefinition.id,
+      confidence: 0.9,
     })
     const blockRun = await prisma.blockRun.create({
       data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
@@ -456,19 +418,12 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersion: 'v1' },
+      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersionNo: 1 },
     })
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId: blockedId,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.9,
-        reason: 'test',
-        method: 'rule',
-        ruleVersion: 'v1',
-        labeledAt: new Date(),
-      },
+    await seedTrueLabel(prisma, {
+      accountId: blockedId,
+      labelDefinitionId: labelDefinition.id,
+      confidence: 0.9,
     })
     const blockRun = await prisma.blockRun.create({
       data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
@@ -532,19 +487,12 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'spam', description: '架空のテスト用ラベル' },
+      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersionNo: 1 },
     })
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId: blockedId,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.9,
-        reason: 'test',
-        method: 'rule',
-        ruleVersion: 'v1',
-        labeledAt: new Date(),
-      },
+    await seedTrueLabel(prisma, {
+      accountId: blockedId,
+      labelDefinitionId: labelDefinition.id,
+      confidence: 0.9,
     })
     const blockRun = await prisma.blockRun.create({
       data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
@@ -608,19 +556,12 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersion: 'v1' },
+      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersionNo: 1 },
     })
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId: blockedId,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.9,
-        reason: 'test',
-        method: 'rule',
-        ruleVersion: 'v1',
-        labeledAt: new Date(),
-      },
+    await seedTrueLabel(prisma, {
+      accountId: blockedId,
+      labelDefinitionId: labelDefinition.id,
+      confidence: 0.9,
     })
     const blockRun = await prisma.blockRun.create({
       data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
@@ -674,7 +615,7 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersion: 'v1' },
+      data: { key: 'spam', description: '架空のテスト用ラベル', currentRuleVersionNo: 1 },
     })
 
     // confidence 降順に 5 件の適格候補を用意し、上位 2 件 (最も confidence が高い) を
@@ -694,17 +635,10 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
           accountCreatedAt: new Date(),
         },
       })
-      await prisma.accountLabelLatest.create({
-        data: {
-          accountId: targetIds[index],
-          labelDefinitionId: labelDefinition.id,
-          value: true,
-          confidence,
-          reason: 'test',
-          method: 'rule',
-          ruleVersion: 'v1',
-          labeledAt: new Date(),
-        },
+      await seedTrueLabel(prisma, {
+        accountId: targetIds[index],
+        labelDefinitionId: labelDefinition.id,
+        confidence,
       })
     }
     await prisma.block.create({

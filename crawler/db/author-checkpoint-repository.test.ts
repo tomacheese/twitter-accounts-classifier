@@ -308,7 +308,7 @@ describe('persistAuthorResultAtomic', () => {
     const queryRaw = vi.fn().mockResolvedValue([])
     const txClient = {
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      accountLabelState: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: queryRaw,
@@ -384,7 +384,7 @@ describe('persistAuthorResultAtomic', () => {
     })
     const txClient = {
       tweet: { findUnique: vi.fn().mockResolvedValue(null), upsert: tweetUpsert },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      accountLabelState: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -675,7 +675,7 @@ describe('persistAuthorResultAtomic', () => {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),
       },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      accountLabelState: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -718,7 +718,7 @@ describe('persistAuthorResultAtomic', () => {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),
       },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([{ accountId: 'context1' }]) },
+      accountLabelState: { findMany: vi.fn().mockResolvedValue([{ accountId: 'context1' }]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -759,7 +759,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // account 削除時の FK 違反を避けるため先に消しておく。
       await prisma.block.deleteMany()
       await prisma.tweet.deleteMany()
-      await prisma.accountLabelLatest.deleteMany()
+      await prisma.accountActiveLabel.deleteMany()
+      await prisma.accountLabelState.deleteMany()
       await prisma.crawlAuthorCheckpoint.deleteMany()
       await prisma.crawlAccountLabelRun.deleteMany()
       await prisma.crawlRun.deleteMany()
@@ -839,15 +840,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
         appVersion: 'test',
       })
 
-      const latest = await prisma.accountLabelLatest.findUniqueOrThrow({
-        where: {
-          accountId_labelDefinitionId: {
-            accountId: 'acct-1',
-            labelDefinitionId: labelDefinitionIds.get('test_ai_media') ?? '',
-          },
-        },
+      // true の行だけが AccountActiveLabel に残るため、行があること自体が評価 true を表す。
+      const labelDefinitionId = labelDefinitionIds.get('test_ai_media')
+      if (labelDefinitionId === undefined) throw new Error('test_ai_media definition is missing')
+      await prisma.accountActiveLabel.findUniqueOrThrow({
+        where: { accountId_labelDefinitionId: { accountId: 'acct-1', labelDefinitionId } },
       })
-      expect(latest.value).toBe(true)
     })
   },
 )

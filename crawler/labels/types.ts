@@ -188,7 +188,7 @@ export interface LabelRule {
   /**
    * ルールの判定ロジックのバージョン。判定ロジックだけでなく、
    * confidence/evidence の算出式を変更する場合も必ず bump すること。
-   * blocker はこの値と `AccountLabelLatest.ruleVersion` の一致を要求するため、
+   * blocker はこの値と `AccountActiveLabel` の版 (`LabelRuleVersion.ruleVersion`) の一致を要求するため、
    * bump しないまま算出式だけ変えると新旧の confidence が同一 `ruleVersion` の下で混在してしまう。
    */
   version: string

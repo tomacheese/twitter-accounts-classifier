@@ -60,7 +60,7 @@ Viewer には認証機構がなく、フォロー・フォロワー・ブロッ�
 | `RELABELER_WORKER_BATCH_SIZE`         | -    | relabeler worker が 1 cycle あたりに claim する work item の上限件数 (concurrency 分の合計ではなく 1 レーンあたりの値)。デフォルト 2000                                                                                   |
 | `RELABELER_WORKER_CONCURRENCY`        | -    | relabeler worker の evaluate フェーズの並行度。デフォルト 1                                                                                                                                                               |
 | `RELABELER_WORKER_CHUNK_SIZE`         | -    | relabeler worker が claim/evaluate する際の 1 chunk あたりの account 件数。デフォルト 1000                                                                                                    |
-| `RELABELER_LABEL_LOOKUP_CHUNK_SIZE`   | -    | relabeler producer の stale scan が AccountLabelLatest を lookup する際の 1 chunk あたりの account 件数。デフォルト 1000                                                                                                  |
+| `RELABELER_LABEL_LOOKUP_CHUNK_SIZE`   | -    | relabeler producer の stale scan が AccountLabelState を lookup する際の 1 chunk あたりの account 件数。デフォルト 1000                                                                                                  |
 | `RELABELER_ORPHAN_RECOVERY_BATCH_SIZE` | -    | relabeler が孤立した work item を回復する際の 1 回あたりの件数。デフォルト 1000 |
 
 ## relabel backfill の運用契約

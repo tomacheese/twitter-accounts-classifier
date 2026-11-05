@@ -1,9 +1,14 @@
-import { PrismaClient } from '../generated/prisma'
+import type { PrismaClient } from '../generated/prisma'
+import { disconnectPrisma, getPrismaClient } from '../db/client'
 import { LabelRuleRegistry } from '../labels/registry'
 import { ALL_LABEL_RULES } from '../labels/all-rules'
 import { runRelabelBackfill } from '../relabel'
 import { runRelabelWorkerCycleOnce } from '../relabel-worker'
-import { ensureLabelDefinitionsForRules } from '../db/label-repository'
+import {
+  ensureLabelDefinitionsForRules,
+  ensureRuleVersionNo,
+  recordAccountLabelsBulkForAccounts,
+} from '../db/label-repository'
 
 const SEED_ACCOUNT_COUNT = Number(process.env.BENCHMARK_ACCOUNT_COUNT ?? 2000)
 const FOLLOW_EDGES_PER_ACCOUNT = Number(process.env.BENCHMARK_FOLLOW_EDGES_PER_ACCOUNT ?? 20)
@@ -24,6 +29,14 @@ function assertNotProductionDatabase(databaseUrl: string | undefined): void {
   )
 }
 
+// Account.id は bigint のため、ベンチマーク専用の架空 ID は数字のみで作る。
+const BENCH_ID_BASE = 7_000_000_000_000_000_000n
+const BENCH_TWEET_ID_OFFSET = 500_000_000n
+
+function benchAccountId(index: number): string {
+  return String(BENCH_ID_BASE + BigInt(index))
+}
+
 /**
  * `count` 件の架空アカウント (実在データを含まない合成データ) をツイート1件付きで作成する。
  * `runRelabelBackfill` が処理する stale なアカウントを用意するベンチマーク専用のシード処理。
@@ -34,7 +47,7 @@ async function seed(prisma: PrismaClient, count: number): Promise<void> {
   for (let i = 0; i < count; i++) {
     await prisma.account.create({
       data: {
-        id: `bench-${i}`,
+        id: benchAccountId(i),
         screenName: `bench_user_${i}`,
         displayName: `Bench User ${i}`,
         bio: 'synthetic benchmark account, not a real Twitter/X user',
@@ -43,36 +56,33 @@ async function seed(prisma: PrismaClient, count: number): Promise<void> {
         tweetCount: 1,
         accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
         isBlueVerified: false,
-        tweets: {
-          create: [
-            {
-              id: `bench-${i}-tweet-1`,
-              fullText: 'synthetic benchmark tweet, not real content',
-              createdAt: new Date(),
-              retweetCount: 0,
-              likeCount: 0,
-              replyCount: 0,
-              quoteCount: 0,
-              isReply: false,
-              isRetweet: false,
-              isPromoted: false,
-              isPaidPromotion: false,
-              source: 'benchmark',
-            },
-          ],
-        },
+      },
+    })
+    await prisma.tweet.create({
+      data: {
+        id: String(BENCH_ID_BASE + BENCH_TWEET_ID_OFFSET + BigInt(i)),
+        accountId: benchAccountId(i),
+        fullText: 'synthetic benchmark tweet, not real content',
+        createdAt: new Date(),
+        retweetCount: 0,
+        likeCount: 0,
+        replyCount: 0,
+        isReply: false,
+        isRetweet: false,
+        isPromoted: false,
+        isPaidPromotion: false,
       },
     })
   }
 }
 
 /**
- * Follow 参照クエリ・AccountLabelLatest lookup クエリを現実的な cardinality で再現するため、
- * 各 account に Follow エッジと AccountLabelLatest 行を追加でシードする。
- * 廃止済みラベルも1件混在させ、labelDefinitionId 絞り込みの効果を計測できるようにする。
+ * Follow 参照クエリ・AccountLabelState lookup クエリを現実的な cardinality で再現するため、
+ * 各 account に Follow エッジと、現行版と異なるルール版 ('bench') で評価済みのラベル状態を追加でシードする。
+ * 廃止済みラベルも1件混在させ、廃止ラベルが stale 判定に影響しないことを計測できるようにする。
  * @param prisma - シード投入に使う Prisma クライアント
  * @param accountIds - シード済み account の id 一覧
- * @param registry - currentRuleVersion 解決に使うルールレジストリ
+ * @param registry - ラベル定義の解決に使うルールレジストリ
  */
 async function seedFollowEdgesAndLabels(
   prisma: PrismaClient,
@@ -84,6 +94,9 @@ async function seedFollowEdgesAndLabels(
     data: { key: 'bench_deprecated_label', description: 'benchmark deprecated label' },
   })
   const allLabelDefinitionIds = [...labelDefinitionIds.values(), deprecatedLabelDefinition.id]
+  for (const labelDefinitionId of allLabelDefinitionIds) {
+    await ensureRuleVersionNo(prisma, labelDefinitionId, 'bench')
+  }
 
   for (const [index, accountId] of accountIds.entries()) {
     const followeeIds = Array.from({ length: FOLLOW_EDGES_PER_ACCOUNT }, (_, offset) => {
@@ -95,22 +108,21 @@ async function seedFollowEdgesAndLabels(
       skipDuplicates: true,
     })
 
-    for (const labelDefinitionId of allLabelDefinitionIds) {
-      await prisma.accountLabelLatest.upsert({
-        where: { accountId_labelDefinitionId: { accountId, labelDefinitionId } },
-        create: {
-          accountId,
-          labelDefinitionId,
+    await recordAccountLabelsBulkForAccounts(prisma, {
+      labels: allLabelDefinitionIds.map((labelDefinitionId) => ({
+        accountId,
+        labelDefinitionId,
+        result: {
           value: Math.random() < LABEL_TRUE_RATE,
           confidence: 1,
           reason: 'benchmark seed',
-          method: 'bench',
-          ruleVersion: 'bench',
-          labeledAt: new Date(),
         },
-        update: {},
-      })
-    }
+        method: 'bench',
+        ruleVersion: 'bench',
+      })),
+      expectedRevByAccountId: new Map([[accountId, 0]]),
+      sourceKind: 'relabel',
+    })
   }
 }
 
@@ -178,7 +190,7 @@ async function runWorkerDrainBenchmark(prisma: PrismaClient): Promise<void> {
 
 async function main(): Promise<void> {
   assertNotProductionDatabase(process.env.DATABASE_URL)
-  const prisma = new PrismaClient()
+  const prisma = getPrismaClient()
   try {
     console.log(`Seeding ${SEED_ACCOUNT_COUNT} synthetic accounts...`)
     await seed(prisma, SEED_ACCOUNT_COUNT)
@@ -189,7 +201,7 @@ async function main(): Promise<void> {
     }
 
     if (process.env.BENCHMARK_MODE === 'worker') {
-      const accountIds = Array.from({ length: SEED_ACCOUNT_COUNT }, (_, i) => `bench-${i}`)
+      const accountIds = Array.from({ length: SEED_ACCOUNT_COUNT }, (_, i) => benchAccountId(i))
       console.log(`Seeding follow edges (${FOLLOW_EDGES_PER_ACCOUNT} edges/account) and labels...`)
       await seedFollowEdgesAndLabels(prisma, accountIds, registry)
       await runWorkerDrainBenchmark(prisma)
@@ -207,7 +219,7 @@ async function main(): Promise<void> {
       `Elapsed: ${elapsedMinutes.toFixed(2)} min (${(result.accountsScanned / elapsedMinutes).toFixed(1)} accounts/min)`,
     )
   } finally {
-    await prisma.$disconnect()
+    await disconnectPrisma()
   }
 }
 
@@ -226,7 +238,7 @@ main().catch((error: unknown) => {
 // 3. アカウント作成 + backfill 計測のみの場合:
 //    DATABASE_URL=postgresql://crawler:crawler@localhost:5432/twitter_accounts_classifier \
 //      pnpm --filter crawler exec tsx scripts/relabel-benchmark.ts
-//    Follow/AccountLabelLatest lookup を含む worker drain を計測する場合:
+//    Follow/AccountLabelState lookup を含む worker drain を計測する場合:
 //    DATABASE_URL=postgresql://crawler:crawler@localhost:5432/twitter_accounts_classifier \
 //      BENCHMARK_MODE=worker RELABELER_WORKER_CHUNK_SIZE=1000 RELABELER_LABEL_LOOKUP_CHUNK_SIZE=1000 \
 //      pnpm --filter crawler exec tsx scripts/relabel-benchmark.ts

@@ -133,7 +133,7 @@ export function getRelabelerWorkerChunkSize(): number {
 }
 
 /**
- * scanForStaleAccounts が AccountLabelLatest を lookup する際の1回あたりの account 件数。
+ * scanForStaleAccounts が AccountLabelState を lookup する際の1回あたりの account 件数。
  */
 export function getRelabelerLabelLookupChunkSize(): number {
   return parsePositiveIntEnv('RELABELER_LABEL_LOOKUP_CHUNK_SIZE', 1000)

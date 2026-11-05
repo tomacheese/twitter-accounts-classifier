@@ -34,7 +34,7 @@ SELECT pg_temp.expect(
     'AccountClassificationReasonCount', 'AccountClassificationRuleVersionCount',
     'AccountClassificationValueCount', 'AccountLabelChange', 'BlockAction', 'BlockOutboxEntry',
     'CrawlAccountLabelRun', 'LabelMetricDaily', 'LabelMetricSnapshot', 'LabelRuleVersion',
-    'LabelSummaryCurrent', 'WeeklyReviewSampleBucketCount'
+    'LabelSummaryCurrent', 'RelabelCoverageSnapshot', 'WeeklyReviewSampleBucketCount'
   ],
   'labelDefinitionId column inventory differs'
 );

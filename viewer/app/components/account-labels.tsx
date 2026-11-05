@@ -7,6 +7,12 @@ const BADGE_STYLES = {
   inactive: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
 } as const
 
+const STATUS_TEXT: Record<AccountDetailLabel['status'], string> = {
+  true: '該当',
+  false: '非該当',
+  unevaluable: '評価不能',
+}
+
 /**
  * ラベル 1 件分のカードを描画する。
  * @param props - 表示するラベル (最新評価と再評価履歴を含む)
@@ -14,6 +20,7 @@ const BADGE_STYLES = {
  */
 function LabelCard({ label }: { label: AccountDetailLabel }): React.ReactElement {
   const tone: keyof typeof BADGE_STYLES = label.value ? 'applied' : 'inactive'
+  const detailsAvailable = label.confidence !== null && label.reason !== null
   return (
     <li className="rounded-lg border bg-white p-3 text-sm shadow-sm dark:border-gray-700 dark:bg-gray-800">
       <p className="font-medium">
@@ -22,12 +29,24 @@ function LabelCard({ label }: { label: AccountDetailLabel }): React.ReactElement
         >
           {label.labelKey}
         </span>
-        confidence {label.confidence.toFixed(2)}
+        {label.confidence === null
+          ? STATUS_TEXT[label.status]
+          : `confidence ${label.confidence.toFixed(2)}`}
       </p>
-      <p className="mt-1 text-gray-600 dark:text-gray-400">{label.reason}</p>
-      <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-        {label.method} · {label.ruleVersion} · {formatDateTime(label.labeledAt)}
-      </p>
+      {detailsAvailable ? (
+        <>
+          <p className="mt-1 text-gray-600 dark:text-gray-400">{label.reason}</p>
+          <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+            {label.method} · {label.ruleVersion}
+            {label.labeledAt === null ? '' : ` · ${formatDateTime(label.labeledAt)}`}
+          </p>
+        </>
+      ) : (
+        <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+          {label.ruleVersion}
+          {' · 理由と confidence は保存していません'}
+        </p>
+      )}
       {label.history.length > 0 ? (
         <details className="mt-2 text-xs">
           <summary className="cursor-pointer text-gray-500 dark:text-gray-400">
@@ -91,7 +110,7 @@ export function AccountLabels({ labels }: { labels: AccountDetailLabel[] }): Rea
       {inactive.length > 0 && (
         <details>
           <summary className="cursor-pointer text-sm text-gray-500 dark:text-gray-400">
-            評価済みで非該当のラベル ({inactive.length}件)
+            評価済みで非該当・評価不能のラベル ({inactive.length}件)
           </summary>
           <ul className="mt-2 flex flex-col gap-2">
             {inactive.map((label) => (
