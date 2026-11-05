@@ -19,7 +19,7 @@ async function createAccount(id: string): Promise<void> {
       followingCount: 0,
       tweetCount: 0,
       accountCreatedAt: new Date(),
-      lastCrawledAt: new Date('2026-01-01T00:00:00Z'),
+      crawlState: { create: { lastCrawledAt: new Date('2026-01-01T00:00:00Z') } },
     },
   })
 }
@@ -74,6 +74,7 @@ async function resetDb(): Promise<void> {
   await prisma.reviewFinding.deleteMany()
   await prisma.labelDefinition.deleteMany()
   await prisma.block.deleteMany()
+  await prisma.accountCrawlState.deleteMany()
   await prisma.account.deleteMany()
 }
 
@@ -133,17 +134,6 @@ describe('processAccountSummaryBootstrap transaction options', () => {
 describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () => {
   beforeEach(resetDb)
 
-  it('has a covering index for the Account bootstrap scan', async () => {
-    const rows = await prisma.$queryRaw<{ indexdef: string }[]>`
-      SELECT indexdef FROM pg_indexes
-      WHERE schemaname = current_schema()
-        AND indexname = 'Account_account_summary_latest_cover_idx'
-    `
-
-    expect(rows).toHaveLength(1)
-    expect(rows[0]?.indexdef).toContain('INCLUDE ("screenName", "displayName", "lastCrawledAt")')
-  })
-
   it('does not overwrite an existing classification whose semantics no longer match AccountActiveLabel', async () => {
     const account = await prisma.account.create({
       data: {
@@ -154,7 +144,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-01T00:00:00Z'),
+        crawlState: { create: { lastCrawledAt: new Date('2026-01-01T00:00:00Z') } },
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
@@ -217,7 +207,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: labeledAt,
+        crawlState: { create: { lastCrawledAt: labeledAt } },
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
@@ -280,18 +270,19 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
   })
 
   it('advances cursor/processedCount exactly once per row when two work items race on the same chunk', async () => {
-    // id は同じ桁数なので辞書順と数値順が一致し、チャンク境界を事前に予測できる。
+    // id は bigint の昇順で並ぶため、チャンク境界を事前に予測できる。
+    const baseId = 100_346_667_403n
     for (let i = 0; i < 5; i++) {
       await prisma.account.create({
         data: {
-          id: String(100_346_667_403n + BigInt(i)),
+          id: String(baseId + BigInt(i)),
           screenName: `user${i}`,
           displayName: `User ${i}`,
           followersCount: 0,
           followingCount: 0,
           tweetCount: 0,
           accountCreatedAt: new Date(),
-          lastCrawledAt: new Date(),
+          crawlState: { create: { lastCrawledAt: new Date() } },
         },
       })
     }
@@ -316,25 +307,20 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     ])
 
     // ReadModelBootstrap 行を FOR UPDATE でロックするため、2 つの WorkItem は
-    // acct_concurrent_0/1 のチャンクと acct_concurrent_2/3 のチャンクへ
+    // 先頭 2 件のチャンクと次の 2 件のチャンクへ
     // 直列に (どちらが先でも) 一意に振り分けられ、二重処理は起きない。
     const bootstrap = await prisma.readModelBootstrap.findUnique({
       where: { modelKey: 'account_summary' },
     })
     expect(bootstrap?.processedCount).toBe(4)
-    expect(bootstrap?.cursor).toBe('100401775249')
+    expect(bootstrap?.cursor).toBe(String(baseId + 3n))
     expect(bootstrap?.status).toBe('running')
 
     const processedSummaries = await prisma.accountSummaryLatest.findMany({
-      where: { accountId: { startsWith: '100346667403' } },
+      where: { accountId: { gte: String(baseId), lte: String(baseId + 4n) } },
       select: { accountId: true },
     })
-    expect(processedSummaries.map((row) => row.accountId).toSorted()).toEqual([
-      '100598866219',
-      '100594106301',
-      '100726712583',
-      '100401775249',
-    ])
+    expect(processedSummaries.map((row) => row.accountId).toSorted()).toEqual([0n, 1n, 2n, 3n].map((offset) => String(baseId + offset)))
   })
 })
 
@@ -522,12 +508,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const labelDefinition = await prisma.labelDefinition.create({
         data: { key: 'test_sampling_race', description: 'テスト用ラベル' },
       })
-      // id は同じ桁数なので辞書順と数値順が一致し、チャンク境界を事前に予測できる。
+      // id は bigint の昇順で並ぶため、チャンク境界を事前に予測できる。
+      const baseId = 100_743_446_399n
       for (let i = 0; i < 5; i++) {
-        await createAccount(String(100_743_446_399n + BigInt(i)))
+        await createAccount(String(baseId + BigInt(i)))
         await prisma.accountClassificationLatest.create({
           data: {
-            accountId: String(100_743_446_399n + BigInt(i)),
+            accountId: String(baseId + BigInt(i)),
             labelDefinitionId: labelDefinition.id,
             value: true,
             confidence: 0.8,
@@ -561,13 +548,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
       ])
 
       // ReadModelBootstrap 行を FOR UPDATE でロックするため、2 つの WorkItem は
-      // acct_sampling_0/1 のチャンクと acct_sampling_2/3 のチャンクへ
+      // 先頭 2 件のチャンクと次の 2 件のチャンクへ
       // 直列に (どちらが先でも) 一意に振り分けられ、二重処理は起きない。
       const bootstrap = await prisma.readModelBootstrap.findUnique({
         where: { modelKey: 'account_summary_sampling_v2' },
       })
       expect(bootstrap?.processedCount).toBe(4)
-      expect(bootstrap?.cursor).toBe('100219201759')
+      expect(bootstrap?.cursor).toBe(String(baseId + 3n))
       expect(bootstrap?.status).toBe('running')
     })
   },

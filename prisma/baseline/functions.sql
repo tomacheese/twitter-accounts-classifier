@@ -24,6 +24,8 @@
 -- INSERT は added、DELETE は removed (評価が false になった) か unevaluable (true から評価不能になった) を記録する。
 -- DELETE には NEW がないため、変更の時刻、元、種別は set_label_result が set_config で渡す。
 -- 値が true のまま confidence や reason だけが変わる UPDATE は遷移ではないため記録しない。
+-- added の previousValue は、直前に評価済みで false だった場合 (状態の versions が正で、true の行が無い) だけ false にする。
+-- set_label_result は状態の versions を更新する前に true の行を書くため、ここで読む versions は書き込み前の値である。
 CREATE FUNCTION account_active_label_change_audit() RETURNS trigger
   LANGUAGE plpgsql
   SECURITY DEFINER
@@ -39,7 +41,10 @@ BEGIN
       ("accountId", "labelDefinitionId", "changeType", "previousValue", "newValue",
        "previousConfidence", "newConfidence", "previousReason", "newReason", "sourceId", "changedAt")
     VALUES
-      (NEW."accountId", NEW."labelDefinitionId", 'added', NULL, true,
+      (NEW."accountId", NEW."labelDefinitionId", 'added',
+       (SELECT CASE WHEN s."versions"[NEW."labelDefinitionId"] > 0 THEN false END
+        FROM "AccountLabelState" AS s WHERE s."accountId" = NEW."accountId"),
+       true,
        NULL, NEW."confidence", NULL, NEW."reason", NEW."sourceId", NEW."labeledAt");
     RETURN NEW;
   ELSIF TG_OP = 'DELETE' THEN

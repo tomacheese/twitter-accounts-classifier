@@ -37,6 +37,7 @@ import { Logger } from '@book000/node-utils'
 import { findActiveFindingsAtWatermarkForAccount } from './read-models/build-account-summary-latest-row'
 import { parseClassificationSnapshot } from './read-models/account-classification-snapshot'
 import {
+  requireLastCrawledAt,
   touchAccountSummaryLatestState,
   upsertAccountClassificationLatest,
   upsertAccountSummaryLatest,
@@ -222,7 +223,9 @@ export async function processAccountSummaryRefresh(
   })
   const account = await prisma.account.findUniqueOrThrow({
     where: { id: observation.accountId },
+    include: { crawlState: { select: { lastCrawledAt: true } } },
   })
+  const profileObservedAt = requireLastCrawledAt(account)
   const [labels, existing] = await Promise.all([
     Promise.resolve(
       parseClassificationSnapshot(observation.accountId, observation.classificationSnapshot),
@@ -255,7 +258,7 @@ export async function processAccountSummaryRefresh(
           // profileObservedAt には Account の実際のプロフィール取得時刻 (lastCrawledAt) を使う。
           // classification observation の時刻を流用すると、プロフィールを再取得していない
           // refresh でも profile が最新化されたかのように見えてしまう。
-          profileObservedAt: account.lastCrawledAt,
+          profileObservedAt,
           activeLabelKeys,
           activeLabelCount: activeLabelKeys.length,
           lastClassificationChangedAt: changed
@@ -312,7 +315,10 @@ export async function processAccountFindingRefresh(
   })
   if (occurrence.finding.primaryScopeType !== 'account') return
   const accountId = occurrence.finding.primaryScopeId
-  const account = await prisma.account.findUniqueOrThrow({ where: { id: accountId } })
+  const account = await prisma.account.findUniqueOrThrow({
+    where: { id: accountId },
+    include: { crawlState: { select: { lastCrawledAt: true } } },
+  })
   const [activeFindings, existing] = await Promise.all([
     findActiveFindingsAtWatermarkForAccount(prisma, accountId, occurrence.sourceObservedAt),
     prisma.accountSummaryLatest.findUnique({ where: { accountId } }),
@@ -330,7 +336,7 @@ export async function processAccountFindingRefresh(
       normalizedDisplayName: existing?.normalizedDisplayName ?? account.displayName.toLowerCase(),
       searchDocument:
         existing?.searchDocument ?? `${account.screenName} ${account.displayName}`.toLowerCase(),
-      profileObservedAt: existing?.profileObservedAt ?? account.lastCrawledAt,
+      profileObservedAt: existing?.profileObservedAt ?? requireLastCrawledAt(account),
       activeLabelKeys: existing?.activeLabelKeys ?? [],
       activeLabelCount: existing?.activeLabelCount ?? 0,
       lastClassificationChangedAt: existing?.lastClassificationChangedAt ?? null,

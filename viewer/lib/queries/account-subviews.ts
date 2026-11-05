@@ -242,7 +242,7 @@ export async function getAccountHistory(
 ): Promise<AccountLabelChangeView[]> {
   const changes = await prisma.accountLabelChange.findMany({
     where: { accountId },
-    orderBy: [{ changedAt: 'desc' }],
+    orderBy: [{ changedAt: 'desc' }, { id: 'desc' }],
     take: HISTORY_LIMIT,
   })
   const labelDefinitions = await prisma.labelDefinition.findMany({
