@@ -163,20 +163,40 @@ DECLARE
     -- versionNo 0 は予約値
     $c$SELECT set_label_result(ARRAY[1]::bigint[], ARRAY[1]::smallint[], ARRAY[0], ARRAY[0]::smallint[], ARRAY[0]::smallint[], ARRAY[NULL]::float8[], ARRAY[NULL], ARRAY[NULL], now(), 1::smallint, 'x', NULL)$c$,
     -- true なのに confidence がない
-    $c$SELECT set_label_result(ARRAY[1]::bigint[], ARRAY[1]::smallint[], ARRAY[0], ARRAY[1]::smallint[], ARRAY[1]::smallint[], ARRAY[NULL]::float8[], ARRAY['a'], ARRAY['rule'], now(), 1::smallint, 'x', NULL)$c$
+    $c$SELECT set_label_result(ARRAY[1]::bigint[], ARRAY[1]::smallint[], ARRAY[0], ARRAY[1]::smallint[], ARRAY[1]::smallint[], ARRAY[NULL]::float8[], ARRAY['a'], ARRAY['rule'], now(), 1::smallint, 'x', NULL)$c$,
+    -- 存在しない label_id
+    $c$SELECT set_label_result(ARRAY[1]::bigint[], ARRAY[999]::smallint[], ARRAY[0], ARRAY[0]::smallint[], ARRAY[1]::smallint[], ARRAY[NULL]::float8[], ARRAY[NULL], ARRAY[NULL], now(), 1::smallint, 'x', NULL)$c$,
+    -- アカウント ID の配列が NULL
+    $c$SELECT set_label_result(NULL, ARRAY[1]::smallint[], ARRAY[0], ARRAY[0]::smallint[], ARRAY[1]::smallint[], ARRAY[NULL]::float8[], ARRAY[NULL], ARRAY[NULL], now(), 1::smallint, 'x', NULL)$c$
+  ];
+  v_expected text[] := ARRAY[
+    'array lengths differ',
+    'duplicate label or inconsistent expected rev for an account',
+    'duplicate label or inconsistent expected rev for an account',
+    'invalid input row',
+    'invalid input row',
+    'invalid input row',
+    'unknown label id',
+    'account ids are required'
   ];
   v_case text;
   v_failed boolean;
+  v_message text;
 BEGIN
-  FOREACH v_case IN ARRAY v_cases LOOP
+  FOR i IN 1..cardinality(v_cases) LOOP
+    v_case := v_cases[i];
     v_failed := false;
     BEGIN
       EXECUTE v_case;
     EXCEPTION WHEN OTHERS THEN
       v_failed := true;
+      v_message := SQLERRM;
     END;
     IF NOT v_failed THEN
       RAISE EXCEPTION 'behavior check failed: T10 invalid input was accepted: %', v_case;
+    END IF;
+    IF v_message <> 'set_label_result: ' || v_expected[i] THEN
+      RAISE EXCEPTION 'behavior check failed: T10 case % raised "%" instead of "%"', i, v_message, v_expected[i];
     END IF;
   END LOOP;
 END
@@ -189,6 +209,14 @@ SELECT pg_temp.expect(
   set_label_result(ARRAY[]::bigint[], ARRAY[]::smallint[], ARRAY[]::integer[], ARRAY[]::smallint[], ARRAY[]::smallint[],
                    ARRAY[]::float8[], ARRAY[]::text[], ARRAY[]::text[], now(), 1::smallint, NULL, NULL) = ARRAY[]::bigint[],
   'T11 empty input');
+
+-- T11b: 状態行が無いのに rev が 0 でないアカウントは、行を作らずに未反映として返す。
+SELECT pg_temp.expect(pg_temp.put(1007, 1::smallint, 5, 1::smallint, 1::smallint, 0.5, 'x') = ARRAY[1007]::bigint[],
+  'T11b a missing state row with a non-zero expected rev is reported as a miss');
+SELECT pg_temp.expect(
+  NOT EXISTS (SELECT 1 FROM "AccountLabelState" WHERE "accountId" = 1007)
+  AND NOT EXISTS (SELECT 1 FROM "AccountActiveLabel" WHERE "accountId" = 1007),
+  'T11b no empty state row is left behind');
 
 -- T12: set_label_result を経由しない直接の DELETE (所有者権限) でも、トリガーが removed を記録する。
 SELECT pg_temp.expect(pg_temp.put(1005, 1::smallint, 0, 1::smallint, 1::smallint, 0.3, 'direct') = ARRAY[]::bigint[], 'T12 setup');

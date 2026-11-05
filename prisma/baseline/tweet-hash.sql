@@ -5,7 +5,7 @@
 -- アカウント指定の取得 (直近 20 件など) は、accountId でパーティションが 1 つに絞られる。
 -- Account への FK は張らない。INSERT ごとの親行ロックと検証コストを避けるため。
 --
--- 参照のない 4 列 (quoteCount、retweetedTweetId、quotedTweetId、source) は削除した。
+-- quoteCount、retweetedTweetId、quotedTweetId、source は参照がないため持たない。
 -- expandedUrls と cardDestinationUrls は、空配列を NULL で保存する。列は NULL 可で既定値は付けない。
 -- 列は 8B 境界、4B、1B、可変長の順に並べる。
 

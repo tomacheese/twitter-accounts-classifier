@@ -6,6 +6,8 @@
 -- これにより、監査トリガーを迂回する書き込みを権限で拒否する。
 -- 権限が効くのは、アプリ用ロールがスーパーユーザーでも BYPASSRLS でもなく、両表の所有者でもない場合に限る。
 -- アプリ用ロールが所有者の場合は、その所有者自身の DML 権限が REVOKE で外れるだけで、GRANT で戻せてしまう。
+-- 権限を整える DO ブロックは、その時点で存在するロールだけを対象にする。
+-- ロールを後から作る場合は、作成後にこのファイルの権限の節を再実行する。
 --
 -- 呼び出し側の前提:
 -- - READ COMMITTED で呼ぶ。ロック待ち後に最新の行で rev を比較する動作に依存する。
@@ -21,7 +23,7 @@
 -- AccountActiveLabel の変化を AccountLabelChange へ記録する。
 -- INSERT は added、DELETE は removed (評価が false になった) か unevaluable (true から評価不能になった) を記録する。
 -- DELETE には NEW がないため、変更の時刻、元、種別は set_label_result が set_config で渡す。
--- 値が true のまま confidence や reason だけが変わる UPDATE は、旧実装と同じく記録しない。
+-- 値が true のまま confidence や reason だけが変わる UPDATE は遷移ではないため記録しない。
 CREATE FUNCTION account_active_label_change_audit() RETURNS trigger
   LANGUAGE plpgsql
   SECURITY DEFINER
@@ -100,6 +102,10 @@ DECLARE
   v_applied bigint[];
   v_missed bigint[];
 BEGIN
+  IF p_account_ids IS NULL THEN
+    RAISE EXCEPTION 'set_label_result: account ids are required';
+  END IF;
+
   IF v_n = 0 THEN
     RETURN ARRAY[]::bigint[];
   END IF;
@@ -133,6 +139,14 @@ BEGIN
     RAISE EXCEPTION 'set_label_result: invalid input row';
   END IF;
 
+  -- 存在しない label_id で versions が巨大に伸びるのを防ぐ。
+  IF EXISTS (
+    SELECT 1 FROM unnest(p_label_ids) AS l(label_id)
+    WHERE NOT EXISTS (SELECT 1 FROM "LabelDefinition" d WHERE d."id" = l.label_id)
+  ) THEN
+    RAISE EXCEPTION 'set_label_result: unknown label id';
+  END IF;
+
   IF EXISTS (
     SELECT 1
     FROM unnest(p_account_ids, p_label_ids, p_expected_revs) AS i(account_id, label_id, exp_rev)
@@ -142,20 +156,20 @@ BEGIN
     RAISE EXCEPTION 'set_label_result: duplicate label or inconsistent expected rev for an account';
   END IF;
 
-  -- 状態行がまだ無いアカウントは、rev = 0 の空の行を作る。
-  -- 作った行は、同じトランザクション内で必ず rev を進めて反映するため、空のまま残らない。
+  -- 状態行がまだ無く、rev = 0 を前提にしたアカウントだけ、空の行を作る。
+  -- 作った行は同じトランザクション内で必ず rev を進めるため、空のまま残らない。
+  -- rev が 0 でないのに行が無いアカウントは、行を作らず、下で未反映として返す。
   INSERT INTO "AccountLabelState" ("accountId", "evaluatedAt", "rev", "versions")
   SELECT d.account_id, p_evaluated_at, 0, ARRAY[]::smallint[]
-  FROM (SELECT DISTINCT a AS account_id FROM unnest(p_account_ids) AS a) AS d
+  FROM (SELECT DISTINCT account_id FROM unnest(p_account_ids, p_expected_revs) AS x(account_id, exp_rev)
+        WHERE exp_rev = 0) AS d
   ORDER BY d.account_id
   ON CONFLICT ("accountId") DO NOTHING;
 
   -- accountId の昇順で行ロックを取り、デッドロックを避ける。
   -- ロック待ちのあとは最新の行で rev を比べるため、CAS として成立する。
-  SELECT
-    COALESCE(array_agg(s."accountId" ORDER BY s."accountId") FILTER (WHERE s."rev" = e.exp_rev), ARRAY[]::bigint[]),
-    COALESCE(array_agg(s."accountId" ORDER BY s."accountId") FILTER (WHERE s."rev" <> e.exp_rev), ARRAY[]::bigint[])
-  INTO v_applied, v_missed
+  SELECT COALESCE(array_agg(s."accountId" ORDER BY s."accountId"), ARRAY[]::bigint[])
+  INTO v_applied
   FROM (
     SELECT "accountId", "rev"
     FROM "AccountLabelState"
@@ -164,7 +178,13 @@ BEGIN
     FOR UPDATE
   ) AS s
   JOIN (SELECT DISTINCT account_id, exp_rev FROM unnest(p_account_ids, p_expected_revs) AS x(account_id, exp_rev)) AS e
-    ON e.account_id = s."accountId";
+    ON e.account_id = s."accountId" AND e.exp_rev = s."rev";
+
+  -- 反映できなかったアカウントは、rev の不一致か、状態行が無いものである。
+  SELECT COALESCE(array_agg(m.account_id ORDER BY m.account_id), ARRAY[]::bigint[])
+  INTO v_missed
+  FROM (SELECT DISTINCT a AS account_id FROM unnest(p_account_ids) AS a) AS m
+  WHERE NOT (m.account_id = ANY (v_applied));
 
   IF cardinality(v_applied) = 0 THEN
     RETURN v_missed;
@@ -258,7 +278,7 @@ REVOKE ALL ON FUNCTION set_label_result(
   timestamptz, smallint, text, text
 ) FROM PUBLIC;
 REVOKE ALL ON FUNCTION account_active_label_change_audit() FROM PUBLIC;
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON "AccountLabelState", "AccountActiveLabel" FROM PUBLIC;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON "AccountLabelState", "AccountActiveLabel" FROM PUBLIC;
 
 -- 既知のアプリ用ロールが存在するときだけ、直接の書き込み権限を外し、書き込み側にだけ関数の実行を許す。
 -- 書き込み側は crawler ロール (crawler、relabeler、blocker が共用する)。
@@ -269,7 +289,7 @@ BEGIN
   FOREACH v_role IN ARRAY ARRAY['crawler', 'analyzer', 'viewer', 'weekly_review', 'blocker'] LOOP
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role) THEN
       EXECUTE format(
-        'REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON "AccountLabelState", "AccountActiveLabel" FROM %I',
+        'REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON "AccountLabelState", "AccountActiveLabel" FROM %I',
         v_role
       );
     END IF;

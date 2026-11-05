@@ -1,6 +1,6 @@
 -- DB 作り直しの baseline。空の DB に、次の順で適用する。
 --   1. baseline.sql (このファイル)
---   2. tweet-hash.sql または tweet-range.sql (どちらか一方。Tweet のパーティション方式は 1% シャードのリハーサルで決める)
+--   2. tweet-hash.sql または tweet-range.sql (どちらか一方だけを適用する)
 --   3. functions.sql
 -- 適用は単一トランザクション (psql の -1 オプション) で行う。
 -- このファイルは Tweet に依存しない。どのテーブルも Tweet を FK で参照しない。
@@ -1351,12 +1351,12 @@ ALTER TABLE "FindingEntityLink" ADD CONSTRAINT "FindingEntityLink_findingId_fkey
 ALTER TABLE "PolicyBacktestFinding" ADD CONSTRAINT "PolicyBacktestFinding_runId_fkey" FOREIGN KEY ("runId") REFERENCES "PolicyBacktestRun"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- ============================================================
--- 2. 旧スキーマから引き継ぐ関数とトリガー (ACL の集計表、weekly review の sample、labeled counter)
--- 時刻型を timestamptz にしたため、旧実装の `AT TIME ZONE 'UTC'` による変換は不要になった。
+-- 2. ACL の集計表、weekly review の sample、labeled counter を維持する関数とトリガー
+-- 時刻型は timestamptz のため、now() との比較は変換せずに行う。
 -- 分単位の丸めは、セッションの timezone に依存しないよう `date_trunc(..., 'UTC')` で行う。
 -- ============================================================
 
--- weekly review の sample 用 bucket。ID の文字列表現から 0..4095 を返す。旧実装と同じ値になる。
+-- weekly review の sample 用 bucket。ID の文字列表現から 0..4095 を返す。
 CREATE FUNCTION weekly_review_sample_bucket(account_id bigint) RETURNS integer
     LANGUAGE sql IMMUTABLE
     AS $$
@@ -1677,6 +1677,7 @@ ALTER TABLE "Account" SET (fillfactor = 80, autovacuum_vacuum_scale_factor = 0.0
 ALTER TABLE "AccountCrawlState" SET (fillfactor = 70, autovacuum_vacuum_scale_factor = 0.02);
 ALTER TABLE "AccountLabelState" SET (fillfactor = 75, autovacuum_vacuum_scale_factor = 0.02);
 ALTER TABLE "AccountClassificationLatest" SET (autovacuum_vacuum_scale_factor = 0.02);
+ALTER TABLE "AccountActiveLabel" SET (autovacuum_vacuum_scale_factor = 0.02);
 ALTER TABLE "AnalysisWorkItem" SET (fillfactor = 50, autovacuum_vacuum_scale_factor = 0.02);
 ALTER TABLE "AccountClassificationObservation" SET (autovacuum_vacuum_scale_factor = 0.02);
 -- AccountLabelChange は追記のみのため、insert 起点の autovacuum だけを早める。

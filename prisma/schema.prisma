@@ -38,14 +38,14 @@ generator analyzerClient {
 // - 部分インデックスと、式インデックス (Account 関連の recent tweets backfill、reply corpus、weekly review sample など)
 // - トリガーと関数 (set_label_result、AccountActiveLabel の監査、ACL の集計表と weekly review sample の維持)
 // - テーブルごとの fillfactor と autovacuum の設定、Observation.classificationSnapshot の lz4 圧縮
-// - IDENTITY 列 (LabelDefinition.id、AnalysisWorkItem.id、AnalysisRun.id、AccountLabelChange.id は
-//   Prisma では `@default(autoincrement())` と書くが、実体は GENERATED ALWAYS AS IDENTITY)
+// - IDENTITY 列 (LabelDefinition.id、AnalysisWorkItem.id、AnalysisRun.id、AccountLabelChange.id)。
+//   Prisma では `@default(autoincrement())` と書くが、実体は GENERATED ALWAYS AS IDENTITY。
 // - AccountLabelChange.sourceLabelId の部分 unique インデックス
 // - FK を張らない巨大・ホットな表 (Tweet、AccountLabelState、AccountActiveLabel、AccountClassificationLatest)。
 //   Prisma は relation を書くと FK を作るため、これらの表には relation を書かない。
 //   整合性は書き込み側と週次の孤児検査で担保する。
 //
-// Prisma が扱えるもの (Prisma 6.19.3 で確認):
+// Prisma が扱えるもの:
 // - 複合 @@id、BigInt、`@db.SmallInt`、native enum、`@db.Timestamptz(3)`、BRIN インデックス
 // - nullable な配列列: スキーマ上は `String[]` と書き、DB 列は NULL 可の `text[]` になる。
 //   Prisma Client は NULL を空配列として読む。`[]` を書き込むと NULL でなく空配列 `{}` が入るため、
@@ -93,10 +93,11 @@ enum RecentTweetsFetchStatus {
   failed
 }
 
-// 更新頻度の高い列を Account から分離した表。インデックスに使う列 (lastRecentTweetsAttemptedAt) の更新は
-// HOT にならないが、それ以外の列の更新は HOT になる。
-// backfill 候補 selector 用の (accountId) WHERE lastRecentTweetsAttemptedAt IS NULL の部分インデックスは
-// baseline.sql の raw SQL で管理する。storage: fillfactor 70。
+// 更新頻度の高い列を Account から分離した表。
+// lastRecentTweetsAttemptedAt の更新だけが HOT にならず、他の列の更新は HOT になる。
+// backfill 候補 selector 用の部分インデックス (WHERE lastRecentTweetsAttemptedAt IS NULL) は、
+// baseline.sql の raw SQL で管理する。
+// storage は fillfactor 70。
 model AccountCrawlState {
   accountId                   BigInt                   @id
   account                     Account                  @relation(fields: [accountId], references: [id])
@@ -107,9 +108,9 @@ model AccountCrawlState {
 }
 
 // パーティション親表。この schema は HASH(accountId) x 32 版 (複合 PK) を表す。
-// RANGE(id) 版 (tweet-range.sql) では PK が id 単独になる。どちらにするかは 1% シャードのリハーサルで決める。
+// RANGE(id) 版 (tweet-range.sql) では PK が id 単独になる。どちらか一方だけを適用する。
 // Account への FK は張らない (INSERT ごとの親行ロックと検証コストを避ける)。relation を書かないのはそのため。
-// 削除した列: quoteCount、retweetedTweetId、quotedTweetId、source。
+// quoteCount、retweetedTweetId、quotedTweetId、source は参照がないため持たない。
 // expandedUrls と cardDestinationUrls は、空配列を NULL で保存する (DB 列は NULL 可、既定値なし)。
 // 部分インデックス (reply corpus の collectedAt DESC, id DESC WHERE isReply) は raw SQL で管理する。
 // storage: fillfactor 90、autovacuum の insert 閾値を引き下げる (tweet-*.sql で設定する)。
@@ -434,9 +435,8 @@ model CrawlAuthorCheckpoint {
   @@index([crawlRunId, username])
 }
 
-// activeLabelKeys (text[]) への GIN index は既定の array ops で表現できるため、本来は Prisma の schema DSL でも宣言できる。
-// ただしこの index は CONCURRENTLY 付きで作成する必要があり、生成される migration がそれに対応しないため、実体は migration 20260810210740_add_account_summary_latest_active_label_keys_gin_idx の raw SQL で作成する。
-// ここでの @@index 宣言は、shadow database の diff がこの index を誤って DROP 対象と判断するのを防ぐためのものである。
+// activeLabelKeys (text[]) への GIN index は既定の array ops で表現できるため、schema にも宣言している。
+// trigram の GIN index は Prisma で表現できないため、baseline.sql の raw SQL で作成する。
 model AccountSummaryLatest {
   accountId                   BigInt    @id
   normalizedScreenName        String
@@ -460,14 +460,14 @@ model AccountSummaryLatest {
 
 // AccountSummaryLatest.activeLabelCount が 0 ⇔ 正 を跨いだ行だけトリガーで増減させ、
 // 少なくとも1つ true ラベルを持つ distinct account 数を O(1) で保持する。
-// 維持方法の詳細は該当 migration のトリガー定義コメントを参照。
+// 維持方法は baseline.sql のトリガー定義を参照する。
 model LabeledAccountCounter {
   id              String   @id
   labeledAccounts Int
   updatedAt       DateTime @updatedAt @db.Timestamptz(3)
 }
 
-// 現状維持の表。キーの型だけを新スキーマ (bigint と smallint) に合わせる。FK は張らない。
+// キーは bigint と smallint で、FK は張らない。
 // 列は 8B 境界、4B、2B、1B、可変長の順に並べる。
 // (labelDefinitionId, value, accountId) のインデックスは作らない。
 // weekly review の sample 用の部分インデックスと、集計表を維持するトリガーは raw SQL で管理する。
@@ -489,7 +489,7 @@ model AccountClassificationLatest {
 
 // weekly review の random baseline sampling 用に、labelDefinitionId/value/bucket
 // 単位で eligible (evaluable=true AND labeledAt IS NOT NULL) な行数を集計する。
-// 詳細な維持方法は該当 migration のトリガー定義コメントを参照。
+// 維持方法は baseline.sql のトリガー定義を参照する。
 model WeeklyReviewSampleBucketCount {
   labelDefinitionId Int     @db.SmallInt
   value             Boolean

@@ -7,7 +7,7 @@
 -- 先の月まで create_tweet_month_partitions で作っておく (この baseline は 2027-12 まで作る)。
 -- Account への FK は張らない。
 --
--- 参照のない 4 列 (quoteCount、retweetedTweetId、quotedTweetId、source) は削除した。
+-- quoteCount、retweetedTweetId、quotedTweetId、source は参照がないため持たない。
 -- expandedUrls と cardDestinationUrls は、空配列を NULL で保存する。
 
 CREATE TABLE "Tweet" (

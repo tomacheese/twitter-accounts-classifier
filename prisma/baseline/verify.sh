@@ -120,11 +120,17 @@ SQL
 SELECT set_label_result(ARRAY[$account]::bigint[], ARRAY[$label]::smallint[], ARRAY[$rev], ARRAY[0]::smallint[],
     ARRAY[1]::smallint[], ARRAY[NULL]::float8[], ARRAY[NULL], ARRAY[NULL], now(), 1::smallint, 'older_run', NULL);
 SQL
-    psql -X -q -At "$url" -f "$WORK/first.sql" >"$WORK/first.out" 2>&1 &
+    psql -X -q -At -v ON_ERROR_STOP=1 "$url" -f "$WORK/first.sql" >"$WORK/first.out" 2>&1 &
     local first_pid=$!
-    sleep 0.5
-    psql -X -q -At "$url" -f "$WORK/second.sql" >"$WORK/second.out" 2>&1
-    wait "$first_pid"
+    # 先行がロックを持ったまま待機に入るのを待ってから、後続を起動する。
+    local waited=0
+    until [ "$(psql -X -At "$url" -c "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE '%pg_sleep(1.5)%' AND pid <> pg_backend_pid()")" = "1" ]; do
+        waited=$((waited + 1))
+        [ "$waited" -le 100 ] || fail "the first writer did not reach its wait"
+        sleep 0.1
+    done
+    psql -X -q -At -v ON_ERROR_STOP=1 "$url" -f "$WORK/second.sql" >"$WORK/second.out" 2>&1
+    wait "$first_pid" || fail "the first writer failed: $(cat "$WORK/first.out")"
     CAS_SECOND_RESULT="$(tr -d '[:space:]' <"$WORK/second.out")"
 }
 
@@ -134,6 +140,9 @@ run_variant() {
     echo "=== variant: $variant ==="
     psql -X -q "$ADMIN/postgres" -c "CREATE DATABASE $db"
 
+    # アプリ用ロールが、全権限を持つ状態から始める (権限の同期スクリプトが後から付与する状況の再現)。
+    # functions.sql の REVOKE が効いていることを確かめるため。
+    psql -X -q -v ON_ERROR_STOP=1 "$url" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO crawler, viewer"
     psql -X -q -v ON_ERROR_STOP=1 -1 "$url" \
         -f "$BASELINE_DIR/baseline.sql" -f "$BASELINE_DIR/tweet-$variant.sql" -f "$BASELINE_DIR/functions.sql" \
         >/dev/null
@@ -232,6 +241,8 @@ SQL
         "UPDATE \"AccountLabelState\" SET \"rev\" = 0"
         "DELETE FROM \"AccountLabelState\""
         "TRUNCATE \"AccountActiveLabel\""
+        "TRUNCATE \"AccountLabelState\""
+        "CREATE TRIGGER forged_trigger AFTER INSERT ON \"AccountActiveLabel\" FOR EACH ROW EXECUTE FUNCTION account_active_label_change_audit()"
     )
     for stmt in "${denied[@]}"; do
         if out="$(psql -X -q -v ON_ERROR_STOP=1 "$app_url" -c "$stmt" 2>&1)"; then
@@ -252,7 +263,7 @@ SQL
         fail "($variant) a read-only role could call set_label_result"
     fi
     printf '%s' "$out" | grep -q 'permission denied for function' || fail "($variant) unexpected error for viewer: $out"
-    echo "app role: direct DML denied (7 statements), set_label_result allowed, read-only role denied"
+    echo "app role: direct DML, TRUNCATE and CREATE TRIGGER denied (9 statements), set_label_result allowed, read-only role denied"
 
     if [ "$variant" = "range" ]; then
         check_prisma_diff "$variant" "$url" "$RANGE_SCHEMA"
