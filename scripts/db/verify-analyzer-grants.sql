@@ -24,7 +24,10 @@ DECLARE
   ];
   limited_write_allowlist text[] := ARRAY['ComponentBuildIdentity'];
   update_only_allowlist text[] := ARRAY['LabeledAccountCounter'];
-  delete_only_allowlist text[] := ARRAY['AccountClassificationObservation'];
+  delete_only_allowlist text[] := ARRAY[
+    'AccountClassificationObservation',
+    'CrawlAccountCheckpoint', 'CrawlAuthorCheckpoint', 'CrawlAccountLabelRun'
+  ];
   missing_writes text;
   missing_limited_writes text;
   missing_update_only text;

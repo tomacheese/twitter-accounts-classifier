@@ -1,8 +1,8 @@
 -- analyzer は正本テーブルへ SELECT のみ、分析・read model テーブルへ INSERT/UPDATE/DELETE を持つ。
 -- 正本テーブル (Account, Tweet, AccountLabelState, AccountActiveLabel, Follow, CrawlRun,
--- CrawlAccountRun, CrawlAccountCheckpoint, CrawlAccountLabelRun, WeeklyAnalysisRun,
--- Block, BlockRun, BlockAccountRun, BlockAction, LabelDefinition)
--- は書き込ませない。
+-- CrawlAccountRun, CrawlAccountCheckpoint, CrawlAccountLabelRun, CrawlAuthorCheckpoint,
+-- WeeklyAnalysisRun, Block, BlockRun, BlockAccountRun, BlockAction, LabelDefinition)
+-- は書き込ませない。ただし Checkpoint 系 3 表は retention sweep のため DELETE だけを許す (下記)。
 
 BEGIN;
 
@@ -58,7 +58,11 @@ GRANT UPDATE ON TABLE "LabeledAccountCounter" TO analyzer;
 GRANT INSERT, UPDATE ON TABLE "ComponentBuildIdentity" TO analyzer;
 
 -- retention sweep が保持期間超過分を削除するのみで INSERT/UPDATE はしないため DELETE のみ許可する。
-GRANT DELETE ON TABLE "AccountClassificationObservation" TO analyzer;
+-- crawl の Checkpoint 系は crawler が書く正本だが、Run の終了から一定日数を過ぎた行の削除だけを analyzer に任せる。
+GRANT DELETE ON TABLE
+  "AccountClassificationObservation",
+  "CrawlAccountCheckpoint", "CrawlAuthorCheckpoint", "CrawlAccountLabelRun"
+  TO analyzer;
 
 -- 現行スキーマは autoincrement を使わずシーケンスを持たないため、schema 全体への
 -- USAGE/SELECT は付与しない。write allowlist のテーブルがシーケンス列を持つに至った
