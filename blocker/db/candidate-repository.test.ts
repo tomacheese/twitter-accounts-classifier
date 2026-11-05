@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { selectBlockCandidates } from './candidate-repository'
+import { createSyntheticId } from 'id-boundary'
 import { getPrismaClient } from './client'
 
 function fakePrismaReturning(rows: unknown[]) {
@@ -14,8 +14,8 @@ function fakePrismaReturning(rows: unknown[]) {
 describe('selectBlockCandidates', () => {
   it('returns rows ordered by confidence desc, capped at maxCount', async () => {
     const prisma = fakePrismaReturning([
-      { accountId: 'spam-1', labelDefinitionId: 'label-spam', confidence: 0.99 },
-      { accountId: 'spam-2', labelDefinitionId: 'label-spam', confidence: 0.85 },
+      { accountId: 'spam-1', labelDefinitionId: 3, confidence: 0.99 },
+      { accountId: 'spam-2', labelDefinitionId: 3, confidence: 0.85 },
     ])
 
     const result = await selectBlockCandidates(
@@ -33,8 +33,8 @@ describe('selectBlockCandidates', () => {
     )
 
     expect(result).toEqual([
-      { accountId: 'spam-1', labelDefinitionId: 'label-spam', confidence: 0.99 },
-      { accountId: 'spam-2', labelDefinitionId: 'label-spam', confidence: 0.85 },
+      { accountId: 'spam-1', labelDefinitionId: 3, confidence: 0.99 },
+      { accountId: 'spam-2', labelDefinitionId: 3, confidence: 0.85 },
     ])
   })
 
@@ -281,8 +281,8 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
   })
 
   it('未解決 outbox entry がある候補を除外する', async () => {
-    const blockerId = `blocker-${randomUUID()}`
-    const blockedId = `blocked-${randomUUID()}`
+    const blockerId = createSyntheticId()
+    const blockedId = createSyntheticId()
     await prisma.account.create({
       data: {
         id: blockerId,
@@ -355,8 +355,8 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
   })
 
   it('remoteSkipCount が上限未満でも cooldown 中なら候補から除外する', async () => {
-    const blockerId = `blocker-${randomUUID()}`
-    const blockedId = `blocked-${randomUUID()}`
+    const blockerId = createSyntheticId()
+    const blockedId = createSyntheticId()
     await prisma.account.create({
       data: {
         id: blockerId,
@@ -431,8 +431,8 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
   })
 
   it('remoteSkipCount が上限未満で cooldown 経過後なら候補になる', async () => {
-    const blockerId = `blocker-${randomUUID()}`
-    const blockedId = `blocked-${randomUUID()}`
+    const blockerId = createSyntheticId()
+    const blockedId = createSyntheticId()
     await prisma.account.create({
       data: {
         id: blockerId,
@@ -507,8 +507,8 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
   })
 
   it('remoteSkipCount が上限以上なら cooldown に関わらず候補から除外する', async () => {
-    const blockerId = `blocker-${randomUUID()}`
-    const blockedId = `blocked-${randomUUID()}`
+    const blockerId = createSyntheticId()
+    const blockedId = createSyntheticId()
     await prisma.account.create({
       data: {
         id: blockerId,
@@ -583,8 +583,8 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
   })
 
   it('remote_failed の target は remoteSkipCount / cooldown 条件と無関係に候補になり得る', async () => {
-    const blockerId = `blocker-${randomUUID()}`
-    const blockedId = `blocked-${randomUUID()}`
+    const blockerId = createSyntheticId()
+    const blockedId = createSyntheticId()
     await prisma.account.create({
       data: {
         id: blockerId,
@@ -661,7 +661,7 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
   })
 
   it('confidence 上位側が Block 済みで除外されても、maxCount まで下位の適格候補で補充する', async () => {
-    const blockerId = `blocker-${randomUUID()}`
+    const blockerId = createSyntheticId()
     await prisma.account.create({
       data: {
         id: blockerId,
@@ -681,7 +681,7 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
     // Block 済みにする。per-label 固定 LIMIT で先頭側だけを取得する実装だと、
     // Block 済みの 2 件が枠を占有したまま補充されず false negative になる。
     const confidences = [0.95, 0.93, 0.91, 0.89, 0.87]
-    const targetIds = confidences.map((_, index) => `target-${index}-${randomUUID()}`)
+    const targetIds = confidences.map(() => createSyntheticId())
     for (const [index, confidence] of confidences.entries()) {
       await prisma.account.create({
         data: {

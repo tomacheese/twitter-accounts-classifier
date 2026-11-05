@@ -15,7 +15,7 @@ vi.mock('node:crypto', () => ({ randomUUID: () => 'mock-id' }))
 
 describe('ensureLabelDefinition', () => {
   it('upserts by key', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 'ld1', key: 'blue_verified' })
+    const upsert = vi.fn().mockResolvedValue({ id: 1, key: 'blue_verified' })
     const prisma = { labelDefinition: { upsert } } as unknown as PrismaClient
 
     await ensureLabelDefinition(prisma, {
@@ -30,7 +30,7 @@ describe('ensureLabelDefinition', () => {
 
   it('既存の LabelDefinition の currentRuleVersion を更新する', async () => {
     const upsertMock = vi.fn().mockResolvedValue({
-      id: 'def-1',
+      id: 1,
       key: 'blue_verified',
       description: 'desc',
       currentRuleVersion: '2.0.0',
@@ -57,7 +57,7 @@ describe('ensureLabelDefinitionsForRules', () => {
     const upsert = vi
       .fn()
       .mockImplementation(({ create }: { create: { key: string } }) =>
-        Promise.resolve({ id: `ld-${create.key}`, key: create.key }),
+        Promise.resolve({ id: create.key === 'spam' ? 2 : 1, key: create.key }),
       )
     const prisma = { labelDefinition: { upsert } } as unknown as PrismaClient
 
@@ -79,13 +79,13 @@ describe('ensureLabelDefinitionsForRules', () => {
     const result = await ensureLabelDefinitionsForRules(prisma, rules)
 
     expect(upsert).toHaveBeenCalledTimes(2)
-    expect(result.get('blue_verified')).toBe('ld-blue_verified')
-    expect(result.get('spam')).toBe('ld-spam')
+    expect(result.get('blue_verified')).toBe(1)
+    expect(result.get('spam')).toBe(2)
   })
 })
 
 describe('recordAccountLabelsBulkLatestOnlyForAccounts', () => {
-  it('orders Phase B latest-only UPSERT input by accountId and labelDefinitionId before taking row locks', async () => {
+  it('orders Phase B latest-only UPSERT input by numeric accountId and labelDefinitionId before taking row locks', async () => {
     const queryRaw = vi.fn().mockResolvedValue([])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
@@ -93,22 +93,22 @@ describe('recordAccountLabelsBulkLatestOnlyForAccounts', () => {
       sourceKind: 'relabel',
       labels: [
         {
-          accountId: 'account-b',
-          labelDefinitionId: 'label-a',
+          accountId: '20',
+          labelDefinitionId: 1,
           result: { value: true, confidence: 1, reason: 'b-a' },
           method: 'rule',
           ruleVersion: 'v1',
         },
         {
-          accountId: 'account-a',
-          labelDefinitionId: 'label-z',
+          accountId: '3',
+          labelDefinitionId: 2,
           result: { value: true, confidence: 1, reason: 'a-z' },
           method: 'rule',
           ruleVersion: 'v1',
         },
         {
-          accountId: 'account-a',
-          labelDefinitionId: 'label-a',
+          accountId: '3',
+          labelDefinitionId: 1,
           result: { value: true, confidence: 1, reason: 'a-a' },
           method: 'rule',
           ruleVersion: 'v1',
@@ -117,16 +117,14 @@ describe('recordAccountLabelsBulkLatestOnlyForAccounts', () => {
     })
 
     const [, ...values] = queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
-    expect(values[0]).toEqual(['account-a', 'account-a', 'account-b'])
-    expect(values[1]).toEqual(['label-a', 'label-z', 'label-a'])
+    expect(values[0]).toEqual(['3', '3', '20'])
+    expect(values[1]).toEqual([1, 2, 1])
   })
 
   it('logs a warning when the AccountLabelLatest upsert guard rejects a genuinely changed row', async () => {
     const queryRaw = vi
       .fn()
-      .mockResolvedValue([
-        { accountId: 'account-a', labelDefinitionId: 'label-a', latestUpserted: false },
-      ])
+      .mockResolvedValue([{ accountId: '3', labelDefinitionId: 1, latestUpserted: false }])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
     const warn = vi
       .spyOn(Logger.configure('label-repository'), 'warn')
@@ -136,8 +134,8 @@ describe('recordAccountLabelsBulkLatestOnlyForAccounts', () => {
       sourceKind: 'relabel',
       labels: [
         {
-          accountId: 'account-a',
-          labelDefinitionId: 'label-a',
+          accountId: '3',
+          labelDefinitionId: 1,
           result: { value: true, confidence: 1, reason: 'stale write attempt' },
           method: 'rule',
           ruleVersion: 'v1',
@@ -146,17 +144,15 @@ describe('recordAccountLabelsBulkLatestOnlyForAccounts', () => {
     })
 
     expect(warn).toHaveBeenCalledTimes(1)
-    expect(warn.mock.calls[0][0]).toContain('account-a')
-    expect(warn.mock.calls[0][0]).toContain('label-a')
+    expect(warn.mock.calls[0][0]).toContain('accountId=3')
+    expect(warn.mock.calls[0][0]).toContain('labelDefinitionId=1')
     warn.mockRestore()
   })
 
   it('does not warn when every genuinely changed row is upserted', async () => {
     const queryRaw = vi
       .fn()
-      .mockResolvedValue([
-        { accountId: 'account-a', labelDefinitionId: 'label-a', latestUpserted: true },
-      ])
+      .mockResolvedValue([{ accountId: '3', labelDefinitionId: 1, latestUpserted: true }])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
     const warn = vi
       .spyOn(Logger.configure('label-repository'), 'warn')
@@ -166,8 +162,8 @@ describe('recordAccountLabelsBulkLatestOnlyForAccounts', () => {
       sourceKind: 'relabel',
       labels: [
         {
-          accountId: 'account-a',
-          labelDefinitionId: 'label-a',
+          accountId: '3',
+          labelDefinitionId: 1,
           result: { value: true, confidence: 1, reason: 'applied' },
           method: 'rule',
           ruleVersion: 'v1',
@@ -184,12 +180,12 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
   it('claims labels, persists via the AccountLabelLatest-only writer (no raw AccountLabel INSERT), and returns an observation id without opening its own transaction', async () => {
     const queryRaw = vi
       .fn()
-      .mockResolvedValueOnce([{ labelDefinitionId: 'ld1', method: 'rule', ruleVersion: 'v1' }])
+      .mockResolvedValueOnce([{ labelDefinitionId: 1, method: 'rule', ruleVersion: 'v1' }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
-          labelDefinitionId: 'ld1',
+          labelDefinitionId: 1,
           value: true,
           confidence: 1,
           reason: 'test',
@@ -213,7 +209,7 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
       username: 'login_account',
       labels: [
         {
-          labelDefinitionId: 'ld1',
+          labelDefinitionId: 1,
           result: { value: true, confidence: 1, reason: 'test' },
           method: 'rule',
           ruleVersion: 'v1',
@@ -240,7 +236,7 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
         snapshotVersion: 1,
         classificationSnapshot: [
           {
-            labelDefinitionId: 'ld1',
+            labelDefinitionId: 1,
             value: true,
             confidence: 1,
             reason: 'test',
@@ -280,7 +276,7 @@ describe('recordCrawlAccountLabelsAtomic transaction budget', () => {
       username: 'login_account',
       labels: [
         {
-          labelDefinitionId: 'ld1',
+          labelDefinitionId: 1,
           result: { value: true, confidence: 1, reason: 'test' },
           method: 'rule',
           ruleVersion: 'v1',

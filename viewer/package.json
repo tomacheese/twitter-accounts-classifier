@@ -8,20 +8,21 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "pnpm --dir ../pipeline-health run build && next build",
+    "build": "pnpm --dir ../pipeline-health run build && pnpm --dir ../id-boundary run build && next build",
     "start": "next start",
     "lint": "eslint .",
     "format": "prettier --check .",
     "typecheck": "tsc --noEmit",
-    "pretest": "pnpm --dir ../pipeline-health run build",
+    "pretest": "pnpm --dir ../pipeline-health run build && pnpm --dir ../id-boundary run build",
     "test": "vitest run",
     "precheck": "pnpm run db:generate",
     "check": "run-p lint typecheck test",
-    "db:generate": "prisma generate --schema=../prisma/schema.prisma --generator viewerClient"
+    "db:generate": "prisma generate --schema=../prisma/schema.prisma --generator viewerClient && node ../prisma/scripts/stringify-bigint-types.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",
     "@sentry/node": "^8.0.0",
+    "id-boundary": "workspace:*",
     "next": "^15.0.0",
     "pipeline-health": "workspace:*",
     "react": "^19.0.0",

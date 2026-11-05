@@ -214,11 +214,11 @@ export async function loadRecentTweetsForAccounts(
 
   const rows = await prisma.$queryRaw<Tweet[]>`
     SELECT t.*
-    FROM UNNEST(${accountIds}::text[]) AS target("accountId")
+    FROM UNNEST(${accountIds}::bigint[]) AS target("accountId")
     CROSS JOIN LATERAL (
       SELECT
-        "id",
-        "accountId",
+        "id"::text AS "id",
+        "accountId"::text AS "accountId",
         "fullText",
         "createdAt",
         "retweetCount",
@@ -226,8 +226,8 @@ export async function loadRecentTweetsForAccounts(
         "replyCount",
         "quoteCount",
         "isReply",
-        "conversationId",
-        "inReplyToTweetId",
+        "conversationId"::text AS "conversationId",
+        "inReplyToTweetId"::text AS "inReplyToTweetId",
         "isAuthorReply",
         "isRetweet",
         "retweetedTweetId",
@@ -240,7 +240,7 @@ export async function loadRecentTweetsForAccounts(
         "hasAiGeneratedMedia",
         "aiGeneratedDetectionSource",
         "quotedTweetId",
-        "quotedTweetAuthorId",
+        "quotedTweetAuthorId"::text AS "quotedTweetAuthorId",
         "quotedTweetHasVideo",
         "foreignVideoSourceCount",
         "source",
@@ -278,9 +278,9 @@ export async function loadPromotedTweetCountsForAccounts(
   if (accountIds.length === 0) return counts
 
   const rows = await prisma.$queryRaw<{ accountId: string; count: number }[]>`
-    SELECT "accountId", COUNT(*)::int AS "count"
+    SELECT "accountId"::text AS "accountId", COUNT(*)::int AS "count"
     FROM "Tweet"
-    WHERE "accountId" = ANY(${accountIds}::text[])
+    WHERE "accountId" = ANY(${accountIds}::bigint[])
       AND "isPromoted" = true
       AND "createdAt" >= ${since}
     GROUP BY "accountId"

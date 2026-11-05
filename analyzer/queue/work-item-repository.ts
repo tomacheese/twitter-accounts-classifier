@@ -92,7 +92,7 @@ export async function deadLetterExhaustedWorkItem(
   const now = new Date()
   return prisma.$transaction(
     async (tx) => {
-      const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
+      const rows = await tx.$queryRawUnsafe<{ id: number }[]>(
         `SELECT "id" FROM "AnalysisWorkItem"
        WHERE "kind" = ANY($1)
          AND "status" IN ('queued', 'leased', 'failed')
@@ -145,7 +145,7 @@ export async function claimNextWorkItem(
 
   return prisma.$transaction(
     async (tx) => {
-      const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
+      const rows = await tx.$queryRawUnsafe<{ id: number }[]>(
         `SELECT "id" FROM "AnalysisWorkItem"
        WHERE "kind" = ANY($1)
          AND "status" IN ('queued', 'leased', 'failed')
@@ -185,7 +185,7 @@ export async function claimNextWorkItem(
 /** renewWorkItemLease の入力。 */
 export interface RenewWorkItemLeaseInput {
   /** 対象 WorkItem の ID。 */
-  workItemId: string
+  workItemId: number
   /** 現在の lease owner。 */
   leaseOwner: string
   /** 更新後の lease 有効期間 (ミリ秒)。 */
@@ -213,7 +213,7 @@ export async function renewWorkItemLease(
 
 export interface CompleteWorkItemInput {
   /** 対象の WorkItem ID。 */
-  workItemId: string
+  workItemId: number
   /** claim 時に設定した lease owner。 */
   leaseOwner: string
   /** 記録する終了状態。 */
@@ -271,7 +271,7 @@ export async function completeWorkItem(
 /** startAnalysisRun の入力。 */
 export interface StartAnalysisRunInput {
   /** 対象の WorkItem ID。 */
-  workItemId: string
+  workItemId: number
   /** claim 時に確定した試行回数。 */
   attemptNumber: number
 }
@@ -285,7 +285,7 @@ export interface StartAnalysisRunInput {
 export async function startAnalysisRun(
   prisma: PrismaClient,
   input: StartAnalysisRunInput,
-): Promise<string> {
+): Promise<number> {
   const run = await prisma.analysisRun.create({
     data: {
       workItemId: input.workItemId,
@@ -299,7 +299,7 @@ export async function startAnalysisRun(
 /** finishAnalysisRun の入力。 */
 export interface FinishAnalysisRunInput {
   /** 対象の AnalysisRun ID。 */
-  analysisRunId: string
+  analysisRunId: number
   /** 記録する終了状態。 */
   status: 'succeeded' | 'failed' | 'dead'
   /** 失敗時のエラーコード。 */

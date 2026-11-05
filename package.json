@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
+  "scripts": {
+    "postinstall": "[ ! -f prisma/scripts/stringify-bigint-types.mjs ] || node prisma/scripts/stringify-bigint-types.mjs"
+  },
   "devDependencies": {
     "prisma": "^6.0.0"
   },

@@ -101,7 +101,7 @@ export default async function LabelsPage(): Promise<React.ReactElement> {
           <ResponsiveTable
             columns={labelColumns}
             rows={items}
-            rowKey={(item) => item.labelDefinitionId}
+            rowKey={(item) => String(item.labelDefinitionId)}
           />
         )}
       </div>

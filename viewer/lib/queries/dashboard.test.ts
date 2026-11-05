@@ -28,7 +28,7 @@ function createMockPrisma(options: { counter?: { labeledAccounts: number } | nul
 
 function makeSummaryItem(overrides: Partial<Record<string, unknown>>) {
   return {
-    labelDefinitionId: 'label-1',
+    labelDefinitionId: 1,
     labelKey: 'spam',
     labelDescription: 'Likely spam account',
     evaluatedCount: 120,

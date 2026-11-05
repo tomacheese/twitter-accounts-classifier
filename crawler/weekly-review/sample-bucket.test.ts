@@ -46,30 +46,30 @@ describe('computeBucketReadCount', () => {
 
 describe('selectBuckets', () => {
   it('同じ入力なら同じ bucket 集合を返す', () => {
-    const first = selectBuckets('run-1', 'label-1', true, 16)
-    const second = selectBuckets('run-1', 'label-1', true, 16)
+    const first = selectBuckets('run-1', 1, true, 16)
+    const second = selectBuckets('run-1', 1, true, 16)
     expect(second).toEqual(first)
   })
 
   it('返す件数は要求した m と一致する', () => {
-    expect(selectBuckets('run-1', 'label-1', true, 16)).toHaveLength(16)
-    expect(selectBuckets('run-1', 'label-1', true, BUCKET_COUNT)).toHaveLength(BUCKET_COUNT)
+    expect(selectBuckets('run-1', 1, true, 16)).toHaveLength(16)
+    expect(selectBuckets('run-1', 1, true, BUCKET_COUNT)).toHaveLength(BUCKET_COUNT)
   })
 
   it('異なる seed (runId) では選ばれる bucket 集合が変わる', () => {
-    const a = selectBuckets('run-1', 'label-1', true, 16)
-    const b = selectBuckets('run-2', 'label-1', true, 16)
+    const a = selectBuckets('run-1', 1, true, 16)
+    const b = selectBuckets('run-2', 1, true, 16)
     expect(new Set(a)).not.toEqual(new Set(b))
   })
 
   it('value が異なれば選ばれる bucket 集合も変わる', () => {
-    const a = selectBuckets('run-1', 'label-1', true, 16)
-    const b = selectBuckets('run-1', 'label-1', false, 16)
+    const a = selectBuckets('run-1', 1, true, 16)
+    const b = selectBuckets('run-1', 1, false, 16)
     expect(new Set(a)).not.toEqual(new Set(b))
   })
 
   it('返す bucket は重複がなく 0..4095 の範囲に収まる', () => {
-    const buckets = selectBuckets('run-1', 'label-1', true, 64)
+    const buckets = selectBuckets('run-1', 1, true, 64)
     expect(new Set(buckets).size).toBe(buckets.length)
     for (const bucket of buckets) {
       expect(bucket).toBeGreaterThanOrEqual(0)

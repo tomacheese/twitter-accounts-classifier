@@ -76,7 +76,7 @@ export interface BuildOverviewSnapshotInput {
   /** 集計の基準時刻。 */
   sourceWatermarkAt: Date
   /** 紐づく AnalysisRun の ID。 */
-  analysisRunId?: string
+  analysisRunId?: number
 }
 
 /**

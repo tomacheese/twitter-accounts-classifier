@@ -1,8 +1,17 @@
 import { randomUUID } from 'node:crypto'
+import { createSyntheticId } from 'id-boundary'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { getPrismaClient } from '../prisma'
 
 const prisma = getPrismaClient()
+
+/**
+ * テストごとに衝突しにくい連続 ID 範囲の先頭を確保する。後片付けは範囲指定で行う。
+ * @returns 範囲の先頭の ID (bigint)
+ */
+function allocateAccountIdBase(): bigint {
+  return BigInt(createSyntheticId())
+}
 
 interface ExplainPlanNode {
   'Node Type': string
@@ -64,11 +73,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
       () => `seq-scan-test-stale-${randomUUID()}`,
     )
     const allGenerationIds = [generationId, ...staleGenerationIds]
+    const testBase = allocateAccountIdBase()
+    const noiseBase = testBase + 1_000_000n
 
     beforeAll(async () => {
       await prisma.accountSummaryLatest.createMany({
         data: Array.from({ length: ROWS_PER_GENERATION }, (_, index) => ({
-          accountId: `account-seq-scan-test-${index}`,
+          accountId: String(testBase + BigInt(index)),
           normalizedScreenName: `screen_seq_${index}`,
           normalizedDisplayName: `Display ${index}`,
           searchDocument: `screen_seq_${index} display ${index}`,
@@ -81,7 +92,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       })
       await prisma.accountSummaryLatest.createMany({
         data: Array.from({ length: NOISE_ROW_COUNT }, (_, index) => ({
-          accountId: `account-seq-scan-noise-${index}`,
+          accountId: String(noiseBase + BigInt(index)),
           normalizedScreenName: `noise_screen_${index}`,
           normalizedDisplayName: `Noise account ${index}`,
           searchDocument: `noise_screen_${index} noise account ${index}`,
@@ -98,7 +109,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         await prisma.labelSummaryCurrent.createMany({
           data: Array.from({ length: ROWS_PER_GENERATION }, (_, index) => ({
             generationId: gid,
-            labelDefinitionId: `label-${gid}-${index}`,
+            labelDefinitionId: index + 1,
             evaluatedCount: 100,
             trueCount: 10,
             populationCount: 100,
@@ -120,10 +131,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         where: { generationId: { in: allGenerationIds } },
       })
       await prisma.accountSummaryLatest.deleteMany({
-        where: { accountId: { startsWith: 'account-seq-scan-test-' } },
-      })
-      await prisma.accountSummaryLatest.deleteMany({
-        where: { accountId: { startsWith: 'account-seq-scan-noise-' } },
+        where: { accountId: { gte: String(testBase), lt: String(noiseBase + 1_000_000n) } },
       })
     })
 
@@ -138,7 +146,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
     it('searchAccounts (accountId exact) は AccountSummaryLatest の Seq Scan を行わない', async () => {
       const plan = await explain(`
-        SELECT "accountId" FROM "AccountSummaryLatest" WHERE "accountId" = 'account-seq-scan-test-0'
+        SELECT "accountId" FROM "AccountSummaryLatest" WHERE "accountId" = ${testBase}::bigint
       `)
       expect(collectSeqScans(plan, 'AccountSummaryLatest')).toEqual([])
     })
@@ -160,7 +168,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         where: { normalizedDisplayName: { contains: 'display 42', mode: 'insensitive' } },
         select: { accountId: true },
       })
-      expect(rows).toEqual([{ accountId: 'account-seq-scan-test-42' }])
+      expect(rows).toEqual([{ accountId: String(testBase + 42n) }])
     })
   },
 )
@@ -174,10 +182,12 @@ const COMMON_LABEL_COUNT = 800
 describe.skipIf(!process.env.DATABASE_URL)(
   'listAccountSummaries label filter (activeLabelKeys GIN index)',
   () => {
+    const filterBase = allocateAccountIdBase()
+
     beforeAll(async () => {
       await prisma.accountSummaryLatest.createMany({
         data: Array.from({ length: LABEL_FILTER_ROW_COUNT }, (_, index) => ({
-          accountId: `account-label-filter-test-${index}`,
+          accountId: String(filterBase + BigInt(index)),
           normalizedScreenName: `screen_label_filter_${index}`,
           normalizedDisplayName: `Display ${index}`,
           searchDocument: `screen_label_filter_${index} display ${index}`,
@@ -198,7 +208,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
     afterAll(async () => {
       await prisma.accountSummaryLatest.deleteMany({
-        where: { accountId: { startsWith: 'account-label-filter-test-' } },
+        where: {
+          accountId: {
+            gte: String(filterBase),
+            lt: String(filterBase + BigInt(LABEL_FILTER_ROW_COUNT)),
+          },
+        },
       })
     })
 
@@ -254,7 +269,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         WHERE "activeLabelKeys" && ARRAY['rare-label-test']
           AND (
             "normalizedScreenName" > 'screen_label_filter_0'
-            OR ("normalizedScreenName" = 'screen_label_filter_0' AND "accountId" > 'account-label-filter-test-0')
+            OR ("normalizedScreenName" = 'screen_label_filter_0' AND "accountId" > ${filterBase}::bigint)
           )
         ORDER BY "normalizedScreenName" ASC, "accountId" ASC
         LIMIT 25

@@ -34,7 +34,7 @@ describe('searchAcrossEntities', () => {
 
   it('アカウント検索は Account 本体ではなく read model の indexed query 3 本へ分割する', async () => {
     const { prisma, accountSummaryFindMany } = createMockPrisma()
-    await searchAcrossEntities(prisma, { query: 'Example' })
+    await searchAcrossEntities(prisma, { query: '1234567890' })
 
     const accountFindMany = (
       prisma as unknown as { account: { findMany: ReturnType<typeof vi.fn> } }
@@ -53,10 +53,10 @@ describe('searchAcrossEntities', () => {
     const { prisma, accountSummaryFindMany } = createMockPrisma()
     await searchAcrossEntities(prisma, { query: 'Example' })
 
-    const screenNameCall = accountSummaryFindMany.mock.calls[1]?.[0] as {
+    const screenNameCall = accountSummaryFindMany.mock.calls[0]?.[0] as {
       where: Record<string, unknown>
     }
-    const displayNameCall = accountSummaryFindMany.mock.calls[2]?.[0] as {
+    const displayNameCall = accountSummaryFindMany.mock.calls[1]?.[0] as {
       where: Record<string, unknown>
     }
     expect(screenNameCall.where.normalizedScreenName).toEqual({ gte: 'example', lt: 'example￿' })
@@ -66,13 +66,24 @@ describe('searchAcrossEntities', () => {
     })
   })
 
+  it('ID として解釈できない検索語では accountId の完全一致検索を発行しない', async () => {
+    const { prisma, accountSummaryFindMany } = createMockPrisma()
+    await searchAcrossEntities(prisma, { query: 'Example' })
+
+    const wheres = accountSummaryFindMany.mock.calls.map(
+      (call) => (call[0] as { where: Record<string, unknown> }).where,
+    )
+    expect(wheres).toHaveLength(2)
+    expect(wheres.some((where) => 'accountId' in where)).toBe(false)
+  })
+
   it('accountId 完全一致で AccountSummaryLatest を検索する', async () => {
     const { prisma, accountSummaryFindMany } = createMockPrisma()
     accountSummaryFindMany.mockImplementation(({ where }: { where: Record<string, unknown> }) => {
       if ('accountId' in where) {
         return Promise.resolve([
           {
-            accountId: 'account-1',
+            accountId: '1234567890',
             normalizedScreenName: 'alice',
             normalizedDisplayName: 'alice display',
           },
@@ -81,15 +92,15 @@ describe('searchAcrossEntities', () => {
       return Promise.resolve([])
     })
 
-    const result = await searchAcrossEntities(prisma, { query: 'account-1' })
+    const result = await searchAcrossEntities(prisma, { query: '1234567890' })
 
     expect(result.accounts).toEqual([
-      { id: 'account-1', screenName: 'alice', displayName: 'alice display' },
+      { id: '1234567890', screenName: 'alice', displayName: 'alice display' },
     ])
     const firstCall = accountSummaryFindMany.mock.calls[0][0] as {
       where: Record<string, unknown>
     }
-    expect(firstCall.where).toEqual({ accountId: 'account-1' })
+    expect(firstCall.where).toEqual({ accountId: '1234567890' })
   })
 
   it('複数の indexed query で同じ account が見つかっても重複を返さない', async () => {
@@ -104,7 +115,7 @@ describe('searchAcrossEntities', () => {
       .mockResolvedValueOnce([row])
       .mockResolvedValueOnce([row])
 
-    const result = await searchAcrossEntities(prisma, { query: 'example' })
+    const result = await searchAcrossEntities(prisma, { query: '12345' })
 
     expect(result.accounts).toEqual([
       { id: 'account-1', screenName: 'example', displayName: 'Example' },

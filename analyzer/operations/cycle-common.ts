@@ -74,7 +74,7 @@ export interface WorkItemStage {
   /** 直近の失敗のエラー概要。 */
   errorSummary: string | undefined
   /** 直近の AnalysisRun の ID。 */
-  analysisRunId: string | undefined
+  analysisRunId: number | undefined
   /** 直近の AnalysisRun の開始時刻。 */
   startedAt: Date | undefined
   /** 直近の AnalysisRun の完了時刻。 */
@@ -126,7 +126,6 @@ export async function deriveWorkItemStage(
 ): Promise<WorkItemStage> {
   const workItem = await prisma.analysisWorkItem.findUnique({
     where: { kind_triggerType_triggerId: { kind, triggerType, triggerId } },
-    include: { runs: { orderBy: { startedAt: 'desc' }, take: 1 } },
   })
   if (!workItem) {
     return {
@@ -141,7 +140,10 @@ export async function deriveWorkItemStage(
     }
   }
 
-  const latestRun = workItem.runs.at(0)
+  const latestRun = await prisma.analysisRun.findFirst({
+    where: { workItemId: workItem.id },
+    orderBy: { startedAt: 'desc' },
+  })
   return {
     // AnalysisRun ではなく WorkItem.status を正本にする。
     // AnalysisRun は attempt ごとの記録であり、dead へ落ちた WorkItem を
@@ -194,7 +196,7 @@ export interface CycleStageInput {
   /** 直近の失敗のエラー概要。 */
   errorSummary?: string
   /** 紐づく AnalysisRun の ID。 */
-  analysisRunId?: string
+  analysisRunId?: number
   /** Stage の開始時刻。 */
   startedAt?: Date
   /** Stage の完了時刻。 */

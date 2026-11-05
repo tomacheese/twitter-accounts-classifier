@@ -33,7 +33,7 @@ type BaselineCandidateByValueRow = Omit<
 >
 
 interface BaselineCandidateTask {
-  definitionId: string
+  definitionId: number
   labelKey: string
   value: boolean
   populationCount: number
@@ -88,7 +88,10 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
       },
       _count: { _all: true },
     })
-    return rows.map((row) => ({ labelDefinitionId: row.primaryScopeId, count: row._count._all }))
+    return rows.map((row) => ({
+      labelDefinitionId: Number(row.primaryScopeId),
+      count: row._count._all,
+    }))
   }
 
   public async listRecentChangeCounts(
@@ -160,7 +163,7 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
           : selectBuckets(seed, task.definitionId, task.value, bucketReadCount)
       const rows = await this.prisma.$queryRaw<BaselineCandidateByValueRow[]>(Prisma.sql`
         SELECT
-          classification."accountId",
+          classification."accountId"::text AS "accountId",
           classification.value,
           classification.confidence,
           classification.reason,
@@ -172,7 +175,7 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
           account."lastRecentTweetsFetchedAt"
         FROM "AccountClassificationLatest" classification
         JOIN "Account" account ON account.id = classification."accountId"
-        WHERE classification."labelDefinitionId" = ${task.definitionId}
+        WHERE classification."labelDefinitionId" = ${task.definitionId}::smallint
           AND classification.value = ${task.value}
           AND classification.evaluable = true
           AND classification."labeledAt" IS NOT NULL
@@ -183,8 +186,8 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
           }
       `)
       const ranked = rows.toSorted((a, b) =>
-        stableRank(seed, task.definitionId, String(task.value), a.accountId).localeCompare(
-          stableRank(seed, task.definitionId, String(task.value), b.accountId),
+        stableRank(seed, String(task.definitionId), String(task.value), a.accountId).localeCompare(
+          stableRank(seed, String(task.definitionId), String(task.value), b.accountId),
         ),
       )
       rowsByTask.push(
@@ -236,7 +239,7 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
   ): Promise<PlanningCandidateRow[]> {
     return this.prisma.$queryRaw<PlanningCandidateRow[]>(Prisma.sql`
       SELECT
-        latest."accountId",
+        latest."accountId"::text AS "accountId",
         latest."labelDefinitionId",
         definition.key AS "labelKey",
         latest.value,

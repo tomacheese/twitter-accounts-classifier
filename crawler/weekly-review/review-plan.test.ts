@@ -21,7 +21,7 @@ function label(
 }
 
 function candidate(
-  labelDefinitionId: string,
+  labelDefinitionId: number,
   labelKey: string,
   accountId: string,
   value: boolean,
@@ -56,12 +56,12 @@ describe('buildWeeklyReviewPlan', () => {
   })
 
   it('同じ seed と入力なら sample 順序まで同一になる', () => {
-    const labels = [label({ id: 'l1', key: 'topic_alpha' })]
+    const labels = [label({ id: 1, key: 'topic_alpha' })]
     const candidates = [
-      candidate('l1', 'topic_alpha', 'a1', true),
-      candidate('l1', 'topic_alpha', 'a2', true),
-      candidate('l1', 'topic_alpha', 'a3', false),
-      candidate('l1', 'topic_alpha', 'a4', false),
+      candidate(1, 'topic_alpha', 'a1', true),
+      candidate(1, 'topic_alpha', 'a2', true),
+      candidate(1, 'topic_alpha', 'a3', false),
+      candidate(1, 'topic_alpha', 'a4', false),
     ]
 
     const first = buildWeeklyReviewPlan({
@@ -85,12 +85,12 @@ describe('buildWeeklyReviewPlan', () => {
   })
 
   it('各ラベルから true と false の random audit を優先して確保する', () => {
-    const labels = [label({ id: 'l1', key: 'topic_alpha' }), label({ id: 'l2', key: 'spam_beta' })]
+    const labels = [label({ id: 1, key: 'topic_alpha' }), label({ id: 2, key: 'spam_beta' })]
     const candidates = [
-      candidate('l1', 'topic_alpha', 'a1', true),
-      candidate('l1', 'topic_alpha', 'a2', false),
-      candidate('l2', 'spam_beta', 'b1', true),
-      candidate('l2', 'spam_beta', 'b2', false),
+      candidate(1, 'topic_alpha', 'a1', true),
+      candidate(1, 'topic_alpha', 'a2', false),
+      candidate(2, 'spam_beta', 'b1', true),
+      candidate(2, 'spam_beta', 'b2', false),
     ]
 
     const plan = buildWeeklyReviewPlan({
@@ -113,16 +113,16 @@ describe('buildWeeklyReviewPlan', () => {
   })
 
   it('余剰 budget は recent change と境界例を優先し duplicate sample を作らない', () => {
-    const labels = [label({ id: 'l1', key: 'bot_alpha', recentChangeCount: 8 })]
+    const labels = [label({ id: 1, key: 'bot_alpha', recentChangeCount: 8 })]
     const candidates = [
-      candidate('l1', 'bot_alpha', 'a1', true, { confidence: 0.9 }),
-      candidate('l1', 'bot_alpha', 'a2', false),
-      candidate('l1', 'bot_alpha', 'a3', false, {
+      candidate(1, 'bot_alpha', 'a1', true, { confidence: 0.9 }),
+      candidate(1, 'bot_alpha', 'a2', false),
+      candidate(1, 'bot_alpha', 'a3', false, {
         confidence: 0.75,
         changeType: 'removed',
       }),
-      candidate('l1', 'bot_alpha', 'a4', true, { confidence: 0.2 }),
-      candidate('l1', 'bot_alpha', 'a5', true, { reason: 'rare reason' }),
+      candidate(1, 'bot_alpha', 'a4', true, { confidence: 0.2 }),
+      candidate(1, 'bot_alpha', 'a5', true, { reason: 'rare reason' }),
     ]
 
     const plan = buildWeeklyReviewPlan({
@@ -151,21 +151,21 @@ describe('buildWeeklyReviewPlan', () => {
   it('metric shift と active finding を持つラベルの targeted candidate を優先する', () => {
     const labels = [
       label({
-        id: 'risky',
+        id: 11,
         key: 'spam_risky',
         activeFindingCount: 2,
         latestMetrics: { prevalence: 0.2, coverage: 0.7, staleRatio: 0.2 },
         previousMetrics: { prevalence: 0.1, coverage: 0.95, staleRatio: 0 },
       }),
-      label({ id: 'stable', key: 'topic_stable' }),
+      label({ id: 12, key: 'topic_stable' }),
     ]
     const candidates = [
-      candidate('risky', 'spam_risky', 'r1', true),
-      candidate('risky', 'spam_risky', 'r2', false),
-      candidate('risky', 'spam_risky', 'r3', false, { confidence: 0.6 }),
-      candidate('stable', 'topic_stable', 's1', true),
-      candidate('stable', 'topic_stable', 's2', false),
-      candidate('stable', 'topic_stable', 's3', false, { confidence: 0.6 }),
+      candidate(11, 'spam_risky', 'r1', true),
+      candidate(11, 'spam_risky', 'r2', false),
+      candidate(11, 'spam_risky', 'r3', false, { confidence: 0.6 }),
+      candidate(12, 'topic_stable', 's1', true),
+      candidate(12, 'topic_stable', 's2', false),
+      candidate(12, 'topic_stable', 's3', false, { confidence: 0.6 }),
     ]
 
     const plan = buildWeeklyReviewPlan({
@@ -185,7 +185,7 @@ describe('buildWeeklyReviewPlan', () => {
 
   it('random baseline を全ラベルへ配分し risk が高いラベルだけに独占させない', () => {
     const labels = Array.from({ length: 10 }, (_, i) =>
-      label({ id: `l${i}`, key: `label_${i}`, activeFindingCount: i === 0 ? 100 : 0 }),
+      label({ id: i + 1, key: `label_${i}`, activeFindingCount: i === 0 ? 100 : 0 }),
     )
     const candidates = labels.flatMap((l) => [
       candidate(l.id, l.key, `${l.id}-pos`, true),
@@ -213,8 +213,8 @@ describe('buildWeeklyReviewPlan', () => {
   })
 
   it('evaluable=false の candidate を insufficient_support として他の targeted signal より優先する', () => {
-    const l = label({ id: 'l1', key: 'label_one' })
-    const insufficientCandidate = candidate('l1', 'label_one', 'account-insufficient', false, {
+    const l = label({ id: 1, key: 'label_one' })
+    const insufficientCandidate = candidate(1, 'label_one', 'account-insufficient', false, {
       confidence: 0.5,
       evaluable: false,
       ruleVersion: '0.9.0',
@@ -234,11 +234,11 @@ describe('buildWeeklyReviewPlan', () => {
   })
 
   it('high_confidence_negative を margin 付きの positive_evidence_negative に置き換える', () => {
-    const l = label({ id: 'l1', key: 'label_one' })
-    const belowMargin = candidate('l1', 'label_one', 'account-below-margin', false, {
+    const l = label({ id: 1, key: 'label_one' })
+    const belowMargin = candidate(1, 'label_one', 'account-below-margin', false, {
       confidence: 0.95,
     })
-    const aboveMargin = candidate('l1', 'label_one', 'account-above-margin', false, {
+    const aboveMargin = candidate(1, 'label_one', 'account-above-margin', false, {
       confidence: 0.3,
     })
 
@@ -258,8 +258,8 @@ describe('buildWeeklyReviewPlan', () => {
   })
 
   it('random sample には populationCounts から populationCount を設定する', () => {
-    const l = label({ id: 'l1', key: 'label_one' })
-    const c = candidate('l1', 'label_one', 'account-1', true)
+    const l = label({ id: 1, key: 'label_one' })
+    const c = candidate(1, 'label_one', 'account-1', true)
 
     const plan = buildWeeklyReviewPlan({
       seed: 'run-population',
@@ -268,7 +268,7 @@ describe('buildWeeklyReviewPlan', () => {
       targetTo,
       labels: [l],
       candidates: [c],
-      populationCounts: new Map([['l1:true', 12_345]]),
+      populationCounts: new Map([['1:true', 12_345]]),
     })
 
     const sample = plan.samples.find((s) => s.sampleKind === 'random_positive')
@@ -276,8 +276,8 @@ describe('buildWeeklyReviewPlan', () => {
   })
 
   it('targeted sample には populationCount を設定しない', () => {
-    const l = label({ id: 'l1', key: 'label_one' })
-    const changeCandidate = candidate('l1', 'label_one', 'account-1', true, {
+    const l = label({ id: 1, key: 'label_one' })
+    const changeCandidate = candidate(1, 'label_one', 'account-1', true, {
       changeType: 'value_changed',
     })
 

@@ -28,7 +28,7 @@ function createMockPrisma(data: MockData) {
   return { prisma, dailyFindMany, snapshotFindFirst }
 }
 
-const labelDefinition = { id: 'label-1', key: 'spam', description: 'A fictional label.' }
+const labelDefinition = { id: 1, key: 'spam', description: 'A fictional label.' }
 
 describe('getLabelDetail', () => {
   it('LabelDefinition が無ければ null を返す', async () => {

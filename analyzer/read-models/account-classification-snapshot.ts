@@ -6,7 +6,7 @@ export const SUPPORTED_ACCOUNT_CLASSIFICATION_SNAPSHOT_VERSION = 1
 /** `classificationSnapshot` から復元した 1 ラベル分の値。 */
 export interface ClassificationSnapshotLabel {
   accountId: string
-  labelDefinitionId: string
+  labelDefinitionId: number
   value: boolean
   confidence: number
   reason: string
@@ -39,7 +39,7 @@ export function parseClassificationSnapshot(
   return snapshot.map((entry, index) => {
     if (
       !isRecord(entry) ||
-      typeof entry.labelDefinitionId !== 'string' ||
+      typeof entry.labelDefinitionId !== 'number' ||
       typeof entry.value !== 'boolean' ||
       typeof entry.confidence !== 'number' ||
       typeof entry.reason !== 'string' ||

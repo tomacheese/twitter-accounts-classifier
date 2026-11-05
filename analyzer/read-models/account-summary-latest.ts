@@ -46,7 +46,7 @@ export async function upsertAccountSummaryLatest(
       "activeLabelKeys", "activeLabelCount", "lastClassificationChangedAt", "classificationObservedAt",
       "activeFindingCount", "highestFindingSeverity", "findingObservedAt", now()
     FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS u(
-      "accountId" text, "normalizedScreenName" text, "normalizedDisplayName" text, "searchDocument" text,
+      "accountId" bigint, "normalizedScreenName" text, "normalizedDisplayName" text, "searchDocument" text,
       "profileObservedAt" timestamp, "activeLabelKeys" text[], "activeLabelCount" int,
       "lastClassificationChangedAt" timestamp, "classificationObservedAt" timestamp,
       "activeFindingCount" int, "highestFindingSeverity" text, "findingObservedAt" timestamp
@@ -95,7 +95,7 @@ export async function upsertAccountSummaryLatest(
 /** upsertAccountClassificationLatest の入力行。 */
 export interface AccountClassificationLatestRow {
   accountId: string
-  labelDefinitionId: string
+  labelDefinitionId: number
   value: boolean
   confidence: number
   reason: string
@@ -143,8 +143,8 @@ export async function upsertAccountClassificationLatest(
       "observedAt", "sourceObservationId", "evaluable", "labeledAt"
     )
     SELECT * FROM UNNEST(
-      ${sortedRows.map((row) => row.accountId)}::text[],
-      ${sortedRows.map((row) => row.labelDefinitionId)}::text[],
+      ${sortedRows.map((row) => row.accountId)}::bigint[],
+      ${sortedRows.map((row) => row.labelDefinitionId)}::smallint[],
       ${sortedRows.map((row) => row.value)}::boolean[],
       ${sortedRows.map((row) => row.confidence)}::double precision[],
       ${sortedRows.map((row) => row.reason)}::text[],

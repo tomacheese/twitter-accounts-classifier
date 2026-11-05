@@ -5,15 +5,15 @@ import { getRelabelStatus } from './relabel-status'
 describe('getRelabelStatus', () => {
   it('value に関係なく currentRuleVersion 一致件数を coverage として数える', async () => {
     const groupByLabelLatest = vi.fn().mockResolvedValue([
-      { labelDefinitionId: 'ld-food', ruleVersion: '1.0.0', _count: 30 },
-      { labelDefinitionId: 'ld-food', ruleVersion: '0.9.0', _count: 5 },
+      { labelDefinitionId: 1, ruleVersion: '1.0.0', _count: 30 },
+      { labelDefinitionId: 1, ruleVersion: '0.9.0', _count: 5 },
     ])
     const prisma = {
       account: { count: vi.fn().mockResolvedValue(100) },
       labelDefinition: {
         findMany: vi.fn().mockResolvedValue([
           {
-            id: 'ld-food',
+            id: 1,
             key: 'topic_food',
             description: 'desc',
             currentRuleVersion: '1.0.0',
@@ -64,7 +64,7 @@ describe('getRelabelStatus', () => {
       labelDefinition: {
         findMany: vi.fn().mockResolvedValue([
           {
-            id: 'ld-new',
+            id: 2,
             key: 'topic_new',
             description: 'desc',
             currentRuleVersion: null,

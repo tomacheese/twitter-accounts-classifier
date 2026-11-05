@@ -36,7 +36,7 @@ describe('getAccountDetail', () => {
         method: 'heuristic',
         ruleVersion: '1.2.0',
         labeledAt: new Date('2026-07-03T00:00:00Z'),
-        labelDefinitionId: 'ld-spam',
+        labelDefinitionId: 1,
         labelDefinition: { key: 'spam' },
       },
       {
@@ -46,7 +46,7 @@ describe('getAccountDetail', () => {
         method: 'ai-generated',
         ruleVersion: '1.0.0',
         labeledAt: new Date('2026-07-01T00:00:00Z'),
-        labelDefinitionId: 'ld-bot',
+        labelDefinitionId: 2,
         labelDefinition: { key: 'bot' },
       },
     ])
@@ -54,7 +54,7 @@ describe('getAccountDetail', () => {
     // ld-bot は初回 added のみで、それ以降の遷移がない。
     const labelChangeFindMany = vi.fn().mockResolvedValue([
       {
-        labelDefinitionId: 'ld-spam',
+        labelDefinitionId: 1,
         changeType: 'added',
         previousValue: false,
         newValue: true,
@@ -65,7 +65,7 @@ describe('getAccountDetail', () => {
         changedAt: new Date('2026-07-03T00:00:00Z'),
       },
       {
-        labelDefinitionId: 'ld-spam',
+        labelDefinitionId: 1,
         changeType: 'removed',
         previousValue: true,
         newValue: false,
@@ -76,7 +76,7 @@ describe('getAccountDetail', () => {
         changedAt: new Date('2026-07-02T00:00:00Z'),
       },
       {
-        labelDefinitionId: 'ld-spam',
+        labelDefinitionId: 1,
         changeType: 'added',
         previousValue: null,
         newValue: true,
@@ -87,7 +87,7 @@ describe('getAccountDetail', () => {
         changedAt: new Date('2026-07-01T00:00:00Z'),
       },
       {
-        labelDefinitionId: 'ld-bot',
+        labelDefinitionId: 2,
         changeType: 'added',
         previousValue: null,
         newValue: true,
@@ -439,7 +439,7 @@ describe('getAccountDetail', () => {
       verifiedType: null,
     }
     const changeRows = Array.from({ length: 25 }, (_, index) => ({
-      labelDefinitionId: 'ld-spam',
+      labelDefinitionId: 1,
       changeType: 'added',
       previousValue: null,
       newValue: true,
@@ -457,7 +457,7 @@ describe('getAccountDetail', () => {
         method: 'heuristic',
         ruleVersion: '1.0.0',
         labeledAt: new Date(2026, 6, 25),
-        labelDefinitionId: 'ld-spam',
+        labelDefinitionId: 1,
         labelDefinition: { key: 'spam' },
       },
     ])
@@ -541,7 +541,7 @@ describe('getAccountDetail', () => {
         method: 'heuristic',
         ruleVersion: '1.0.0',
         labeledAt: new Date('2026-01-01T00:00:00Z'),
-        labelDefinitionId: 'ld-quiet',
+        labelDefinitionId: 3,
         labelDefinition: { key: 'quiet' },
       },
     ])
@@ -600,7 +600,7 @@ describe('getAccountDetail', () => {
         method: 'heuristic',
         ruleVersion: '1.0.0',
         labeledAt: new Date('2026-01-01T00:00:00Z'),
-        labelDefinitionId: 'ld-never-triggered',
+        labelDefinitionId: 4,
         labelDefinition: { key: 'never_triggered' },
       },
     ])

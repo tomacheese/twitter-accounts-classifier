@@ -16,7 +16,7 @@ const NON_BLOCKING_LABEL_KEYS = new Set([
  */
 export interface BlockCandidate {
   accountId: string
-  labelDefinitionId: string
+  labelDefinitionId: number
   confidence: number
 }
 
@@ -71,29 +71,29 @@ export async function selectBlockCandidates(
       WHERE all_latest."value" = true
         AND all_latest."confidence" >= rl.threshold
         AND all_latest."ruleVersion" = rl."currentRuleVersion"
-        AND all_latest."accountId" != ${blockerId}
+        AND all_latest."accountId" != ${blockerId}::bigint
       ORDER BY all_latest."accountId", all_latest."confidence" DESC
     )
-    SELECT b."accountId", b."labelDefinitionId", b."confidence"
+    SELECT b."accountId"::text AS "accountId", b."labelDefinitionId", b."confidence"
     FROM best_label_per_account b
     WHERE NOT EXISTS (
       SELECT 1 FROM "Block" bl
-      WHERE bl."blockerId" = ${blockerId} AND bl."blockedId" = b."accountId"
+      WHERE bl."blockerId" = ${blockerId}::bigint AND bl."blockedId" = b."accountId"
     )
     AND NOT EXISTS (
       SELECT 1 FROM "BlockAction" ba
-      WHERE ba."blockerId" = ${blockerId}
+      WHERE ba."blockerId" = ${blockerId}::bigint
         AND ba."blockedId" = b."accountId"
         AND ba."result" = 'success'
     )
     AND NOT EXISTS (
       SELECT 1 FROM "Follow" f
-      WHERE (f."followerId" = ${blockerId} AND f."followeeId" = b."accountId")
-         OR (f."followerId" = b."accountId" AND f."followeeId" = ${blockerId})
+      WHERE (f."followerId" = ${blockerId}::bigint AND f."followeeId" = b."accountId")
+         OR (f."followerId" = b."accountId" AND f."followeeId" = ${blockerId}::bigint)
     )
     AND NOT EXISTS (
       SELECT 1 FROM "BlockOutboxEntry" oe
-      WHERE oe."blockerId" = ${blockerId}
+      WHERE oe."blockerId" = ${blockerId}::bigint
         AND oe."blockedId" = b."accountId"
         AND (
           oe."status" IN ('pending_remote', 'remote_succeeded')

@@ -114,7 +114,7 @@ export interface PublishGenerationInput {
   /** 集計の基準時刻。 */
   sourceWatermarkAt: Date
   /** 紐づく AnalysisRun の ID。 */
-  analysisRunId?: string
+  analysisRunId?: number
   /** 新しい generationId 宛てに行を書き込む処理。 */
   build: (
     generationId: string,

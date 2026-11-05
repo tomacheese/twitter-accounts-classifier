@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto'
+import { createSyntheticId } from 'id-boundary'
 import { afterEach, describe, expect, it } from 'vitest'
-import { PrismaClient } from '../generated/prisma'
+import { getPrismaClient } from './client'
 
-const prisma = new PrismaClient()
+const prisma = getPrismaClient()
 const accountIds: string[] = []
 
 async function createSyntheticAccount(): Promise<{ id: string }> {
-  const id = `synthetic_reply_hijack_${randomUUID()}`
+  const id = createSyntheticId()
   accountIds.push(id)
 
   return prisma.account.create({
@@ -33,12 +34,12 @@ describe.skipIf(!process.env.DATABASE_URL)('ReplyHijackEvidence (integration)', 
     const account = await createSyntheticAccount()
     const evidence = {
       accountId: account.id,
-      targetTweetId: `synthetic_target_${randomUUID()}`,
+      targetTweetId: createSyntheticId(),
       ruleVersion: 'synthetic-rule/1',
       swarmSize: 3,
       averageSimilarity: 0.98,
       spanHours: 1.5,
-      replyTweetIds: ['synthetic_reply_1', 'synthetic_reply_2', 'synthetic_reply_3'],
+      replyTweetIds: [createSyntheticId(), createSyntheticId(), createSyntheticId()],
     }
 
     await prisma.replyHijackEvidence.create({ data: evidence })

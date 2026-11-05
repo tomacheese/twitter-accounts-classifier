@@ -158,7 +158,7 @@ export interface CrawlDependencies {
   persistAccount: (input: AccountProfileInput) => Promise<void>
   recordRecentTweetsFetchFailure: (input: AccountProfileInput, attemptedAt: Date) => Promise<void>
   persistTweets: (inputs: TweetInput[]) => Promise<void>
-  ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, string>>
+  ensureLabelDefinitions: (registry: LabelRuleRegistry) => Promise<Map<string, number>>
   loadReplyCorpus: (watermark: Date) => Promise<ReplyHijackCorpusEntry[]>
   loadBioCorpus: (watermark: Date) => Promise<BioCorpusEntry[]>
   relabelGrownBioClusters: (corpus: BioCorpusEntry[]) => Promise<number>
@@ -588,7 +588,7 @@ export async function runRepliesPhase(
 export async function runAuthorUnitPhase(
   deps: CrawlDependencies,
   registry: LabelRuleRegistry,
-  labelDefinitionIds: Map<string, string>,
+  labelDefinitionIds: Map<string, number>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
   selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,
@@ -1629,7 +1629,7 @@ function allocateCycletlsPort(): number {
 async function runAccountCycle(
   deps: CrawlDependencies,
   registry: LabelRuleRegistry,
-  labelDefinitionIds: Map<string, string>,
+  labelDefinitionIds: Map<string, number>,
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
   selfReplyPromoIndex: ReturnType<typeof buildSelfReplyPromoIndex>,

@@ -22,7 +22,7 @@ interface CandidateRow {
 }
 
 interface DefinitionIdRow {
-  id: string
+  id: number
 }
 
 /**
@@ -50,10 +50,12 @@ export async function selectRecentTweetsBackfillCandidates(
   if (definitions.length === 0) return { accountIds: [] }
 
   const cursorCondition =
-    options.afterId === undefined ? Prisma.empty : Prisma.sql`AND a."id" > ${options.afterId}`
+    options.afterId === undefined
+      ? Prisma.empty
+      : Prisma.sql`AND a."id" > ${options.afterId}::bigint`
   const definitionIds = Prisma.join(definitions.map((definition) => definition.id))
   const rows = await prisma.$queryRaw<CandidateRow[]>(Prisma.sql`
-    SELECT a."id" AS "accountId"
+    SELECT a."id"::text AS "accountId"
     FROM "Account" AS a
     CROSS JOIN LATERAL (
       SELECT 1

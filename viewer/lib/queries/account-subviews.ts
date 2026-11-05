@@ -86,7 +86,7 @@ export async function getAccountClassification(
   )
 
   return rows.map((row) => ({
-    labelKey: keyById.get(row.labelDefinitionId) ?? row.labelDefinitionId,
+    labelKey: keyById.get(row.labelDefinitionId) ?? String(row.labelDefinitionId),
     value: row.value,
     confidence: row.confidence,
     reason: row.reason,
@@ -221,7 +221,7 @@ export async function getAccountRelations(
 
 /** ラベル変化履歴の 1 件。 */
 export interface AccountLabelChangeView {
-  id: string
+  id: number
   labelKey: string
   changeType: string
   previousValue: boolean | null
@@ -252,7 +252,7 @@ export async function getAccountHistory(
 
   return changes.map((change) => ({
     id: change.id,
-    labelKey: keyById.get(change.labelDefinitionId) ?? change.labelDefinitionId,
+    labelKey: keyById.get(change.labelDefinitionId) ?? String(change.labelDefinitionId),
     changeType: change.changeType,
     previousValue: change.previousValue,
     newValue: change.newValue,

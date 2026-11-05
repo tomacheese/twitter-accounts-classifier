@@ -58,7 +58,7 @@ export interface PersistAuthorResultAtomicParams {
   parentTweetFetchRateLimitRemaining?: number | null
   parentTweetFetchRateLimitReset?: number | null
   registry: LabelRuleRegistry
-  labelDefinitionIds: Map<string, string>
+  labelDefinitionIds: Map<string, number>
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
@@ -201,7 +201,7 @@ export async function persistAuthorResultAtomic(
       const appliedRules = params.registry.applyAll(bundle)
       const ruleResults = appliedRules.flatMap(({ rule, result }) => {
         const labelDefinitionId = params.labelDefinitionIds.get(rule.key)
-        if (!labelDefinitionId) {
+        if (labelDefinitionId === undefined) {
           logger.warn(`No LabelDefinition id found for rule "${rule.key}", skipping persistence`)
           return []
         }

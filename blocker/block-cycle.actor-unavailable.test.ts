@@ -68,7 +68,7 @@ describe('attemptBlock actor unavailable', () => {
       deps as never,
       'bar-1',
       'blocker-1',
-      { accountId: 'blocked-1', labelDefinitionId: 'label-1', confidence: 0.9 },
+      { accountId: 'blocked-1', labelDefinitionId: 1, confidence: 0.9 },
       'alice',
     )
 
@@ -86,7 +86,7 @@ describe('attemptBlock actor unavailable', () => {
       deps as never,
       'bar-1',
       'blocker-1',
-      { accountId: 'blocked-1', labelDefinitionId: 'label-1', confidence: 0.9 },
+      { accountId: 'blocked-1', labelDefinitionId: 1, confidence: 0.9 },
       'alice',
     )
 
@@ -103,7 +103,7 @@ describe('attemptBlock actor unavailable', () => {
       deps as never,
       'bar-1',
       'blocker-1',
-      { accountId: 'blocked-1', labelDefinitionId: 'label-1', confidence: 0.9 },
+      { accountId: 'blocked-1', labelDefinitionId: 1, confidence: 0.9 },
       'alice',
     )
 
@@ -115,9 +115,9 @@ describe('runBlockAccountCycle actor unavailable', () => {
   it('stops calling createBlock after the first actor_unavailable candidate', async () => {
     const { client, deps } = fakeDeps()
     const candidates = [
-      { accountId: 'blocked-1', labelDefinitionId: 'label-1', confidence: 0.9 },
-      { accountId: 'blocked-2', labelDefinitionId: 'label-1', confidence: 0.9 },
-      { accountId: 'blocked-3', labelDefinitionId: 'label-1', confidence: 0.9 },
+      { accountId: 'blocked-1', labelDefinitionId: 1, confidence: 0.9 },
+      { accountId: 'blocked-2', labelDefinitionId: 1, confidence: 0.9 },
+      { accountId: 'blocked-3', labelDefinitionId: 1, confidence: 0.9 },
     ]
     vi.mocked(deps.selectBlockCandidates).mockResolvedValue(candidates)
     vi.mocked(client.createBlock).mockRejectedValue(new BlockActorUnavailableError(403, 64))
@@ -142,8 +142,8 @@ describe('runBlockAccountCycle actor unavailable', () => {
   it('counts prior successes before stopping at actor_unavailable', async () => {
     const { client, deps } = fakeDeps()
     const candidates = [
-      { accountId: 'blocked-1', labelDefinitionId: 'label-1', confidence: 0.9 },
-      { accountId: 'blocked-2', labelDefinitionId: 'label-1', confidence: 0.9 },
+      { accountId: 'blocked-1', labelDefinitionId: 1, confidence: 0.9 },
+      { accountId: 'blocked-2', labelDefinitionId: 1, confidence: 0.9 },
     ]
     vi.mocked(deps.selectBlockCandidates).mockResolvedValue(candidates)
     vi.mocked(client.createBlock)

@@ -95,13 +95,13 @@ async function resolvePurgeTables(prisma: PrismaClient): Promise<PurgeTable[]> {
 async function deleteBatch(
   prisma: PrismaClient,
   table: PurgeTable,
-  labelDefinitionIds: string[],
+  labelDefinitionIds: number[],
   batchSize: number,
 ): Promise<number> {
   // table は PURGE_TABLES の固定値のみで、外部入力は含まない。
   return prisma.$executeRawUnsafe(
     `DELETE FROM "${table}" WHERE ctid = ANY(ARRAY(
-       SELECT ctid FROM "${table}" WHERE "labelDefinitionId" = ANY($1::text[]) LIMIT $2::int
+       SELECT ctid FROM "${table}" WHERE "labelDefinitionId" = ANY($1::smallint[]) LIMIT $2::int
      ))`,
     labelDefinitionIds,
     batchSize,
@@ -156,7 +156,7 @@ export async function runRetireTopicRulesPurge(deps: PurgeDependencies): Promise
 
   // 外部キーが残っていれば RESTRICT で失敗する。これは削除漏れの検知を兼ねる。
   const removed = await prisma.$executeRawUnsafe(
-    `DELETE FROM "LabelDefinition" WHERE id = ANY($1::text[])`,
+    `DELETE FROM "LabelDefinition" WHERE id = ANY($1::smallint[])`,
     labelDefinitionIds,
   )
   log(`Deleted ${removed} rows from LabelDefinition`)

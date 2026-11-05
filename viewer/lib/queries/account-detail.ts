@@ -84,7 +84,7 @@ const ACCOUNT_LABEL_CHANGE_FETCH_LIMIT = 2000
  */
 function buildLabelHistoryByDefinition(
   changes: {
-    labelDefinitionId: string
+    labelDefinitionId: number
     changeType: string
     previousValue: boolean | null
     newValue: boolean | null
@@ -94,8 +94,8 @@ function buildLabelHistoryByDefinition(
     newReason: string | null
     changedAt: Date
   }[],
-): Map<string, AccountDetailLabelHistoryEntry[]> {
-  const historyByDefinition = new Map<string, AccountDetailLabelHistoryEntry[]>()
+): Map<number, AccountDetailLabelHistoryEntry[]> {
+  const historyByDefinition = new Map<number, AccountDetailLabelHistoryEntry[]>()
 
   for (const change of changes) {
     let history = historyByDefinition.get(change.labelDefinitionId)
@@ -129,7 +129,7 @@ function buildLabelHistoryByDefinition(
  */
 function groupLabelsByDefinition(
   latestLabels: {
-    labelDefinitionId: string
+    labelDefinitionId: number
     labelDefinition: { key: string }
     value: boolean
     confidence: number
@@ -139,7 +139,7 @@ function groupLabelsByDefinition(
     labeledAt: Date
   }[],
   historyRows: {
-    labelDefinitionId: string
+    labelDefinitionId: number
     changeType: string
     previousValue: boolean | null
     newValue: boolean | null

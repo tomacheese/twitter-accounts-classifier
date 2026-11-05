@@ -5,6 +5,7 @@ packages:
   - "blocker"
   - "analyzer"
   - "pipeline-health"
+  - "id-boundary"
 
 # pnpm deploy --prod が workspace パッケージを symlink でなく実体としてコピーするために必要。
 injectWorkspacePackages: true

@@ -111,7 +111,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
   it('does not overwrite an existing classification whose semantics no longer match AccountLabelLatest', async () => {
     const account = await prisma.account.create({
       data: {
-        id: 'acct_live_wins',
+        id: '100283528355',
         screenName: 'frank',
         displayName: 'Frank',
         followersCount: 0,
@@ -178,7 +178,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     const labeledAt = new Date('2026-01-01T00:00:00Z')
     const account = await prisma.account.create({
       data: {
-        id: 'acct_bootstrap_evaluable',
+        id: '100713351095',
         screenName: 'judy',
         displayName: 'Judy',
         followersCount: 0,
@@ -253,12 +253,11 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
   })
 
   it('advances cursor/processedCount exactly once per row when two work items race on the same chunk', async () => {
-    // id は 'acct_concurrent_0' .. '_4' の辞書順が数値順と一致するため、
-    // orderBy: { id: 'asc' } のチャンク境界を事前に予測できる。
+    // id は同じ桁数なので辞書順と数値順が一致し、チャンク境界を事前に予測できる。
     for (let i = 0; i < 5; i++) {
       await prisma.account.create({
         data: {
-          id: `acct_concurrent_${i}`,
+          id: String(100_346_667_403n + BigInt(i)),
           screenName: `user${i}`,
           displayName: `User ${i}`,
           followersCount: 0,
@@ -296,18 +295,18 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
       where: { modelKey: 'account_summary' },
     })
     expect(bootstrap?.processedCount).toBe(4)
-    expect(bootstrap?.cursor).toBe('acct_concurrent_3')
+    expect(bootstrap?.cursor).toBe('100401775249')
     expect(bootstrap?.status).toBe('running')
 
     const processedSummaries = await prisma.accountSummaryLatest.findMany({
-      where: { accountId: { startsWith: 'acct_concurrent_' } },
+      where: { accountId: { startsWith: '100346667403' } },
       select: { accountId: true },
     })
     expect(processedSummaries.map((row) => row.accountId).toSorted()).toEqual([
-      'acct_concurrent_0',
-      'acct_concurrent_1',
-      'acct_concurrent_2',
-      'acct_concurrent_3',
+      '100598866219',
+      '100594106301',
+      '100726712583',
+      '100401775249',
     ])
   })
 })
@@ -318,13 +317,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
     beforeEach(resetDb)
 
     it('does not insert a classification row for a pair that exists only in AccountLabelLatest', async () => {
-      await createAccount('acct_label_only')
+      await createAccount('100027855373')
       const labelDefinition = await prisma.labelDefinition.create({
         data: { key: 'test_label_only', description: 'テスト用ラベル' },
       })
       await prisma.accountLabelLatest.create({
         data: {
-          accountId: 'acct_label_only',
+          accountId: '100027855373',
           labelDefinitionId: labelDefinition.id,
           value: true,
           confidence: 0.8,
@@ -345,20 +344,20 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await processAccountSummaryBootstrap(prisma, workItem, { chunkSize: 10 })
 
       const classificationCount = await prisma.accountClassificationLatest.count({
-        where: { accountId: 'acct_label_only' },
+        where: { accountId: '100027855373' },
       })
       expect(classificationCount).toBe(0)
     })
 
     it('leaves migration-default evaluable=false/labeledAt=null untouched when the matching AccountLabelLatest row has different semantics', async () => {
-      await createAccount('acct_mismatch')
+      await createAccount('100291733494')
       const labelDefinition = await prisma.labelDefinition.create({
         data: { key: 'test_mismatch', description: 'テスト用ラベル' },
       })
       // migration 直後の既定値 (evaluable=false, labeledAt=null) を再現する。
       await prisma.accountClassificationLatest.create({
         data: {
-          accountId: 'acct_mismatch',
+          accountId: '100291733494',
           labelDefinitionId: labelDefinition.id,
           value: true,
           confidence: 0.8,
@@ -373,7 +372,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // AccountLabelLatest 側は同じ key だが value が異なる (semantics mismatch)。
       await prisma.accountLabelLatest.create({
         data: {
-          accountId: 'acct_mismatch',
+          accountId: '100291733494',
           labelDefinitionId: labelDefinition.id,
           value: false,
           confidence: 0.8,
@@ -396,7 +395,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const classification = await prisma.accountClassificationLatest.findUniqueOrThrow({
         where: {
           accountId_labelDefinitionId: {
-            accountId: 'acct_mismatch',
+            accountId: '100291733494',
             labelDefinitionId: labelDefinition.id,
           },
         },
@@ -410,14 +409,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
 
     it('sets evaluable/labeledAt when the matching AccountLabelLatest row has identical semantics', async () => {
-      await createAccount('acct_match')
+      await createAccount('100515155459')
       const labelDefinition = await prisma.labelDefinition.create({
         data: { key: 'test_match', description: 'テスト用ラベル' },
       })
       const labeledAt = new Date('2026-01-02T00:00:00Z')
       await prisma.accountClassificationLatest.create({
         data: {
-          accountId: 'acct_match',
+          accountId: '100515155459',
           labelDefinitionId: labelDefinition.id,
           value: true,
           confidence: 0.8,
@@ -431,7 +430,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       })
       await prisma.accountLabelLatest.create({
         data: {
-          accountId: 'acct_match',
+          accountId: '100515155459',
           labelDefinitionId: labelDefinition.id,
           value: true,
           confidence: 0.8,
@@ -455,7 +454,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const classification = await prisma.accountClassificationLatest.findUniqueOrThrow({
         where: {
           accountId_labelDefinitionId: {
-            accountId: 'acct_match',
+            accountId: '100515155459',
             labelDefinitionId: labelDefinition.id,
           },
         },
@@ -466,7 +465,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // metadata-only UPDATE が WeeklyReviewSampleBucketCount trigger を発火させ、
       // eligibility 遷移 (ineligible → eligible) を反映することを確認する。
       const [{ bucket }] = await prisma.$queryRaw<{ bucket: number }[]>`
-        SELECT weekly_review_sample_bucket('acct_match') AS bucket
+        SELECT weekly_review_sample_bucket('100515155459') AS bucket
       `
       const bucketCount = await prisma.weeklyReviewSampleBucketCount.findUnique({
         where: {
@@ -484,7 +483,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // AccountClassificationLatest に行が無いアカウントを複数用意しても、
       // それらは既存 sampling population に含まれないため cursor の対象にならない。
       for (let i = 0; i < 5; i++) {
-        await createAccount(`acct_unclassified_${i}`)
+        await createAccount(String(100_406_367_032n + BigInt(i)))
       }
 
       const workItem = await prisma.analysisWorkItem.create({
@@ -509,13 +508,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const labelDefinition = await prisma.labelDefinition.create({
         data: { key: 'test_sampling_race', description: 'テスト用ラベル' },
       })
-      // id は 'acct_sampling_0' .. '_4' の辞書順が数値順と一致するため、
-      // orderBy accountId asc のチャンク境界を事前に予測できる。
+      // id は同じ桁数なので辞書順と数値順が一致し、チャンク境界を事前に予測できる。
       for (let i = 0; i < 5; i++) {
-        await createAccount(`acct_sampling_${i}`)
+        await createAccount(String(100_743_446_399n + BigInt(i)))
         await prisma.accountClassificationLatest.create({
           data: {
-            accountId: `acct_sampling_${i}`,
+            accountId: String(100_743_446_399n + BigInt(i)),
             labelDefinitionId: labelDefinition.id,
             value: true,
             confidence: 0.8,
@@ -555,7 +553,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         where: { modelKey: 'account_summary_sampling_v2' },
       })
       expect(bootstrap?.processedCount).toBe(4)
-      expect(bootstrap?.cursor).toBe('acct_sampling_3')
+      expect(bootstrap?.cursor).toBe('100219201759')
       expect(bootstrap?.status).toBe('running')
     })
   },
@@ -579,7 +577,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
 
   it('does not start the sampling phase while the legacy phase is still pending/running', async () => {
     await prisma.readModelBootstrap.create({
-      data: { modelKey: 'account_summary', status: 'running', cursor: 'acct_1' },
+      data: { modelKey: 'account_summary', status: 'running', cursor: '100427814401' },
     })
     await prisma.analysisWorkItem.create({
       data: {
@@ -667,7 +665,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
       data: { modelKey: 'account_summary', status: 'completed' },
     })
     await prisma.readModelBootstrap.create({
-      data: { modelKey: 'account_summary_sampling_v2', status: 'running', cursor: 'acct_1' },
+      data: { modelKey: 'account_summary_sampling_v2', status: 'running', cursor: '100427814401' },
     })
     await prisma.analysisWorkItem.create({
       data: {
@@ -694,7 +692,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
       data: { modelKey: 'account_summary', status: 'completed' },
     })
     await prisma.readModelBootstrap.create({
-      data: { modelKey: 'account_summary_v2', status: 'completed', cursor: 'acct_9999999' },
+      data: { modelKey: 'account_summary_v2', status: 'completed', cursor: '100696643940' },
     })
 
     await enqueueAccountSummaryBootstrapIfNeeded(prisma)
@@ -717,7 +715,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueAccountSummaryBootstrapIfNeed
       data: { modelKey: 'account_summary', status: 'completed' },
     })
     await prisma.readModelBootstrap.create({
-      data: { modelKey: 'account_summary_v2', status: 'running', cursor: 'acct_9999999' },
+      data: { modelKey: 'account_summary_v2', status: 'running', cursor: '100696643940' },
     })
 
     await enqueueAccountSummaryBootstrapIfNeeded(prisma)

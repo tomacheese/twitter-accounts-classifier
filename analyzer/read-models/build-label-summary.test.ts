@@ -1,3 +1,4 @@
+import { createSyntheticSerialId } from 'id-boundary'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { getPrismaClient } from '../db/client'
@@ -19,7 +20,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
     })
-    const triggerWorkItemId = `work_item_${randomUUID()}`
+    const triggerWorkItemId = createSyntheticSerialId()
 
     await prisma.labelMetricSnapshot.create({
       data: {
@@ -43,7 +44,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
         identityVersion: 1,
         type: 'label_count_drop',
         primaryScopeType: 'label',
-        primaryScopeId: labelDefinition.id,
+        primaryScopeId: String(labelDefinition.id),
         status: 'active',
         currentSeverity: 'high',
         maximumSeverity: 'high',
@@ -73,7 +74,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: `test_label_${randomUUID()}`, description: 'テスト用ラベル' },
     })
-    const triggerWorkItemId = `work_item_${randomUUID()}`
+    const triggerWorkItemId = createSyntheticSerialId()
 
     await prisma.labelMetricSnapshot.create({
       data: {
@@ -111,7 +112,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
 
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: 'work_item_old',
+        triggerWorkItemId: 700_013,
         labelDefinitionId: labelDefinition.id,
         observedAt: new Date('2026-01-01T00:00:00Z'),
         sourceWatermarkAt: new Date('2026-01-01T00:00:00Z'),
@@ -125,7 +126,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     })
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: 'work_item_new',
+        triggerWorkItemId: 700_003,
         labelDefinitionId: labelDefinition.id,
         observedAt: new Date('2026-01-02T00:00:00Z'),
         sourceWatermarkAt: new Date('2026-01-02T00:00:00Z'),
@@ -140,7 +141,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
 
     const result = await buildLabelSummary(prisma, {
       generationId: 'gen_1',
-      triggerWorkItemId: 'work_item_new',
+      triggerWorkItemId: 700_003,
       sourceWatermarkAt: new Date('2026-01-02T00:00:00Z'),
     })
     expect(result.rowCount).toBe(1)
@@ -164,7 +165,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
 
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: 'work_item_unknown_old',
+        triggerWorkItemId: 700_007,
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: new Date(Date.now() - 60 * 60 * 1000),
@@ -179,7 +180,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     })
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: 'work_item_unknown_current',
+        triggerWorkItemId: 700_000,
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: new Date(),
@@ -196,7 +197,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     const generationId = `generation-${randomUUID()}`
     await buildLabelSummary(prisma, {
       generationId,
-      triggerWorkItemId: 'work_item_unknown_current',
+      triggerWorkItemId: 700_000,
       sourceWatermarkAt: new Date(),
     })
 
@@ -215,11 +216,10 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     const day = 24 * 60 * 60 * 1000
     const offsets = [0, 1 * day, 8 * day]
     const prevalences = [0.4, 0.3, 0.1]
-    const currentTriggerWorkItemId = `work_item_current_${randomUUID()}`
+    const currentTriggerWorkItemId = createSyntheticSerialId()
     await prisma.labelMetricSnapshot.createMany({
       data: offsets.map((offset, index) => ({
-        triggerWorkItemId:
-          index === 0 ? currentTriggerWorkItemId : `work_item_past_${randomUUID()}`,
+        triggerWorkItemId: index === 0 ? currentTriggerWorkItemId : createSyntheticSerialId(),
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: new Date(now - offset),
@@ -253,7 +253,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     const watermarkAt = new Date(Date.now() - 60 * 60 * 1000)
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: 'work_item_designated',
+        triggerWorkItemId: 700_005,
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: new Date(watermarkAt.getTime() - 60 * 60 * 1000),
@@ -270,7 +270,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     // 対象に含まれてはならない。
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: 'work_item_other',
+        triggerWorkItemId: 700_012,
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: new Date(watermarkAt.getTime() + 60 * 1000),
@@ -287,7 +287,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     const generationId = `generation-${randomUUID()}`
     await buildLabelSummary(prisma, {
       generationId,
-      triggerWorkItemId: 'work_item_designated',
+      triggerWorkItemId: 700_005,
       sourceWatermarkAt: watermarkAt,
     })
 
@@ -305,7 +305,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     const generationId = `generation-${randomUUID()}`
     const result = await buildLabelSummary(prisma, {
       generationId,
-      triggerWorkItemId: `work_item_nonexistent_${randomUUID()}`,
+      triggerWorkItemId: createSyntheticSerialId(),
       sourceWatermarkAt: new Date(),
     })
 

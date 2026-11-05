@@ -69,7 +69,7 @@ describe('missing block target', () => {
       'blocker-1',
       {
         accountId: 'blocked-1',
-        labelDefinitionId: 'label-1',
+        labelDefinitionId: 1,
         confidence: 0.9,
       },
       'alice',
@@ -86,7 +86,7 @@ describe('missing block target', () => {
 
   it('does not increment failedCount for a missing target', async () => {
     const { client, deps } = fakeDeps()
-    const candidate = { accountId: 'missing-1', labelDefinitionId: 'label-spam', confidence: 0.95 }
+    const candidate = { accountId: 'missing-1', labelDefinitionId: 3, confidence: 0.95 }
     vi.mocked(client.createBlock).mockRejectedValue(
       new BlockTargetNotFoundError(candidate.accountId),
     )

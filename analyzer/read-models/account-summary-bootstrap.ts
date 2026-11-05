@@ -419,15 +419,23 @@ async function processSamplingChunk(tx: PrismaClient, chunkSize: number): Promis
   const accountIdRows = await tx.$queryRaw<{ accountId: string }[]>(
     state.cursor
       ? Prisma.sql`
-        SELECT DISTINCT "accountId" FROM "AccountClassificationLatest"
-        WHERE "accountId" > ${state.cursor}
-        ORDER BY "accountId" ASC
-        LIMIT ${chunkSize}
+        SELECT "accountId"::text AS "accountId"
+        FROM (
+          SELECT DISTINCT "accountId" FROM "AccountClassificationLatest"
+          WHERE "accountId" > ${state.cursor}::bigint
+          ORDER BY "accountId" ASC
+          LIMIT ${chunkSize}
+        ) AS page
+        ORDER BY page."accountId" ASC
       `
       : Prisma.sql`
-        SELECT DISTINCT "accountId" FROM "AccountClassificationLatest"
-        ORDER BY "accountId" ASC
-        LIMIT ${chunkSize}
+        SELECT "accountId"::text AS "accountId"
+        FROM (
+          SELECT DISTINCT "accountId" FROM "AccountClassificationLatest"
+          ORDER BY "accountId" ASC
+          LIMIT ${chunkSize}
+        ) AS page
+        ORDER BY page."accountId" ASC
       `,
   )
   const accountIds = accountIdRows.map((row) => row.accountId)
@@ -445,7 +453,7 @@ async function processSamplingChunk(tx: PrismaClient, chunkSize: number): Promis
         AND l."reason" = c."reason"
         AND l."method" = c."method"
         AND l."ruleVersion" = c."ruleVersion"
-        AND c."accountId" = ANY(${accountIds}::text[])
+        AND c."accountId" = ANY(${accountIds}::bigint[])
     `
   }
 

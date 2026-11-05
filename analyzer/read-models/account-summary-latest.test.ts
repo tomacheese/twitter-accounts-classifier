@@ -23,7 +23,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountSummaryLatest', () => {
   it('does not roll back classificationObservedAt when a later profile-only update arrives', async () => {
     const account = await prisma.account.create({
       data: {
-        id: 'acct_watermark',
+        id: '100650582382',
         screenName: 'alice',
         displayName: 'Alice',
         followersCount: 0,
@@ -80,7 +80,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountSummaryLatest', () => {
   it('does not apply a stale classification update older than the current watermark', async () => {
     const account = await prisma.account.create({
       data: {
-        id: 'acct_stale',
+        id: '100232606372',
         screenName: 'bob',
         displayName: 'Bob',
         followersCount: 0,
@@ -143,7 +143,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
   it('rejects a semantic update whose labeledAt is older than the existing row', async () => {
     const account = await prisma.account.create({
       data: {
-        id: 'acct_class',
+        id: '100682868121',
         screenName: 'carol',
         displayName: 'Carol',
         followersCount: 0,
@@ -205,7 +205,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
   it('反例固定: 新しい observedAt だが古い labeledAt の live refresh の後に、より新しい labeledAt の bootstrap が来ても value/evaluable/labeledAt は同一の bootstrap 由来行に揃い、observedAt/sourceObservationId は独立して最新の観測を維持する', async () => {
     const account = await prisma.account.create({
       data: {
-        id: 'acct_interleave',
+        id: '100429038660',
         screenName: 'dave',
         displayName: 'Dave',
         followersCount: 0,
@@ -280,7 +280,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
   it('反例の逆順 commit でも同一の labeledAt 由来の semantic 行に収束する', async () => {
     const account = await prisma.account.create({
       data: {
-        id: 'acct_interleave_reverse',
+        id: '100221496434',
         screenName: 'erin',
         displayName: 'Erin',
         followersCount: 0,
@@ -349,7 +349,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
   it('1回の呼び出しでlabeledAtがnullの行とnon-nullの行が混在してもtext[]::timestamp[]経由のcastが両方を正しく書き込む', async () => {
     const accountWithLabel = await prisma.account.create({
       data: {
-        id: 'acct_mixed_labeled',
+        id: '100846625227',
         screenName: 'frank',
         displayName: 'Frank',
         followersCount: 0,
@@ -360,7 +360,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
     })
     const accountWithoutLabel = await prisma.account.create({
       data: {
-        id: 'acct_mixed_unlabeled',
+        id: '100420050461',
         screenName: 'judy',
         displayName: 'Judy',
         followersCount: 0,
@@ -421,8 +421,8 @@ describe('upsertAccountClassificationLatest row ordering', () => {
 
     await upsertAccountClassificationLatest(fakePrisma, [
       {
-        accountId: 'acct_1',
-        labelDefinitionId: 'label_z',
+        accountId: '100427814401',
+        labelDefinitionId: 9,
         value: true,
         confidence: 0.9,
         reason: 'r',
@@ -434,8 +434,8 @@ describe('upsertAccountClassificationLatest row ordering', () => {
         labeledAt: new Date('2026-08-13T00:00:00Z'),
       },
       {
-        accountId: 'acct_1',
-        labelDefinitionId: 'label_a',
+        accountId: '100427814401',
+        labelDefinitionId: 3,
         value: false,
         confidence: 0.1,
         reason: 'r2',
@@ -450,7 +450,7 @@ describe('upsertAccountClassificationLatest row ordering', () => {
 
     expect(executeRaw).toHaveBeenCalledTimes(1)
     const labelDefinitionIds = executeRaw.mock.calls[0][2]
-    expect(labelDefinitionIds).toEqual(['label_a', 'label_z'])
+    expect(labelDefinitionIds).toEqual([3, 9])
   })
 })
 

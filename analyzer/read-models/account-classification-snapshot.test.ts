@@ -3,9 +3,9 @@ import { parseClassificationSnapshot } from './account-classification-snapshot'
 
 describe('parseClassificationSnapshot', () => {
   it('converts a valid snapshot array into LabelAtWatermark rows with the given accountId', () => {
-    const result = parseClassificationSnapshot('acct_1', [
+    const result = parseClassificationSnapshot('100427814401', [
       {
-        labelDefinitionId: 'def_1',
+        labelDefinitionId: 1,
         value: true,
         confidence: 0.9,
         reason: 'r',
@@ -18,8 +18,8 @@ describe('parseClassificationSnapshot', () => {
 
     expect(result).toEqual([
       {
-        accountId: 'acct_1',
-        labelDefinitionId: 'def_1',
+        accountId: '100427814401',
+        labelDefinitionId: 1,
         value: true,
         confidence: 0.9,
         reason: 'r',
@@ -32,20 +32,20 @@ describe('parseClassificationSnapshot', () => {
   })
 
   it('returns an empty array for an empty snapshot', () => {
-    expect(parseClassificationSnapshot('acct_1', [])).toEqual([])
+    expect(parseClassificationSnapshot('100427814401', [])).toEqual([])
   })
 
   it('throws when the snapshot is not an array', () => {
-    expect(() => parseClassificationSnapshot('acct_1', { labelDefinitionId: 'def_1' })).toThrow(
+    expect(() => parseClassificationSnapshot('100427814401', { labelDefinitionId: 1 })).toThrow(
       'classificationSnapshot must be an array',
     )
   })
 
   it('throws when an entry is missing a required field', () => {
     expect(() =>
-      parseClassificationSnapshot('acct_1', [
+      parseClassificationSnapshot('100427814401', [
         {
-          labelDefinitionId: 'def_1',
+          labelDefinitionId: 1,
           value: true,
           confidence: 0.9,
           reason: 'r',

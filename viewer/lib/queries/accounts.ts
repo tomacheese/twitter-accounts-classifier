@@ -57,7 +57,7 @@ async function findAccountIdsWithAnyLabel(
   labelKeys: string[],
 ): Promise<string[]> {
   const rows = await prisma.$queryRaw<MatchingAccountIdRow[]>`
-    SELECT DISTINCT ll."accountId" AS "accountId"
+    SELECT DISTINCT ll."accountId"::text AS "accountId"
     FROM "AccountLabelLatest" ll
     JOIN "LabelDefinition" ld ON ld.id = ll."labelDefinitionId"
     WHERE ll.value = true AND ld.key IN (${Prisma.join(labelKeys)})
@@ -83,10 +83,10 @@ async function getActiveLabelKeysByAccount(
   }
 
   const rows = await prisma.$queryRaw<ActiveLabelRow[]>`
-    SELECT ll."accountId" AS "accountId", ld.key AS "key"
+    SELECT ll."accountId"::text AS "accountId", ld.key AS "key"
     FROM "AccountLabelLatest" ll
     JOIN "LabelDefinition" ld ON ld.id = ll."labelDefinitionId"
-    WHERE ll.value = true AND ll."accountId" IN (${Prisma.join(accountIds)})
+    WHERE ll.value = true AND ll."accountId" = ANY(${accountIds}::bigint[])
   `
 
   const map = new Map<string, string[]>()

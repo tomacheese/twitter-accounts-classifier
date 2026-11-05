@@ -7,7 +7,7 @@ export interface PlanningMetrics {
 }
 
 export interface PlanningLabel {
-  id: string
+  id: number
   key: string
   currentRuleVersion: string
   trueCount: number
@@ -20,7 +20,7 @@ export interface PlanningLabel {
 
 export interface PlanningCandidate {
   accountId: string
-  labelDefinitionId: string
+  labelDefinitionId: number
   labelKey: string
   value: boolean
   confidence: number
@@ -54,7 +54,7 @@ export type WeeklyReviewSelectionSignal = Exclude<
 export interface WeeklyReviewSample {
   sampleId: string
   accountId: string
-  labelDefinitionId: string
+  labelDefinitionId: number
   labelKey: string
   classifierValue: boolean
   classifierConfidence: number
@@ -77,7 +77,7 @@ export interface WeeklyReviewSample {
 }
 
 export interface WeeklyReviewPlanLabel {
-  labelDefinitionId: string
+  labelDefinitionId: number
   labelKey: string
   riskScore: number
   baselineSampleCount: number
@@ -215,7 +215,7 @@ function targetedKind(
 
 export function buildWeeklyReviewPlan(input: BuildWeeklyReviewPlanInput): WeeklyReviewPlan {
   const labelsById = new Map(input.labels.map((label) => [label.id, label]))
-  const candidatesByLabel = new Map<string, PlanningCandidate[]>()
+  const candidatesByLabel = new Map<number, PlanningCandidate[]>()
   for (const candidate of input.candidates) {
     const existing = candidatesByLabel.get(candidate.labelDefinitionId) ?? []
     existing.push(candidate)
