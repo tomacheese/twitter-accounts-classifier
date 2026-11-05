@@ -27,171 +27,211 @@ generator analyzerClient {
   output   = "../analyzer/generated/prisma"
 }
 
-model Account {
-  id                             String                 @id
-  screenName                     String
-  displayName                    String
-  bio                            String?
-  profileImageUrl                String?
-  followersCount                 Int
-  followingCount                 Int
-  tweetCount                     Int
-  accountCreatedAt               DateTime
-  location                       String?
-  url                            String?
-  isBlueVerified                 Boolean                @default(false)
-  verifiedType                   String?
-  professionalType               String?
-  parodyCommentaryFanLabel       String?
-  firstSeenAt                    DateTime               @default(now())
-  lastCrawledAt                  DateTime               @default(now())
-  lastRecentTweetsAttemptedAt    DateTime?
-  lastRecentTweetsFetchedAt      DateTime?
-  recentTweetsFetchStatus        String?
-  updatedAt                      DateTime               @updatedAt
-  tweets                         Tweet[]
-  latestLabels                   AccountLabelLatest[]
-  followerEdges                  Follow[]               @relation("FollowerEdges")
-  followeeEdges                  Follow[]               @relation("FolloweeEdges")
-  followStateChangesAsFollower  FollowStateChange[]    @relation("FollowStateChangeFollower")
-  followStateChangesAsFollowee  FollowStateChange[]    @relation("FollowStateChangeFollowee")
-  replyHijackEvidence            ReplyHijackEvidence[]
-  blockerEdges                   Block[]                @relation("BlockerEdges")
-  blockedEdges                   Block[]                @relation("BlockedEdges")
-  blockActionsAsBlocker          BlockAction[]          @relation("BlockActionBlocker")
-  blockActionsAsBlocked          BlockAction[]          @relation("BlockActionBlocked")
-  blockOutboxEntriesAsBlocker    BlockOutboxEntry[]     @relation("BlockOutboxBlocker")
-  blockOutboxEntriesAsBlocked    BlockOutboxEntry[]     @relation("BlockOutboxBlocked")
+// ===== 新スキーマの前提 (DB 作り直し) =====
+//
+// 実体は prisma/baseline/ の raw SQL (baseline.sql、tweet-hash.sql または tweet-range.sql、functions.sql) で作る。
+// この schema.prisma は Prisma Client の型生成と、`prisma migrate diff` による baseline との整合検査のために保つ。
+// 列の並びは、8B 境界の列、4B、2B、1B、可変長の順にしてパディングを削っている (大きい表のみ)。
+//
+// Prisma の schema DSL では表現できず、raw SQL だけで管理するもの:
+// - Tweet のパーティション (親表を通常の model として書く。HASH 版は複合 @@id、RANGE 版は id 単独の PK)
+// - 部分インデックスと、式インデックス (Account 関連の recent tweets backfill、reply corpus、weekly review sample など)
+// - トリガーと関数 (set_label_result、AccountActiveLabel の監査、ACL の集計表と weekly review sample の維持)
+// - テーブルごとの fillfactor と autovacuum の設定、Observation.classificationSnapshot の lz4 圧縮
+// - IDENTITY 列 (LabelDefinition.id、AnalysisWorkItem.id、AnalysisRun.id、AccountLabelChange.id は
+//   Prisma では `@default(autoincrement())` と書くが、実体は GENERATED ALWAYS AS IDENTITY)
+// - AccountLabelChange.sourceLabelId の部分 unique インデックス
+// - FK を張らない巨大・ホットな表 (Tweet、AccountLabelState、AccountActiveLabel、AccountClassificationLatest)。
+//   Prisma は relation を書くと FK を作るため、これらの表には relation を書かない。
+//   整合性は書き込み側と週次の孤児検査で担保する。
+//
+// Prisma が扱えるもの (Prisma 6.19.3 で確認):
+// - 複合 @@id、BigInt、`@db.SmallInt`、native enum、`@db.Timestamptz(3)`、BRIN インデックス
+// - nullable な配列列: スキーマ上は `String[]` と書き、DB 列は NULL 可の `text[]` になる。
+//   Prisma Client は NULL を空配列として読む。`[]` を書き込むと NULL でなく空配列 `{}` が入るため、
+//   Tweet の空配列を NULL で保存する書き込みは raw SQL で行う。
 
-  // この3カラムは絞り込みなしで並び替えに使われうるため、
-  // インデックスがないと行数増加に伴い全件ソートが発生する。
-  @@index([followersCount])
-  @@index([tweetCount])
-  @@index([lastCrawledAt])
-  // recent tweets backfill 候補 selector 用の (id) WHERE lastRecentTweetsAttemptedAt IS NULL
-  // 部分 index は、Prisma の schema DSL では WHERE 句を表現できないため、
-  // migration 20260830190000_add_account_recent_tweets_unattempted_index の raw SQL で管理する。
+model Account {
+  id                           BigInt                @id
+  accountCreatedAt             DateTime              @db.Timestamptz(3)
+  firstSeenAt                  DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt                    DateTime              @updatedAt @db.Timestamptz(3)
+  followersCount               Int
+  followingCount               Int
+  tweetCount                   Int
+  isBlueVerified               Boolean               @default(false)
+  screenName                   String
+  displayName                  String
+  bio                          String?
+  profileImageUrl              String?
+  location                     String?
+  url                          String?
+  // verifiedType、professionalType、parodyCommentaryFanLabel は外部 API 由来の自由な文字列で、
+  // 値の集合が閉じていないため enum にしない。
+  verifiedType                 String?
+  professionalType             String?
+  parodyCommentaryFanLabel     String?
+  crawlState                   AccountCrawlState?
+  followerEdges                Follow[]              @relation("FollowerEdges")
+  followeeEdges                Follow[]              @relation("FolloweeEdges")
+  followStateChangesAsFollower FollowStateChange[]   @relation("FollowStateChangeFollower")
+  followStateChangesAsFollowee FollowStateChange[]   @relation("FollowStateChangeFollowee")
+  replyHijackEvidence          ReplyHijackEvidence[]
+  blockerEdges                 Block[]               @relation("BlockerEdges")
+  blockedEdges                 Block[]               @relation("BlockedEdges")
+  blockActionsAsBlocker        BlockAction[]         @relation("BlockActionBlocker")
+  blockActionsAsBlocked        BlockAction[]         @relation("BlockActionBlocked")
+  blockOutboxEntriesAsBlocker  BlockOutboxEntry[]    @relation("BlockOutboxBlocker")
+  blockOutboxEntriesAsBlocked  BlockOutboxEntry[]    @relation("BlockOutboxBlocked")
+
+  // followersCount、tweetCount、lastCrawledAt、cover のインデックスは使用実績がないため作らない。
+  // storage: fillfactor 80 (baseline.sql で設定する)。
 }
 
+enum RecentTweetsFetchStatus {
+  success
+  failed
+}
+
+// 更新頻度の高い列を Account から分離した表。インデックスに使う列 (lastRecentTweetsAttemptedAt) の更新は
+// HOT にならないが、それ以外の列の更新は HOT になる。
+// backfill 候補 selector 用の (accountId) WHERE lastRecentTweetsAttemptedAt IS NULL の部分インデックスは
+// baseline.sql の raw SQL で管理する。storage: fillfactor 70。
+model AccountCrawlState {
+  accountId                   BigInt                   @id
+  account                     Account                  @relation(fields: [accountId], references: [id])
+  lastCrawledAt               DateTime                 @default(now()) @db.Timestamptz(3)
+  lastRecentTweetsAttemptedAt DateTime?                @db.Timestamptz(3)
+  lastRecentTweetsFetchedAt   DateTime?                @db.Timestamptz(3)
+  recentTweetsFetchStatus     RecentTweetsFetchStatus?
+}
+
+// パーティション親表。この schema は HASH(accountId) x 32 版 (複合 PK) を表す。
+// RANGE(id) 版 (tweet-range.sql) では PK が id 単独になる。どちらにするかは 1% シャードのリハーサルで決める。
+// Account への FK は張らない (INSERT ごとの親行ロックと検証コストを避ける)。relation を書かないのはそのため。
+// 削除した列: quoteCount、retweetedTweetId、quotedTweetId、source。
+// expandedUrls と cardDestinationUrls は、空配列を NULL で保存する (DB 列は NULL 可、既定値なし)。
+// 部分インデックス (reply corpus の collectedAt DESC, id DESC WHERE isReply) は raw SQL で管理する。
+// storage: fillfactor 90、autovacuum の insert 閾値を引き下げる (tweet-*.sql で設定する)。
 model Tweet {
-  id                         String   @id
-  accountId                  String
-  account                    Account  @relation(fields: [accountId], references: [id])
-  fullText                   String
-  createdAt                  DateTime
-  retweetCount               Int
-  likeCount                  Int
-  replyCount                 Int
-  quoteCount                 Int
-  isReply                    Boolean  @default(false)
-  conversationId             String?
-  inReplyToTweetId           String?
-  isAuthorReply              Boolean  @default(false)
-  isRetweet                  Boolean  @default(false)
-  retweetedTweetId           String?
-  isPromoted                 Boolean  @default(false)
-  isPaidPromotion            Boolean  @default(false)
-  expandedUrls               String[] @default([])
-  cardDestinationUrls        String[] @default([])
+  id                           BigInt
+  accountId                    BigInt
+  createdAt                    DateTime @db.Timestamptz(3)
+  collectedAt                  DateTime @default(now()) @db.Timestamptz(3)
+  inReplyToTweetId             BigInt?
+  conversationId               BigInt?
+  quotedTweetAuthorId          BigInt?
+  retweetCount                 Int
+  likeCount                    Int
+  replyCount                   Int
+  foreignVideoSourceCount      Int?
+  isReply                      Boolean  @default(false)
+  isAuthorReply                Boolean  @default(false)
+  isRetweet                    Boolean  @default(false)
+  isPromoted                   Boolean  @default(false)
+  isPaidPromotion              Boolean  @default(false)
   // この列が存在する前に収集された行は Card 自体を評価していないため、
   // デフォルトを true ではなく false にして未評価の状態と実際の評価結果を区別している。
   cardDestinationUrlsEvaluated Boolean  @default(false)
-  hasMedia                    Boolean?
+  hasMedia                     Boolean?
   // この列が存在する前に収集された行は判定自体が行われていないため、
   // デフォルトを false ではなく null にして未評価の状態と実際の判定結果を区別している。
-  hasAiGeneratedMedia        Boolean?
-  aiGeneratedDetectionSource String?
-  quotedTweetId              String?
-  quotedTweetAuthorId        String?
-  // hasAiGeneratedMedia と同じ理由で、
-  // 未評価行を区別するためデフォルトを設定せず null のままにしている。
-  quotedTweetHasVideo        Boolean?
-  foreignVideoSourceCount    Int?
-  source                     String
-  collectedAt                DateTime @default(now())
+  hasAiGeneratedMedia          Boolean?
+  // hasAiGeneratedMedia と同じ理由で、未評価行を区別するためデフォルトを設定せず null のままにしている。
+  quotedTweetHasVideo          Boolean?
+  aiGeneratedDetectionSource   String?
+  expandedUrls                 String[]
+  cardDestinationUrls          String[]
+  fullText                     String
 
+  @@id([accountId, id])
   @@index([accountId, createdAt])
-  // reply corpus 用の collectedAt/id 降順索引は isReply = true への部分索引であり、
-  // Prisma の schema DSL では WHERE 句を表現できないため、
-  // migration 20260811090000_add_reply_corpus_partial_index の raw SQL で管理する。
 }
 
+// id は再利用しない。AccountLabelState.versions の添字を兼ねるため、削除せず retiredAt で廃止する。
+// 実体は GENERATED ALWAYS AS IDENTITY (smallint)。
 model LabelDefinition {
-  id                  String               @id @default(cuid())
-  key                 String               @unique
-  description         String
-  currentRuleVersion  String?
-  createdAt           DateTime             @default(now())
-  accountLabelsLatest AccountLabelLatest[]
-  blockActions        BlockAction[]
-  blockOutboxEntries  BlockOutboxEntry[]
+  id                   Int                @id @default(autoincrement()) @db.SmallInt
+  currentRuleVersionNo Int?               @db.SmallInt
+  retiredAt            DateTime?          @db.Timestamptz(3)
+  createdAt            DateTime           @default(now()) @db.Timestamptz(3)
+  key                  String             @unique
+  description          String
+  ruleVersions         LabelRuleVersion[]
+  blockActions         BlockAction[]
+  blockOutboxEntries   BlockOutboxEntry[]
 }
 
-// AccountLabel は監査証跡としてほぼ無制限に増え続ける履歴テーブルであり、
-// そこから DISTINCT ON で最新値を都度導出すると、
-// ダッシュボードやアカウント一覧のクエリが全件スキャンになり本番の応答時間を守れない。
-// そのため (accountId, labelDefinitionId) ごとの最新値のみを保持する専用テーブルとして用意し、
-// recordCrawlAccountLabel 等が AccountLabel への履歴 INSERT と同時に upsert する。
-// crawler/db/label-repository.ts・crawler/db/label-aggregate-repository.ts・
-// viewer/lib/queries/accounts.ts・対応するマイグレーションのコメントは、
-// この経緯の説明をここへの参照のみとし、重複させない。
-model AccountLabelLatest {
-  accountId         String
-  account           Account         @relation(fields: [accountId], references: [id])
-  labelDefinitionId String
+// versionNo は 1 始まりで、0 は予約値 (AccountLabelState.versions で符号付きに使うため、0 と -0 を区別できない)。
+// 0 を許さない CHECK 制約は baseline.sql で付ける。
+model LabelRuleVersion {
+  labelDefinitionId Int             @db.SmallInt
   labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
-  value             Boolean
-  confidence        Float
-  reason            String
-  method            String
+  versionNo         Int             @db.SmallInt
   ruleVersion       String
-  evaluable         Boolean         @default(true)
-  labeledAt         DateTime
-  sourceKind        String          @default("legacy")
+
+  @@id([labelDefinitionId, versionNo])
+  @@unique([labelDefinitionId, ruleVersion])
+}
+
+// アカウントごとの評価状態。ラベルの true/false/評価不能/未評価をここで持ち、
+// 書き込みは関数 set_label_result (functions.sql) だけに閉じる。FK は張らない。
+// versions の添字は LabelDefinition.id (1 始まり)。
+//   0 または配列外 = 未評価、正 = 評価済みの versionNo、負 = -versionNo で評価不能。
+//   評価済みで AccountActiveLabel に行がある = true、行がない = false。
+// rev は書き込みのたびに 1 増える。評価入力を読んだ時点の rev と比べて競合を防ぐ (CAS)。
+// versions は NOT NULL とするため、Prisma 側では空配列を既定値にしている (DB 側の既定値も空配列)。
+// storage: fillfactor 75、autovacuum_vacuum_scale_factor 0.02 (baseline.sql で設定する)。
+model AccountLabelState {
+  accountId   BigInt   @id
+  evaluatedAt DateTime @db.Timestamptz(3)
+  rev         Int      @default(0)
+  versions    Int[]    @default([]) @db.SmallInt
+}
+
+// value = true の行のみを持つ。FK は張らない。書き込みは set_label_result だけが行い、
+// INSERT/UPDATE/DELETE は監査トリガー (functions.sql) が AccountLabelChange へ記録する。
+// sourceKind は 0 = legacy、1 = crawl、2 = relabel。
+// インデックスは Prisma で表現できるため schema に宣言している。
+model AccountActiveLabel {
+  accountId         BigInt
+  labeledAt         DateTime @db.Timestamptz(3)
+  confidence        Float
+  labelDefinitionId Int      @db.SmallInt
+  ruleVersionNo     Int      @db.SmallInt
+  sourceKind        Int      @default(0) @db.SmallInt
+  method            String
+  reason            String
   sourceId          String?
   sourceUsername    String?
 
   @@id([accountId, labelDefinitionId])
-  // (labelDefinitionId, value) の複合インデックスは削除した。
-  // accounts.ts の value = true 絞り込みは (value, accountId) 側の Bitmap Index Scan で賄われ、
-  // このインデックスは書き込みコストだけを積んでいた。
-  @@index([value, accountId])
-  // viewer の relabel coverage クエリを支えるインデックス。
-  @@index([labelDefinitionId, ruleVersion])
-  // recent tweets backfill 候補 selector 用の (labelDefinitionId, accountId) WHERE evaluable = false
-  // 部分 index は、Prisma の schema DSL では WHERE 句を表現できないため、
-  // migration 20260830180000_add_recent_tweets_backfill_label_evaluable_index の raw SQL で管理する。
-  // block candidate selector 用の (labelDefinitionId, ruleVersion, confidence DESC, accountId)
-  // WHERE value = true 部分 index も同様の理由で
-  // migration 20260830185000_add_account_label_latest_block_candidate_index の raw SQL で管理する。
-  // このテーブルへの INSERT/UPDATE には AccountLabelChange を自動生成するトリガーが付いている。
-  // Prisma の schema DSL ではトリガーを表現できないため、raw SQL の
-  // migration 20260906010000_add_account_classification_snapshot_and_label_change_trigger で管理する。
+  @@index([labelDefinitionId, ruleVersionNo, confidence(sort: Desc), accountId])
 }
 
 /// storage-guard が計測したホストファイルシステムの空き容量・使用率を保持する単一行テーブル。
 /// relabel の fail-closed circuit breaker が読む唯一の情報源であり、書き込みは storage-guard
 /// service のみが行う。
 model StorageCapacityState {
-  id           String   @id
-  availableGib Float
-  usedPercent  Int
-  measuredAt   DateTime
+  id             String   @id
+  availableGib   Float
+  usedPercent    Int
+  measuredAt     DateTime @db.Timestamptz(3)
   // circuit breaker の hysteresis 判定結果 (blocked かどうか) の永続化。
   // プロセス内メモリだけで持つと relabeler 再起動のたびに ok 相当から
   // 再判定してしまい、blocked から回復しきい値に届く前の中間的な値を
   // 再起動直後の最初の計測として受け取った際に hysteresis を経ずに
   // 再開してしまうため、storage-guard の書き込みを跨いで保持する。
   relabelBlocked Boolean  @default(false)
-  updatedAt      DateTime @updatedAt
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
 }
 
 model WeeklyAnalysisRun {
   id                String    @id @default(cuid())
-  startedAt         DateTime
-  lastHeartbeatAt   DateTime
-  finishedAt        DateTime?
-  staleAfterAt      DateTime?
+  startedAt         DateTime  @db.Timestamptz(3)
+  lastHeartbeatAt   DateTime  @db.Timestamptz(3)
+  finishedAt        DateTime? @db.Timestamptz(3)
+  staleAfterAt      DateTime? @db.Timestamptz(3)
   status            String
   currentPhase      String?
   errorMessage      String?
@@ -200,8 +240,8 @@ model WeeklyAnalysisRun {
   sampledAccountIds Json
   findings          String?
   commitSha         String?
-  targetFrom        DateTime?
-  targetTo          DateTime?
+  targetFrom        DateTime? @db.Timestamptz(3)
+  targetTo          DateTime? @db.Timestamptz(3)
   analysisVersion   String?
   modelIdentity     String?
   toolIdentity      String?
@@ -214,12 +254,12 @@ model WeeklyAnalysisRun {
 
 model Follow {
   id          String   @id @default(cuid())
-  followerId  String
+  followerId  BigInt
   follower    Account  @relation("FollowerEdges", fields: [followerId], references: [id])
-  followeeId  String
+  followeeId  BigInt
   followee    Account  @relation("FolloweeEdges", fields: [followeeId], references: [id])
-  firstSeenAt DateTime @default(now())
-  lastSeenAt  DateTime @default(now())
+  firstSeenAt DateTime @default(now()) @db.Timestamptz(3)
+  lastSeenAt  DateTime @default(now()) @db.Timestamptz(3)
 
   @@unique([followerId, followeeId])
   @@index([followerId])
@@ -228,12 +268,12 @@ model Follow {
 
 model FollowStateChange {
   id         String   @id @default(cuid())
-  followerId String
+  followerId BigInt
   follower   Account  @relation("FollowStateChangeFollower", fields: [followerId], references: [id])
-  followeeId String
+  followeeId BigInt
   followee   Account  @relation("FollowStateChangeFollowee", fields: [followeeId], references: [id])
   changeType String
-  observedAt DateTime @default(now())
+  observedAt DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([followerId, observedAt(sort: Desc)])
   @@index([followeeId, observedAt(sort: Desc)])
@@ -241,15 +281,15 @@ model FollowStateChange {
 
 model ReplyHijackEvidence {
   id                String   @id @default(cuid())
-  accountId         String
+  accountId         BigInt
   account           Account  @relation(fields: [accountId], references: [id])
-  targetTweetId     String
+  targetTweetId     BigInt
   ruleVersion       String
-  observedAt        DateTime @updatedAt
+  observedAt        DateTime @updatedAt @db.Timestamptz(3)
   swarmSize         Int
   averageSimilarity Float
   spanHours         Float
-  replyTweetIds     String[] @default([])
+  replyTweetIds     BigInt[] @default([])
 
   @@unique([accountId, targetTweetId, ruleVersion])
   @@index([targetTweetId])
@@ -257,17 +297,17 @@ model ReplyHijackEvidence {
 
 model Block {
   id                      String    @id @default(cuid())
-  blockerId               String
+  blockerId               BigInt
   blocker                 Account   @relation("BlockerEdges", fields: [blockerId], references: [id])
-  blockedId               String
+  blockedId               BigInt
   blocked                 Account   @relation("BlockedEdges", fields: [blockedId], references: [id])
-  firstSeenAt             DateTime  @default(now())
-  lastSeenAt              DateTime  @default(now())
+  firstSeenAt             DateTime  @default(now()) @db.Timestamptz(3)
+  lastSeenAt              DateTime  @default(now()) @db.Timestamptz(3)
   // 完全同期で対象が存在しない場合のみ論理状態を進める。物理削除はしない。
   status                  String    @default("active")
-  lastCheckedAt           DateTime  @default(now())
-  missingSinceAt          DateTime?
-  resolvedAt              DateTime?
+  lastCheckedAt           DateTime  @default(now()) @db.Timestamptz(3)
+  missingSinceAt          DateTime? @db.Timestamptz(3)
+  resolvedAt              DateTime? @db.Timestamptz(3)
   consecutiveMissingCount Int       @default(0)
   sourceKind              String    @default("legacy")
   sourceId                String?
@@ -280,18 +320,18 @@ model Block {
 
 model CrawlRun {
   id                      String                   @id @default(cuid())
-  startedAt               DateTime
-  lastHeartbeatAt         DateTime
-  finishedAt              DateTime?
+  startedAt               DateTime                 @db.Timestamptz(3)
+  lastHeartbeatAt         DateTime                 @db.Timestamptz(3)
+  finishedAt              DateTime?                @db.Timestamptz(3)
   status                  String
   currentUsername         String?
-  currentAccountStartedAt DateTime?
-  staleAfterAt            DateTime?
+  currentAccountStartedAt DateTime?                @db.Timestamptz(3)
+  staleAfterAt            DateTime?                @db.Timestamptz(3)
   accountRuns             CrawlAccountRun[]
   checkpoints             CrawlAccountCheckpoint[]
   accountLabelRuns        CrawlAccountLabelRun[]
   authorCheckpoints       CrawlAuthorCheckpoint[]
-  labelEvidenceEpoch     LabelEvidenceEpoch?
+  labelEvidenceEpoch      LabelEvidenceEpoch?
 
   @@index([startedAt])
   @@index([status, startedAt(sort: Desc), id(sort: Desc)])
@@ -303,38 +343,38 @@ model LabelEvidenceEpoch {
   id                String   @id @default(cuid())
   crawlRunId        String   @unique
   crawlRun          CrawlRun @relation(fields: [crawlRunId], references: [id])
-  sourceWatermarkAt DateTime
-  createdAt         DateTime @default(now())
+  sourceWatermarkAt DateTime @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([sourceWatermarkAt(sort: Desc)])
 }
 
 model CrawlAccountRun {
-  id                   String    @id @default(cuid())
-  crawlRunId           String
-  crawlRun             CrawlRun  @relation(fields: [crawlRunId], references: [id])
-  username             String
-  startedAt            DateTime
-  finishedAt           DateTime?
-  status               String
-  recommendedCount     Int       @default(0)
-  followingCount       Int       @default(0)
-  trendingCount        Int       @default(0)
-  replyCount           Int       @default(0)
-  profileCount         Int       @default(0)
-  labelsAppliedCount   Int       @default(0)
-  parentTweetFetchCount Int      @default(0)
-  followingSynced      Boolean   @default(false)
-  followersSynced      Boolean   @default(false)
-  blocksSynced         Boolean   @default(false)
-  warnings             Json      @default("[]")
-  errorMessage         String?
+  id                    String    @id @default(cuid())
+  crawlRunId            String
+  crawlRun              CrawlRun  @relation(fields: [crawlRunId], references: [id])
+  username              String
+  startedAt             DateTime  @db.Timestamptz(3)
+  finishedAt            DateTime? @db.Timestamptz(3)
+  status                String
+  recommendedCount      Int       @default(0)
+  followingCount        Int       @default(0)
+  trendingCount         Int       @default(0)
+  replyCount            Int       @default(0)
+  profileCount          Int       @default(0)
+  labelsAppliedCount    Int       @default(0)
+  parentTweetFetchCount Int       @default(0)
+  followingSynced       Boolean   @default(false)
+  followersSynced       Boolean   @default(false)
+  blocksSynced          Boolean   @default(false)
+  warnings              Json      @default("[]")
+  errorMessage          String?
   /// crawler イメージに埋め込まれた APPLICATION_VERSION (Docker のビルド引数)。
   /// 値が取得できない場合は "unknown" になる。
   /// この行を最終的に確定させたビルドを表しており、
   /// 個々の warning を発生させたビルドは warnings 内の各要素が持つ appVersion を参照する。
-  appVersion           String    @default("unknown")
-  classificationStatus String    @default("unknown")
+  appVersion            String    @default("unknown")
+  classificationStatus  String    @default("unknown")
 
   @@index([crawlRunId])
   @@index([startedAt])
@@ -348,7 +388,7 @@ model CrawlAccountCheckpoint {
   username    String
   phase       String
   data        Json
-  completedAt DateTime @default(now())
+  completedAt DateTime @default(now()) @db.Timestamptz(3)
 
   @@unique([crawlRunId, username, phase])
   @@index([crawlRunId, username])
@@ -359,36 +399,36 @@ model CrawlAccountLabelRun {
   crawlRunId        String
   crawlRun          CrawlRun @relation(fields: [crawlRunId], references: [id])
   username          String
-  accountId         String
-  labelDefinitionId String
+  accountId         BigInt
+  labelDefinitionId Int      @db.SmallInt
   method            String
   ruleVersion       String
-  createdAt         DateTime @default(now())
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
 
   @@unique([crawlRunId, username, accountId, labelDefinitionId, method, ruleVersion])
 }
 
 model CrawlAuthorCheckpoint {
-  id                 String   @id @default(cuid())
-  crawlRunId         String
-  crawlRun           CrawlRun @relation(fields: [crawlRunId], references: [id])
-  username           String
-  authorId           String
-  status             String
-  profileCount       Int      @default(0)
-  labelsAppliedCount Int      @default(0)
-  warnings           Json     @default("[]")
-  durationMs         Int?
-  retryWaitMs        Int?
-  followSampleStatus String?
-  followSampleRequestCount Int @default(0)
-  followSampleRateLimitRemaining Int?
-  followSampleRateLimitReset Int?
-  parentTweetFetchRequestCount   Int      @default(0)
+  id                                 String   @id @default(cuid())
+  crawlRunId                         String
+  crawlRun                           CrawlRun @relation(fields: [crawlRunId], references: [id])
+  username                           String
+  authorId                           BigInt
+  status                             String
+  profileCount                       Int      @default(0)
+  labelsAppliedCount                 Int      @default(0)
+  warnings                           Json     @default("[]")
+  durationMs                         Int?
+  retryWaitMs                        Int?
+  followSampleStatus                 String?
+  followSampleRequestCount           Int      @default(0)
+  followSampleRateLimitRemaining     Int?
+  followSampleRateLimitReset         Int?
+  parentTweetFetchRequestCount       Int      @default(0)
   parentTweetFetchRateLimitRemaining Int?
-  parentTweetFetchRateLimitReset Int?
-  appVersion         String   @default("unknown")
-  completedAt        DateTime @default(now())
+  parentTweetFetchRateLimitReset     Int?
+  appVersion                         String   @default("unknown")
+  completedAt                        DateTime @default(now()) @db.Timestamptz(3)
 
   @@unique([crawlRunId, username, authorId])
   @@index([crawlRunId, username])
@@ -398,19 +438,19 @@ model CrawlAuthorCheckpoint {
 // ただしこの index は CONCURRENTLY 付きで作成する必要があり、生成される migration がそれに対応しないため、実体は migration 20260810210740_add_account_summary_latest_active_label_keys_gin_idx の raw SQL で作成する。
 // ここでの @@index 宣言は、shadow database の diff がこの index を誤って DROP 対象と判断するのを防ぐためのものである。
 model AccountSummaryLatest {
-  accountId                   String    @id
+  accountId                   BigInt    @id
   normalizedScreenName        String
   normalizedDisplayName       String
   searchDocument              String
-  profileObservedAt           DateTime
+  profileObservedAt           DateTime  @db.Timestamptz(3)
   activeLabelKeys             String[]
   activeLabelCount            Int
-  lastClassificationChangedAt DateTime?
-  classificationObservedAt    DateTime?
+  lastClassificationChangedAt DateTime? @db.Timestamptz(3)
+  classificationObservedAt    DateTime? @db.Timestamptz(3)
   activeFindingCount          Int       @default(0)
   highestFindingSeverity      String?
-  findingObservedAt           DateTime?
-  updatedAt                   DateTime  @updatedAt
+  findingObservedAt           DateTime? @db.Timestamptz(3)
+  updatedAt                   DateTime  @updatedAt @db.Timestamptz(3)
 
   @@index([lastClassificationChangedAt(sort: Desc), accountId])
   @@index([highestFindingSeverity, activeFindingCount, accountId])
@@ -424,92 +464,96 @@ model AccountSummaryLatest {
 model LabeledAccountCounter {
   id              String   @id
   labeledAccounts Int
-  updatedAt       DateTime @updatedAt
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
 }
 
+// 現状維持の表。キーの型だけを新スキーマ (bigint と smallint) に合わせる。FK は張らない。
+// 列は 8B 境界、4B、2B、1B、可変長の順に並べる。
+// (labelDefinitionId, value, accountId) のインデックスは作らない。
+// weekly review の sample 用の部分インデックスと、集計表を維持するトリガーは raw SQL で管理する。
 model AccountClassificationLatest {
-  accountId           String
-  labelDefinitionId   String
-  value               Boolean
+  accountId           BigInt
+  observedAt          DateTime  @db.Timestamptz(3)
+  labeledAt           DateTime? @db.Timestamptz(3)
   confidence          Float
+  labelDefinitionId   Int       @db.SmallInt
+  value               Boolean
+  evaluable           Boolean   @default(false)
   reason              String
   method              String
   ruleVersion         String
-  observedAt          DateTime
   sourceObservationId String?
-  evaluable           Boolean   @default(false)
-  labeledAt           DateTime?
 
   @@id([accountId, labelDefinitionId])
-  @@index([labelDefinitionId, value, accountId])
 }
 
 // weekly review の random baseline sampling 用に、labelDefinitionId/value/bucket
 // 単位で eligible (evaluable=true AND labeledAt IS NOT NULL) な行数を集計する。
 // 詳細な維持方法は該当 migration のトリガー定義コメントを参照。
 model WeeklyReviewSampleBucketCount {
-  labelDefinitionId String
+  labelDefinitionId Int     @db.SmallInt
   value             Boolean
   bucket            Int
-  count             Int    @default(0)
+  count             Int     @default(0)
 
   @@id([labelDefinitionId, value, bucket])
 }
 
 model AccountClassificationValueCount {
-  labelDefinitionId String
+  labelDefinitionId Int     @db.SmallInt
   value             Boolean
-  count             Int      @default(0)
-  confidenceSum     Float    @default(0)
+  count             Int     @default(0)
+  confidenceSum     Float   @default(0)
 
   @@id([labelDefinitionId, value])
 }
 
 model AccountClassificationConfidenceBucketCount {
-  labelDefinitionId String
+  labelDefinitionId Int @db.SmallInt
   confidenceBucket  Int
-  count             Int      @default(0)
+  count             Int @default(0)
 
   @@id([labelDefinitionId, confidenceBucket])
 }
 
 model AccountClassificationRuleVersionCount {
-  labelDefinitionId String
+  labelDefinitionId Int    @db.SmallInt
   ruleVersion       String
-  count             Int      @default(0)
+  count             Int    @default(0)
 
   @@id([labelDefinitionId, ruleVersion])
 }
 
 model AccountClassificationFreshnessBucket {
-  labelDefinitionId String
-  observedAtBucket  DateTime
+  labelDefinitionId Int      @db.SmallInt
+  observedAtBucket  DateTime @db.Timestamptz(3)
   count             Int      @default(0)
 
   @@id([labelDefinitionId, observedAtBucket])
 }
 
 model AccountClassificationReasonCount {
-  labelDefinitionId String
+  labelDefinitionId Int    @db.SmallInt
   reason            String
   count             Int    @default(0)
 
   @@id([labelDefinitionId, reason])
 }
 
+// classificationSnapshot は lz4 圧縮にする (baseline.sql の ALTER TABLE で設定する)。
 model AccountClassificationObservation {
-  id         String   @id @default(cuid())
-  accountId  String
-  crawlRunId String?
-  username   String?
-  observedAt DateTime
-  labelCount Int
-  createdAt  DateTime @default(now())
+  observedAt             DateTime @db.Timestamptz(3)
+  createdAt              DateTime @default(now()) @db.Timestamptz(3)
+  accountId              BigInt
+  labelCount             Int
   // crawl 経路でのみ設定する。relabel は Observation を作らないため常に null。
   // サポートするバージョンは analyzer 側の分岐ロジックが判定する。
-  snapshotVersion       Int?
+  snapshotVersion        Int?
+  id                     String   @id @default(cuid())
+  crawlRunId             String?
+  username               String?
   // labelDefinitionId・value・confidence・reason・method・ruleVersion・evaluable・labeledAt を
-  // 持つ不変な配列。crawl 実行時点の AccountLabelLatest 書き込みと同一 transaction で確定するため、
+  // 持つ不変な配列。crawl 実行時点の評価結果をその場で確定するため、
   // 後続の relabel による上書きの影響を受けない。
   classificationSnapshot Json?
 
@@ -521,19 +565,19 @@ model ReadModelBootstrap {
   status         String    @default("pending")
   cursor         String?
   processedCount Int       @default(0)
-  startedAt      DateTime?
-  updatedAt      DateTime  @updatedAt
-  completedAt    DateTime?
+  startedAt      DateTime? @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+  completedAt    DateTime? @db.Timestamptz(3)
   errorSummary   String?
 }
 
 model BlockRun {
   id              String            @id @default(cuid())
-  startedAt       DateTime
-  lastHeartbeatAt DateTime
-  finishedAt      DateTime?
+  startedAt       DateTime          @db.Timestamptz(3)
+  lastHeartbeatAt DateTime          @db.Timestamptz(3)
+  finishedAt      DateTime?         @db.Timestamptz(3)
   status          String
-  staleAfterAt    DateTime?
+  staleAfterAt    DateTime?         @db.Timestamptz(3)
   accountRuns     BlockAccountRun[]
 
   @@index([startedAt])
@@ -545,8 +589,8 @@ model BlockAccountRun {
   blockRunId      String
   blockRun        BlockRun           @relation(fields: [blockRunId], references: [id])
   username        String
-  startedAt       DateTime
-  finishedAt      DateTime?
+  startedAt       DateTime           @db.Timestamptz(3)
+  finishedAt      DateTime?          @db.Timestamptz(3)
   status          String
   candidatesCount Int                @default(0)
   blockedCount    Int                @default(0)
@@ -564,16 +608,16 @@ model BlockAction {
   id                String            @id @default(cuid())
   blockAccountRunId String
   blockAccountRun   BlockAccountRun   @relation(fields: [blockAccountRunId], references: [id])
-  blockerId         String
+  blockerId         BigInt
   blocker           Account           @relation("BlockActionBlocker", fields: [blockerId], references: [id])
-  blockedId         String
+  blockedId         BigInt
   blocked           Account           @relation("BlockActionBlocked", fields: [blockedId], references: [id])
-  labelDefinitionId String
+  labelDefinitionId Int               @db.SmallInt
   labelDefinition   LabelDefinition   @relation(fields: [labelDefinitionId], references: [id])
   confidence        Float
   result            String
   errorMessage      String?
-  createdAt         DateTime          @default(now())
+  createdAt         DateTime          @default(now()) @db.Timestamptz(3)
   outboxEntryId     String?           @unique
   outboxEntry       BlockOutboxEntry? @relation(fields: [outboxEntryId], references: [id])
 
@@ -586,24 +630,24 @@ model BlockAction {
 // createBlock (remote) 実行前に durable な intent を作ることで、DB 障害でどの段階が失敗しても直前に確定した状態が残るようにする。
 // (blockerId, blockedId) の一意制約により同一ペアの outbox entry は常に 1 件に保たれ、中断や再選定後の再開は既存行の再利用で行う。
 model BlockOutboxEntry {
-  id                String          @id @default(cuid())
-  blockAccountRunId String
-  blockAccountRun   BlockAccountRun @relation(fields: [blockAccountRunId], references: [id])
-  blockerId         String
-  blocker           Account         @relation("BlockOutboxBlocker", fields: [blockerId], references: [id])
-  blockedId         String
-  blocked           Account         @relation("BlockOutboxBlocked", fields: [blockedId], references: [id])
-  labelDefinitionId String
-  labelDefinition   LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
-  confidence        Float
-  status            String
+  id                  String          @id @default(cuid())
+  blockAccountRunId   String
+  blockAccountRun     BlockAccountRun @relation(fields: [blockAccountRunId], references: [id])
+  blockerId           BigInt
+  blocker             Account         @relation("BlockOutboxBlocker", fields: [blockerId], references: [id])
+  blockedId           BigInt
+  blocked             Account         @relation("BlockOutboxBlocked", fields: [blockedId], references: [id])
+  labelDefinitionId   Int             @db.SmallInt
+  labelDefinition     LabelDefinition @relation(fields: [labelDefinitionId], references: [id])
+  confidence          Float
+  status              String
   remoteSkipCount     Int             @default(0)
-  lastRemoteSkippedAt DateTime?
-  createdAt         DateTime        @default(now())
-  remoteSucceededAt DateTime?
-  localPersistedAt  DateTime?
-  reconciledAt      DateTime?
-  actions           BlockAction[]
+  lastRemoteSkippedAt DateTime?       @db.Timestamptz(3)
+  createdAt           DateTime        @default(now()) @db.Timestamptz(3)
+  remoteSucceededAt   DateTime?       @db.Timestamptz(3)
+  localPersistedAt    DateTime?       @db.Timestamptz(3)
+  reconciledAt        DateTime?       @db.Timestamptz(3)
+  actions             BlockAction[]
 
   @@unique([blockerId, blockedId])
   @@index([status, createdAt])
@@ -611,27 +655,28 @@ model BlockOutboxEntry {
 
 // analyzer が処理する耐久キュー。at-least-once を前提とし、
 // exactly-once は装わない。冪等性は出力側の unique constraint で担保する。
+// 未処理・実行中・dead の行だけを持ち、完了した論理キーは AnalysisWorkItemDone へ移す。
+// storage: fillfactor 50 (baseline.sql で設定する)。
 model AnalysisWorkItem {
-  id               String        @id @default(cuid())
+  availableAt      DateTime  @default(now()) @db.Timestamptz(3)
+  leaseExpiresAt   DateTime? @db.Timestamptz(3)
+  // account_relabel 専用: lease 中に新しい変更要求が来たことを示すマーカー。
+  // complete 時にこれが設定されていれば完了にせず queued へ戻す(他 kind では未使用)。
+  staleRequestedAt DateTime? @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @db.Timestamptz(3)
+  id               Int       @id @default(autoincrement())
+  priority         Int       @default(0)
+  attemptCount     Int       @default(0)
+  maxAttempts      Int       @default(5)
   kind             String
   triggerType      String
   triggerId        String
-  status           String        @default("queued")
-  priority         Int           @default(0)
-  availableAt      DateTime      @default(now())
+  status           String    @default("queued")
   leaseOwner       String?
-  leaseExpiresAt   DateTime?
-  attemptCount     Int           @default(0)
-  maxAttempts      Int           @default(5)
   dependencyKey    String?
-  // account_relabel 専用: lease 中に新しい変更要求が来たことを示すマーカー。
-  // complete 時にこれが設定されていれば succeeded にせず queued へ戻す(他 kind では未使用)。
-  staleRequestedAt DateTime?
   lastErrorCode    String?
   lastErrorSummary String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  runs             AnalysisRun[]
 
   // 同じ完了イベントを複数回通知しても WorkItem を重複生成しないための論理一意キー。
   @@unique([kind, triggerType, triggerId])
@@ -639,16 +684,25 @@ model AnalysisWorkItem {
   @@index([status, availableAt, priority])
 }
 
+// 完了した論理キーの台帳。30 日保持する。
+// 保持期間内は、同じ論理キーが再びキューに入るのを防ぐ。
+model AnalysisWorkItemDone {
+  completedAt DateTime @default(now()) @db.Timestamptz(3)
+  kind        String
+  triggerType String
+  triggerId   String
+
+  @@id([kind, triggerType, triggerId])
+  @@index([completedAt])
+}
+
+// workItemId は AnalysisWorkItem への参照だが、WorkItem は完了後に消えるため FK を張らない。
 model AnalysisRun {
-  id            String            @id @default(cuid())
-  // WorkItem は 30 日、AnalysisRun は 180 日と保持期間が異なる。cascade delete だと
-  // WorkItem の retention sweep のたびに紐づく AnalysisRun も年齢を問わず消えてしまうため、
-  // nullable FK + SetNull にして WorkItem 削除後も AnalysisRun 自身の retention sweep まで残す。
-  workItemId    String?
-  workItem      AnalysisWorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  startedAt     DateTime  @default(now()) @db.Timestamptz(3)
+  finishedAt    DateTime? @db.Timestamptz(3)
+  id            Int       @id @default(autoincrement())
+  workItemId    Int?
   attemptNumber Int
-  startedAt     DateTime          @default(now())
-  finishedAt    DateTime?
   status        String
   errorCode     String?
   errorSummary  String?
@@ -660,8 +714,8 @@ model AnalysisRun {
 // 1 行だけを持ち、id は常に固定値 "singleton" を使う。
 model RelabelScanCursor {
   id                   String   @id @default("singleton")
-  lastScannedAccountId String?
-  updatedAt            DateTime @updatedAt
+  lastScannedAccountId BigInt?
+  updatedAt            DateTime @updatedAt @db.Timestamptz(3)
 }
 
 model OperationCycle {
@@ -669,16 +723,16 @@ model OperationCycle {
   kind              String
   sourceType        String
   sourceId          String
-  triggeredAt       DateTime
-  expectedAt        DateTime?
-  startedAt         DateTime?
-  finishedAt        DateTime?
+  triggeredAt       DateTime         @db.Timestamptz(3)
+  expectedAt        DateTime?        @db.Timestamptz(3)
+  startedAt         DateTime?        @db.Timestamptz(3)
+  finishedAt        DateTime?        @db.Timestamptz(3)
   status            String           @default("scheduled")
   attentionRequired Boolean          @default(false)
   currentStageKey   String?
-  sourceWatermarkAt DateTime?
+  sourceWatermarkAt DateTime?        @db.Timestamptz(3)
   modelVersion      String
-  updatedAt         DateTime         @updatedAt
+  updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
   stages            OperationStage[]
 
   @@unique([sourceType, sourceId])
@@ -698,16 +752,16 @@ model OperationStage {
   attemptCount  Int            @default(0)
   sourceType    String?
   sourceId      String?
-  expectedAt    DateTime?
-  delayedAt     DateTime?
-  staleAt       DateTime?
-  startedAt     DateTime?
-  heartbeatAt   DateTime?
-  finishedAt    DateTime?
+  expectedAt    DateTime?      @db.Timestamptz(3)
+  delayedAt     DateTime?      @db.Timestamptz(3)
+  staleAt       DateTime?      @db.Timestamptz(3)
+  startedAt     DateTime?      @db.Timestamptz(3)
+  heartbeatAt   DateTime?      @db.Timestamptz(3)
+  finishedAt    DateTime?      @db.Timestamptz(3)
   counters      Json           @default("{}")
   errorCode     String?
   errorSummary  String?
-  analysisRunId String?
+  analysisRunId Int?
 
   @@unique([cycleId, stageKey])
   @@index([cycleId, sequence])
@@ -720,9 +774,9 @@ model OperationalIssue {
   fingerprint         String
   status              String                       @default("active")
   severity            String
-  firstDetectedAt     DateTime                     @default(now())
-  lastDetectedAt      DateTime                     @default(now())
-  resolvedAt          DateTime?
+  firstDetectedAt     DateTime                     @default(now()) @db.Timestamptz(3)
+  lastDetectedAt      DateTime                     @default(now()) @db.Timestamptz(3)
+  resolvedAt          DateTime?                    @db.Timestamptz(3)
   currentOccurrenceId String?
   sourceCycleId       String?
   sourceStageId       String?
@@ -736,7 +790,7 @@ model OperationalIssueOccurrence {
   id              String           @id @default(cuid())
   issueId         String
   issue           OperationalIssue @relation(fields: [issueId], references: [id])
-  observedAt      DateTime         @default(now())
+  observedAt      DateTime         @default(now()) @db.Timestamptz(3)
   stateTransition String
   severity        String
   sourceType      String
@@ -759,9 +813,9 @@ model ReviewFinding {
   status                String                    @default("active")
   currentSeverity       String
   maximumSeverity       String
-  firstDetectedAt       DateTime                  @default(now())
-  lastDetectedAt        DateTime                  @default(now())
-  resolvedAt            DateTime?
+  firstDetectedAt       DateTime                  @default(now()) @db.Timestamptz(3)
+  lastDetectedAt        DateTime                  @default(now()) @db.Timestamptz(3)
+  resolvedAt            DateTime?                 @db.Timestamptz(3)
   recurrenceCount       Int                       @default(0)
   previousFindingId     String?
   supersededByFindingId String?
@@ -779,11 +833,11 @@ model ReviewFindingOccurrence {
   id                 String        @id @default(cuid())
   findingId          String
   finding            ReviewFinding @relation(fields: [findingId], references: [id])
-  observedAt         DateTime      @default(now())
+  observedAt         DateTime      @default(now()) @db.Timestamptz(3)
   // observedAt は analyzer がこの Occurrence を書き込んだ処理時刻であり、lifecycle の
   // クールダウン判定に使う。crawl/weekly review の元データ自体の時刻とは異なるため、
   // AccountSummary 側で sourceWatermarkAt と比較する際はこちらを使う。
-  sourceObservedAt   DateTime
+  sourceObservedAt   DateTime      @db.Timestamptz(3)
   stateTransition    String
   severity           String
   sourceType         String
@@ -817,7 +871,7 @@ model FindingEvidence {
   redactionVersion      Int
   sampleStrategyVersion String?
   payload               Json
-  createdAt             DateTime      @default(now())
+  createdAt             DateTime      @default(now()) @db.Timestamptz(3)
 
   @@index([findingId, kind, createdAt(sort: Desc)])
 }
@@ -830,7 +884,7 @@ model FindingRawArtifact {
   kind        String
   content     String
   isTruncated Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([findingId, kind])
 }
@@ -852,7 +906,7 @@ model DetectionPolicyVersion {
   contentHash   String
   schemaVersion Int
   content       Json
-  loadedAt      DateTime @default(now())
+  loadedAt      DateTime @default(now()) @db.Timestamptz(3)
 }
 
 // active 化前の候補を含む detector 評価結果。通常の Review 一覧には表示しない。
@@ -864,7 +918,7 @@ model DetectorEvaluation {
   // 同一観測イベント (例: 同じ CrawlRun) の at-least-once retry で
   // DetectorEvaluation が重複しないための論理一意キー。
   sourceId        String
-  evaluatedAt     DateTime @default(now())
+  evaluatedAt     DateTime @default(now()) @db.Timestamptz(3)
   isShadow        Boolean  @default(false)
   result          Json
   policyHash      String
@@ -879,10 +933,10 @@ model PolicyBacktestRun {
   id                  String                  @id @default(cuid())
   candidatePolicyHash String
   baselinePolicyHash  String
-  targetFrom          DateTime
-  targetTo            DateTime
-  startedAt           DateTime                @default(now())
-  finishedAt          DateTime?
+  targetFrom          DateTime                @db.Timestamptz(3)
+  targetTo            DateTime                @db.Timestamptz(3)
+  startedAt           DateTime                @default(now()) @db.Timestamptz(3)
+  finishedAt          DateTime?               @db.Timestamptz(3)
   status              String                  @default("running")
   summary             Json                    @default("{}")
   findings            PolicyBacktestFinding[]
@@ -903,11 +957,11 @@ model PolicyBacktestFinding {
 model LabelMetricSnapshot {
   id                      String   @id @default(cuid())
   sourceCrawlRunId        String?
-  triggerWorkItemId       String
-  labelDefinitionId       String
-  observedAt              DateTime
-  generatedAt             DateTime @default(now())
-  sourceWatermarkAt       DateTime
+  triggerWorkItemId       Int
+  labelDefinitionId       Int      @db.SmallInt
+  observedAt              DateTime @db.Timestamptz(3)
+  generatedAt             DateTime @default(now()) @db.Timestamptz(3)
+  sourceWatermarkAt       DateTime @db.Timestamptz(3)
   populationCount         Int      @default(0)
   evaluatedCount          Int
   trueCount               Int
@@ -926,7 +980,7 @@ model LabelMetricSnapshot {
   completeness            String
   policyHash              String
   analyzerVersion         String
-  analysisRunId           String?
+  analysisRunId           Int?
 
   @@unique([triggerWorkItemId, labelDefinitionId])
   @@index([labelDefinitionId, observedAt(sort: Desc), id(sort: Desc)])
@@ -935,7 +989,7 @@ model LabelMetricSnapshot {
 model LabelMetricDaily {
   id                 String   @id @default(cuid())
   date               DateTime @db.Date
-  labelDefinitionId  String
+  labelDefinitionId  Int      @db.SmallInt
   evaluatedCount     Int
   trueCount          Int
   prevalence         Float
@@ -944,38 +998,46 @@ model LabelMetricDaily {
   // この行の値が採用された元 LabelMetricSnapshot.observedAt。
   // 遅延して実行された backlog 分の build が、それより新しい observedAt を
   // 採用済みの行を古い値へ巻き戻すのを防ぐ判定にのみ使う。
-  sourceObservedAt   DateTime
+  sourceObservedAt   DateTime @db.Timestamptz(3)
 
   @@unique([date, labelDefinitionId])
   @@index([labelDefinitionId, date(sort: Desc)])
 }
 
-// sourceLabelId (legacy snapshotless analyzer が変化元 AccountLabel.id の重複排除に使っていた列) は
-// Prisma schema・DB カラムともに DROP migration で削除済み。
-// 同一ミリ秒に複数回 value が反転しても各 transition を別イベントとして保持する。
+enum AccountLabelChangeType {
+  added
+  removed
+  unevaluable
+}
+
+// 追記のみの表。AccountActiveLabel の監査トリガーが書く。
+// removed は評価が false になった遷移、unevaluable は true から評価不能になった遷移を表す。
+// sourceLabelId は analyzer の再処理を冪等にするキーで、値があるときだけ一意にする。
+// その部分 unique インデックスは Prisma で表現できないため baseline.sql の raw SQL で管理する。
+// 同一ミリ秒に複数回遷移しても各 transition を別イベントとして保持する。
+// changedAt の BRIN は、追記順と時刻が一致するため効く。
 model AccountLabelChange {
-  id                 String   @id @default(cuid())
-  accountId          String
-  labelDefinitionId  String
-  changeType         String
-  previousValue      Boolean?
-  newValue           Boolean?
+  accountId          BigInt
+  changedAt          DateTime               @default(now()) @db.Timestamptz(3)
   previousConfidence Float?
   newConfidence      Float?
+  id                 Int                    @id @default(autoincrement())
+  changeType         AccountLabelChangeType
+  labelDefinitionId  Int                    @db.SmallInt
+  previousValue      Boolean?
+  newValue           Boolean?
+  sourceId           String?
+  sourceLabelId      String?
   previousReason     String?
   newReason          String?
-  sourceId           String?
-  changedAt          DateTime @default(now())
 
-  @@index([accountId, labelDefinitionId, changedAt])
   @@index([accountId, changedAt(sort: Desc)])
-  @@index([labelDefinitionId, changedAt(sort: Desc), id(sort: Desc)])
-  @@index([changedAt(sort: Desc), id(sort: Desc)])
+  @@index([changedAt], type: Brin)
 }
 
 model LabelSummaryCurrent {
   generationId           String
-  labelDefinitionId      String
+  labelDefinitionId      Int      @db.SmallInt
   latestSnapshotId       String?
   evaluatedCount         Int
   trueCount              Int
@@ -990,8 +1052,8 @@ model LabelSummaryCurrent {
   activeFindingCount     Int      @default(0)
   highestFindingSeverity String?
   qualityStatus          String
-  sourceWatermarkAt      DateTime
-  updatedAt              DateTime @updatedAt
+  sourceWatermarkAt      DateTime @db.Timestamptz(3)
+  updatedAt              DateTime @updatedAt @db.Timestamptz(3)
 
   @@id([generationId, labelDefinitionId])
   @@index([generationId, qualityStatus])
@@ -1003,10 +1065,10 @@ model BlockRelationCurrent {
   normalizedBlockerScreenName String
   normalizedBlockedScreenName String
   status                      String
-  statusChangedAt             DateTime
+  statusChangedAt             DateTime @db.Timestamptz(3)
   activeFindingCount          Int      @default(0)
   highestFindingSeverity      String?
-  sourceWatermarkAt           DateTime
+  sourceWatermarkAt           DateTime @db.Timestamptz(3)
 
   @@id([generationId, blockId])
   @@index([generationId, status, statusChangedAt(sort: Desc), blockId])
@@ -1017,7 +1079,7 @@ model BlockStateChange {
   blockId    String
   fromStatus String?
   toStatus   String
-  changedAt  DateTime @default(now())
+  changedAt  DateTime @default(now()) @db.Timestamptz(3)
   sourceId   String?
 
   @@index([blockId, changedAt(sort: Desc), id(sort: Desc)])
@@ -1034,7 +1096,7 @@ model AttentionItemCurrent {
   severity     String
   summary      String
   impact       Json     @default("{}")
-  detectedAt   DateTime
+  detectedAt   DateTime @db.Timestamptz(3)
   freshness    String
   detailHref   String
 
@@ -1047,12 +1109,12 @@ model OverviewSnapshot {
   // ReadModelGeneration.id と 1:1 に対応させ、Pointer 経由の原子的公開に乗せるためのキー。
   generationId      String   @unique
   schemaVersion     Int
-  generatedAt       DateTime @default(now())
-  sourceWatermarkAt DateTime
+  generatedAt       DateTime @default(now()) @db.Timestamptz(3)
+  sourceWatermarkAt DateTime @db.Timestamptz(3)
   operationalStatus String
   qualityStatus     String
   payload           Json
-  analysisRunId     String?
+  analysisRunId     Int?
 
   @@index([generatedAt(sort: Desc)])
 }
@@ -1062,12 +1124,12 @@ model ReadModelGeneration {
   modelKey          String
   schemaVersion     Int
   status            String    @default("building")
-  sourceWatermarkAt DateTime?
-  startedAt         DateTime  @default(now())
-  completedAt       DateTime?
+  sourceWatermarkAt DateTime? @db.Timestamptz(3)
+  startedAt         DateTime  @default(now()) @db.Timestamptz(3)
+  completedAt       DateTime? @db.Timestamptz(3)
   rowCount          Int?
   validationSummary Json      @default("{}")
-  analysisRunId     String?
+  analysisRunId     Int?
 
   @@index([modelKey, status, startedAt(sort: Desc)])
 }
@@ -1075,7 +1137,7 @@ model ReadModelGeneration {
 model ReadModelPointer {
   modelKey            String   @id
   currentGenerationId String
-  switchedAt          DateTime @default(now())
+  switchedAt          DateTime @default(now()) @db.Timestamptz(3)
 }
 
 model ReadModelState {
@@ -1083,13 +1145,13 @@ model ReadModelState {
   schemaVersion       Int
   status              String    @default("unknown")
   currentGenerationId String?
-  sourceWatermarkAt   DateTime?
-  lastStartedAt       DateTime?
-  lastSuccessAt       DateTime?
-  lastFailureAt       DateTime?
-  expectedNextAt      DateTime?
-  delayedAt           DateTime?
-  staleAt             DateTime?
+  sourceWatermarkAt   DateTime? @db.Timestamptz(3)
+  lastStartedAt       DateTime? @db.Timestamptz(3)
+  lastSuccessAt       DateTime? @db.Timestamptz(3)
+  lastFailureAt       DateTime? @db.Timestamptz(3)
+  expectedNextAt      DateTime? @db.Timestamptz(3)
+  delayedAt           DateTime? @db.Timestamptz(3)
+  staleAt             DateTime? @db.Timestamptz(3)
   rowCount            Int?
   policyHash          String?
   analyzerVersion     String?
@@ -1101,15 +1163,15 @@ model ReadModelState {
 model DetectorState {
   detectorKey         String    @id
   lastEvidenceEpochId String?
-  sourceWatermarkAt   DateTime?
-  lastStartedAt       DateTime?
-  lastSuccessAt       DateTime?
-  lastFailureAt       DateTime?
+  sourceWatermarkAt   DateTime? @db.Timestamptz(3)
+  lastStartedAt       DateTime? @db.Timestamptz(3)
+  lastSuccessAt       DateTime? @db.Timestamptz(3)
+  lastFailureAt       DateTime? @db.Timestamptz(3)
   errorCode           String?
   errorSummary        String?
   policyHash          String?
   analyzerVersion     String?
-  updatedAt           DateTime  @updatedAt
+  updatedAt           DateTime  @updatedAt @db.Timestamptz(3)
 }
 
 // 各コンポーネントの起動時に自身の build identity を upsert する。
@@ -1118,13 +1180,13 @@ model ComponentBuildIdentity {
   component          String    @id
   applicationVersion String
   gitRevision        String
-  buildTime          DateTime?
-  startedAt          DateTime
-  updatedAt          DateTime  @updatedAt
+  buildTime          DateTime? @db.Timestamptz(3)
+  startedAt          DateTime  @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
 }
 
 model BioDuplicateClusterSize {
   clusterKey String   @id
   size       Int
-  memberIds  String[] @default([])
+  memberIds  BigInt[] @default([])
 }
