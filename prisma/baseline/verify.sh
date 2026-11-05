@@ -78,6 +78,7 @@ b = src.index('\n}\n', a)
 body = src[a:b]
 body = re.sub(r'^(\s+)id(\s+)BigInt\s*$', r'\1id\2BigInt @id', body, flags=re.M)
 body = re.sub(r'^\s*@@id\(\[accountId, id\]\)\s*$\n', '', body, flags=re.M)
+body = re.sub(r'^\s*@@index\(\[id\]\)[ \t]*$\n?', '', body, flags=re.M)
 open(sys.argv[2], 'w', encoding='utf-8').write(src[:a] + body + src[b:])
 PY
 grep -q '@@id(\[accountId, id\])' "$RANGE_SCHEMA" && fail "range schema transform did not remove the composite id"
@@ -132,6 +133,26 @@ SQL
     psql -X -q -At -v ON_ERROR_STOP=1 "$url" -f "$WORK/second.sql" >"$WORK/second.out" 2>&1
     wait "$first_pid" || fail "the first writer failed: $(cat "$WORK/first.out")"
     CAS_SECOND_RESULT="$(tr -d '[:space:]' <"$WORK/second.out")"
+}
+
+# Tweet の実行計画。ID 単独の検索が全件走査にならず、アカウント指定の取得が 1 パーティションに絞られることを確かめる。
+check_tweet_plans() {
+    local url="$1" plan
+    psql -X -q -v ON_ERROR_STOP=1 "$url" -c "
+        INSERT INTO \"Tweet\" (id, \"accountId\", \"createdAt\", \"retweetCount\", \"likeCount\", \"replyCount\", \"fullText\")
+        SELECT 1700000000000000000::bigint + g::bigint * 1000003, 1000 + (g % 5000), now() - (g || ' seconds')::interval, 0, 0, 0, 'dummy ' || g
+        FROM generate_series(1, 300000) g;
+        ANALYZE \"Tweet\";"
+    plan="$(psql -X -At "$url" -c "EXPLAIN (COSTS OFF) SELECT id FROM \"Tweet\" WHERE id IN (1700000000010000030, 1700000000020000060)")"
+    printf '%s' "$plan" | grep -q 'Seq Scan' && fail "ID-only lookup seq-scans Tweet: $plan"
+    [ "$(printf '%s\n' "$plan" | grep -c 'Index.*Scan using "Tweet_h[0-9]*_id_idx"')" = "32" ] \
+        || fail "ID-only lookup does not probe 32 per-partition id indexes: $plan"
+    plan="$(psql -X -At "$url" -c "EXPLAIN (COSTS OFF) SELECT id FROM \"Tweet\" WHERE \"accountId\" = 1234 ORDER BY \"createdAt\" DESC LIMIT 20")"
+    [ "$(printf '%s\n' "$plan" | grep -c 'Scan.*on "Tweet_h')" = "1" ] \
+        || fail "recent-tweets lookup does not prune to one partition: $plan"
+    printf '%s' "$plan" | grep -q 'Seq Scan' && fail "recent-tweets lookup seq-scans Tweet: $plan"
+    psql -X -q -v ON_ERROR_STOP=1 "$url" -c 'TRUNCATE "Tweet"'
+    echo "Tweet plans: ID-only lookup probes 32 id indexes, per-account lookup prunes to one partition"
 }
 
 run_variant() {
@@ -264,6 +285,10 @@ SQL
     fi
     printf '%s' "$out" | grep -q 'permission denied for function' || fail "($variant) unexpected error for viewer: $out"
     echo "app role: direct DML, TRUNCATE and CREATE TRIGGER denied (9 statements), set_label_result allowed, read-only role denied"
+
+    if [ "$variant" = "hash" ]; then
+        check_tweet_plans "$url"
+    fi
 
     if [ "$variant" = "range" ]; then
         check_prisma_diff "$variant" "$url" "$RANGE_SCHEMA"

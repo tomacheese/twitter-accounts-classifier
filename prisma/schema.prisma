@@ -147,6 +147,7 @@ model Tweet {
 
   @@id([accountId, id])
   @@index([accountId, createdAt])
+  @@index([id])
 }
 
 // id は再利用しない。AccountLabelState.versions の添字を兼ねるため、削除せず retiredAt で廃止する。
