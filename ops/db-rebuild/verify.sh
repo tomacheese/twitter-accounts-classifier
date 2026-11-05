@@ -75,6 +75,7 @@ fetch_query() { # sql_file scope_file out
 }
 
 # ---- 1. テーブルごとの件数と内容ハッシュ ----
+# shellcheck disable=SC2001
 qualify_cols() { sed 's/"\([^"]*\)"/q."\1"/g' <<<"$1"; }
 
 verify_table() {

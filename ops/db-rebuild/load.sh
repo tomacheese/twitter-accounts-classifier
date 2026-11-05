@@ -15,7 +15,7 @@
 #   ID_BATCH         シャード実行で 1 回の問い合わせに渡すアカウント数 (既定 2000)
 #   CTID_BLOCKS      全量実行で巨大表を分割するブロック数 (既定 131072 = 1GB)
 #   THROTTLE_SLEEP   旧 DB への問い合わせの間に挟む秒数 (既定 0)
-#   KEEP_UPDATED     AccountLabelChange の changeType='updated' を残すか (既定 true。新 enum に 'updated' が要る)
+#   KEEP_UPDATED     AccountLabelChange の changeType='updated' を残すか (既定 false で、その行を捨てる。true は新 enum に 'updated' が要る)
 #   FV_SINCE/HM_SINCE  foreignVideoSourceCount / hasMedia を確定値で埋める collectedAt の下限 (UTC)
 #   WORK_DIR、OLD_PSQL、NEW_PSQL など: lib.sh を参照
 #
@@ -131,6 +131,7 @@ prepare() {
 # 投入前に、巨大表の制約とインデックス、全表の FK を退避して外し、ACL などのトリガーを止める。
 prepare_new_tables() {
     local tables
+    # shellcheck disable=SC2086
     tables="$(printf "'%s'," $BIG_INDEX_TABLES)"
     tables="${tables%,}"
     new_psql -q -1 -f /dev/stdin <<SQL >/dev/null
@@ -285,7 +286,8 @@ run_step() {
 }
 
 run_tweet_step() {
-    local name="$1" file="$2" t0=$SECONDS cols dir="$WORK_DIR/tweetfifos" in="$WORK_DIR/fifo.$name.in"
+    local name="$1" file="$2" t0=$SECONDS cols dir="$WORK_DIR/tweetfifos" in
+    in="$WORK_DIR/fifo.$name.in"
     cols="$(hdr "$file" columns)"
     write_part_expr
     rm -rf "$dir" "$in"
@@ -312,14 +314,14 @@ run_tweet_step() {
     wait "$router_pid" || rc=$?
     local pid
     for pid in "${cpids[@]}"; do wait "$pid" || rc=$?; done
-    [ "$rc" = 0 ] || die "$name failed: router: $(tail -n 3 "$WORK_DIR/log.$name.router"); $(cat "$WORK_DIR"/log.$name.p* | grep -i error | head -n 3)"
+    [ "$rc" = 0 ] || die "$name failed: router: $(tail -n 3 "$WORK_DIR/log.$name.router"); $(cat "$WORK_DIR"/log."$name".p* | grep -i error | head -n 3)"
     local rows=0 n
     for p in $parts; do
         n="$(sed -n 's/^COPY //p' "$WORK_DIR/log.$name.p$p" | tail -n1)"
         rows=$((rows + ${n:-0}))
     done
     record_step "$name" "$rows" $((SECONDS - t0))
-    log "$name: loaded $rows rows into $(echo $parts | wc -w) leaf tables in $((SECONDS - t0))s"
+    log "$name: loaded $rows rows into $(echo "$parts" | wc -w) leaf tables in $((SECONDS - t0))s"
     rm -rf "$dir" "$in"
 }
 

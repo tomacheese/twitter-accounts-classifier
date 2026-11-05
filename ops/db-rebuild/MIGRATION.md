@@ -44,7 +44,7 @@ cleanup  mig と stg を落とす (切り替えの前に実行する。検証が
 - **work item**: 未処理・実行中・dead だけを `AnalysisWorkItem` に残し、残す行を `createdAt` 順に int id へ変換する。完了済みの論理キーは、旧 DB の基準時刻から 30 日分を `AnalysisWorkItemDone` へ入れる。`workItemId`、`attemptCount`、`createdAt`、`completedAt` (旧 `updatedAt`) を旧 DB の行から写し、`workItemId` は他の表と同じ変換表を通した int id にする。`account_relabel` は再 arm できる kind のため台帳に入れない。台帳の行と、完了済みで参照だけが残る id (`AnalysisRun.workItemId`、`LabelMetricSnapshot.triggerWorkItemId`) には、残す行の後ろの int id を与える (外部キーなし)。`AnalysisWorkItem` と `AnalysisRun` の identity は、取り込んだ最大の id まで `setval` する。
 - **Tweet**: 参照のない 4 列を外し、空配列を NULL にし、`foreignVideoSourceCount` と `hasMedia` の NULL を、旧 backfill と同じ判定 (`FV_SINCE`、`HM_SINCE` 以降の `collectedAt`) で `0` と `false` に確定する。方式 (HASH か RANGE) は、`tweet-hash.sql` と `tweet-range.sql` のどちらを適用したかで自動的に決まる。振り分けの計算が PostgreSQL のものと一致しているかは、attach 時のパーティション制約の検証が全行で確認する。
 - **ACL の集計表、AccountSummaryLatest**: トリガーを止めたうえで、旧 DB の値を写す。`LabeledAccountCounter` も旧 DB の値を写す。
-- **AccountLabelChange**: `id` は新しい identity が `changedAt` 順に採番する (BRIN が効くよう物理順を時刻順にする)。`sourceLabelId` は旧スキーマで削除済みのため NULL。旧データには `changeType = 'updated'` の行が多く、新 baseline の enum (`added`、`removed`、`unevaluable`) には無い。`KEEP_UPDATED=true` (既定) は enum に `updated` が要り、`false` はその行を捨てる。どちらにするかは、ユーザーの判断が必要。
+- **AccountLabelChange**: `id` は新しい identity が `changedAt` 順に採番する (BRIN が効くよう物理順を時刻順にする)。`sourceLabelId` は旧スキーマで削除済みのため NULL。旧データには `changeType = 'updated'` の行が多く、新 baseline の enum (`added`、`removed`、`unevaluable`) には無い。`KEEP_UPDATED=false` (既定) はその行を捨て、`true` は baseline の enum に `updated` を足した場合だけ使える (足していないと load.sh が最初に止まる)。
 
 ## 検証ゲート
 
