@@ -306,9 +306,8 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
       processAccountSummaryBootstrap(prisma, workItemB, { chunkSize: 2 }),
     ])
 
-    // ReadModelBootstrap 行を FOR UPDATE でロックするため、2 つの WorkItem は
-    // 先頭 2 件のチャンクと次の 2 件のチャンクへ
-    // 直列に (どちらが先でも) 一意に振り分けられ、二重処理は起きない。
+    // ReadModelBootstrap 行を FOR UPDATE でロックするため、2 つの WorkItem は直列に処理される。
+    // 先頭 2 件と次の 2 件のチャンクへ一意に振り分けられ、二重処理は起きない。
     const bootstrap = await prisma.readModelBootstrap.findUnique({
       where: { modelKey: 'account_summary' },
     })
@@ -320,7 +319,9 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
       where: { accountId: { gte: String(baseId), lte: String(baseId + 4n) } },
       select: { accountId: true },
     })
-    expect(processedSummaries.map((row) => row.accountId).toSorted()).toEqual([0n, 1n, 2n, 3n].map((offset) => String(baseId + offset)))
+    expect(processedSummaries.map((row) => row.accountId).toSorted()).toEqual(
+      [0n, 1n, 2n, 3n].map((offset) => String(baseId + offset)),
+    )
   })
 })
 
@@ -547,9 +548,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
         processAccountSummaryBootstrap(prisma, workItemB, { chunkSize: 2 }),
       ])
 
-      // ReadModelBootstrap 行を FOR UPDATE でロックするため、2 つの WorkItem は
-      // 先頭 2 件のチャンクと次の 2 件のチャンクへ
-      // 直列に (どちらが先でも) 一意に振り分けられ、二重処理は起きない。
+      // ReadModelBootstrap 行を FOR UPDATE でロックするため、2 つの WorkItem は直列に処理される。
+      // 先頭 2 件と次の 2 件のチャンクへ一意に振り分けられ、二重処理は起きない。
       const bootstrap = await prisma.readModelBootstrap.findUnique({
         where: { modelKey: 'account_summary_sampling_v2' },
       })

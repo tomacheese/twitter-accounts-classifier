@@ -1,9 +1,9 @@
 #!/bin/bash
 # 旧スキーマ (prisma/migrations) と新スキーマ (baseline) に同じ操作を与え、次を比べる。
 # - AccountClassificationLatest の集計表 (ValueCount など) とトリガーの結果が一致する
-# - AccountLabelChange の行が、true から評価不能への遷移を除いて一致する
-#   (旧は AccountLabelLatest、新は AccountActiveLabel の監査トリガーが書く。false 側の確信度と理由は新で失われる)
-#   true から評価不能への遷移は、新だけが unevaluable として記録する
+# - AccountLabelChange の行が一致する。旧は AccountLabelLatest、新は AccountActiveLabel の監査トリガーが書く。
+#   false 側の確信度と理由は新で失われるため、比べない。
+#   true から評価不能への遷移は、新だけが unevaluable として記録するため、比較から除く。
 #
 # 使い捨ての PostgreSQL 17 コンテナを自分で起動し、本番の DB には一切接続しない。
 # 前提: docker、psql、リポジトリルートで `pnpm install` 済みであること。
@@ -60,8 +60,8 @@ ANCHOR="$(date -u -d '-3 hours' +%Y-%m-%dT%H:00:00Z)"
 # --- AccountClassificationLatest の集計 ---
 psql -X -q -v ON_ERROR_STOP=1 -v "anchor=$ANCHOR" "$OLD" -f "$BASELINE_DIR/parity-acl.sql"
 psql -X -q -v ON_ERROR_STOP=1 -v "anchor=$ANCHOR" "$NEW" -f "$BASELINE_DIR/parity-acl.sql"
-psql -X -f "$BASELINE_DIR/parity-acl-dump.sql" "$OLD" >"$WORK/acl_old.txt"
-psql -X -f "$BASELINE_DIR/parity-acl-dump.sql" "$NEW" >"$WORK/acl_new.txt"
+psql -X -v ON_ERROR_STOP=1 -f "$BASELINE_DIR/parity-acl-dump.sql" "$OLD" >"$WORK/acl_old.txt"
+psql -X -v ON_ERROR_STOP=1 -f "$BASELINE_DIR/parity-acl-dump.sql" "$NEW" >"$WORK/acl_new.txt"
 [ -s "$WORK/acl_old.txt" ] || fail "ACL aggregate dump is empty (the scenario did not exercise the triggers)"
 diff "$WORK/acl_old.txt" "$WORK/acl_new.txt" >"$WORK/acl.diff" || fail "ACL aggregate tables differ:
 $(cat "$WORK/acl.diff")"
@@ -113,8 +113,8 @@ SELECT pg_temp.put(6002, 1::smallint, 0.75, 'r5', :'anchor'::timestamptz + inter
 SELECT pg_temp.put(6003, -1::smallint, NULL, NULL, :'anchor'::timestamptz + interval '2 hours', 'run2');
 SQL
 
-psql -X -f "$BASELINE_DIR/parity-change-dump.sql" "$OLD" >"$WORK/change_old.txt"
-psql -X -f "$BASELINE_DIR/parity-change-dump.sql" "$NEW" >"$WORK/change_new.txt"
+psql -X -v ON_ERROR_STOP=1 -f "$BASELINE_DIR/parity-change-dump.sql" "$OLD" >"$WORK/change_old.txt"
+psql -X -v ON_ERROR_STOP=1 -f "$BASELINE_DIR/parity-change-dump.sql" "$NEW" >"$WORK/change_new.txt"
 [ -s "$WORK/change_old.txt" ] || fail "AccountLabelChange (old) is empty"
 
 # 新だけが記録する unevaluable の行を取り除いてから比べる。
