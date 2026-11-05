@@ -88,7 +88,7 @@ export async function runTextOnlyMediaBackfill(
   let updated = 0
 
   while (options.maxBatches === undefined || batches < options.maxBatches) {
-    // 走査と更新の対象指定は PK の形 (accountId, id) に依存する。RANGE 版 (PK は id のみ) へ切り替えるときはここを書き換える。
+    // 走査と更新の対象指定は PK の形 (accountId, id) に依存するため、PK が変わるときはここも書き換える。
     // ORDER BY は出力の別名 (text) ではなく列そのものを指すよう、表名で修飾する。
     const window = await prisma.$queryRaw<TweetKey[]>(Prisma.sql`
       SELECT "accountId"::text AS "accountId", "id"::text AS "id" FROM "Tweet"

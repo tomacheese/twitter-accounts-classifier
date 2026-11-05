@@ -13,9 +13,9 @@ export interface UpsertTweetResult {
   changed: boolean
 }
 
-// Tweet の PK の形 (HASH 版は (accountId, id)、RANGE 版は (id)) に依存する箇所は、tweetKey と
-// TWEET_CONFLICT_TARGET の 2 つに閉じ込める。RANGE 版へ切り替えるときは、この 2 つだけを書き換える。
-// ID 単独の検索 (findMissingTweetIds など) は PK の形に依存しないため、ここには含めない。
+// PK の形 (現在は (accountId, id)) に依存する箇所は、この 2 つに閉じ込める。
+// PK が変わるときは、tweetKey と TWEET_CONFLICT_TARGET だけを書き換える。
+// ID 単独の検索は PK の形に依存しないため、含めない。
 
 function tweetKey(accountId: string, id: string) {
   return { accountId_id: { accountId, id } }
@@ -23,8 +23,7 @@ function tweetKey(accountId: string, id: string) {
 
 const TWEET_CONFLICT_TARGET = Prisma.sql`("accountId", "id")`
 
-// 生 SQL で Tweet 行を Prisma の `Tweet` 型と同じ形で返すための列。
-// id 系は text に戻し、NULL で保存している空配列は空配列として返す。
+// 生 SQL の戻り値を Prisma の `Tweet` 型に合わせるための列。
 export const TWEET_ROW_COLUMNS = Prisma.sql`
   "id"::text AS "id",
   "accountId"::text AS "accountId",
@@ -121,8 +120,7 @@ function hasBundleRelevantChange(existing: TweetMergeBase, merged: TweetMergeBas
   )
 }
 
-// 既存の並びを保って新しい URL を後ろに足す。
-// 並びが再取得ごとに入れ替わると、同値の更新が DB に書き込まれてしまうため。
+// 並びが入れ替わると同値の更新が書き込まれてしまうため、既存の並びの後ろに足す。
 function unionUrls(existing: string[] | undefined, incoming: string[] | undefined): string[] {
   return [...new Set([...(existing ?? []), ...(incoming ?? [])])]
 }
@@ -190,8 +188,7 @@ export async function findTweet(
   return prisma.tweet.findUnique({ where: tweetKey(accountId, id) })
 }
 
-// Prisma の upsert は、配列が空のとき NULL ではなく `{}` を書く。baseline は空配列を NULL で持つため、
-// 生 SQL で書く。値が変わるときだけ UPDATE するので、同値の再取得は行を書き換えない。
+// Prisma の upsert は空配列を NULL ではなく `{}` で書くため、生 SQL を使う。
 async function writeTweet(
   prisma: PrismaClient,
   accountId: string,
@@ -279,7 +276,6 @@ export async function upsertTweet(
 
   const written = await writeTweet(prisma, input.accountId, input.id, merged)
   if (written !== undefined) return { tweet: written, changed }
-  // 値が同じで UPDATE されなかったので、既存行がそのまま結果になる。
   const tweet = existing ?? (await findTweet(prisma, input.accountId, input.id))
   if (tweet === null) {
     throw new Error(`Tweet ${input.id} (accountId=${input.accountId}) vanished during upsert`)
@@ -307,7 +303,7 @@ export async function upsertTweets(
   return results
 }
 
-/** 直近ツイートの取得 SQL。EXPLAIN による検査と本体で同じ文を使うために切り出している。 */
+/** 直近ツイートの取得 SQL。実行計画のテストでも同じ文を使う。 */
 export function recentTweetsQuery(accountIds: string[], limitPerAccount: number): Prisma.Sql {
   return Prisma.sql`
     SELECT t.*
@@ -325,7 +321,6 @@ export function recentTweetsQuery(accountIds: string[], limitPerAccount: number)
 /**
  * 複数 account の直近ツイートを account ごとに `limitPerAccount` 件までまとめて 1 ラウンドトリップで取得する。
  * account ごとに `findMany` を発行する代わりに、`(accountId, createdAt)` 索引を使う `LATERAL JOIN` で account ごとの上位 N 件を 1 クエリに畳み込む。
- * accountId の等値条件でパーティションが 1 つに絞られる。
  * @param prisma - Prisma クライアント
  * @param accountIds - 取得対象の account ID 一覧
  * @param limitPerAccount - account ごとに取得する直近ツイートの上限件数
@@ -378,8 +373,7 @@ export async function loadPromotedTweetCountsForAccounts(
   return counts
 }
 
-// 以下の ID 単独の検索は、投稿者が分からない親ツイートの引き当て用で、HASH 版では全パーティションを探索する。
-// 呼び出しは件数の少ないバッチに限る。
+// 以下の ID 単独の検索は、投稿者が分からない親ツイートの引き当て用で、件数の少ないバッチに限る。
 
 /**
  * @param prisma - Prisma クライアント
