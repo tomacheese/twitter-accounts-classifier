@@ -5,6 +5,7 @@ import { computePolicyHash } from '../policy/policy-hash'
 import type { DetectionPolicy, DetectionPolicyRule } from '../policy/schema'
 import type { StructuredOutput, WeeklyReviewFindingCandidate } from './structured-output-schema'
 import { Logger } from '@book000/node-utils'
+import { enqueueWorkItem } from '../queue/work-item-repository'
 
 const logger = Logger.configure('analyzer:weekly-review-ingest')
 
@@ -192,20 +193,10 @@ async function ingestOneFinding(
     })
 
     if (candidate.primaryScopeType === 'account') {
-      await tx.analysisWorkItem.upsert({
-        where: {
-          kind_triggerType_triggerId: {
-            kind: 'account_summary_refresh',
-            triggerType: 'review_finding_occurrence',
-            triggerId: occurrence.id,
-          },
-        },
-        create: {
-          kind: 'account_summary_refresh',
-          triggerType: 'review_finding_occurrence',
-          triggerId: occurrence.id,
-        },
-        update: {},
+      await enqueueWorkItem(tx, {
+        kind: 'account_summary_refresh',
+        triggerType: 'review_finding_occurrence',
+        triggerId: occurrence.id,
       })
     }
 

@@ -112,6 +112,21 @@ SELECT pg_temp.expect(
   'AnalysisWorkItem fillfactor'
 );
 SELECT pg_temp.expect(
+  (SELECT reloptions FROM pg_class WHERE oid = '"AnalysisWorkItem"'::regclass)
+    @> ARRAY['autovacuum_vacuum_scale_factor=0', 'autovacuum_vacuum_threshold=1000'],
+  'AnalysisWorkItem autovacuum'
+);
+SELECT pg_temp.expect(
+  (SELECT indpred IS NOT NULL FROM pg_index WHERE indexrelid = '"AnalysisWorkItem_queue_idx"'::regclass),
+  'AnalysisWorkItem queue index is partial'
+);
+SELECT pg_temp.expect(
+  (SELECT array_agg(attname::text ORDER BY attnum) FROM pg_attribute
+    WHERE attrelid = '"AnalysisWorkItemDone"'::regclass AND attnum > 0 AND NOT attisdropped)
+    = ARRAY['completedAt', 'createdAt', 'workItemId', 'attemptCount', 'kind', 'triggerType', 'triggerId'],
+  'AnalysisWorkItemDone columns'
+);
+SELECT pg_temp.expect(
   NOT EXISTS (
     SELECT 1 FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
     WHERE i.inhparent = '"Tweet"'::regclass

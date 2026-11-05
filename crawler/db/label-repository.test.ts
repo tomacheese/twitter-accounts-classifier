@@ -196,11 +196,11 @@ describe('recordCrawlAccountLabelsAtomicWithinTx', () => {
         },
       ])
     const create = vi.fn().mockResolvedValue({ id: 'observation1' })
-    const upsert = vi.fn().mockResolvedValue({})
+    const executeRaw = vi.fn().mockResolvedValue({})
     const txClient = {
       $queryRaw: queryRaw,
+      $executeRaw: executeRaw,
       accountClassificationObservation: { create },
-      analysisWorkItem: { upsert },
     } as unknown as PrismaClient
 
     const observationId = await recordCrawlAccountLabelsAtomicWithinTx(txClient, {

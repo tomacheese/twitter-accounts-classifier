@@ -7,7 +7,7 @@ DECLARE
   unreadable_tables text;
   unexpected_write_tables text;
   write_allowlist text[] := ARRAY[
-    'AnalysisWorkItem', 'AnalysisRun',
+    'AnalysisWorkItem', 'AnalysisWorkItemDone', 'AnalysisRun',
     'OperationCycle', 'OperationStage', 'OperationalIssue', 'OperationalIssueOccurrence',
     'ReviewFinding', 'ReviewFindingOccurrence', 'FindingEvidence', 'FindingRawArtifact',
     'FindingEntityLink', 'DetectionPolicyVersion', 'DetectorEvaluation',

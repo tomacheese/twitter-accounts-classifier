@@ -680,20 +680,25 @@ model AnalysisWorkItem {
 
   // 同じ完了イベントを複数回通知しても WorkItem を重複生成しないための論理一意キー。
   @@unique([kind, triggerType, triggerId])
-  // FOR UPDATE SKIP LOCKED での claim 用。
-  @@index([status, availableAt, priority])
+  // claim 用の部分インデックス (status, availableAt, priority) は baseline.sql で管理する。
 }
 
 // 完了した論理キーの台帳。30 日保持する。
 // 保持期間内は、同じ論理キーが再びキューに入るのを防ぐ。
 model AnalysisWorkItemDone {
-  completedAt DateTime @default(now()) @db.Timestamptz(3)
-  kind        String
-  triggerType String
-  triggerId   String
+  completedAt  DateTime @default(now()) @db.Timestamptz(3)
+  // 完了した WorkItem の enqueue 時刻と id・試行回数。
+  // キュー表から消えた後も、AnalysisRun の参照と post-completion の再実行で元の値を復元するために持つ。
+  createdAt    DateTime @db.Timestamptz(3)
+  workItemId   Int
+  attemptCount Int
+  kind         String
+  triggerType  String
+  triggerId    String
 
   @@id([kind, triggerType, triggerId])
   @@index([completedAt])
+  @@index([workItemId])
 }
 
 // workItemId は AnalysisWorkItem への参照だが、WorkItem は完了後に消えるため FK を張らない。

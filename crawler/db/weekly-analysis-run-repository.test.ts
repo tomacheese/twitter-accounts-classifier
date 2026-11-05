@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
+import { enqueuedKeys } from './enqueued-keys.test-helper'
 import {
   cancelWeeklyAnalysisRunBackends,
   completeWeeklyAnalysisRun,
@@ -66,8 +67,8 @@ describe('cancelWeeklyAnalysisRunBackends', () => {
 describe('createWeeklyAnalysisRun', () => {
   it('creates a running row with lastHeartbeatAt and staleAfterAt from startedAt', async () => {
     const create = vi.fn().mockResolvedValue(toRow())
-    const upsert = vi.fn().mockResolvedValue({})
-    const tx = { weeklyAnalysisRun: { create }, analysisWorkItem: { upsert } }
+    const executeRaw = vi.fn().mockResolvedValue({})
+    const tx = { weeklyAnalysisRun: { create }, $executeRaw: executeRaw }
     const transaction = vi.fn((fn: (transactionClient: unknown) => Promise<unknown>) => fn(tx))
     const prisma = {
       weeklyAnalysisRun: { create },
@@ -87,21 +88,9 @@ describe('createWeeklyAnalysisRun', () => {
         sampledAccountIds: [],
       },
     })
-    expect(upsert).toHaveBeenCalledWith({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'operation_cycle_refresh',
-          triggerType: 'weekly_analysis_run',
-          triggerId: 'run1',
-        },
-      },
-      create: {
-        kind: 'operation_cycle_refresh',
-        triggerType: 'weekly_analysis_run',
-        triggerId: 'run1',
-      },
-      update: {},
-    })
+    expect(enqueuedKeys(executeRaw)).toEqual([
+      ['operation_cycle_refresh', 'weekly_analysis_run', 'run1'],
+    ])
   })
 })
 
@@ -191,8 +180,8 @@ describe('completeWeeklyAnalysisRun', () => {
   it('reports alreadyTerminal when the row is no longer running', async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 })
     const findUnique = vi.fn().mockResolvedValue(toRow({ status: 'success' }))
-    const upsert = vi.fn().mockResolvedValue({})
-    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, analysisWorkItem: { upsert } }
+    const executeRaw = vi.fn().mockResolvedValue({})
+    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, $executeRaw: executeRaw }
     const prisma = {
       $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
     } as unknown as PrismaClient
@@ -212,14 +201,14 @@ describe('completeWeeklyAnalysisRun', () => {
 
     expect(result.ok).toBe(false)
     expect(result.alreadyTerminal).toBe(true)
-    expect(upsert).not.toHaveBeenCalled()
+    expect(executeRaw).not.toHaveBeenCalled()
   })
 
   it('does not overwrite pullRequestUrl/sampledAccountIds/findings when the caller omits them', async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 })
     const findUnique = vi.fn().mockResolvedValue(toRow({ status: 'success' }))
-    const upsert = vi.fn().mockResolvedValue({})
-    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, analysisWorkItem: { upsert } }
+    const executeRaw = vi.fn().mockResolvedValue({})
+    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, $executeRaw: executeRaw }
     const prisma = {
       $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
     } as unknown as PrismaClient
@@ -243,8 +232,8 @@ describe('completeWeeklyAnalysisRun', () => {
   it('persists structuredOutput so weekly_review_ingest has something to ingest', async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 })
     const findUnique = vi.fn().mockResolvedValue(toRow({ status: 'success' }))
-    const upsert = vi.fn().mockResolvedValue({})
-    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, analysisWorkItem: { upsert } }
+    const executeRaw = vi.fn().mockResolvedValue({})
+    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, $executeRaw: executeRaw }
     const prisma = {
       $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
     } as unknown as PrismaClient
@@ -264,25 +253,17 @@ describe('completeWeeklyAnalysisRun', () => {
   it('enqueues a weekly_review_ingest AnalysisWorkItem when the run transitions to success', async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 })
     const findUnique = vi.fn().mockResolvedValue(toRow({ status: 'success' }))
-    const upsert = vi.fn().mockResolvedValue({})
-    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, analysisWorkItem: { upsert } }
+    const executeRaw = vi.fn().mockResolvedValue({})
+    const tx = { weeklyAnalysisRun: { updateMany, findUnique }, $executeRaw: executeRaw }
     const prisma = {
       $transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(tx)),
     } as unknown as PrismaClient
 
     await completeWeeklyAnalysisRun(prisma, 'run1', new Date('2026-08-05T01:00:00Z'), {})
 
-    expect(upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          kind_triggerType_triggerId: {
-            kind: 'weekly_review_ingest',
-            triggerType: 'weekly_analysis_run',
-            triggerId: 'run1',
-          },
-        },
-      }),
-    )
+    expect(enqueuedKeys(executeRaw)).toEqual([
+      ['weekly_review_ingest', 'weekly_analysis_run', 'run1'],
+    ])
   })
 })
 

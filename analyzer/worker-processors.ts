@@ -1,7 +1,11 @@
 import path from 'node:path'
 import { Prisma, type AnalysisWorkItem, type PrismaClient } from './generated/prisma'
 import { captureException } from './monitoring/sentry'
-import { enqueueWorkItem } from './queue/work-item-repository'
+import {
+  enqueueWorkItem,
+  findWorkItemById,
+  type SettledWorkItem,
+} from './queue/work-item-repository'
 import { buildLabelAggregateSnapshotSet } from './metrics/label-metric-snapshot'
 import { generateFindingsForAggregateRefresh } from './findings/generate-findings'
 import { runLabelFindingsSerialized } from './findings/serialize-label-findings'
@@ -713,7 +717,7 @@ const NON_CYCLE_TRIGGER_TYPES = new Set([
  */
 export async function handleWorkItemSettled(
   prisma: PrismaClient,
-  workItem: AnalysisWorkItem,
+  workItem: SettledWorkItem,
   outcome: WorkItemOutcome,
 ): Promise<void> {
   await refreshReadModelFreshnessFromPolicy(prisma)
@@ -761,7 +765,7 @@ export async function handleWorkItemSettled(
  * kind: post_completion_refresh の処理関数。
  * handleWorkItemSettled が例外を投げて non-durable な post-completion hook として
  * 終わった場合の再試行を担う。元 WorkItem は既に succeeded/failed/dead で確定済みのため、
- * その行を再読み込みして終了状態を復元し、同じ後処理をやり直す。
+ * キュー表 (failed/dead) または台帳 (succeeded) から終了状態を復元し、同じ後処理をやり直す。
  * @param prisma - Prisma クライアント
  * @param workItem - triggerId に元 WorkItem の ID を持つ post_completion_refresh の WorkItem
  */
@@ -769,9 +773,11 @@ export async function processPostCompletionRefresh(
   prisma: PrismaClient,
   workItem: AnalysisWorkItem,
 ): Promise<void> {
-  const originalWorkItem = await prisma.analysisWorkItem.findUniqueOrThrow({
-    where: { id: Number(workItem.triggerId) },
-  })
+  const originalId = Number(workItem.triggerId)
+  const originalWorkItem = await findWorkItemById(prisma, originalId)
+  if (!originalWorkItem) {
+    throw new Error(`settled work item ${originalId} not found in queue or completion ledger`)
+  }
   const outcome: WorkItemOutcome = {
     status: originalWorkItem.status as WorkItemOutcome['status'],
     errorCode: originalWorkItem.lastErrorCode ?? undefined,

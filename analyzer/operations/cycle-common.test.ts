@@ -16,17 +16,24 @@ import {
 function createMockPrismaClient(): {
   prisma: PrismaClient
   findUnique: ReturnType<typeof vi.fn>
+  doneFindUnique: ReturnType<typeof vi.fn>
+  runFindFirst: ReturnType<typeof vi.fn>
   deleteMany: ReturnType<typeof vi.fn>
 } {
   const findUnique = vi.fn()
+  const doneFindUnique = vi.fn().mockResolvedValue(null)
+  const runFindFirst = vi.fn().mockResolvedValue(null)
   const deleteMany = vi.fn()
   return {
     prisma: {
       analysisWorkItem: { findUnique },
-      analysisRun: { findFirst: vi.fn().mockResolvedValue(null) },
+      analysisWorkItemDone: { findUnique: doneFindUnique },
+      analysisRun: { findFirst: runFindFirst },
       operationStage: { deleteMany },
     } as unknown as PrismaClient,
     findUnique,
+    doneFindUnique,
+    runFindFirst,
     deleteMany,
   }
 }
@@ -103,6 +110,40 @@ describe('deriveWorkItemStage', () => {
     const stage = await deriveWorkItemStage(prisma, 'label_aggregate_refresh', 'crawl_run', 'run-1')
 
     expect(stage.workItemExists).toBe(true)
+  })
+
+  it('キュー表に無くても台帳に完了済みの論理キーがあれば succeeded の Stage を返す', async () => {
+    const { prisma, findUnique, doneFindUnique, runFindFirst } = createMockPrismaClient()
+    findUnique.mockResolvedValue(null)
+    doneFindUnique.mockResolvedValue({
+      workItemId: 42,
+      kind: 'label_aggregate_refresh',
+      triggerType: 'crawl_run',
+      triggerId: 'run-1',
+      createdAt: new Date('2026-11-01T00:00:00.000Z'),
+      attemptCount: 2,
+      completedAt: new Date('2026-11-01T00:10:00.000Z'),
+    })
+    const startedAt = new Date('2026-11-01T00:05:00.000Z')
+    const finishedAt = new Date('2026-11-01T00:10:00.000Z')
+    runFindFirst.mockResolvedValue({ id: 7, startedAt, finishedAt })
+
+    const stage = await deriveWorkItemStage(prisma, 'label_aggregate_refresh', 'crawl_run', 'run-1')
+
+    expect(stage).toEqual({
+      status: 'succeeded',
+      attemptCount: 2,
+      errorCode: undefined,
+      errorSummary: undefined,
+      analysisRunId: 7,
+      startedAt,
+      finishedAt,
+      workItemExists: true,
+    })
+    expect(runFindFirst).toHaveBeenCalledWith({
+      where: { workItemId: 42 },
+      orderBy: { startedAt: 'desc' },
+    })
   })
 })
 
