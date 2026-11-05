@@ -18,6 +18,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountSummaryLatest', () => {
     await prisma.accountLabelState.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -139,6 +140,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
     await prisma.accountLabelState.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 

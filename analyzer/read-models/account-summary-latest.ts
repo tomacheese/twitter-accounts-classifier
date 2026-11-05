@@ -1,5 +1,22 @@
 import type { PrismaClient } from '../generated/prisma'
 
+/**
+ * Account.crawlState から最終クロール時刻を取り出す。
+ * crawlState は Account 作成と同時に作られる不変条件のため、欠けていれば異常として止める。
+ * @param account - id と crawlState を読み込んだ Account
+ * @returns 最終クロール時刻
+ * @throws crawlState が無い場合
+ */
+export function requireLastCrawledAt(account: {
+  id: string
+  crawlState: { lastCrawledAt: Date } | null
+}): Date {
+  if (account.crawlState === null) {
+    throw new Error(`AccountCrawlState row is missing for account ${account.id}`)
+  }
+  return account.crawlState.lastCrawledAt
+}
+
 /** upsertAccountSummaryLatest の入力。呼び出し元が更新しない component は現在値をそのまま渡す。 */
 export interface UpsertAccountSummaryLatestInput {
   accountId: string

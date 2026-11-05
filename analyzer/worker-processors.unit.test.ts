@@ -56,7 +56,7 @@ describe('processAccountSummaryRefresh transaction budget', () => {
           id: 'account-1',
           screenName: 'Alice',
           displayName: 'Alice',
-          lastCrawledAt: observedAt,
+          crawlState: { lastCrawledAt: observedAt },
         }),
       },
       accountSummaryLatest: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -74,6 +74,36 @@ describe('processAccountSummaryRefresh transaction budget', () => {
       expect.any(Function),
       expect.objectContaining({ timeout: 60_000 }),
     )
+  })
+})
+
+describe('processAccountSummaryRefresh crawl state invariant', () => {
+  it('throws when the account has no AccountCrawlState row', async () => {
+    const prisma = {
+      accountClassificationObservation: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: 'observation-1',
+          accountId: '1001',
+          observedAt: new Date('2026-08-10T00:00:00Z'),
+          classificationSnapshot: [],
+        }),
+      },
+      account: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: '1001',
+          screenName: 'alice',
+          displayName: 'Alice',
+          crawlState: null,
+        }),
+      },
+      accountSummaryLatest: { findUnique: vi.fn().mockResolvedValue(null) },
+      labelDefinition: { findMany: vi.fn().mockResolvedValue([]) },
+      $transaction: vi.fn(),
+    } as unknown as PrismaClient
+
+    await expect(
+      processAccountSummaryRefresh(prisma, { id: 1, triggerId: 'observation-1' } as never),
+    ).rejects.toThrow('AccountCrawlState row is missing for account 1001')
   })
 })
 

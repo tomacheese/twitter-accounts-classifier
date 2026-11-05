@@ -789,15 +789,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
         data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
       })
 
-      const authorProfile = profile('acct-1')
+      const authorProfile = profile('100001')
       // 1 周目: AI メディアが検出された状態で保存する。
       await persistAuthorResultAtomic(prisma, {
         crawlRunId: crawlRunOne.id,
         username: 'tester',
-        authorId: 'acct-1',
+        authorId: '100001',
         profile: authorProfile,
         recentTweets: [
-          tweet('t1', 'acct-1', {
+          tweet('2000001', '100001', {
             hasAiGeneratedMedia: true,
             aiGeneratedDetectionSource: 'C2paClient',
           }),
@@ -822,9 +822,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await persistAuthorResultAtomic(prisma, {
         crawlRunId: crawlRunTwo.id,
         username: 'tester',
-        authorId: 'acct-1',
+        authorId: '100001',
         profile: authorProfile,
-        recentTweets: [tweet('t1', 'acct-1', { hasAiGeneratedMedia: null })],
+        recentTweets: [tweet('2000001', '100001', { hasAiGeneratedMedia: null })],
         additionalOwnTweets: [],
         recentTweetsFallbackAuthors: [],
         followSample: null,
@@ -844,7 +844,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const labelDefinitionId = labelDefinitionIds.get('test_ai_media')
       if (labelDefinitionId === undefined) throw new Error('test_ai_media definition is missing')
       await prisma.accountActiveLabel.findUniqueOrThrow({
-        where: { accountId_labelDefinitionId: { accountId: 'acct-1', labelDefinitionId } },
+        where: { accountId_labelDefinitionId: { accountId: '100001', labelDefinitionId } },
       })
     })
   },

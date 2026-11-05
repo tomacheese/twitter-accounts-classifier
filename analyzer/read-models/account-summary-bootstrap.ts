@@ -6,6 +6,7 @@ import {
   upsertAccountSummaryLatest,
   touchAccountSummaryLatestState,
   markAccountSummaryLatestFailed,
+  requireLastCrawledAt,
   type AccountClassificationLatestRow,
   type UpsertAccountSummaryLatestInput,
 } from './account-summary-latest'
@@ -231,13 +232,19 @@ async function processLegacyChunk(tx: PrismaClient, chunkSize: number): Promise<
     take: chunkSize,
     ...(state.cursor ? { skip: 1, cursor: { id: state.cursor } } : {}),
     orderBy: { id: 'asc' },
-    select: { id: true, screenName: true, displayName: true, lastCrawledAt: true },
+    select: {
+      id: true,
+      screenName: true,
+      displayName: true,
+      crawlState: { select: { lastCrawledAt: true } },
+    },
   })
 
   let chunkWatermarkAt: Date | null = null
   for (const account of accounts) {
-    if (!chunkWatermarkAt || account.lastCrawledAt > chunkWatermarkAt) {
-      chunkWatermarkAt = account.lastCrawledAt
+    const lastCrawledAt = requireLastCrawledAt(account)
+    if (!chunkWatermarkAt || lastCrawledAt > chunkWatermarkAt) {
+      chunkWatermarkAt = lastCrawledAt
     }
   }
 
@@ -319,7 +326,7 @@ async function processLegacyChunk(tx: PrismaClient, chunkSize: number): Promise<
         normalizedScreenName: account.screenName.toLowerCase(),
         normalizedDisplayName: account.displayName.toLowerCase(),
         searchDocument: `${account.screenName} ${account.displayName}`.toLowerCase(),
-        profileObservedAt: account.lastCrawledAt,
+        profileObservedAt: requireLastCrawledAt(account),
         activeLabelKeys,
         activeLabelCount: activeLabelKeys.length,
         // bootstrap は変化検出を行わないため、classificationObservedAt と同値を書く。

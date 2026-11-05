@@ -500,6 +500,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     await prisma.readModelState.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -514,7 +515,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt,
+        crawlState: { create: { lastCrawledAt } },
       },
     })
     const labelA = await prisma.labelDefinition.create({
@@ -642,7 +643,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+        crawlState: { create: { lastCrawledAt: new Date('2026-01-03T00:00:00Z') } },
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
@@ -701,7 +702,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+        crawlState: { create: { lastCrawledAt: new Date('2026-01-03T00:00:00Z') } },
       },
     })
     const observedAt = new Date('2026-01-02T00:00:00Z')
@@ -744,7 +745,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+        crawlState: { create: { lastCrawledAt: new Date('2026-01-03T00:00:00Z') } },
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
@@ -820,6 +821,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () =>
     await prisma.readModelState.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -834,7 +836,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () =>
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt,
+        crawlState: { create: { lastCrawledAt } },
       },
     })
     const priorClassificationObservedAt = new Date('2026-01-02T00:00:00Z')
