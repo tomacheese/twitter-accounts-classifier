@@ -13,9 +13,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/ensure-service-role.sh"
 
+ensure_service_role crawler "${CRAWLER_DB_PASSWORD:-}"
 ensure_service_role viewer "${VIEWER_DB_PASSWORD:-}"
 ensure_service_role analyzer "${ANALYZER_DB_PASSWORD:-}"
 
+psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$SCRIPT_DIR/sync-crawler-grants.sql"
 psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$SCRIPT_DIR/sync-crawler-runtime-settings.sql"
 psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$SCRIPT_DIR/verify-crawler-runtime-settings.sql"
 
