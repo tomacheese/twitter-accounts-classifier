@@ -113,7 +113,23 @@ function mockAccountRepository() {
   return { upsertAccountSpy }
 }
 
+/**
+ * Tweet の永続化は tweet-repository 側の統合テストで検証済みのため、
+ * ここでは tx モックの `tweet.upsert` が返す行をそのまま upsert 結果として扱う。
+ * `tweet.upsert` が返す行の形が、各テストで upsert 後の Tweet に何を期待するかを表している。
+ */
+function mockTweetRepositoryUpsert() {
+  vi.spyOn(tweetRepository, 'upsertTweet').mockImplementation(async (prisma, input) => {
+    const client = prisma as unknown as {
+      tweet: { upsert: (args: unknown) => Promise<unknown> }
+    }
+    const tweet = (await client.tweet.upsert({ where: { id: input.id }, create: input })) as never
+    return { tweet, changed: true }
+  })
+}
+
 beforeEach(() => {
+  mockTweetRepositoryUpsert()
   // 個別のテストで上書きしない限り、期間内のプロモ投稿の DB 集計は 0 件の前提にする。
   vi.spyOn(tweetRepository, 'loadPromotedTweetCountsForAccounts').mockResolvedValue(new Map())
   ;({ upsertAccountSpy } = mockAccountRepository())
@@ -136,7 +152,6 @@ describe('persistAuthorResultAtomic', () => {
     const authorProfile = profile('author1')
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
         upsert: vi.fn(({ create }: { create: ReturnType<typeof baseTweet> }) =>
           Promise.resolve({
@@ -226,7 +241,6 @@ describe('persistAuthorResultAtomic', () => {
     const authorProfile = profile('author1')
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
         upsert: vi.fn(({ create }: { create: ReturnType<typeof baseTweet> }) =>
           Promise.resolve({
@@ -383,7 +397,7 @@ describe('persistAuthorResultAtomic', () => {
       })
     })
     const txClient = {
-      tweet: { findUnique: vi.fn().mockResolvedValue(null), upsert: tweetUpsert },
+      tweet: { upsert: tweetUpsert },
       accountLabelState: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
@@ -449,7 +463,6 @@ describe('persistAuthorResultAtomic', () => {
     ])
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: tweetUpsert,
         findMany: tweetFindMany,
       },
@@ -514,7 +527,6 @@ describe('persistAuthorResultAtomic', () => {
     // 直後の crawl state の更新で 'success' に変わることを再現する。
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
       },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
@@ -601,7 +613,6 @@ describe('persistAuthorResultAtomic', () => {
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
       },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
@@ -637,7 +648,6 @@ describe('persistAuthorResultAtomic', () => {
   it('opens the transaction with an extended budget for the combined write', async () => {
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
       },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
@@ -672,7 +682,6 @@ describe('persistAuthorResultAtomic', () => {
   it('upserts each fallback author only once even if it appears against multiple context tweets', async () => {
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),
       },
       accountLabelState: { findMany: vi.fn().mockResolvedValue([]) },
@@ -715,7 +724,6 @@ describe('persistAuthorResultAtomic', () => {
     )
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),
       },
       accountLabelState: { findMany: vi.fn().mockResolvedValue([{ accountId: 'context1' }]) },
@@ -755,6 +763,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // 実 DB で Account と crawl state の永続化まで通すため、共通のスパイを外す。
       vi.mocked(accountRepository.upsertAccount).mockRestore()
       vi.mocked(accountRepository.recordRecentTweetsFetchSuccess).mockRestore()
+      vi.mocked(tweetRepository.upsertTweet).mockRestore()
       // Block は他の統合テストファイルが残す可能性があり、
       // account 削除時の FK 違反を避けるため先に消しておく。
       await prisma.block.deleteMany()

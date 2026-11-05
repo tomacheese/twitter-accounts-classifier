@@ -41,13 +41,21 @@ export async function loadSelfReplyPromoCorpus(
       fullText: true,
       expandedUrls: true,
       createdAt: true,
-      account: { select: { screenName: true } },
     },
   })
-  const selfReplyCorpus: SelfReplyPromoCorpusEntry[] = rows.map(({ account, ...tweet }) => ({
-    ...tweet,
-    authorScreenName: account.screenName,
-  }))
+  // Tweet は Account への FK を持たない。Account 行が無い投稿者の投稿は、誘導先の自己判定ができないため除く。
+  const authors =
+    rows.length === 0
+      ? []
+      : await prisma.account.findMany({
+          where: { id: { in: [...new Set(rows.map((row) => row.accountId))] } },
+          select: { id: true, screenName: true },
+        })
+  const screenNameById = new Map(authors.map((author) => [author.id, author.screenName]))
+  const selfReplyCorpus: SelfReplyPromoCorpusEntry[] = rows.flatMap((tweet) => {
+    const authorScreenName = screenNameById.get(tweet.accountId)
+    return authorScreenName === undefined ? [] : [{ ...tweet, authorScreenName }]
+  })
 
   const byId = new Map(selfReplyCorpus.map((entry) => [entry.id, entry]))
   const rootCandidateIds = new Set<string>()

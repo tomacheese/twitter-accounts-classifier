@@ -51,7 +51,7 @@ export interface PersistAuthorResultAtomicParams {
    * ラベル評価が merge 前の値を見る状態を避ける。
    */
   additionalOwnTweets: TweetInput[]
-  /** `recentTweets` に含まれる文脈 Tweet の `accountId` FK を満たすための fallback profile。 */
+  /** `recentTweets` に含まれる文脈 Tweet の投稿者の fallback profile。Account 行が無いと自己返信コーパスが投稿者を引けない。 */
   recentTweetsFallbackAuthors: AccountProfileInput[]
   /** remote fetch に失敗した場合は null。null の場合サンプル書き込みは skip する。 */
   followSample: FollowListResult | null
@@ -128,8 +128,8 @@ export async function persistAuthorResultAtomic(
         params.recentTweetsFetchedAt ?? new Date(),
       )
       const account = { ...upsertedAccount, crawlState }
-      // `recentTweets` には他者に帰属する会話コンテキストの Tweet が混在するため、
-      // Tweet.accountId の FK を満たすには対応する Account を先に用意しておく必要がある。
+      // `recentTweets` には他者に帰属する会話コンテキストの Tweet が混在する。
+      // Tweet は Account への FK を持たないが、自己返信コーパスが投稿者の screenName を Account から引くため、先に用意する。
       // この account 自身は今回の crawl 対象ではなく、このループでしか profile 更新を観測できないため、
       // ラベル評価に影響する変化があれば relabel も併せて要求する。
       for (const fallbackAuthor of fallbackAuthorsById.values()) {
