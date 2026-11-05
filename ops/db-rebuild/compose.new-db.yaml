@@ -5,7 +5,7 @@
 #   DB_PROFILE=bulk   一括投入用
 #   DB_PROFILE=steady 定常運用用 (WAL アーカイブ有効)
 # DB_PROFILE は必須にしている。既定値を持たせると、steady 運用中に指定を忘れた up で bulk 設定へ戻ってしまう。
-name: tac-new-db
+name: ${NEW_DB_PROJECT:-tac-new-db}
 
 x-default-logging: &default-logging
   driver: json-file
@@ -16,7 +16,7 @@ x-default-logging: &default-logging
 services:
   postgres:
     image: ${NEW_DB_IMAGE:-postgres:17-alpine}
-    container_name: tac-new-postgres
+    container_name: ${NEW_DB_CONTAINER_NAME:-tac-new-postgres}
     restart: unless-stopped
     # 並列クエリの dynamic shared memory 用。64MB の Docker 既定値では不足する。
     shm_size: 1gb

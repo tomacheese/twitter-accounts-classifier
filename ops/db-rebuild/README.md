@@ -14,6 +14,8 @@ DB 作り直しで使う新しい postgres コンテナの定義と運用スク�
 | `switch-to-steady.sh` | bulk から steady への切り替えと最初のベースバックアップ |
 | `verify-restore.sh` | ベースバックアップを scratch へリストアして検証する |
 
+旧 DB から新 DB への移行ツール (`load.sh`、`verify.sh`、`rehearsal.sh` など) は [MIGRATION.md](./MIGRATION.md) を参照する。
+
 ## initdb の固定値
 
 `initdb.sh` が次の値で初期化する。いずれも作成後に変更できない。
