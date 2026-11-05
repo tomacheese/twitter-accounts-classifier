@@ -55,7 +55,8 @@ describe.skipIf(!process.env.DATABASE_URL)('reconcileBlockRelations', () => {
   beforeEach(async () => {
     await prisma.blockStateChange.deleteMany()
     await prisma.block.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
     await prisma.account.deleteMany()
   })
 

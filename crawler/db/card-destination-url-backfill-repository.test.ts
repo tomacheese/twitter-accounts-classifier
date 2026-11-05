@@ -1,10 +1,21 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createSyntheticId } from 'id-boundary'
 import type { PrismaClient } from '../generated/prisma'
 import { CRAWL_LIMITS } from '../config/crawl-limits'
-import { selectCardDestinationUrlBackfillCandidates } from './card-destination-url-backfill-repository'
+import type { LabelRule } from '../labels/types'
+import { getPrismaClient } from './client'
+import {
+  CARD_DESTINATION_URL_BACKFILL_LABEL_KEY,
+  selectCardDestinationUrlBackfillCandidates,
+} from './card-destination-url-backfill-repository'
+import {
+  ensureLabelDefinitionsForRules,
+  recordAccountLabelsBulkForAccounts,
+} from './label-repository'
+import { getOrThrow } from './label-test-support'
 
 describe('selectCardDestinationUrlBackfillCandidates query shape', () => {
-  it('Account を起点に LATERAL fence 付きで ad_pr_hashtag=true かつ Card 未評価の Tweet を probe する', async () => {
+  it('Account を起点に LATERAL fence 付きで AccountActiveLabel に ad_pr_hashtag の行があり Card 未評価の Tweet を持つ account を probe する', async () => {
     const queryRaw = vi
       .fn()
       .mockResolvedValueOnce([{ id: 'ld-ad-pr-hashtag' }])
@@ -23,7 +34,7 @@ describe('selectCardDestinationUrlBackfillCandidates query shape', () => {
     expect(candidateSql).toContain('FROM "Account" AS a')
     expect(candidateSql).toContain('CROSS JOIN LATERAL')
     expect(candidateSql).toContain('"labelDefinitionId" =')
-    expect(candidateSql).toContain('"value" = true')
+    expect(candidateSql).toContain('FROM "AccountActiveLabel" AS active')
     expect(candidateSql).toContain('"cardDestinationUrlsEvaluated" = false')
     expect(candidateSql).toContain('ORDER BY t."createdAt" DESC')
     expect(candidateSql.match(/LIMIT/g)).toHaveLength(4)
@@ -72,3 +83,72 @@ describe('selectCardDestinationUrlBackfillCandidates query shape', () => {
     ).resolves.toEqual({ accountIds: ['a1', 'a2'], nextAfterId: 'a2' })
   })
 })
+
+describe.skipIf(!process.env.DATABASE_URL)(
+  'selectCardDestinationUrlBackfillCandidates (実 DB)',
+  () => {
+    it('ad_pr_hashtag が true で、直近の Tweet に Card 未評価を含む account だけを返す', async () => {
+      const prisma = getPrismaClient()
+      await prisma.$executeRawUnsafe(
+        'TRUNCATE "AccountActiveLabel", "AccountLabelState", "AccountLabelChange", "LabelRuleVersion", "LabelDefinition", "Account" RESTART IDENTITY CASCADE',
+      )
+      const rule: LabelRule = {
+        key: CARD_DESTINATION_URL_BACKFILL_LABEL_KEY,
+        description: 'synthetic',
+        version: '1.0.0',
+        evaluate: () => ({ value: false, confidence: 1, reason: 'unused' }),
+      }
+      const ids = await ensureLabelDefinitionsForRules(prisma, [rule])
+      const base = BigInt(createSyntheticId())
+      const [labeledPending, labeledEvaluated, unlabeledPending] = [1n, 2n, 3n].map((offset) =>
+        String(base + offset),
+      )
+      for (const [accountId, value, evaluated] of [
+        [labeledPending, true, false],
+        [labeledEvaluated, true, true],
+        [unlabeledPending, false, false],
+      ] as const) {
+        await prisma.account.create({
+          data: {
+            id: accountId,
+            screenName: `synthetic_${accountId}`,
+            displayName: 'Synthetic account',
+            followersCount: 0,
+            followingCount: 0,
+            tweetCount: 0,
+            accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
+          },
+        })
+        await prisma.tweet.create({
+          data: {
+            id: String(BigInt(accountId) + 1000n),
+            accountId,
+            fullText: 'synthetic tweet',
+            createdAt: new Date(),
+            retweetCount: 0,
+            likeCount: 0,
+            replyCount: 0,
+            cardDestinationUrlsEvaluated: evaluated,
+          },
+        })
+        await recordAccountLabelsBulkForAccounts(prisma, {
+          labels: [
+            {
+              accountId,
+              labelDefinitionId: getOrThrow(ids, CARD_DESTINATION_URL_BACKFILL_LABEL_KEY),
+              result: { value, confidence: 0.9, reason: 'synthetic' },
+              method: CARD_DESTINATION_URL_BACKFILL_LABEL_KEY,
+              ruleVersion: '1.0.0',
+            },
+          ],
+          expectedRevByAccountId: new Map([[accountId, 0]]),
+          sourceKind: 'relabel',
+        })
+      }
+
+      await expect(
+        selectCardDestinationUrlBackfillCandidates(prisma, { limit: 10 }),
+      ).resolves.toEqual({ accountIds: [labeledPending] })
+    })
+  },
+)

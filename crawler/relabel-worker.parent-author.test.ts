@@ -76,7 +76,10 @@ it('relabel evaluation receives the resolved parent author id', async () => {
       ['root-1', { fullText: 'root text', accountId: 'account-1' }],
     ]),
   )
-  vi.spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts').mockResolvedValue()
+  vi.spyOn(labelRepository, 'loadAccountLabelStates').mockResolvedValue(
+    new Map([['account-1', { rev: 0, versions: [], active: new Map() }]]),
+  )
+  vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts').mockResolvedValue([])
   vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
     { id: 1, status: 'succeeded' },
   ])

@@ -51,6 +51,7 @@ describe('SystemPage', () => {
       labelCoverage: [],
       backlog: [],
       scanCursorUpdatedAt: null,
+      coverageComputedAt: null,
     })
 
     const html = renderToStaticMarkup(await SystemPage())

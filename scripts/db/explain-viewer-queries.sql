@@ -5,8 +5,8 @@
 
 -- dashboard.ts の label 集計相当
 EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
-SELECT "labelDefinitionId", COUNT(*) FILTER (WHERE "value") AS "trueCount", COUNT(*) AS "evaluatedCount"
-FROM "AccountLabelLatest"
+SELECT "labelDefinitionId", COUNT(*) AS "trueCount"
+FROM "AccountActiveLabel"
 GROUP BY "labelDefinitionId";
 
 -- accounts.ts の一覧相当 (offset pagination の実行計画を確認する目的)
