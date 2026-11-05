@@ -431,7 +431,8 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     await prisma.accountClassificationLatest.deleteMany()
     await prisma.accountSummaryLatest.deleteMany()
     await prisma.accountLabelChange.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
     await prisma.accountClassificationObservation.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
     await prisma.readModelState.deleteMany()
@@ -555,8 +556,8 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     expect(summary?.profileObservedAt.toISOString()).toBe(lastCrawledAt.toISOString())
     expect(summary?.lastClassificationChangedAt?.toISOString()).toBe(observedAt.toISOString())
 
-    // AccountLabelChange は AccountLabelLatest への書き込みを検出する DB トリガーが
-    // 生成するため、AccountLabelLatest を書かないこの経路では作られない。
+    // AccountLabelChange は AccountActiveLabel への書き込みを検出する DB トリガーが
+    // 生成するため、AccountActiveLabel を書かないこの経路では作られない。
     const changes = await prisma.accountLabelChange.findMany({
       where: { accountId: account.id },
     })
@@ -749,7 +750,8 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () =>
     await prisma.accountClassificationLatest.deleteMany()
     await prisma.accountSummaryLatest.deleteMany()
     await prisma.accountLabelChange.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
     await prisma.accountClassificationObservation.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
     await prisma.readModelState.deleteMany()
@@ -899,7 +901,8 @@ describe.skipIf(!process.env.DATABASE_URL)('processLabelAggregateRefresh', () =>
     await prisma.labelSummaryCurrent.deleteMany()
     await prisma.labelMetricSnapshot.deleteMany()
     await prisma.accountClassificationLatest.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
     await prisma.readModelState.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
     await prisma.labelDefinition.deleteMany()

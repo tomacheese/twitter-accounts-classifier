@@ -24,6 +24,39 @@ async function createAccount(id: string): Promise<void> {
   })
 }
 
+/** 評価状態を持たない true の行を直接作る。権限制限のないテスト用 DB 前提。 */
+async function seedActiveLabel(input: {
+  accountId: string
+  labelDefinitionId: number
+  confidence: number
+  reason: string
+  ruleVersion: string
+  labeledAt: Date
+}): Promise<void> {
+  await prisma.labelRuleVersion.upsert({
+    where: {
+      labelDefinitionId_versionNo: { labelDefinitionId: input.labelDefinitionId, versionNo: 1 },
+    },
+    create: {
+      labelDefinitionId: input.labelDefinitionId,
+      versionNo: 1,
+      ruleVersion: input.ruleVersion,
+    },
+    update: {},
+  })
+  await prisma.accountActiveLabel.create({
+    data: {
+      accountId: input.accountId,
+      labelDefinitionId: input.labelDefinitionId,
+      ruleVersionNo: 1,
+      confidence: input.confidence,
+      reason: input.reason,
+      method: 'rule',
+      labeledAt: input.labeledAt,
+    },
+  })
+}
+
 async function resetDb(): Promise<void> {
   await prisma.analysisWorkItem.deleteMany()
   await prisma.readModelBootstrap.deleteMany()
@@ -32,7 +65,9 @@ async function resetDb(): Promise<void> {
   await prisma.weeklyReviewSampleBucketCount.deleteMany()
   await prisma.accountClassificationLatest.deleteMany()
   await prisma.accountSummaryLatest.deleteMany()
-  await prisma.accountLabelLatest.deleteMany()
+  await prisma.accountActiveLabel.deleteMany()
+  await prisma.accountLabelState.deleteMany()
+  await prisma.labelRuleVersion.deleteMany()
   await prisma.reviewFindingOccurrence.deleteMany()
   await prisma.findingEvidence.deleteMany()
   await prisma.reviewFinding.deleteMany()
@@ -108,7 +143,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     expect(rows[0]?.indexdef).toContain('INCLUDE ("screenName", "displayName", "lastCrawledAt")')
   })
 
-  it('does not overwrite an existing classification whose semantics no longer match AccountLabelLatest', async () => {
+  it('does not overwrite an existing classification whose semantics no longer match AccountActiveLabel', async () => {
     const account = await prisma.account.create({
       data: {
         id: '100283528355',
@@ -124,17 +159,13 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: 'test_live_label', description: 'テスト用ラベル' },
     })
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId: account.id,
-        labelDefinitionId: labelDefinition.id,
-        value: false,
-        confidence: 0.2,
-        reason: 'old reason',
-        method: 'rule',
-        ruleVersion: 'v1',
-        labeledAt: new Date('2026-01-01T00:00:00Z'),
-      },
+    await seedActiveLabel({
+      accountId: account.id,
+      labelDefinitionId: labelDefinition.id,
+      confidence: 0.2,
+      reason: 'old reason',
+      ruleVersion: 'v1',
+      labeledAt: new Date('2026-01-01T00:00:00Z'),
     })
     // live crawler が、bootstrap の baseline (labeledAt=2026-01-01) より新しい
     // labeledAt (2026-01-02) の値を先に書き込んでいる状態を再現する。
@@ -174,7 +205,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     expect(classification?.reason).toBe('new reason')
   })
 
-  it('inserts new classification rows as fail-closed (evaluable=false/labeledAt=null) regardless of AccountLabelLatest.evaluable', async () => {
+  it('inserts new classification rows as fail-closed (evaluable=false/labeledAt=null) regardless of the evaluation state of AccountActiveLabel', async () => {
     const labeledAt = new Date('2026-01-01T00:00:00Z')
     const account = await prisma.account.create({
       data: {
@@ -191,20 +222,15 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryBootstrap', () 
     const labelDefinition = await prisma.labelDefinition.create({
       data: { key: 'test_bootstrap_evaluable_label', description: 'テスト用ラベル' },
     })
-    // AccountLabelLatest 側は evaluable=true でも、legacy phase は
+    // 評価済みの true 行があっても、legacy phase は
     // sampling phase による意味的一致検証を経ずに eligible 扱いにしない。
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId: account.id,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.8,
-        reason: 'test reason',
-        method: 'rule',
-        ruleVersion: 'v1',
-        evaluable: true,
-        labeledAt,
-      },
+    await seedActiveLabel({
+      accountId: account.id,
+      labelDefinitionId: labelDefinition.id,
+      confidence: 0.8,
+      reason: 'test reason',
+      ruleVersion: 'v1',
+      labeledAt,
     })
     const workItem = await prisma.analysisWorkItem.create({
       data: {
@@ -316,22 +342,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
   () => {
     beforeEach(resetDb)
 
-    it('does not insert a classification row for a pair that exists only in AccountLabelLatest', async () => {
+    it('does not insert a classification row for a pair that exists only in AccountActiveLabel', async () => {
       await createAccount('100027855373')
       const labelDefinition = await prisma.labelDefinition.create({
         data: { key: 'test_label_only', description: 'テスト用ラベル' },
       })
-      await prisma.accountLabelLatest.create({
-        data: {
-          accountId: '100027855373',
-          labelDefinitionId: labelDefinition.id,
-          value: true,
-          confidence: 0.8,
-          reason: 'test reason',
-          method: 'rule',
-          ruleVersion: 'v1',
-          labeledAt: new Date('2026-01-01T00:00:00Z'),
-        },
+      await seedActiveLabel({
+        accountId: '100027855373',
+        labelDefinitionId: labelDefinition.id,
+        confidence: 0.8,
+        reason: 'test reason',
+        ruleVersion: 'v1',
+        labeledAt: new Date('2026-01-01T00:00:00Z'),
       })
       const workItem = await prisma.analysisWorkItem.create({
         data: {
@@ -349,7 +371,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(classificationCount).toBe(0)
     })
 
-    it('leaves migration-default evaluable=false/labeledAt=null untouched when the matching AccountLabelLatest row has different semantics', async () => {
+    it('leaves migration-default evaluable=false/labeledAt=null untouched when the matching AccountActiveLabel row has different semantics', async () => {
       await createAccount('100291733494')
       const labelDefinition = await prisma.labelDefinition.create({
         data: { key: 'test_mismatch', description: 'テスト用ラベル' },
@@ -369,18 +391,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
           labeledAt: null,
         },
       })
-      // AccountLabelLatest 側は同じ key だが value が異なる (semantics mismatch)。
-      await prisma.accountLabelLatest.create({
-        data: {
-          accountId: '100291733494',
-          labelDefinitionId: labelDefinition.id,
-          value: false,
-          confidence: 0.8,
-          reason: 'old reason',
-          method: 'rule',
-          ruleVersion: 'v1',
-          labeledAt: new Date('2026-01-02T00:00:00Z'),
-        },
+      // AccountActiveLabel 側は同じ key だが confidence が異なる (semantics mismatch)。
+      await seedActiveLabel({
+        accountId: '100291733494',
+        labelDefinitionId: labelDefinition.id,
+        confidence: 0.5,
+        reason: 'old reason',
+        ruleVersion: 'v1',
+        labeledAt: new Date('2026-01-02T00:00:00Z'),
       })
       const workItem = await prisma.analysisWorkItem.create({
         data: {
@@ -408,7 +426,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(classification.labeledAt).toBeNull()
     })
 
-    it('sets evaluable/labeledAt when the matching AccountLabelLatest row has identical semantics', async () => {
+    it('sets evaluable/labeledAt when the matching AccountActiveLabel row has identical semantics', async () => {
       await createAccount('100515155459')
       const labelDefinition = await prisma.labelDefinition.create({
         data: { key: 'test_match', description: 'テスト用ラベル' },
@@ -428,18 +446,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
           labeledAt: null,
         },
       })
-      await prisma.accountLabelLatest.create({
-        data: {
-          accountId: '100515155459',
-          labelDefinitionId: labelDefinition.id,
-          value: true,
-          confidence: 0.8,
-          reason: 'same reason',
-          method: 'rule',
-          ruleVersion: 'v1',
-          evaluable: true,
-          labeledAt,
-        },
+      await seedActiveLabel({
+        accountId: '100515155459',
+        labelDefinitionId: labelDefinition.id,
+        confidence: 0.8,
+        reason: 'same reason',
+        ruleVersion: 'v1',
+        labeledAt,
       })
       const workItem = await prisma.analysisWorkItem.create({
         data: {

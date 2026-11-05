@@ -12,7 +12,7 @@ DECLARE
     'ReviewFinding', 'ReviewFindingOccurrence', 'FindingEvidence', 'FindingRawArtifact',
     'FindingEntityLink', 'DetectionPolicyVersion', 'DetectorEvaluation',
     'PolicyBacktestRun', 'PolicyBacktestFinding',
-    'LabelMetricSnapshot', 'LabelMetricDaily',
+    'LabelMetricSnapshot', 'LabelMetricDaily', 'RelabelCoverageSnapshot',
     'AccountLabelChange',
     'AccountSummaryLatest', 'AccountClassificationLatest', 'ReadModelBootstrap',
     'LabelSummaryCurrent', 'BlockRelationCurrent', 'BlockStateChange',

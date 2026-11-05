@@ -21,6 +21,7 @@ import { buildLabelSummary } from './read-models/build-label-summary'
 import { buildAttentionItems } from './read-models/build-attention-items'
 import { buildOverviewSnapshot } from './read-models/build-overview-snapshot'
 import { buildBlockRelationSummary } from './read-models/build-block-relation-summary'
+import { refreshRelabelCoverageSnapshot } from './read-models/relabel-coverage-snapshot'
 import { ingestWeeklyReviewFindings } from './weekly-review/ingest'
 import { runRetentionSweep } from './retention/sweep'
 import { structuredOutputSchema } from './weekly-review/structured-output-schema'
@@ -202,7 +203,7 @@ function isSameLabelKeySet(a: string[], b: string[]): boolean {
  * `AccountSummaryLatest`/`AccountClassificationLatest` へ反映する。
  * finding 系フィールド (activeFindingCount/highestFindingSeverity/findingObservedAt) は
  * ここでは更新しない (現状値をそのまま渡す)。
- * `AccountLabelChange` は `AccountLabelLatest` への書き込みを検出する DB トリガーが
+ * `AccountLabelChange` は `AccountActiveLabel` への書き込みを検出する DB トリガーが
  * 生成するため、ここでは生成しない。
  * @param prisma - Prisma クライアント
  * @param workItem - `triggerType: 'account_classification_observation'` の WorkItem
@@ -481,6 +482,16 @@ export async function processLabelAggregateRefresh(
       'label_summary_publish_failed',
       error instanceof Error ? error.message : String(error),
     )
+  }
+  // viewer の relabel coverage だけが読む補助的な集計で、全アカウントの状態を走査するため時間ごとの schedule でだけ作り直す。
+  // 失敗しても他の read model の更新は妨げない。
+  if (workItem.triggerType === 'schedule') {
+    try {
+      await refreshRelabelCoverageSnapshot(prisma)
+    } catch (error) {
+      logger.error('Failed to refresh RelabelCoverageSnapshot', error as Error)
+      captureException(error, { source: 'processLabelAggregateRefresh.relabelCoverageSnapshot' })
+    }
   }
   await publishAttentionAndOverview(prisma, snapshotAt)
 }

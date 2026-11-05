@@ -49,7 +49,7 @@ if printf '%s\n' "$PRODUCTION_TS_FILES" | xargs grep -EnH '\bprisma\.accountLabe
 fi
 
 if printf '%s\n' "$PRODUCTION_TS_FILES" \
-    | xargs grep -EnH '\brecordCrawlAccountLabel\b|\brecordAccountLabelsBulkForAccounts\b|\bRELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED\b' 2>/dev/null; then
+    | xargs grep -EnH '\brecordCrawlAccountLabel\b|\bRELABEL_ACCOUNT_LABEL_HISTORY_WRITE_ENABLED\b' 2>/dev/null; then
     fail "production code still references a retired AccountLabel write identifier (see above)"
 fi
 

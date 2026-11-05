@@ -199,7 +199,7 @@ async function findActiveFindingsForAccounts(
 }
 
 /**
- * legacy phase の 1 chunk 分を処理する。`Account`/`AccountLabelLatest`/直近の
+ * legacy phase の 1 chunk 分を処理する。`Account`/`AccountActiveLabel` (true の行のみ)/直近の
  * active `ReviewFinding` を baseline として `AccountSummaryLatest`/
  * `AccountClassificationLatest` を構築する。`AccountLabelChange` への書き込みは
  * 行わない (過去の変更イベントを捏造しない)。`evaluable`/`labeledAt` は常に
@@ -242,26 +242,33 @@ async function processLegacyChunk(tx: PrismaClient, chunkSize: number): Promise<
 
   if (accounts.length > 0) {
     const accountIds = accounts.map((account) => account.id)
-    const [labelLatestRows, activeFindings, labelDefinitions, observationRows] = await Promise.all([
-      tx.accountLabelLatest.findMany({ where: { accountId: { in: accountIds } } }),
-      findActiveFindingsForAccounts(
-        tx as unknown as PrismaClient,
-        accountIds,
-        chunkWatermarkAt ?? new Date(),
-      ),
-      tx.labelDefinition.findMany({ select: { id: true, key: true } }),
-      // relabel は AccountClassificationObservation を作らないため、
-      // 該当行が無いアカウントは labeledAt のみに基づく freshness にフォールバックする。
-      tx.accountClassificationObservation.groupBy({
-        by: ['accountId'],
-        where: { accountId: { in: accountIds } },
-        _max: { observedAt: true },
-      }),
-    ])
+    const [labelLatestRows, activeFindings, labelDefinitions, ruleVersions, observationRows] =
+      await Promise.all([
+        tx.accountActiveLabel.findMany({ where: { accountId: { in: accountIds } } }),
+        findActiveFindingsForAccounts(
+          tx as unknown as PrismaClient,
+          accountIds,
+          chunkWatermarkAt ?? new Date(),
+        ),
+        tx.labelDefinition.findMany({ select: { id: true, key: true } }),
+        tx.labelRuleVersion.findMany({
+          select: { labelDefinitionId: true, versionNo: true, ruleVersion: true },
+        }),
+        // relabel は AccountClassificationObservation を作らないため、
+        // 該当行が無いアカウントは labeledAt のみに基づく freshness にフォールバックする。
+        tx.accountClassificationObservation.groupBy({
+          by: ['accountId'],
+          where: { accountId: { in: accountIds } },
+          _max: { observedAt: true },
+        }),
+      ])
     const maxObservedAtByAccount = new Map(
       observationRows.map((row) => [row.accountId, row._max.observedAt]),
     )
     const labelKeyById = new Map(labelDefinitions.map((def) => [def.id, def.key]))
+    const ruleVersionByNo = new Map(
+      ruleVersions.map((row) => [`${row.labelDefinitionId}:${row.versionNo}`, row.ruleVersion]),
+    )
     const labelsByAccount = new Map<string, typeof labelLatestRows>()
     for (const row of labelLatestRows) {
       const list = labelsByAccount.get(row.accountId) ?? []
@@ -289,7 +296,6 @@ async function processLegacyChunk(tx: PrismaClient, chunkSize: number): Promise<
     for (const account of accounts) {
       const labels = labelsByAccount.get(account.id) ?? []
       const activeLabelKeys = labels
-        .filter((label) => label.value)
         .map((label) => labelKeyById.get(label.labelDefinitionId))
         .filter((key): key is string => key !== undefined)
       let classificationObservedAt: Date | null = null
@@ -323,17 +329,23 @@ async function processLegacyChunk(tx: PrismaClient, chunkSize: number): Promise<
         findingObservedAt: finding?.observedAt ?? null,
       })
       for (const label of labels) {
+        const ruleVersion = ruleVersionByNo.get(`${label.labelDefinitionId}:${label.ruleVersionNo}`)
+        if (ruleVersion === undefined) {
+          throw new Error(
+            `LabelRuleVersion is missing for label ${label.labelDefinitionId} version ${label.ruleVersionNo}`,
+          )
+        }
         classificationRows.push({
           accountId: label.accountId,
           labelDefinitionId: label.labelDefinitionId,
-          value: label.value,
+          value: true,
           confidence: label.confidence,
           reason: label.reason,
           method: label.method,
-          ruleVersion: label.ruleVersion,
+          ruleVersion,
           observedAt: label.labeledAt,
           sourceObservationId: null,
-          // sampling phase が AccountLabelLatest との意味的一致を検証した上で
+          // sampling phase が AccountActiveLabel との意味的一致を検証した上で
           // 追いつかせるため、ここでは fail-closed な既定値のまま挿入する。
           evaluable: false,
           labeledAt: null,
@@ -385,12 +397,12 @@ async function processLegacyChunk(tx: PrismaClient, chunkSize: number): Promise<
 /**
  * sampling phase の 1 chunk 分を処理する。既存の `AccountClassificationLatest` 行
  * (= 既存 sampling population) だけを対象に、`labeledAt IS NULL` かつ同じ
- * `(accountId, labelDefinitionId)` の `AccountLabelLatest` 行と意味的フィールド
- * (`value`/`confidence`/`reason`/`method`/`ruleVersion`) が完全一致する場合に限り、
- * `evaluable`/`labeledAt` を metadata-only で UPDATE する。`AccountLabelLatest` に
- * しか無い pair は新規 INSERT しない (`AccountLabelLatest` は既存 population の
- * 10 倍を超える規模のため、全件を classification 対象へ広げると本番ディスク容量を
- * 圧迫する)。`labeledAt IS NULL` を条件に含めることで、live refresh が既に設定した
+ * `(accountId, labelDefinitionId)` の `AccountActiveLabel` 行 (true のみ) について、
+ * 意味的フィールド (`value`/`confidence`/`reason`/`method`/`ruleVersion`) が完全一致する場合に限り、
+ * `evaluable`/`labeledAt` を metadata-only で UPDATE する。
+ * `AccountActiveLabel` にしか無い pair は新規 INSERT しない。
+ * 全件を classification 対象へ広げると本番ディスク容量を圧迫するためである。
+ * `labeledAt IS NULL` を条件に含めることで、live refresh が既に設定した
  * `evaluable`/`labeledAt` を上書きしない (write-once)。`AccountClassificationLatest`
  * への UPDATE は `WeeklyReviewSampleBucketCount` trigger を経由するトランザクション
  * 内で行うため、eligibility 遷移は自動的に反映される。
@@ -443,16 +455,18 @@ async function processSamplingChunk(tx: PrismaClient, chunkSize: number): Promis
   if (accountIds.length > 0) {
     await tx.$executeRaw`
       UPDATE "AccountClassificationLatest" AS c
-      SET "evaluable" = l."evaluable", "labeledAt" = l."labeledAt"
-      FROM "AccountLabelLatest" AS l
+      SET "evaluable" = true, "labeledAt" = l."labeledAt"
+      FROM "AccountActiveLabel" AS l
+      JOIN "LabelRuleVersion" AS rv
+        ON rv."labelDefinitionId" = l."labelDefinitionId" AND rv."versionNo" = l."ruleVersionNo"
       WHERE l."accountId" = c."accountId"
         AND l."labelDefinitionId" = c."labelDefinitionId"
         AND c."labeledAt" IS NULL
-        AND l."value" = c."value"
+        AND c."value" = true
         AND l."confidence" = c."confidence"
         AND l."reason" = c."reason"
         AND l."method" = c."method"
-        AND l."ruleVersion" = c."ruleVersion"
+        AND rv."ruleVersion" = c."ruleVersion"
         AND c."accountId" = ANY(${accountIds}::bigint[])
     `
   }

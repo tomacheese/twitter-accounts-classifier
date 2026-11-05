@@ -109,6 +109,16 @@ CREATE TABLE "AccountActiveLabel" (
 );
 
 -- CreateTable
+CREATE TABLE "RelabelCoverageSnapshot" (
+    "computedAt" TIMESTAMPTZ(3) NOT NULL,
+    "accountCount" INTEGER NOT NULL,
+    "labelDefinitionId" SMALLINT NOT NULL,
+    "versionNo" SMALLINT NOT NULL,
+
+    CONSTRAINT "RelabelCoverageSnapshot_pkey" PRIMARY KEY ("labelDefinitionId","versionNo")
+);
+
+-- CreateTable
 CREATE TABLE "StorageCapacityState" (
     "id" TEXT NOT NULL,
     "availableGib" DOUBLE PRECISION NOT NULL,

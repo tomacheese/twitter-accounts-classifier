@@ -210,6 +210,18 @@ model AccountActiveLabel {
   @@index([labelDefinitionId, ruleVersionNo, confidence(sort: Desc), accountId])
 }
 
+// AccountLabelState.versions を展開した (ラベル, 版) ごとのアカウント数。
+// 全アカウントの versions の集計は重いため、analyzer が定期的に作り直し、viewer の relabel coverage が読む。
+// 行は 1 回の transaction で入れ替える。評価不能 (負の版) も絶対値の版として数える。
+model RelabelCoverageSnapshot {
+  computedAt        DateTime @db.Timestamptz(3)
+  accountCount      Int
+  labelDefinitionId Int      @db.SmallInt
+  versionNo         Int      @db.SmallInt
+
+  @@id([labelDefinitionId, versionNo])
+}
+
 /// storage-guard が計測したホストファイルシステムの空き容量・使用率を保持する単一行テーブル。
 /// relabel の fail-closed circuit breaker が読む唯一の情報源であり、書き込みは storage-guard
 /// service のみが行う。

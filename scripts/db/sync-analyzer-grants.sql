@@ -1,5 +1,5 @@
 -- analyzer は正本テーブルへ SELECT のみ、分析・read model テーブルへ INSERT/UPDATE/DELETE を持つ。
--- 正本テーブル (Account, Tweet, AccountLabelLatest, Follow, CrawlRun,
+-- 正本テーブル (Account, Tweet, AccountLabelState, AccountActiveLabel, Follow, CrawlRun,
 -- CrawlAccountRun, CrawlAccountCheckpoint, CrawlAccountLabelRun, WeeklyAnalysisRun,
 -- Block, BlockRun, BlockAccountRun, BlockAction, LabelDefinition)
 -- は書き込ませない。
@@ -40,7 +40,7 @@ GRANT INSERT, UPDATE, DELETE ON TABLE
   "ReviewFinding", "ReviewFindingOccurrence", "FindingEvidence", "FindingRawArtifact",
   "FindingEntityLink", "DetectionPolicyVersion", "DetectorEvaluation",
   "PolicyBacktestRun", "PolicyBacktestFinding",
-  "LabelMetricSnapshot", "LabelMetricDaily",
+  "LabelMetricSnapshot", "LabelMetricDaily", "RelabelCoverageSnapshot",
   "AccountLabelChange",
   "AccountSummaryLatest", "AccountClassificationLatest", "ReadModelBootstrap",
   "LabelSummaryCurrent", "BlockRelationCurrent", "BlockStateChange",

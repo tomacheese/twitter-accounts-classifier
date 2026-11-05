@@ -602,7 +602,9 @@ describe.skipIf(!process.env.DATABASE_URL)('getReadModelReadiness', () => {
     await prisma.readModelGeneration.deleteMany({ where: { modelKey: 'label_summary' } })
     // rowCount との一致判定は LabelDefinition 全件数を分母にするため、他ファイルのテストが
     // 残した LabelDefinition が残っていると誤って不一致になる。全件削除して分離する。
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.blockAction.deleteMany()
     await prisma.blockOutboxEntry.deleteMany()
     await prisma.labelDefinition.deleteMany()

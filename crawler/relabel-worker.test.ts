@@ -18,6 +18,10 @@ import {
   scanForStaleAccounts,
 } from './relabel-worker'
 
+function emptyLabelState(rev: number): labelRepository.AccountLabelSnapshot {
+  return { rev, versions: [], active: new Map() }
+}
+
 function makeTransactionalPrisma(client: Record<string, unknown>): PrismaClient {
   const prisma = client as unknown as PrismaClient
   Object.assign(client, {
@@ -26,9 +30,30 @@ function makeTransactionalPrisma(client: Record<string, unknown>): PrismaClient 
   return prisma
 }
 
+function evaluateOptions(registry: LabelRuleRegistry) {
+  return {
+    registry,
+    labelDefinitionIds: new Map([['test_rule', 1]]),
+    duplicateReplyIndex: { countOtherAccounts: () => 0 },
+    bioDuplicateIndex: { countOtherAccounts: () => 0 },
+    replyHijackIndex: {
+      swarmSizeFor: () => 0,
+      isEligibleForScreening: () => true,
+      evidenceFor: () => undefined,
+    },
+    selfReplyPromoIndex: { evidenceFor: () => undefined },
+    concurrency: 1,
+    leaseOwner: 'test-worker',
+  }
+}
+
 describe('evaluateAccountRelabelItems', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    // 個別のテストで上書きしない限り、全アカウントが未評価 (rev 0) の前提にする。
+    vi.spyOn(labelRepository, 'loadAccountLabelStates').mockImplementation((_prisma, accountIds) =>
+      Promise.resolve(new Map(accountIds.map((accountId) => [accountId, emptyLabelState(0)]))),
+    )
     // 個別のテストで上書きしない限り、渡された work item は全て lease を保持し続けている前提にする。
     vi.spyOn(workItemRepository, 'claimStillLeasedWorkItemIdsForUpdate').mockImplementation(
       (_tx, input) => Promise.resolve(input.workItemIds),
@@ -67,7 +92,7 @@ describe('evaluateAccountRelabelItems', () => {
       new Map([['account-1', 3]]),
     )
     vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
-    vi.spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts').mockResolvedValue()
+    vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts').mockResolvedValue([])
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
       { id: 1, status: 'succeeded' },
     ])
@@ -114,8 +139,8 @@ describe('evaluateAccountRelabelItems', () => {
     )
     vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
     const recordLabelsSpy = vi
-      .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
-      .mockResolvedValue()
+      .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+      .mockResolvedValue([])
     const evidenceSpy = vi
       .spyOn(evidenceRepository, 'upsertReplyHijackEvidence')
       .mockResolvedValue()
@@ -193,7 +218,7 @@ describe('evaluateAccountRelabelItems', () => {
       ]),
     )
     vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
-    vi.spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts').mockResolvedValue()
+    vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts').mockResolvedValue([])
     const evidenceSpy = vi
       .spyOn(evidenceRepository, 'upsertReplyHijackEvidence')
       .mockResolvedValue()
@@ -251,8 +276,8 @@ describe('evaluateAccountRelabelItems', () => {
     )
     vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
     const recordLabelsSpy = vi
-      .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
-      .mockResolvedValue()
+      .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+      .mockResolvedValue([])
     vi.spyOn(evidenceRepository, 'upsertReplyHijackEvidence').mockRejectedValue(
       new Error('evidence write failed'),
     )
@@ -284,7 +309,7 @@ describe('evaluateAccountRelabelItems', () => {
     )
 
     // ラベル書き込みは transaction 内で試みられるが、直後の evidence 書き込み失敗により
-    // transaction 全体が roll back されるため、recordAccountLabelsBulkLatestOnlyForAccounts が
+    // transaction 全体が roll back されるため、recordAccountLabelsBulkForAccounts が
     // 冪等な UPSERT である以上、次回の再試行でも安全にやり直せる。
     expect(result.succeeded).toBe(0)
     expect(recordLabelsSpy).toHaveBeenCalledWith(prisma, expect.anything())
@@ -316,8 +341,8 @@ describe('evaluateAccountRelabelItems', () => {
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
     vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
     const recordLabelsSpy = vi
-      .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
-      .mockResolvedValue()
+      .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+      .mockResolvedValue([])
     const completeSpy = vi
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
       .mockResolvedValue([{ id: 12, status: 'succeeded' }])
@@ -346,6 +371,14 @@ describe('evaluateAccountRelabelItems', () => {
     expect(result.succeeded).toBe(1)
     expect(recordLabelsSpy).toHaveBeenCalledWith(prisma, {
       sourceKind: 'relabel',
+      expectedRevByAccountId: new Map([
+        ['alice', 0],
+        ['bob', 0],
+      ]),
+      baselineByAccountId: new Map([
+        ['alice', emptyLabelState(0)],
+        ['bob', emptyLabelState(0)],
+      ]),
       labels: [
         {
           accountId: 'bob',
@@ -376,8 +409,8 @@ describe('evaluateAccountRelabelItems', () => {
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
       .mockResolvedValue([{ id: 1, status: 'succeeded' }])
     const recordLabelsSpy = vi
-      .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
-      .mockResolvedValue()
+      .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+      .mockResolvedValue([])
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
 
     const prisma = makeTransactionalPrisma({
@@ -406,6 +439,8 @@ describe('evaluateAccountRelabelItems', () => {
     expect(result.succeeded).toBe(1)
     expect(recordLabelsSpy).toHaveBeenCalledWith(prisma, {
       sourceKind: 'relabel',
+      expectedRevByAccountId: new Map([['alice', 0]]),
+      baselineByAccountId: new Map([['alice', emptyLabelState(0)]]),
       labels: [
         {
           accountId: 'alice',
@@ -439,7 +474,7 @@ describe('evaluateAccountRelabelItems', () => {
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
       { id: 1, status: 'succeeded' },
     ])
-    vi.spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts').mockResolvedValue()
+    vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts').mockResolvedValue([])
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(
       new Map([
         [
@@ -517,12 +552,83 @@ describe('evaluateAccountRelabelItems', () => {
     })
   })
 
+  describe('CAS に負けたアカウント', () => {
+    const casRule: LabelRule = {
+      key: 'test_rule',
+      description: 'test',
+      version: '1.0.0',
+      evaluate: () => ({ value: true, confidence: 1, reason: 'test' }),
+    }
+    it('入力と rev を読み直して再評価し、書き込めたら work item を complete する', async () => {
+      const registry = new LabelRuleRegistry()
+      registry.register(casRule)
+      const findMany = vi.fn().mockResolvedValue([{ id: 'alice' }])
+      const prisma = makeTransactionalPrisma({ account: { findMany } })
+      vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
+      vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
+      vi.spyOn(labelRepository, 'loadAccountLabelStates')
+        .mockResolvedValueOnce(new Map([['alice', emptyLabelState(3)]]))
+        .mockResolvedValueOnce(new Map([['alice', emptyLabelState(4)]]))
+      const recordSpy = vi
+        .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+        .mockResolvedValueOnce(['alice'])
+        .mockResolvedValueOnce([])
+      const completeSpy = vi
+        .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
+        .mockResolvedValue([{ id: 1, status: 'succeeded' }])
+
+      const result = await evaluateAccountRelabelItems(
+        prisma,
+        [{ id: 1, triggerId: 'alice' } as never],
+        evaluateOptions(registry),
+      )
+
+      expect(result.succeeded).toBe(1)
+      expect(findMany).toHaveBeenCalledTimes(2)
+      expect(recordSpy.mock.calls.map((call) => call[1].expectedRevByAccountId)).toEqual([
+        new Map([['alice', 3]]),
+        new Map([['alice', 4]]),
+      ])
+      expect(completeSpy).toHaveBeenCalledTimes(1)
+      expect(completeSpy).toHaveBeenCalledWith(prisma, {
+        workItemIds: [1],
+        leaseOwner: 'test-worker',
+      })
+    })
+
+    it('再試行の上限を超えたら work item を complete せずに諦める', async () => {
+      const registry = new LabelRuleRegistry()
+      registry.register(casRule)
+      const prisma = makeTransactionalPrisma({
+        account: { findMany: vi.fn().mockResolvedValue([{ id: 'alice' }]) },
+      })
+      vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
+      vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
+      const recordSpy = vi
+        .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+        .mockResolvedValue(['alice'])
+      const completeSpy = vi
+        .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
+        .mockResolvedValue([])
+
+      const result = await evaluateAccountRelabelItems(
+        prisma,
+        [{ id: 1, triggerId: 'alice' } as never],
+        evaluateOptions(registry),
+      )
+
+      expect(result.succeeded).toBe(0)
+      expect(recordSpy).toHaveBeenCalledTimes(labelRepository.LABEL_WRITE_MAX_ATTEMPTS)
+      expect(completeSpy).not.toHaveBeenCalled()
+    })
+  })
+
   it('concurrency を 2 以上に設定すると複数グループへ分割して並走する', async () => {
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockImplementation(
       (_prisma, { workItemIds }) =>
         Promise.resolve(workItemIds.map((id) => ({ id, status: 'succeeded' as const }))),
     )
-    vi.spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts').mockResolvedValue()
+    vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts').mockResolvedValue([])
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
     const pendingResolvers: (() => void)[] = []
     const prisma = makeTransactionalPrisma({
@@ -562,6 +668,8 @@ describe('evaluateAccountRelabelItems', () => {
     // concurrency: 2 なら group (alice→carol) と group (bob→dave) が同時に走り出すため、
     // 両グループ先頭の account.findMany が解決前に 2 件同時に保留する。
     // concurrency: 1 の直列実行ではこの時点で保留は 1 件にしかならないため、この件数がグループ並走の検証点になる。
+    // rev の取得を await してから account.findMany に進むため、マイクロタスクを流してから数える。
+    for (let i = 0; i < 10; i++) await Promise.resolve()
     expect(pendingResolvers).toHaveLength(2)
 
     while (pendingResolvers.length > 0) {
@@ -591,8 +699,8 @@ describe('evaluateAccountRelabelItems', () => {
     registry.register(rule)
 
     const recordLabelsSpy = vi
-      .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
-      .mockResolvedValue()
+      .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+      .mockResolvedValue([])
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockImplementation(
       (_prisma, { workItemIds }) =>
         Promise.resolve(workItemIds.map((id) => ({ id, status: 'succeeded' as const }))),
@@ -632,6 +740,14 @@ describe('evaluateAccountRelabelItems', () => {
     expect(result.succeeded).toBe(2)
     expect(recordLabelsSpy).toHaveBeenCalledWith(prisma, {
       sourceKind: 'relabel',
+      expectedRevByAccountId: new Map([
+        ['alice', 0],
+        ['bob', 0],
+      ]),
+      baselineByAccountId: new Map([
+        ['alice', emptyLabelState(0)],
+        ['bob', emptyLabelState(0)],
+      ]),
       labels: [
         {
           accountId: 'alice',
@@ -665,8 +781,8 @@ describe('evaluateAccountRelabelItems', () => {
     registry.register(rule)
 
     const recordLabelsSpy = vi
-      .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
-      .mockResolvedValue()
+      .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+      .mockResolvedValue([])
     const completeSpy = vi
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
       .mockImplementation((_prisma, { workItemIds }) =>
@@ -705,6 +821,14 @@ describe('evaluateAccountRelabelItems', () => {
     expect(result.succeeded).toBe(1)
     expect(recordLabelsSpy).toHaveBeenCalledWith(prisma, {
       sourceKind: 'relabel',
+      expectedRevByAccountId: new Map([
+        ['alice', 0],
+        ['bob', 0],
+      ]),
+      baselineByAccountId: new Map([
+        ['alice', emptyLabelState(0)],
+        ['bob', emptyLabelState(0)],
+      ]),
       labels: [
         {
           accountId: 'alice',
@@ -742,8 +866,8 @@ describe('evaluateAccountRelabelItems', () => {
     const accounts = Array.from({ length: 15 }, (_, index) => ({ id: `account-${index}` }))
 
     const recordLabelsSpy = vi
-      .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
-      .mockResolvedValue()
+      .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+      .mockResolvedValue([])
     let completeCallCount = 0
     const completeSpy = vi
       .spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
@@ -798,10 +922,7 @@ describe('evaluateAccountRelabelItems', () => {
     const registry = new LabelRuleRegistry()
     registry.register(rule)
 
-    const recordLabelsSpy = vi.spyOn(
-      labelRepository,
-      'recordAccountLabelsBulkLatestOnlyForAccounts',
-    )
+    const recordLabelsSpy = vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
     const completeSpy = vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk')
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockRejectedValue(
       new Error('connection reset'),
@@ -841,7 +962,7 @@ describe('evaluateAccountRelabelItems', () => {
     })
   })
 
-  it('always calls recordAccountLabelsBulkLatestOnlyForAccounts (Phase B, history-write flag removed)', async () => {
+  it('always calls recordAccountLabelsBulkForAccounts (Phase B, history-write flag removed)', async () => {
     const rule: LabelRule = {
       key: 'test_rule',
       description: 'test',
@@ -856,8 +977,8 @@ describe('evaluateAccountRelabelItems', () => {
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
     vi.spyOn(tweetRepository, 'findTweetContextsByIds').mockResolvedValue(new Map())
     const latestOnlySpy = vi
-      .spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts')
-      .mockResolvedValue()
+      .spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts')
+      .mockResolvedValue([])
     vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
       { id: 1, status: 'succeeded' },
     ])
@@ -900,12 +1021,10 @@ describe('scanForStaleAccounts', () => {
       account: {
         findMany: vi.fn().mockResolvedValue([{ id: 'acct-1' }, { id: 'acct-2' }]),
       },
-      accountLabelLatest: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([{ accountId: 'acct-1', labelDefinitionId: 1, ruleVersion: '1.0.0' }]),
-      },
     } as unknown as PrismaClient
+    const staleSpy = vi
+      .spyOn(labelRepository, 'findAccountIdsWithStaleLabels')
+      .mockResolvedValue(['acct-1', 'acct-2'])
 
     const rule: LabelRule = {
       key: 'test_rule',
@@ -923,7 +1042,11 @@ describe('scanForStaleAccounts', () => {
     })
 
     expect(result.scanned).toBe(2)
-    // acct-1 は ruleVersion が古い (1.0.0 != 2.0.0)、acct-2 は行自体がない → どちらも stale
+    expect(staleSpy).toHaveBeenCalledWith(
+      prisma,
+      ['acct-1', 'acct-2'],
+      [{ labelDefinitionId: 1, ruleVersion: '2.0.0' }],
+    )
     expect(requestSpy).toHaveBeenCalledWith(prisma, ['acct-1', 'acct-2'])
     expect(result.requested).toBe(2)
     expect(result.wrapped).toBe(false)
@@ -931,7 +1054,9 @@ describe('scanForStaleAccounts', () => {
 
   it('excludeFromStaleScan なルールの version 変更だけでは account を stale 扱いにしない', async () => {
     const requestSpy = vi.spyOn(workItemRepository, 'requestAccountRelabelBulk').mockResolvedValue()
-    const findManyCalls: unknown[] = []
+    const staleSpy = vi
+      .spyOn(labelRepository, 'findAccountIdsWithStaleLabels')
+      .mockResolvedValue([])
     const prisma = {
       relabelScanCursor: {
         findUnique: vi.fn().mockResolvedValue({ id: 'singleton', lastScannedAccountId: null }),
@@ -939,13 +1064,6 @@ describe('scanForStaleAccounts', () => {
       },
       account: {
         findMany: vi.fn().mockResolvedValue([{ id: 'acct-1' }]),
-      },
-      accountLabelLatest: {
-        findMany: vi.fn().mockImplementation((args: unknown) => {
-          findManyCalls.push(args)
-          // acct-1 は shadow_rule の行を一切持たない (missing ruleVersion) 状態を模す。
-          return Promise.resolve([])
-        }),
       },
     } as unknown as PrismaClient
 
@@ -967,14 +1085,16 @@ describe('scanForStaleAccounts', () => {
 
     expect(result.requested).toBe(0)
     expect(requestSpy).toHaveBeenCalledWith(prisma, [])
-    // stale 判定対象のルールが 0 件になるため、AccountLabelLatest 自体を lookup しない。
-    expect(findManyCalls).toHaveLength(0)
+    // stale 判定対象のルールが 0 件になるため、評価対象に渡すルールは空になる。
+    expect(staleSpy).toHaveBeenCalledWith(prisma, ['acct-1'], [])
   })
 
-  it('accountIds が chunk size を超える場合、AccountLabelLatest lookup を chunk ごとに分割し labelDefinitionId でも絞り込む', async () => {
+  it('accountIds が chunk size を超える場合、stale 判定の lookup を chunk ごとに分割する', async () => {
     vi.stubEnv('RELABELER_LABEL_LOOKUP_CHUNK_SIZE', '2')
     vi.spyOn(workItemRepository, 'requestAccountRelabelBulk').mockResolvedValue()
-    const findManyCalls: unknown[] = []
+    const staleSpy = vi
+      .spyOn(labelRepository, 'findAccountIdsWithStaleLabels')
+      .mockResolvedValue([])
     const prisma = {
       relabelScanCursor: {
         findUnique: vi.fn().mockResolvedValue({ id: 'singleton', lastScannedAccountId: null }),
@@ -982,12 +1102,6 @@ describe('scanForStaleAccounts', () => {
       },
       account: {
         findMany: vi.fn().mockResolvedValue([{ id: 'acct-1' }, { id: 'acct-2' }, { id: 'acct-3' }]),
-      },
-      accountLabelLatest: {
-        findMany: vi.fn().mockImplementation((args: unknown) => {
-          findManyCalls.push(args)
-          return Promise.resolve([])
-        }),
       },
     } as unknown as PrismaClient
 
@@ -1007,11 +1121,7 @@ describe('scanForStaleAccounts', () => {
     })
 
     // chunk size 2 に対し 3 件の account なので chunk は [acct-1, acct-2] と [acct-3] の2つに分かれる。
-    expect(findManyCalls).toHaveLength(2)
-    for (const call of findManyCalls) {
-      const where = (call as { where: { labelDefinitionId: { in: string[] } } }).where
-      expect(where.labelDefinitionId).toEqual({ in: [1] })
-    }
+    expect(staleSpy.mock.calls.map((call) => call[1])).toEqual([['acct-1', 'acct-2'], ['acct-3']])
   })
 })
 
@@ -1022,7 +1132,6 @@ function makeCursorPrisma(overrides: Record<string, unknown> = {}): PrismaClient
       upsert: vi.fn().mockResolvedValue({}),
     },
     account: { findMany: vi.fn().mockResolvedValue([]) },
-    accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
     analysisWorkItem: { update: vi.fn().mockResolvedValue({}) },
     ...overrides,
   })
@@ -1031,6 +1140,11 @@ function makeCursorPrisma(overrides: Record<string, unknown> = {}): PrismaClient
 describe('runRelabelWorkerCycleOnce', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    vi.spyOn(labelRepository, 'loadAccountLabelStates').mockImplementation((_prisma, accountIds) =>
+      Promise.resolve(new Map(accountIds.map((accountId) => [accountId, emptyLabelState(0)]))),
+    )
+    // 個別のテストで上書きしない限り、全アカウントが現行版で評価済み (stale なし) の前提にする。
+    vi.spyOn(labelRepository, 'findAccountIdsWithStaleLabels').mockResolvedValue([])
     vi.spyOn(tweetRepository, 'loadRecentTweetsForAccounts').mockResolvedValue(new Map())
     // 個別のテストで上書きしない限り、期間内のプロモ投稿の DB 集計は 0 件の前提にする。
     vi.spyOn(tweetRepository, 'loadPromotedTweetCountsForAccounts').mockResolvedValue(new Map())
