@@ -40,7 +40,7 @@ services:
       # 旧 DB (5432、ホスト非公開) と衝突しない別ポート。既定はローカルのみ。
       - "${NEW_DB_BIND:-127.0.0.1}:${NEW_DB_PORT:-5433}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${NEW_DB_USER:-crawler} -d ${NEW_DB_NAME:-twitter_accounts_classifier}"]
+      test: ["CMD-SHELL", "pg_isready -U ${NEW_DB_USER:-tac_owner} -d ${NEW_DB_NAME:-twitter_accounts_classifier}"]
       interval: 5s
       timeout: 5s
       retries: 10

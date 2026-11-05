@@ -1,7 +1,7 @@
 -- Tweet の HASH(accountId) x 32 版。baseline.sql の後に適用する (tweet-range.sql とはどちらか一方だけを使う)。
 --
 -- 一意制約はパーティションキーを含む必要があるため、PK は (accountId, id) になる。
--- Tweet ID だけでの検索と upsert は、全パーティションを走査する。
+-- Tweet ID だけでの検索は、各パーティションの (id) インデックスを 32 本引く (全件走査にはならない)。
 -- アカウント指定の取得 (直近 20 件など) は、accountId でパーティションが 1 つに絞られる。
 -- Account への FK は張らない。INSERT ごとの親行ロックと検証コストを避けるため。
 --
@@ -40,6 +40,10 @@ CREATE TABLE "Tweet" (
 
 -- アカウント指定で新しい順に引く。
 CREATE INDEX "Tweet_accountId_createdAt_idx" ON "Tweet" ("accountId", "createdAt");
+
+-- Tweet ID だけで引く経路 (findMissingTweetIds、findTweetContextsByIds) 用。
+-- PK が (accountId, id) のため、id 単独の条件ではこの索引がなければ全パーティションを走査する。
+CREATE INDEX "Tweet_id_idx" ON "Tweet" ("id");
 
 -- reply corpus 用。isReply = true の行だけを、新しい順に引く。
 CREATE INDEX "Tweet_reply_corpus_idx" ON "Tweet" ("collectedAt" DESC, "id" DESC) WHERE "isReply" = true;

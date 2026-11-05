@@ -8,7 +8,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="${NEW_DB_IMAGE:-postgres:17-alpine}"
-DB_USER="${NEW_DB_USER:-crawler}"
+DB_USER="${NEW_DB_USER:-tac_owner}"
 DB_NAME="${NEW_DB_NAME:-twitter_accounts_classifier}"
 RESTORE_CONTAINER=tac-new-restore-verify
 

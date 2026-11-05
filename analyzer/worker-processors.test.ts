@@ -498,6 +498,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     await prisma.analysisWorkItem.deleteMany()
     await prisma.analysisWorkItemDone.deleteMany()
     await prisma.readModelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
     await prisma.accountCrawlState.deleteMany()
@@ -819,6 +820,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () =>
     await prisma.analysisWorkItem.deleteMany()
     await prisma.analysisWorkItemDone.deleteMany()
     await prisma.readModelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
     await prisma.accountCrawlState.deleteMany()
@@ -971,6 +973,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processLabelAggregateRefresh', () =>
     await prisma.readModelState.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
     await prisma.analysisWorkItemDone.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
   })
 

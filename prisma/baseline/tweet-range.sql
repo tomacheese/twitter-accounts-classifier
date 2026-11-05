@@ -1,3 +1,4 @@
+-- 未採用。本番は tweet-hash.sql を使う。比較と検証のために残している。
 -- Tweet の RANGE(id) 版。baseline.sql の後に適用する (tweet-hash.sql とはどちらか一方だけを使う)。
 --
 -- Tweet ID は snowflake で時間順になるため、ID の範囲が作成時刻の範囲に対応する。
