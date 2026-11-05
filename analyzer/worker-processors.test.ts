@@ -13,6 +13,7 @@ import {
   processLabelAggregateRefresh,
   processBlockReconciliation,
   processRetentionSweep,
+  enqueueWeeklyOrphanCheck,
   processOperationCycleRefresh,
   handleWorkItemSettled,
   processPostCompletionRefresh,
@@ -205,6 +206,54 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
       where: { kind: 'retention_sweep' },
     })
     expect(pending).toHaveLength(0)
+  })
+
+  it('enqueueWeeklyOrphanCheck は同じ週の呼び出しで 1 件だけ積み、翌週の月曜に新しく積む', async () => {
+    await prisma.analysisWorkItem.deleteMany({ where: { kind: 'retention_sweep' } })
+    await prisma.analysisWorkItemDone.deleteMany({ where: { kind: 'retention_sweep' } })
+
+    await enqueueWeeklyOrphanCheck(prisma, new Date('2026-11-04T10:00:00.000Z'))
+    await enqueueWeeklyOrphanCheck(prisma, new Date('2026-11-08T23:59:59.000Z'))
+    await enqueueWeeklyOrphanCheck(prisma, new Date('2026-11-09T00:00:00.000Z'))
+
+    const items = await prisma.analysisWorkItem.findMany({
+      where: { kind: 'retention_sweep', triggerType: 'orphan_check' },
+      orderBy: { triggerId: 'asc' },
+    })
+    expect(items.map((item) => item.triggerId)).toEqual(['2026-11-02', '2026-11-09'])
+  })
+
+  it('processRetentionSweep は orphan_check の WorkItem で孤児を OperationalIssue に記録する', async () => {
+    await prisma.operationalIssueOccurrence.deleteMany()
+    await prisma.operationalIssue.deleteMany()
+    await prisma.accountLabelState.deleteMany()
+    await prisma.accountLabelState.create({
+      data: { accountId: '7777', evaluatedAt: new Date('2026-08-08T00:00:00.000Z') },
+    })
+
+    await processRetentionSweep(prisma, {
+      id: 906,
+      kind: 'retention_sweep',
+      triggerType: 'orphan_check',
+      triggerId: '2026-11-02',
+      status: 'leased',
+      priority: 0,
+      availableAt: new Date(),
+      leaseOwner: 'worker-1',
+      leaseExpiresAt: new Date(),
+      attemptCount: 1,
+      maxAttempts: 5,
+      dependencyKey: null,
+      staleRequestedAt: null,
+      lastErrorCode: null,
+      lastErrorSummary: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    const issue = await prisma.operationalIssue.findFirstOrThrow({ where: { type: 'orphan_rows' } })
+    expect(issue.status).toBe('active')
+    await prisma.accountLabelState.deleteMany()
   })
 
   it('handleWorkItemSettled は Cycle 再構築後に Attention/Overview を改めて publish する', async () => {

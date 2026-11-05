@@ -26,6 +26,7 @@ import { buildAttentionItems } from './read-models/build-attention-items'
 import { buildOverviewSnapshot } from './read-models/build-overview-snapshot'
 import { buildBlockRelationSummary } from './read-models/build-block-relation-summary'
 import { ingestWeeklyReviewFindings } from './weekly-review/ingest'
+import { reportOrphanIssue, runOrphanCheck } from './retention/orphan-check'
 import { runRetentionSweep } from './retention/sweep'
 import { structuredOutputSchema } from './weekly-review/structured-output-schema'
 import { validateStructuredOutputAgainstReviewPlan } from './weekly-review/validate-review-plan'
@@ -618,27 +619,55 @@ export async function enqueueDailyRetentionSweep(prisma: PrismaClient, now: Date
   })
 }
 
+const ORPHAN_CHECK_TRIGGER_TYPE = 'orphan_check'
+
 /**
- * kind: retention_sweep の処理関数。古い履歴行を削除する。
+ * 週ごとに 1 件だけ作られる孤児検査の WorkItem を積む。
+ * 起動ごとに呼んでも、同じ週 (月曜の日付で識別) の分は enqueueWorkItem の一意制約で no-op になる。
+ * 保持期限の sweep と同じ kind に載せ、triggerType で処理を分ける。
+ * @param prisma - Prisma クライアント
+ * @param now - 基準時刻
+ */
+export async function enqueueWeeklyOrphanCheck(prisma: PrismaClient, now: Date): Promise<void> {
+  const daysSinceMonday = (now.getUTCDay() + 6) % 7
+  const monday = new Date(now.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000)
+  await enqueueWorkItem(prisma, {
+    kind: 'retention_sweep',
+    triggerType: ORPHAN_CHECK_TRIGGER_TYPE,
+    triggerId: toDateKey(monday),
+  })
+}
+
+/**
+ * kind: retention_sweep の処理関数。triggerType が schedule なら古い履歴行を削除し、
+ * orphan_check なら FK を持たない表の孤児を検査して OperationalIssue に反映する。
  * 次回分の enqueue は `main()` が毎パスの起動時に当日分を冪等に行うため、
  * ここで翌日分を自己予約しない。`enqueueWorkItem` は `availableAt` を
  * 指定できず即時 claim 可能な行を作るため、ここから予約すると
  * queue が空にならないまま翌日分以降を連鎖して処理してしまう。
  * @param prisma - Prisma クライアント
- * @param workItem - `triggerType: 'schedule'` の WorkItem
+ * @param workItem - `triggerType` が `schedule` または `orphan_check` の WorkItem
  */
 export async function processRetentionSweep(
   prisma: PrismaClient,
   workItem: AnalysisWorkItem,
 ): Promise<void> {
+  if (workItem.triggerType === ORPHAN_CHECK_TRIGGER_TYPE) {
+    const results = await runOrphanCheck(prisma)
+    await reportOrphanIssue(prisma, results, new Date())
+    logger.info(
+      `orphan check (${workItem.triggerId}): ` +
+        results.map((result) => `${result.table}=${result.orphanAccountCount}`).join(', '),
+    )
+    return
+  }
+
   const result = await runRetentionSweep(prisma, new Date())
   logger.info(
-    `retention sweep (${workItem.triggerId}) removed ${result.deletedAnalysisRunCount} AnalysisRun, ` +
-      `${result.deletedWorkItemCount} AnalysisWorkItem, ` +
-      `${result.deletedLabelMetricSnapshotCount} LabelMetricSnapshot, ` +
-      `${result.deletedOverviewSnapshotCount} OverviewSnapshot, ` +
-      `${result.deletedShadowDetectorEvaluationCount} shadow DetectorEvaluation rows, ` +
-      `${result.deletedAccountClassificationObservationCount} AccountClassificationObservation rows`,
+    `retention sweep (${workItem.triggerId}) removed ${JSON.stringify(result.counts)}` +
+      (result.truncatedTables.length > 0
+        ? `; remaining for next run: ${result.truncatedTables.join(', ')}`
+        : ''),
   )
 }
 
@@ -705,6 +734,7 @@ const NON_CYCLE_TRIGGER_TYPES = new Set([
   'account_summary_sampling_bootstrap_chunk',
   'bootstrap_completion',
   RETENTION_SWEEP_TRIGGER_TYPE,
+  ORPHAN_CHECK_TRIGGER_TYPE,
   WORK_ITEM_COMPLETION_TRIGGER_TYPE,
 ])
 

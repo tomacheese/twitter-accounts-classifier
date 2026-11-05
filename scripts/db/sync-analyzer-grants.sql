@@ -58,7 +58,11 @@ GRANT UPDATE ON TABLE "LabeledAccountCounter" TO analyzer;
 GRANT INSERT, UPDATE ON TABLE "ComponentBuildIdentity" TO analyzer;
 
 -- retention sweep が保持期間超過分を削除するのみで INSERT/UPDATE はしないため DELETE のみ許可する。
-GRANT DELETE ON TABLE "AccountClassificationObservation" TO analyzer;
+-- crawl の Checkpoint 系は crawler が書く正本だが、Run の終了から一定日数を過ぎた行の削除だけを analyzer に任せる。
+GRANT DELETE ON TABLE
+  "AccountClassificationObservation",
+  "CrawlAccountCheckpoint", "CrawlAuthorCheckpoint", "CrawlAccountLabelRun"
+  TO analyzer;
 
 -- 現行スキーマは autoincrement を使わずシーケンスを持たないため、schema 全体への
 -- USAGE/SELECT は付与しない。write allowlist のテーブルがシーケンス列を持つに至った
