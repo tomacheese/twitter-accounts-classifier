@@ -798,6 +798,6 @@ describe.skipIf(!process.env.DATABASE_URL)('ラベル保存 (S+)', () => {
       )
       // 大量の書き込みが現実的な時間で終わることだけを確かめる。
       expect(elapsedMs).toBeLessThan(30_000)
-    })
+    }, 60_000)
   })
 })

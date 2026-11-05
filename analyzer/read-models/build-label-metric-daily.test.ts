@@ -10,6 +10,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
   beforeEach(async () => {
     await prisma.labelMetricDaily.deleteMany()
     await prisma.labelMetricSnapshot.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
   })
 

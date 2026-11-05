@@ -45,7 +45,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
 
     it('bisects past a row-local NOT NULL violation and still upserts the valid row', async () => {
-      const badInput = { ...makeInput('900002'), screenName: null } as unknown as AccountProfileInput
+      const badInput = {
+        ...makeInput('900002'),
+        screenName: null,
+      } as unknown as AccountProfileInput
 
       const result = await upsertAccountsBulk(prisma, [makeInput('900001'), badInput])
 

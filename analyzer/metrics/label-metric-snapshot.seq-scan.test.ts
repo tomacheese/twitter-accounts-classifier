@@ -176,6 +176,7 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
     await prisma.account.deleteMany({
       where: { id: { gte: noiseAccountId(0), lte: noiseAccountId(NOISE_ACCOUNT_COUNT) } },
     })
+    await prisma.labelRuleVersion.deleteMany({ where: { labelDefinitionId: { in: allLabelIds } } })
     await prisma.labelDefinition.deleteMany({ where: { id: { in: allLabelIds } } })
   })
 
