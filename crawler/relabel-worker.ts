@@ -17,9 +17,13 @@ import {
   type WorkItemCandidate,
 } from './db/analysis-work-item-repository'
 import {
-  recordAccountLabelsBulkLatestOnlyForAccounts,
+  LABEL_WRITE_MAX_ATTEMPTS,
   ensureLabelDefinitionsForRules,
+  findAccountIdsWithStaleLabels,
+  loadAccountLabelStates,
+  recordAccountLabelsBulkForAccounts,
   type AccountLabelBulkInput,
+  type AccountLabelSnapshot,
 } from './db/label-repository'
 import { CRAWL_LIMITS } from './config/crawl-limits'
 import { loadReplyCorpus } from './db/reply-corpus'
@@ -121,10 +125,9 @@ export interface EvaluateAccountRelabelItemsResult {
  * `evaluateAccountRelabelItemGroup` がラベル永続化・work item 完了を分割する account 数。
  * グループ全体を 1 回で永続化・完了すると、その 1 回の失敗で maxAttempts を使い切った account が二度と claim も再 enqueue もされず取り残される。
  * 失敗時に失われる範囲をこのサブバッチ単位に留める。
- * ルール数 (`ALL_LABEL_RULES.length`、現状 49) との積が `recordAccountLabelsBulkLatestOnlyForAccounts` の
- * サブチャンク上限 2000 行に収まるようこの値を選んでおり、1 サブバッチが常に 1 回の UNNEST
- * UPSERT で書けるようにしている。将来ルールが増えても 200 個までは 2000 行以内に収まる。
- * AccountLabelLatest は行ごとのトリガーと複数 index を持ち、所要時間が書き込み行数に比例して伸びる。
+ * ルール数との積が `recordAccountLabelsBulkForAccounts` のサブチャンク上限に収まる値にしている。
+ * これにより 1 サブバッチは常に 1 回の `set_label_result` 呼び出しで書ける。
+ * AccountActiveLabel は行ごとの監査トリガーを持ち、所要時間が書き込み行数に比例して伸びる。
  * timeout を延ばす案は行ロックの保持を長引かせるだけなので採らず、行数を抑えて timeout に余裕を持たせる。
  */
 const ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE = 10
@@ -142,19 +145,25 @@ const SUB_BATCH_TRANSACTION_MAX_WAIT_MS = 10_000
  * account 取得・tweet 取得は、それぞれ 1 ラウンドトリップにまとめる。
  * 個々の account のルール評価は DB I/O を伴わない CPU 処理であり、try/catch で分離しているため、1 account の不正なデータでグループ全体の評価が失敗することはない。
  * サブバッチの失敗は他のサブバッチの完了済み結果を巻き込まない。
+ * ラベルの書き込みは、評価入力を読む前に取得した rev との CAS で行う。
+ * 別の書き込みが先に入ったアカウントは入力を読み直して再評価し、`LABEL_WRITE_MAX_ATTEMPTS` 回で打ち切る。
+ * 打ち切ったアカウントの work item は完了させず、lease の失効後の再 claim に任せる。
  * @param prisma - Prisma クライアント
  * @param group - claimAccountRelabelBatchByIds で claim 済みの work item のうち 1 グループ分
  * @param options - 評価に使うルールレジストリと共有インデックス・lease owner 名
+ * @param attempt - 何回目の評価か (1 始まり)
  * @returns succeeded (requeue 含む) にできた件数
  */
 async function evaluateAccountRelabelItemGroup(
   prisma: PrismaClient,
   group: AnalysisWorkItem[],
   options: Omit<EvaluateAccountRelabelItemsOptions, 'concurrency'>,
+  attempt = 1,
 ): Promise<number> {
   if (group.length === 0) return 0
 
   const accountIds = group.map((item) => item.triggerId)
+  let labelStateByAccountId: Map<string, AccountLabelSnapshot>
   let accounts: AccountWithCrawlState[]
   let tweetsByAccountId: Map<string, Tweet[]>
   let followChurnObservationByAccountId: Map<string, FollowChurnObservation>
@@ -166,6 +175,8 @@ async function evaluateAccountRelabelItemGroup(
       Date.now() - FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS * 24 * 60 * 60 * 1000,
     )
     const promotedSince = new Date(Date.now() - PROMOTED_RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+    // 状態 (rev を含む) は評価入力を読む前に取る。入力を読んだ後に入った別の書き込みを、書き込み時の CAS で検知するため。
+    labelStateByAccountId = await loadAccountLabelStates(prisma, accountIds)
     ;[accounts, tweetsByAccountId, followChurnObservationByAccountId, promotedCountByAccountId] =
       await Promise.all([
         prisma.account.findMany({
@@ -185,7 +196,7 @@ async function evaluateAccountRelabelItemGroup(
           .filter((id): id is string => typeof id === 'string'),
       ),
     ]
-    // labelLookupChunkSize は accountLabelLatest の chunk 済み IN 句と同じ値を流用し、
+    // labelLookupChunkSize は stale scan の chunk 済み IN 句と同じ値を流用し、
     // 大規模グループで1回の IN 句に数千件の id を渡さないようにする。
     const lookupChunkSize = getRelabelerLabelLookupChunkSize()
     parentTweetTextById = new Map()
@@ -211,6 +222,9 @@ async function evaluateAccountRelabelItemGroup(
     return 0
   }
   const accountById = new Map(accounts.map((account) => [account.id, account]))
+  const expectedRevByAccountId = new Map(
+    [...labelStateByAccountId].map(([accountId, state]) => [accountId, state.rev]),
+  )
 
   const labelsByAccountId = new Map<string, AccountLabelBulkInput[]>()
   const replyHijackEvidenceByAccountId = new Map<string, ReplyHijackEvidenceInput>()
@@ -272,6 +286,7 @@ async function evaluateAccountRelabelItemGroup(
 
   const completableItems = group.filter((item) => !failedItemIds.has(item.id))
   let succeeded = 0
+  const missedItems: AnalysisWorkItem[] = []
   for (
     let offset = 0;
     offset < completableItems.length;
@@ -282,20 +297,13 @@ async function evaluateAccountRelabelItemGroup(
       offset + ACCOUNT_RELABEL_COMPLETION_SUB_BATCH_SIZE,
     )
     try {
-      // recordAccountLabelsBulkLatestOnlyForAccounts の UPSERT は leaseOwner を条件にしない。
-      // 生存確認とラベル書き込みを別々の呼び出しにすると、確認直後に lease が失効し
-      // 別 worker が再 claim・再評価・先に書き込みを終えたあとで、この worker が
-      // 古い評価結果を遅れて書いて新しい結果を上書きしてしまいうる (AccountLabelLatest の
-      // upsert guard は labeledAt の前後関係しか見ないため、単に「遅れて書いた」だけの
-      // 古いデータでも通ってしまう)。生存確認から work item 完了までを 1 本の
-      // interactive transaction にまとめ、確認を FOR UPDATE SKIP LOCKED で行うことで、
-      // この transaction が commit するまで対象行のロックを保持し続ける。他 worker の
-      // 再 claim も同じ FOR UPDATE SKIP LOCKED で行うためロック中の行をスキップし、
-      // 生存確認から書き込み完了までの間に割り込めなくなる。単なる事前 SELECT では
-      // 確認と書き込みの間に再 claim が割り込む窓が残るため採用しない。
-      // サブバッチを小さく (10 account) 保つことで、この transaction 自体は
-      // lease (5分) より十分短い timeout で完了できる規模に留めている。
-      const completions = await prisma.$transaction(
+      // 生存確認とラベル書き込みを別の呼び出しにすると、確認直後に lease が失効する窓が残る。
+      // rev の CAS は、lease を失った worker の書き込みそのものは止めない。
+      // そこで生存確認から work item 完了までを 1 本の interactive transaction にまとめる。
+      // 確認は FOR UPDATE SKIP LOCKED で行い、対象行のロックを commit まで保持する。
+      // 再 claim も SKIP LOCKED なのでロック中の行は取れず、書き込み完了までの間に割り込めない。
+      // サブバッチを小さく保ち、この transaction を lease より十分短い timeout で終わらせる。
+      const result = await prisma.$transaction(
         async (tx) => {
           const stillLeasedIds = new Set(
             await claimStillLeasedWorkItemIdsForUpdate(tx, {
@@ -307,30 +315,42 @@ async function evaluateAccountRelabelItemGroup(
           const subBatchLabels = leasedSubBatch.flatMap(
             (item) => labelsByAccountId.get(item.triggerId) ?? [],
           )
-          const subBatchEvidence = leasedSubBatch.flatMap((item) => {
+          const missedAccountIds = new Set(
+            subBatchLabels.length > 0
+              ? await recordAccountLabelsBulkForAccounts(tx, {
+                  sourceKind: 'relabel',
+                  labels: subBatchLabels,
+                  expectedRevByAccountId,
+                  baselineByAccountId: labelStateByAccountId,
+                })
+              : [],
+          )
+          const writtenSubBatch = leasedSubBatch.filter(
+            (item) => !missedAccountIds.has(item.triggerId),
+          )
+          for (const item of writtenSubBatch) {
             const evidence = replyHijackEvidenceByAccountId.get(item.triggerId)
-            return evidence ? [evidence] : []
-          })
-          if (subBatchLabels.length > 0) {
-            await recordAccountLabelsBulkLatestOnlyForAccounts(tx, {
-              sourceKind: 'relabel',
-              labels: subBatchLabels,
-            })
+            if (evidence) await upsertReplyHijackEvidence(tx, evidence)
           }
-          for (const evidence of subBatchEvidence) {
-            await upsertReplyHijackEvidence(tx, evidence)
+          const completions =
+            writtenSubBatch.length > 0
+              ? await completeAccountRelabelWorkItemsBulk(tx, {
+                  workItemIds: writtenSubBatch.map((item) => item.id),
+                  leaseOwner: options.leaseOwner,
+                })
+              : []
+          return {
+            completions,
+            missed: leasedSubBatch.filter((item) => missedAccountIds.has(item.triggerId)),
           }
-          return completeAccountRelabelWorkItemsBulk(tx, {
-            workItemIds: leasedSubBatch.map((item) => item.id),
-            leaseOwner: options.leaseOwner,
-          })
         },
         {
           maxWait: SUB_BATCH_TRANSACTION_MAX_WAIT_MS,
           timeout: SUB_BATCH_TRANSACTION_TIMEOUT_MS,
         },
       )
-      succeeded += completions.length
+      succeeded += result.completions.length
+      missedItems.push(...result.missed)
     } catch (error) {
       logger.error(
         `Failed to persist labels / complete work items for a sub-batch (accounts: ${subBatch.length})`,
@@ -345,6 +365,16 @@ async function evaluateAccountRelabelItemGroup(
           data: { lastErrorSummary: String(error).slice(0, 500) },
         })
         .catch(() => undefined)
+    }
+  }
+
+  if (missedItems.length > 0) {
+    if (attempt < LABEL_WRITE_MAX_ATTEMPTS) {
+      succeeded += await evaluateAccountRelabelItemGroup(prisma, missedItems, options, attempt + 1)
+    } else {
+      logger.warn(
+        `Relabel write skipped after ${LABEL_WRITE_MAX_ATTEMPTS} CAS misses (accounts: ${missedItems.length}); left for lease expiry`,
+      )
     }
   }
   return succeeded
@@ -445,34 +475,17 @@ export async function scanForStaleAccounts(
   // crawl 時・account 変更時の通常評価はこの絞り込みと無関係にこのルールも含めて評価される。
   const rules = options.registry.getAll().filter((rule) => !rule.excludeFromStaleScan)
   const accountIds = targets.map((account) => account.id)
-  const targetLabelDefinitionIds = rules
-    .map((rule) => options.labelDefinitionIds.get(rule.key))
-    .filter((id): id is number => id !== undefined)
+  const staleRules = rules.flatMap((rule) => {
+    const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
+    return labelDefinitionId === undefined ? [] : [{ labelDefinitionId, ruleVersion: rule.version }]
+  })
   const lookupChunkSize = getRelabelerLabelLookupChunkSize()
-  const latestRows: { accountId: string; labelDefinitionId: number; ruleVersion: string }[] = []
-  // stale 判定対象のルールが 1 つも無ければ、どの account も stale になり得ないため lookup 自体を省略する。
-  if (rules.length > 0) {
-    for (let i = 0; i < accountIds.length; i += lookupChunkSize) {
-      const chunk = accountIds.slice(i, i + lookupChunkSize)
-      const rows = await prisma.accountLabelLatest.findMany({
-        where: { accountId: { in: chunk }, labelDefinitionId: { in: targetLabelDefinitionIds } },
-        select: { accountId: true, labelDefinitionId: true, ruleVersion: true },
-      })
-      for (const row of rows) latestRows.push(row)
-    }
-  }
-  const latestByKey = new Map(
-    latestRows.map((row) => [`${row.accountId}:${row.labelDefinitionId}`, row.ruleVersion]),
-  )
-
   const staleAccountIds: string[] = []
-  for (const account of targets) {
-    const isStale = rules.some((rule) => {
-      const labelDefinitionId = options.labelDefinitionIds.get(rule.key)
-      if (labelDefinitionId === undefined) return false
-      return latestByKey.get(`${account.id}:${labelDefinitionId}`) !== rule.version
-    })
-    if (isStale) staleAccountIds.push(account.id)
+  // 現行版で評価済みかは AccountLabelState.versions だけで決まる。
+  // 評価済みのアカウントは再び stale にならず、未評価のアカウントは常に stale になる。
+  for (let i = 0; i < accountIds.length; i += lookupChunkSize) {
+    const chunk = accountIds.slice(i, i + lookupChunkSize)
+    staleAccountIds.push(...(await findAccountIdsWithStaleLabels(prisma, chunk, staleRules)))
   }
   await requestAccountRelabelBulk(prisma, staleAccountIds)
 

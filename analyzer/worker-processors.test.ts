@@ -13,6 +13,7 @@ import {
   processLabelAggregateRefresh,
   processBlockReconciliation,
   processRetentionSweep,
+  enqueueWeeklyOrphanCheck,
   processOperationCycleRefresh,
   handleWorkItemSettled,
   processPostCompletionRefresh,
@@ -205,6 +206,54 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
       where: { kind: 'retention_sweep' },
     })
     expect(pending).toHaveLength(0)
+  })
+
+  it('enqueueWeeklyOrphanCheck は同じ週の呼び出しで 1 件だけ積み、翌週の月曜に新しく積む', async () => {
+    await prisma.analysisWorkItem.deleteMany({ where: { kind: 'retention_sweep' } })
+    await prisma.analysisWorkItemDone.deleteMany({ where: { kind: 'retention_sweep' } })
+
+    await enqueueWeeklyOrphanCheck(prisma, new Date('2026-11-04T10:00:00.000Z'))
+    await enqueueWeeklyOrphanCheck(prisma, new Date('2026-11-08T23:59:59.000Z'))
+    await enqueueWeeklyOrphanCheck(prisma, new Date('2026-11-09T00:00:00.000Z'))
+
+    const items = await prisma.analysisWorkItem.findMany({
+      where: { kind: 'retention_sweep', triggerType: 'orphan_check' },
+      orderBy: { triggerId: 'asc' },
+    })
+    expect(items.map((item) => item.triggerId)).toEqual(['2026-11-02', '2026-11-09'])
+  })
+
+  it('processRetentionSweep は orphan_check の WorkItem で孤児を OperationalIssue に記録する', async () => {
+    await prisma.operationalIssueOccurrence.deleteMany()
+    await prisma.operationalIssue.deleteMany()
+    await prisma.accountLabelState.deleteMany()
+    await prisma.accountLabelState.create({
+      data: { accountId: '7777', evaluatedAt: new Date('2026-08-08T00:00:00.000Z') },
+    })
+
+    await processRetentionSweep(prisma, {
+      id: 906,
+      kind: 'retention_sweep',
+      triggerType: 'orphan_check',
+      triggerId: '2026-11-02',
+      status: 'leased',
+      priority: 0,
+      availableAt: new Date(),
+      leaseOwner: 'worker-1',
+      leaseExpiresAt: new Date(),
+      attemptCount: 1,
+      maxAttempts: 5,
+      dependencyKey: null,
+      staleRequestedAt: null,
+      lastErrorCode: null,
+      lastErrorSummary: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    const issue = await prisma.operationalIssue.findFirstOrThrow({ where: { type: 'orphan_rows' } })
+    expect(issue.status).toBe('active')
+    await prisma.accountLabelState.deleteMany()
   })
 
   it('handleWorkItemSettled は Cycle 再構築後に Attention/Overview を改めて publish する', async () => {
@@ -443,13 +492,16 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     await prisma.accountClassificationLatest.deleteMany()
     await prisma.accountSummaryLatest.deleteMany()
     await prisma.accountLabelChange.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
     await prisma.accountClassificationObservation.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
     await prisma.analysisWorkItemDone.deleteMany()
     await prisma.readModelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -464,7 +516,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt,
+        crawlState: { create: { lastCrawledAt } },
       },
     })
     const labelA = await prisma.labelDefinition.create({
@@ -568,8 +620,8 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     expect(summary?.profileObservedAt.toISOString()).toBe(lastCrawledAt.toISOString())
     expect(summary?.lastClassificationChangedAt?.toISOString()).toBe(observedAt.toISOString())
 
-    // AccountLabelChange は AccountLabelLatest への書き込みを検出する DB トリガーが
-    // 生成するため、AccountLabelLatest を書かないこの経路では作られない。
+    // AccountLabelChange は AccountActiveLabel への書き込みを検出する DB トリガーが
+    // 生成するため、AccountActiveLabel を書かないこの経路では作られない。
     const changes = await prisma.accountLabelChange.findMany({
       where: { accountId: account.id },
     })
@@ -592,7 +644,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+        crawlState: { create: { lastCrawledAt: new Date('2026-01-03T00:00:00Z') } },
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
@@ -651,7 +703,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+        crawlState: { create: { lastCrawledAt: new Date('2026-01-03T00:00:00Z') } },
       },
     })
     const observedAt = new Date('2026-01-02T00:00:00Z')
@@ -694,7 +746,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+        crawlState: { create: { lastCrawledAt: new Date('2026-01-03T00:00:00Z') } },
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
@@ -762,13 +814,16 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () =>
     await prisma.accountClassificationLatest.deleteMany()
     await prisma.accountSummaryLatest.deleteMany()
     await prisma.accountLabelChange.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
     await prisma.accountClassificationObservation.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
     await prisma.analysisWorkItemDone.deleteMany()
     await prisma.readModelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -783,7 +838,7 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () =>
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt,
+        crawlState: { create: { lastCrawledAt } },
       },
     })
     const priorClassificationObservedAt = new Date('2026-01-02T00:00:00Z')
@@ -913,10 +968,12 @@ describe.skipIf(!process.env.DATABASE_URL)('processLabelAggregateRefresh', () =>
     await prisma.labelSummaryCurrent.deleteMany()
     await prisma.labelMetricSnapshot.deleteMany()
     await prisma.accountClassificationLatest.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
     await prisma.readModelState.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
     await prisma.analysisWorkItemDone.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
   })
 

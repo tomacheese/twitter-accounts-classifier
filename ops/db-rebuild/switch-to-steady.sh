@@ -10,7 +10,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTAINER=tac-new-postgres
-DB_USER="${NEW_DB_USER:-crawler}"
+DB_USER="${NEW_DB_USER:-tac_owner}"
 DB_NAME="${NEW_DB_NAME:-twitter_accounts_classifier}"
 
 psql_c() {

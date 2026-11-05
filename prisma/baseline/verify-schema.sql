@@ -34,7 +34,7 @@ SELECT pg_temp.expect(
     'AccountClassificationReasonCount', 'AccountClassificationRuleVersionCount',
     'AccountClassificationValueCount', 'AccountLabelChange', 'BlockAction', 'BlockOutboxEntry',
     'CrawlAccountLabelRun', 'LabelMetricDaily', 'LabelMetricSnapshot', 'LabelRuleVersion',
-    'LabelSummaryCurrent', 'WeeklyReviewSampleBucketCount'
+    'LabelSummaryCurrent', 'RelabelCoverageSnapshot', 'WeeklyReviewSampleBucketCount'
   ],
   'labelDefinitionId column inventory differs'
 );
@@ -166,6 +166,19 @@ SELECT pg_temp.expect(
       AND x.indexrelid = '"Tweet_reply_corpus_idx"'::regclass
   ),
   'Tweet reply corpus partial index'
+);
+-- HASH 版は、Tweet ID 単独の検索用に (id) の索引を全パーティションが持つ (RANGE 版は PK が id 単独)。
+SELECT pg_temp.expect(
+  :'tweet_variant' <> 'hash'
+  OR (
+    (SELECT count(*) FROM pg_inherits c
+     WHERE c.inhparent = '"Tweet"'::regclass
+       AND EXISTS (
+         SELECT 1 FROM pg_index x JOIN pg_attribute a ON a.attrelid = x.indrelid AND a.attnum = x.indkey[0]
+         WHERE x.indrelid = c.inhrelid AND x.indnatts = 1 AND NOT x.indisunique AND a.attname = 'id'
+       )) = 32
+  ),
+  'every Tweet partition needs a non-unique index on (id)'
 );
 -- 削除した 4 列がなく、配列列は NULL 可で既定値がない。
 SELECT pg_temp.expect(

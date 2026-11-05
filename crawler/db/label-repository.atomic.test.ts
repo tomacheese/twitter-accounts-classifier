@@ -1,44 +1,46 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { createSyntheticId } from 'id-boundary'
 import type { PrismaClient } from '../generated/prisma'
+import type { LabelRule, LabelRuleResult } from '../labels/types'
 import { getPrismaClient } from './client'
+import { getOrThrow } from './label-test-support'
 import {
-  recordAccountLabelsBulkLatestOnlyForAccounts,
+  ensureLabelDefinitionsForRules,
+  recordAccountLabelsBulkForAccounts,
   recordCrawlAccountLabelsAtomic,
   recordCrawlAccountLabelsAtomicWithinTx,
 } from './label-repository'
 
-/** 非同期 transaction 間のテスト用 barrier。 */
-function createDeferred() {
-  let settle!: () => void
-  const promise = new Promise<void>((resolve) => {
-    settle = resolve
-  })
-  return { promise, resolve: settle }
+// 乱数の ID は衝突しうるため、基点からの連番で一意にする。
+const ID_BASE = BigInt(createSyntheticId())
+let idCounter = 0n
+function newId(): string {
+  idCounter += 1n
+  return String(ID_BASE + idCounter)
 }
 
-/** 指定した Latest row が別 transaction に lock されているか確認する。 */
-async function waitForLatestRowToBeLocked(
-  prisma: PrismaClient,
-  accountId: string,
-  labelDefinitionId: number,
-): Promise<boolean> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      await prisma.$queryRaw`
-        SELECT 1
-        FROM "AccountLabelLatest"
-        WHERE "accountId" = ${accountId}::bigint AND "labelDefinitionId" = ${labelDefinitionId}::smallint
-        FOR UPDATE NOWAIT
-      `
-    } catch (error) {
-      if (String(error).includes('55P03') || String(error).includes('could not obtain lock')) {
-        return true
-      }
-      throw error
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10))
+function makeRule(key: string, version = 'v1'): LabelRule {
+  return {
+    key,
+    description: `${key} description`,
+    version,
+    evaluate: () => ({ value: false, confidence: 1, reason: 'unused' }),
   }
-  return false
+}
+
+function result(value: boolean, confidence: number, reason: string): LabelRuleResult {
+  return { value, confidence, reason }
+}
+
+interface SnapshotEntry {
+  labelDefinitionId: number
+  value: boolean
+  confidence: number
+  reason: string
+  method: string
+  ruleVersion: string
+  evaluable: boolean
+  labeledAt: string
 }
 
 /** 指定した application_name の transaction が Postgres の lock wait に入るまで待つ。 */
@@ -46,7 +48,7 @@ async function waitForSessionToWaitOnLock(
   prisma: PrismaClient,
   applicationName: string,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     const rows = await prisma.$queryRaw<{ waiting: boolean }[]>`
       SELECT EXISTS (
         SELECT 1
@@ -60,10 +62,7 @@ async function waitForSessionToWaitOnLock(
   throw new Error(`Timed out waiting for Postgres lock wait: ${applicationName}`)
 }
 
-// node:crypto の randomUUID は label-repository.test.ts でモックされているが、
-// このファイルは実 DB を使うため、そちらの影響を受けないよう別ファイルに分離する
-// (モックされた固定 UUID のまま複数回 claim すると、CrawlAccountLabelRun.id の
-// 主キー制約違反で意図しない例外になり、resume の冪等性テストが成立しない)。
+// node:crypto の randomUUID は、実 DB を使うこのファイルではモックしない。
 describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () => {
   const prisma = getPrismaClient()
 
@@ -71,11 +70,12 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
     await prisma.analysisWorkItem.deleteMany()
     await prisma.analysisWorkItemDone.deleteMany()
     await prisma.accountClassificationObservation.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
     await prisma.crawlAccountLabelRun.deleteMany()
     await prisma.crawlAuthorCheckpoint.deleteMany()
     await prisma.crawlRun.deleteMany()
-    await prisma.labelDefinition.deleteMany()
+    await prisma.$executeRawUnsafe(
+      'TRUNCATE "AccountActiveLabel", "AccountLabelState", "AccountLabelChange", "LabelRuleVersion", "LabelDefinition" RESTART IDENTITY CASCADE',
+    )
     // 他の integration test / benchmark が同じ DB に Block/Tweet/Follow を残していると、
     // account の外部キー制約により削除が失敗するため先に消しておく。
     await prisma.block.deleteMany()
@@ -84,33 +84,49 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
     await prisma.account.deleteMany()
   })
 
-  it('creates one AccountClassificationObservation and enqueues account_summary_refresh in the same transaction when at least one claim succeeds', async () => {
-    const account = await prisma.account.create({
+  async function createAccount(): Promise<string> {
+    const id = newId()
+    await prisma.account.create({
       data: {
-        id: 'acct_1',
-        screenName: 'alice',
-        displayName: 'Alice',
+        id,
+        screenName: `synthetic_${id}`,
+        displayName: 'Synthetic account',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
       },
     })
-    const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'test_label', description: 'テスト用ラベル' },
-    })
+    return id
+  }
+
+  async function createCrawlRun(): Promise<string> {
     const crawlRun = await prisma.crawlRun.create({
       data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
     })
+    return crawlRun.id
+  }
+
+  async function snapshotOf(observationId: string | null): Promise<SnapshotEntry[]> {
+    const observation = await prisma.accountClassificationObservation.findUniqueOrThrow({
+      where: { id: observationId ?? '' },
+    })
+    return observation.classificationSnapshot as unknown as SnapshotEntry[]
+  }
+
+  it('creates one AccountClassificationObservation and enqueues account_summary_refresh in the same transaction when at least one claim succeeds', async () => {
+    const accountId = await createAccount()
+    const ids = await ensureLabelDefinitionsForRules(prisma, [makeRule('test_label')])
+    const crawlRunId = await createCrawlRun()
 
     const observationId = await recordCrawlAccountLabelsAtomic(prisma, {
-      accountId: account.id,
-      crawlRunId: crawlRun.id,
+      accountId,
+      crawlRunId,
       username: 'login_account',
       labels: [
         {
-          labelDefinitionId: labelDefinition.id,
-          result: { value: true, confidence: 0.9, reason: 'test reason' },
+          labelDefinitionId: getOrThrow(ids, 'test_label'),
+          result: result(true, 0.9, 'test reason'),
           method: 'rule',
           ruleVersion: 'v1',
         },
@@ -121,17 +137,12 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
     const observation = await prisma.accountClassificationObservation.findUnique({
       where: { id: observationId ?? '' },
     })
-    expect(observation?.accountId).toBe(account.id)
+    expect(observation?.accountId).toBe(accountId)
     expect(observation?.labelCount).toBe(1)
-    const latest = await prisma.accountLabelLatest.findUnique({
-      where: {
-        accountId_labelDefinitionId: {
-          accountId: account.id,
-          labelDefinitionId: labelDefinition.id,
-        },
-      },
-    })
-    expect(latest?.value).toBe(true)
+    const active = await prisma.accountActiveLabel.findFirstOrThrow({ where: { accountId } })
+    expect(active.sourceKind).toBe(1)
+    expect(active.sourceId).toBe(crawlRunId)
+    expect(active.sourceUsername).toBe('login_account')
     const workItem = await prisma.analysisWorkItem.findFirst({
       where: {
         kind: 'account_summary_refresh',
@@ -143,388 +154,303 @@ describe.skipIf(!process.env.DATABASE_URL)('recordCrawlAccountLabelsAtomic', () 
   })
 
   it('returns null, creates no observation, and enqueues nothing when all rule claims were already recorded (resume)', async () => {
-    const account = await prisma.account.create({
-      data: {
-        id: 'acct_2',
-        screenName: 'bob',
-        displayName: 'Bob',
-        followersCount: 0,
-        followingCount: 0,
-        tweetCount: 0,
-        accountCreatedAt: new Date(),
-      },
-    })
-    const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'test_label_2', description: 'テスト用ラベル2' },
-    })
-    const crawlRun = await prisma.crawlRun.create({
-      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
-    })
+    const accountId = await createAccount()
+    const ids = await ensureLabelDefinitionsForRules(prisma, [makeRule('test_label_2')])
+    const crawlRunId = await createCrawlRun()
     const params = {
-      accountId: account.id,
-      crawlRunId: crawlRun.id,
+      accountId,
+      crawlRunId,
       username: 'login_account',
       labels: [
         {
-          labelDefinitionId: labelDefinition.id,
-          result: { value: false, confidence: 0.1, reason: 'test reason' },
+          labelDefinitionId: getOrThrow(ids, 'test_label_2'),
+          result: result(false, 0.1, 'test reason'),
           method: 'rule',
           ruleVersion: 'v1',
         },
       ],
     }
 
-    const first = await recordCrawlAccountLabelsAtomic(prisma, params)
-    expect(first).not.toBeNull()
+    expect(await recordCrawlAccountLabelsAtomic(prisma, params)).not.toBeNull()
+    expect(await recordCrawlAccountLabelsAtomic(prisma, params)).toBeNull()
 
-    const second = await recordCrawlAccountLabelsAtomic(prisma, params)
-    expect(second).toBeNull()
-    const workItemCount = await prisma.analysisWorkItem.count({
-      where: { kind: 'account_summary_refresh' },
-    })
-    expect(workItemCount).toBe(1)
+    expect(
+      await prisma.analysisWorkItem.count({ where: { kind: 'account_summary_refresh' } }),
+    ).toBe(1)
   })
 
-  it('stores a classificationSnapshot covering every evaluated label, including semantic no-ops carrying the existing AccountLabelLatest value', async () => {
-    const account = await prisma.account.create({
-      data: {
-        id: 'acct_snapshot',
-        screenName: 'dave',
-        displayName: 'Dave',
-        followersCount: 0,
-        followingCount: 0,
-        tweetCount: 0,
-        accountCreatedAt: new Date(),
-      },
-    })
-    const labelA = await prisma.labelDefinition.create({
-      data: { key: 'test_label_snapshot_a', description: 'テスト用ラベルA' },
-    })
-    const labelB = await prisma.labelDefinition.create({
-      data: { key: 'test_label_snapshot_b', description: 'テスト用ラベルB' },
-    })
-    const crawlRun1 = await prisma.crawlRun.create({
-      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
-    })
-
-    const firstObservationId = await recordCrawlAccountLabelsAtomic(prisma, {
-      accountId: account.id,
-      crawlRunId: crawlRun1.id,
-      username: 'login_account',
-      labels: [
-        {
-          labelDefinitionId: labelA.id,
-          result: { value: true, confidence: 0.9, reason: 'reason a' },
-          method: 'rule',
-          ruleVersion: 'v1',
-        },
-        {
-          labelDefinitionId: labelB.id,
-          result: { value: false, confidence: 0.1, reason: 'reason b' },
-          method: 'rule',
-          ruleVersion: 'v1',
-        },
-      ],
-    })
-    const firstObservation = await prisma.accountClassificationObservation.findUniqueOrThrow({
-      where: { id: firstObservationId ?? '' },
-    })
-    expect(firstObservation.snapshotVersion).toBe(1)
-    const firstSnapshot = firstObservation.classificationSnapshot as unknown as {
-      labelDefinitionId: number
-      value: boolean
-    }[]
-    expect(firstSnapshot).toHaveLength(2)
-    expect(firstSnapshot.find((entry) => entry.labelDefinitionId === labelA.id)?.value).toBe(true)
-    expect(firstSnapshot.find((entry) => entry.labelDefinitionId === labelB.id)?.value).toBe(false)
-
-    // 2 回目の crawl (別 crawlRunId) で labelA を同一の内容で再評価する。
-    // CrawlAccountLabelRun の一意制約は crawlRunId を含むため claim は成立するが、
-    // AccountLabelLatest への値そのものは変わらない semanticNoOp になる。
-    const crawlRun2 = await prisma.crawlRun.create({
-      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
-    })
-    const secondObservationId = await recordCrawlAccountLabelsAtomic(prisma, {
-      accountId: account.id,
-      crawlRunId: crawlRun2.id,
-      username: 'login_account',
-      labels: [
-        {
-          labelDefinitionId: labelA.id,
-          result: { value: true, confidence: 0.9, reason: 'reason a' },
-          method: 'rule',
-          ruleVersion: 'v1',
-        },
-      ],
-    })
-    const secondObservation = await prisma.accountClassificationObservation.findUniqueOrThrow({
-      where: { id: secondObservationId ?? '' },
-    })
-    const secondSnapshot = secondObservation.classificationSnapshot as unknown as {
-      labelDefinitionId: number
-      value: boolean
-      confidence: number
-    }[]
-    expect(secondSnapshot).toHaveLength(1)
-    expect(secondSnapshot[0].labelDefinitionId).toBe(labelA.id)
-    expect(secondSnapshot[0].value).toBe(true)
-    expect(secondSnapshot[0].confidence).toBe(0.9)
-  })
-
-  it('AccountLabelLatest の labeledAt guard が古い評価を拒否した場合、snapshot には永続化済み Latest を保存する', async () => {
-    const account = await prisma.account.create({
-      data: {
-        id: 'acct_snapshot_guard',
-        screenName: 'frank',
-        displayName: 'Frank',
-        followersCount: 0,
-        followingCount: 0,
-        tweetCount: 0,
-        accountCreatedAt: new Date(),
-      },
-    })
-    const labelDefinition = await prisma.labelDefinition.create({
-      data: { key: 'test_label_snapshot_guard', description: '競合guardテスト用ラベル' },
-    })
-    const crawlRun = await prisma.crawlRun.create({
-      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
-    })
-    const newerLabeledAt = new Date('2100-01-01T00:00:00.000Z')
-    await prisma.accountLabelLatest.create({
-      data: {
-        accountId: account.id,
-        labelDefinitionId: labelDefinition.id,
-        value: true,
-        confidence: 0.99,
-        reason: 'newer committed value',
-        method: 'rule',
-        ruleVersion: 'v2',
-        evaluable: true,
-        labeledAt: newerLabeledAt,
-        sourceKind: 'relabel',
-      },
-    })
+  it('stores a classificationSnapshot synthesized from the true rows and the state (true, false and unevaluable)', async () => {
+    const accountId = await createAccount()
+    const ids = await ensureLabelDefinitionsForRules(prisma, [
+      makeRule('snapshot_true'),
+      makeRule('snapshot_false'),
+      makeRule('snapshot_unevaluable'),
+    ])
+    const crawlRunId = await createCrawlRun()
 
     const observationId = await recordCrawlAccountLabelsAtomic(prisma, {
-      accountId: account.id,
-      crawlRunId: crawlRun.id,
+      accountId,
+      crawlRunId,
       username: 'login_account',
       labels: [
         {
-          labelDefinitionId: labelDefinition.id,
-          result: { value: false, confidence: 0.1, reason: 'stale crawl value' },
-          method: 'rule',
+          labelDefinitionId: getOrThrow(ids, 'snapshot_true'),
+          result: result(true, 0.9, 'reason true'),
+          method: 'snapshot_true',
+          ruleVersion: 'v1',
+        },
+        {
+          labelDefinitionId: getOrThrow(ids, 'snapshot_false'),
+          result: result(false, 0.1, 'reason false'),
+          method: 'snapshot_false',
+          ruleVersion: 'v1',
+        },
+        {
+          labelDefinitionId: getOrThrow(ids, 'snapshot_unevaluable'),
+          result: { value: false, confidence: 0.5, reason: 'reason unevaluable', evaluable: false },
+          method: 'snapshot_unevaluable',
           ruleVersion: 'v1',
         },
       ],
     })
-
-    const latest = await prisma.accountLabelLatest.findUniqueOrThrow({
-      where: {
-        accountId_labelDefinitionId: {
-          accountId: account.id,
-          labelDefinitionId: labelDefinition.id,
-        },
-      },
-    })
-    expect(latest.value).toBe(true)
-    expect(latest.ruleVersion).toBe('v2')
-    expect(latest.labeledAt).toEqual(newerLabeledAt)
 
     const observation = await prisma.accountClassificationObservation.findUniqueOrThrow({
       where: { id: observationId ?? '' },
     })
-    const snapshot = observation.classificationSnapshot as unknown as {
-      labelDefinitionId: number
-      value: boolean
-      confidence: number
-      reason: string
-      ruleVersion: string
-      labeledAt: string
-    }[]
-    expect(snapshot).toHaveLength(1)
-    expect(snapshot[0]).toMatchObject({
-      labelDefinitionId: labelDefinition.id,
+    expect(observation.snapshotVersion).toBe(1)
+    const state = await prisma.accountLabelState.findUniqueOrThrow({ where: { accountId } })
+    const activeRow = await prisma.accountActiveLabel.findFirstOrThrow({ where: { accountId } })
+    const snapshot = await snapshotOf(observationId)
+    const byLabel = new Map(snapshot.map((entry) => [entry.labelDefinitionId, entry]))
+    expect(snapshot.map((entry) => entry.labelDefinitionId)).toEqual(
+      [...ids.values()].toSorted((left, right) => left - right),
+    )
+    expect(byLabel.get(getOrThrow(ids, 'snapshot_true'))).toEqual({
+      labelDefinitionId: ids.get('snapshot_true'),
       value: true,
-      confidence: 0.99,
-      reason: 'newer committed value',
-      ruleVersion: 'v2',
-      labeledAt: newerLabeledAt.toISOString(),
+      confidence: 0.9,
+      reason: 'reason true',
+      method: 'snapshot_true',
+      ruleVersion: 'v1',
+      evaluable: true,
+      labeledAt: activeRow.labeledAt.toISOString(),
+    })
+    expect(byLabel.get(getOrThrow(ids, 'snapshot_false'))).toEqual({
+      labelDefinitionId: ids.get('snapshot_false'),
+      value: false,
+      confidence: 0.1,
+      reason: 'reason false',
+      method: 'snapshot_false',
+      ruleVersion: 'v1',
+      evaluable: true,
+      labeledAt: state.evaluatedAt.toISOString(),
+    })
+    expect(byLabel.get(getOrThrow(ids, 'snapshot_unevaluable'))).toEqual({
+      labelDefinitionId: ids.get('snapshot_unevaluable'),
+      value: false,
+      confidence: 0.5,
+      reason: 'reason unevaluable',
+      method: 'snapshot_unevaluable',
+      ruleVersion: 'v1',
+      evaluable: false,
+      labeledAt: state.evaluatedAt.toISOString(),
     })
   })
 
-  it('同一crawlRunIdの部分的な再開呼び出しでも、前回claim済みのラベルをAccountLabelLatestから補いsnapshotに含める', async () => {
-    const account = await prisma.account.create({
-      data: {
-        id: 'acct_partial_resume',
-        screenName: 'erin',
-        displayName: 'Erin',
-        followersCount: 0,
-        followingCount: 0,
-        tweetCount: 0,
-        accountCreatedAt: new Date(),
-      },
+  it('records a true label that became unevaluable as an unevaluable change and keeps no true row', async () => {
+    const accountId = await createAccount()
+    const ids = await ensureLabelDefinitionsForRules(prisma, [makeRule('flip')])
+    const labelDefinitionId = getOrThrow(ids, 'flip')
+    const first = await createCrawlRun()
+    const second = await createCrawlRun()
+    const labelWith = (labelResult: LabelRuleResult) => [
+      { labelDefinitionId, result: labelResult, method: 'flip', ruleVersion: 'v1' },
+    ]
+
+    await recordCrawlAccountLabelsAtomic(prisma, {
+      accountId,
+      crawlRunId: first,
+      username: 'login_account',
+      labels: labelWith(result(true, 0.9, 'was true')),
     })
-    const labelA = await prisma.labelDefinition.create({
-      data: { key: 'test_label_partial_a', description: 'テスト用ラベルA' },
+    const observationId = await recordCrawlAccountLabelsAtomic(prisma, {
+      accountId,
+      crawlRunId: second,
+      username: 'login_account',
+      labels: labelWith({ value: false, confidence: 0.5, reason: 'no samples', evaluable: false }),
     })
-    const labelB = await prisma.labelDefinition.create({
-      data: { key: 'test_label_partial_b', description: 'テスト用ラベルB' },
+
+    expect(await prisma.accountActiveLabel.count({ where: { accountId } })).toBe(0)
+    const changes = await prisma.accountLabelChange.findMany({
+      where: { accountId },
+      orderBy: { id: 'asc' },
     })
-    const crawlRun = await prisma.crawlRun.create({
-      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
+    expect(changes.map((row) => [row.changeType, row.sourceId])).toEqual([
+      ['added', first],
+      ['unevaluable', second],
+    ])
+    const [unevaluableEntry] = await snapshotOf(observationId)
+    expect(unevaluableEntry).toMatchObject({
+      value: false,
+      evaluable: false,
+      reason: 'no samples',
     })
+  })
+
+  it('同一crawlRunIdの部分的な再開呼び出しでも、前回claim済みのラベルを永続化済みの状態から補いsnapshotに含める', async () => {
+    const accountId = await createAccount()
+    const ids = await ensureLabelDefinitionsForRules(prisma, [
+      makeRule('partial_a'),
+      makeRule('partial_b'),
+    ])
+    const crawlRunId = await createCrawlRun()
+    const labelA = {
+      labelDefinitionId: getOrThrow(ids, 'partial_a'),
+      result: result(true, 0.9, 'reason a'),
+      method: 'rule',
+      ruleVersion: 'v1',
+    }
+    const labelB = {
+      labelDefinitionId: getOrThrow(ids, 'partial_b'),
+      result: result(true, 0.8, 'reason b'),
+      method: 'rule',
+      ruleVersion: 'v1',
+    }
 
     // 1 回目は labelA のみ claim・記録する (labelB の評価前にプロセスが再起動した想定)。
     await recordCrawlAccountLabelsAtomic(prisma, {
-      accountId: account.id,
-      crawlRunId: crawlRun.id,
+      accountId,
+      crawlRunId,
       username: 'login_account',
-      labels: [
-        {
-          labelDefinitionId: labelA.id,
-          result: { value: true, confidence: 0.9, reason: 'reason a' },
-          method: 'rule',
-          ruleVersion: 'v1',
-        },
-      ],
+      labels: [labelA],
+    })
+    const resumedObservationId = await recordCrawlAccountLabelsAtomic(prisma, {
+      accountId,
+      crawlRunId,
+      username: 'login_account',
+      labels: [labelA, labelB],
     })
 
-    // 2 回目は同一 crawlRunId で labelA・labelB 両方を渡す (再開後の再評価想定)。
-    // labelA は CrawlAccountLabelRun の一意制約により claim できず、labelB のみ claim される。
-    const resumedObservationId = await recordCrawlAccountLabelsAtomic(prisma, {
-      accountId: account.id,
-      crawlRunId: crawlRun.id,
-      username: 'login_account',
-      labels: [
-        {
-          labelDefinitionId: labelA.id,
-          result: { value: true, confidence: 0.9, reason: 'reason a' },
-          method: 'rule',
-          ruleVersion: 'v1',
-        },
-        {
-          labelDefinitionId: labelB.id,
-          result: { value: true, confidence: 0.8, reason: 'reason b' },
-          method: 'rule',
-          ruleVersion: 'v1',
-        },
-      ],
-    })
+    const snapshot = await snapshotOf(resumedObservationId)
+    expect(snapshot.map((entry) => [entry.labelDefinitionId, entry.value, entry.reason])).toEqual([
+      [labelA.labelDefinitionId, true, 'reason a'],
+      [labelB.labelDefinitionId, true, 'reason b'],
+    ])
     const resumedObservation = await prisma.accountClassificationObservation.findUniqueOrThrow({
       where: { id: resumedObservationId ?? '' },
     })
-    const resumedSnapshot = resumedObservation.classificationSnapshot as unknown as {
-      labelDefinitionId: number
-      value: boolean
-    }[]
-    // labelB (今回 claim) だけでなく、labelA (前回 claim・AccountLabelLatest から補完) も含む。
-    expect(resumedSnapshot).toHaveLength(2)
-    expect(resumedSnapshot.find((entry) => entry.labelDefinitionId === labelA.id)?.value).toBe(true)
-    expect(resumedSnapshot.find((entry) => entry.labelDefinitionId === labelB.id)?.value).toBe(true)
+    expect(resumedObservation.labelCount).toBe(1)
   })
 
-  it('部分 resume の全 label snapshot lock と concurrent bulk writer が deadlock せず完了する', async () => {
-    const account = await prisma.account.create({
-      data: {
-        id: 'acct_partial_resume_lock_order',
-        screenName: 'grace',
-        displayName: 'Grace',
-        followersCount: 0,
-        followingCount: 0,
-        tweetCount: 0,
-        accountCreatedAt: new Date(),
-      },
-    })
-    const labelDefinitions = await Promise.all([
-      prisma.labelDefinition.create({
-        data: { key: 'test_label_lock_order_a', description: 'lock order test label A' },
-      }),
-      prisma.labelDefinition.create({
-        data: { key: 'test_label_lock_order_b', description: 'lock order test label B' },
-      }),
+  it('状態の添字が 0 のラベルが snapshot に残るときは、書き込みの不整合として例外にする', async () => {
+    const accountId = await createAccount()
+    const ids = await ensureLabelDefinitionsForRules(prisma, [
+      makeRule('slot_a'),
+      makeRule('slot_b'),
     ])
-    const [firstLabel, secondLabel] = labelDefinitions.toSorted((a, b) => a.id - b.id)
-    const crawlRun = await prisma.crawlRun.create({
-      data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
-    })
-    const labels = [firstLabel, secondLabel].map((label, index) => ({
-      labelDefinitionId: label.id,
-      result: { value: index === 0, confidence: 0.9, reason: `reason ${index}` },
+    const crawlRunId = await createCrawlRun()
+    const labelB = {
+      labelDefinitionId: getOrThrow(ids, 'slot_b'),
+      result: result(true, 0.8, 'reason b'),
       method: 'rule',
       ruleVersion: 'v1',
-    }))
-
-    await recordCrawlAccountLabelsAtomic(prisma, {
-      accountId: account.id,
-      crawlRunId: crawlRun.id,
-      username: 'login_account',
-      labels: [labels[0]],
-    })
-    await prisma.accountLabelLatest.create({
+    }
+    await prisma.crawlAccountLabelRun.create({
       data: {
-        accountId: account.id,
-        labelDefinitionId: secondLabel.id,
-        value: true,
-        confidence: 0.1,
-        reason: 'seeded before partial resume',
+        crawlRunId,
+        username: 'login_account',
+        accountId,
+        labelDefinitionId: labelB.labelDefinitionId,
         method: 'rule',
-        ruleVersion: 'v0',
-        evaluable: true,
-        labeledAt: new Date(),
-        sourceKind: 'relabel',
+        ruleVersion: 'v1',
       },
     })
 
-    const firstLatestLocked = createDeferred()
-    const allowConcurrentWrite = createDeferred()
-    const concurrentBulkWrite = prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe("SET LOCAL deadlock_timeout = '100ms'")
-      await tx.$queryRaw`
-        SELECT 1
-        FROM "AccountLabelLatest"
-        WHERE "accountId" = ${account.id} AND "labelDefinitionId" = ${firstLabel.id}
-        FOR UPDATE
-      `
-      firstLatestLocked.resolve()
-      await allowConcurrentWrite.promise
-      return recordAccountLabelsBulkLatestOnlyForAccounts(tx as unknown as PrismaClient, {
-        sourceKind: 'relabel',
-        labels: labels.map((label) => ({
-          ...label,
-          accountId: account.id,
-          result: {
-            ...label.result,
-            value: !label.result.value,
-            reason: `concurrent ${label.result.reason}`,
+    await expect(
+      recordCrawlAccountLabelsAtomic(prisma, {
+        accountId,
+        crawlRunId,
+        username: 'login_account',
+        labels: [
+          {
+            labelDefinitionId: getOrThrow(ids, 'slot_a'),
+            result: result(true, 0.9, 'reason a'),
+            method: 'rule',
+            ruleVersion: 'v1',
           },
-        })),
-      })
+          labelB,
+        ],
+      }),
+    ).rejects.toThrow(
+      `recordCrawlAccountLabelsAtomicWithinTx: label slot is 0 after persistence (accountId=${accountId}, labelDefinitionId=${labelB.labelDefinitionId})`,
+    )
+    expect(await prisma.accountLabelState.count({ where: { accountId } })).toBe(0)
+  })
+
+  it('crawl が rev を読んだ後に別の writer が commit した場合、rev を読み直して書き直し、新しい評価を反映する', async () => {
+    const accountId = await createAccount()
+    const ids = await ensureLabelDefinitionsForRules(prisma, [makeRule('race')])
+    const labelDefinitionId = getOrThrow(ids, 'race')
+    const crawlRunId = await createCrawlRun()
+
+    let releaseRelabel!: () => void
+    const relabelMayCommit = new Promise<void>((resolve) => {
+      releaseRelabel = resolve
     })
-    await firstLatestLocked.promise
-    const applicationName = 'tac_partial_resume_snapshot_prelock'
-    const partialResume = prisma.$transaction(async (tx) => {
+    let relabelLocked!: () => void
+    const relabelHoldsLock = new Promise<void>((resolve) => {
+      relabelLocked = resolve
+    })
+    const relabel = prisma.$transaction(async (tx) => {
+      await recordAccountLabelsBulkForAccounts(tx, {
+        labels: [
+          {
+            accountId,
+            labelDefinitionId,
+            result: result(false, 0.2, 'relabel false'),
+            method: 'race',
+            ruleVersion: 'v1',
+          },
+        ],
+        expectedRevByAccountId: new Map([[accountId, 0]]),
+        sourceKind: 'relabel',
+        sourceId: 'relabel-run',
+      })
+      relabelLocked()
+      await relabelMayCommit
+    })
+    await relabelHoldsLock
+
+    const applicationName = 'tac_crawl_cas_retry'
+    const crawl = prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`SET LOCAL application_name = '${applicationName}'`)
       return recordCrawlAccountLabelsAtomicWithinTx(tx as unknown as PrismaClient, {
-        accountId: account.id,
-        crawlRunId: crawlRun.id,
+        accountId,
+        crawlRunId,
         username: 'login_account',
-        labels,
+        labels: [
+          {
+            labelDefinitionId,
+            result: result(true, 0.95, 'crawl true'),
+            method: 'race',
+            ruleVersion: 'v1',
+          },
+        ],
       })
     })
-    try {
-      await waitForSessionToWaitOnLock(prisma, applicationName)
-      const secondLatestWasLocked = await waitForLatestRowToBeLocked(
-        prisma,
-        account.id,
-        secondLabel.id,
-      )
-      expect(secondLatestWasLocked).toBe(false)
-      allowConcurrentWrite.resolve()
-      await expect(Promise.all([partialResume, concurrentBulkWrite])).resolves.toHaveLength(2)
-    } finally {
-      allowConcurrentWrite.resolve()
-      await Promise.allSettled([partialResume, concurrentBulkWrite])
-    }
+    await waitForSessionToWaitOnLock(prisma, applicationName)
+    releaseRelabel()
+    const [observationId] = await Promise.all([crawl, relabel])
+
+    const state = await prisma.accountLabelState.findUniqueOrThrow({ where: { accountId } })
+    expect(state.rev).toBe(2)
+    const active = await prisma.accountActiveLabel.findFirstOrThrow({ where: { accountId } })
+    expect(active.sourceId).toBe(crawlRunId)
+    const [crawlEntry] = await snapshotOf(observationId)
+    expect(crawlEntry).toMatchObject({
+      value: true,
+      confidence: 0.95,
+      reason: 'crawl true',
+    })
   }, 15_000)
 })

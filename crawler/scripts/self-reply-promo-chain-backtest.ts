@@ -80,4 +80,4 @@ main().catch((error: unknown) => {
 // DATABASE_URL=<read replica 等の接続文字列> \
 //   pnpm --filter crawler exec tsx scripts/self-reply-promo-chain-backtest.ts
 // BACKTEST_ACCOUNT_LIMIT で評価対象アカウント数の上限を調整できる (既定 500)。
-// AccountLabel/AccountLabelLatest への書き込みは一切行わない。
+// AccountActiveLabel/AccountLabelState への書き込みは一切行わない。

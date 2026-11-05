@@ -36,7 +36,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await prisma.analysisWorkItem.deleteMany()
       await prisma.analysisWorkItemDone.deleteMany()
       await prisma.accountClassificationObservation.deleteMany()
-      await prisma.accountLabelLatest.deleteMany()
+      await prisma.accountActiveLabel.deleteMany()
+      await prisma.accountLabelState.deleteMany()
       await prisma.crawlAccountLabelRun.deleteMany()
       await prisma.block.deleteMany()
       await prisma.accountCrawlState.deleteMany()
@@ -44,14 +45,17 @@ describe.skipIf(!process.env.DATABASE_URL)(
     })
 
     it('bisects past a row-local NOT NULL violation and still upserts the valid row', async () => {
-      const badInput = { ...makeInput('bad_1'), screenName: null } as unknown as AccountProfileInput
+      const badInput = {
+        ...makeInput('900002'),
+        screenName: null,
+      } as unknown as AccountProfileInput
 
-      const result = await upsertAccountsBulk(prisma, [makeInput('good_1'), badInput])
+      const result = await upsertAccountsBulk(prisma, [makeInput('900001'), badInput])
 
-      expect(result).toEqual(new Set(['good_1']))
-      const persisted = await prisma.account.findUnique({ where: { id: 'good_1' } })
+      expect(result).toEqual(new Set(['900001']))
+      const persisted = await prisma.account.findUnique({ where: { id: '900001' } })
       expect(persisted).not.toBeNull()
-      const missing = await prisma.account.findUnique({ where: { id: 'bad_1' } })
+      const missing = await prisma.account.findUnique({ where: { id: '900002' } })
       expect(missing).toBeNull()
     })
   },

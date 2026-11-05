@@ -278,6 +278,12 @@ export default async function SystemPage(): Promise<React.ReactElement> {
                   ? formatDateTime(relabelStatus.scanCursorUpdatedAt)
                   : '—'}
               </p>
+              <p className="mt-2">
+                Coverage snapshot:{' '}
+                {relabelStatus.coverageComputedAt
+                  ? formatDateTime(relabelStatus.coverageComputedAt)
+                  : 'not computed yet'}
+              </p>
               {relabelStatus.labelCoverage.length === 0 ? (
                 <p className="mt-2">No label definition recorded yet.</p>
               ) : (

@@ -13,6 +13,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelSummary', () => {
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
     await prisma.labelMetricSnapshot.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
   })
 

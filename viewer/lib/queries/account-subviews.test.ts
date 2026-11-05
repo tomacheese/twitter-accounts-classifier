@@ -29,6 +29,7 @@ function createMockPrisma(data: MockData) {
   const blockFindMany = vi.fn().mockResolvedValue(data.blocks ?? [])
   const blockCount = vi.fn().mockResolvedValue(data.blockCount ?? data.blocks?.length ?? 0)
   const readModelPointerFindUnique = vi.fn().mockResolvedValue(data.pointer ?? null)
+  const changeFindMany = vi.fn().mockResolvedValue(data.changes ?? [])
   const prisma = {
     readModelPointer: { findUnique: readModelPointerFindUnique },
     account: {
@@ -43,13 +44,13 @@ function createMockPrisma(data: MockData) {
     reviewFinding: { findMany: vi.fn().mockResolvedValue(data.findings ?? []) },
     block: { findMany: blockFindMany, count: blockCount },
     accountLabelChange: {
-      findMany: vi.fn().mockResolvedValue(data.changes ?? []),
+      findMany: changeFindMany,
       groupBy: vi.fn().mockResolvedValue(data.classificationLastChanges ?? []),
     },
     readModelState: { findUnique: vi.fn().mockResolvedValue(data.readModelState ?? null) },
     detectionPolicyVersion: { findFirst: vi.fn().mockResolvedValue(null) },
   } as unknown as PrismaClient
-  return { prisma, blockFindMany, blockCount, readModelPointerFindUnique }
+  return { prisma, blockFindMany, blockCount, readModelPointerFindUnique, changeFindMany }
 }
 
 const account = {
@@ -381,14 +382,14 @@ describe('getAccountRelations', () => {
 })
 
 describe('getAccountHistory', () => {
-  it('labelDefinitionId を labelKey に解決する', async () => {
+  it('labelDefinitionId を labelKey に解決し、changedAt と id の降順で取得する', async () => {
     const changedAt = new Date('2026-01-05T00:00:00Z')
-    const { prisma } = createMockPrisma({
+    const { prisma, changeFindMany } = createMockPrisma({
       changes: [
         {
-          id: 'change-1',
+          id: 1,
           labelDefinitionId: 1,
-          changeType: 'updated',
+          changeType: 'added',
           previousValue: false,
           newValue: true,
           changedAt,
@@ -397,13 +398,46 @@ describe('getAccountHistory', () => {
       labelDefinitions: [{ id: 1, key: 'spam' }],
     })
 
-    expect(await getAccountHistory(prisma, 'account-1')).toEqual([
+    expect(await getAccountHistory(prisma, '1001')).toEqual([
       {
-        id: 'change-1',
+        id: 1,
         labelKey: 'spam',
-        changeType: 'updated',
+        changeType: 'added',
         previousValue: false,
         newValue: true,
+        changedAt,
+      },
+    ])
+    expect(changeFindMany).toHaveBeenCalledWith({
+      where: { accountId: '1001' },
+      orderBy: [{ changedAt: 'desc' }, { id: 'desc' }],
+      take: 50,
+    })
+  })
+
+  it('評価不能への遷移 (newValue が null) を unevaluable のまま返す', async () => {
+    const changedAt = new Date('2026-01-06T00:00:00Z')
+    const { prisma } = createMockPrisma({
+      changes: [
+        {
+          id: 2,
+          labelDefinitionId: 1,
+          changeType: 'unevaluable',
+          previousValue: true,
+          newValue: null,
+          changedAt,
+        },
+      ],
+      labelDefinitions: [{ id: 1, key: 'spam' }],
+    })
+
+    expect(await getAccountHistory(prisma, '1001')).toEqual([
+      {
+        id: 2,
+        labelKey: 'spam',
+        changeType: 'unevaluable',
+        previousValue: true,
+        newValue: null,
         changedAt,
       },
     ])
@@ -414,9 +448,9 @@ describe('getAccountHistory', () => {
     const { prisma } = createMockPrisma({
       changes: [
         {
-          id: 'change-1',
-          labelDefinitionId: 'label-deleted',
-          changeType: 'updated',
+          id: 1,
+          labelDefinitionId: 999,
+          changeType: 'added',
           previousValue: false,
           newValue: true,
           changedAt,
@@ -425,9 +459,9 @@ describe('getAccountHistory', () => {
       labelDefinitions: [],
     })
 
-    const result = await getAccountHistory(prisma, 'account-1')
+    const result = await getAccountHistory(prisma, '1001')
 
-    expect(result[0].labelKey).toBe('label-deleted')
+    expect(result[0].labelKey).toBe('999')
   })
 })
 

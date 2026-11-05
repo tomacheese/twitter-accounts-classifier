@@ -251,5 +251,16 @@ SELECT pg_temp.expect(
 SELECT pg_temp.expect(NOT EXISTS (SELECT 1 FROM "AccountLabelState" WHERE array_position(versions, NULL) IS NOT NULL),
   'T14 versions never contain NULL');
 
+-- T15: false から true へ戻ると added の previousValue が false になる。初回の true と、評価不能からの復帰は NULL のまま。
+SELECT pg_temp.put(1007, 1::smallint, 0, 1::smallint, 1::smallint, 0.9, 'first');
+SELECT pg_temp.put(1007, 1::smallint, 1, 0::smallint, 1::smallint);
+SELECT pg_temp.put(1007, 1::smallint, 2, 1::smallint, 1::smallint, 0.8, 'again');
+SELECT pg_temp.put(1007, 1::smallint, 3, (-1)::smallint, 1::smallint);
+SELECT pg_temp.put(1007, 1::smallint, 4, 1::smallint, 1::smallint, 0.7, 'back');
+SELECT pg_temp.expect(
+  (SELECT array_agg("previousValue"::text ORDER BY "id") FROM "AccountLabelChange"
+   WHERE "accountId" = 1007 AND "changeType"::text = 'added') IS NOT DISTINCT FROM ARRAY[NULL, 'false', NULL]::text[],
+  'T15 previousValue of added: NULL for the first true, false after false, NULL after unevaluable');
+
 \o
 SELECT 'behavior checks passed' AS result;

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../generated/prisma'
 import {
-  upsertTweet,
+  mergeTweet,
   upsertTweets,
   loadRecentTweetsForAccounts,
   loadPromotedTweetCountsForAccounts,
@@ -11,8 +11,8 @@ import {
 } from './tweet-repository'
 
 const sampleTweet: TweetInput = {
-  id: 't1',
-  accountId: 'u1',
+  id: '1000001',
+  accountId: '2000001',
   fullText: 'hello world',
   createdAt: new Date('2026-01-01T00:00:00Z'),
   retweetCount: 3,
@@ -37,371 +37,149 @@ const sampleTweet: TweetInput = {
   source: 'recommended',
 }
 
-describe('upsertTweet', () => {
-  it('upserts a single tweet keyed by id', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue(null)
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+type ExistingRow = Parameters<typeof mergeTweet>[1]
 
-    await upsertTweet(prisma, sampleTweet)
+function existingRow(overrides: Partial<NonNullable<ExistingRow>> = {}): NonNullable<ExistingRow> {
+  return {
+    fullText: sampleTweet.fullText,
+    createdAt: sampleTweet.createdAt,
+    retweetCount: sampleTweet.retweetCount,
+    likeCount: sampleTweet.likeCount,
+    replyCount: sampleTweet.replyCount,
+    isReply: false,
+    conversationId: null,
+    isRetweet: false,
+    inReplyToTweetId: null,
+    isPromoted: false,
+    isPaidPromotion: false,
+    expandedUrls: [],
+    cardDestinationUrls: [],
+    cardDestinationUrlsEvaluated: false,
+    hasMedia: null,
+    hasAiGeneratedMedia: null,
+    aiGeneratedDetectionSource: null,
+    foreignVideoSourceCount: null,
+    quotedTweetAuthorId: null,
+    quotedTweetHasVideo: null,
+    ...overrides,
+  }
+}
 
-    expect(upsert).toHaveBeenCalledTimes(1)
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.where).toEqual({ id: 't1' })
+describe('mergeTweet', () => {
+  it('新規 (既存行なし) は入力値をそのまま書き込み値にする', () => {
+    const merged = mergeTweet(
+      { ...sampleTweet, isPromoted: true, foreignVideoSourceCount: 2, hasMedia: false },
+      null,
+    )
+
+    expect(merged).toMatchObject({
+      isPromoted: true,
+      foreignVideoSourceCount: 2,
+      hasMedia: false,
+      expandedUrls: [],
+      cardDestinationUrls: [],
+    })
   })
-})
 
-describe('upsertTweets', () => {
-  it('upserts every tweet in the batch', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue(null)
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+  it('広告メタデータを欠く再取得で、検出済みの isPromoted/isPaidPromotion を false に戻さない', () => {
+    const merged = mergeTweet(
+      { ...sampleTweet, isPromoted: false, isPaidPromotion: false },
+      existingRow({ isPromoted: true, isPaidPromotion: true }),
+    )
 
-    await upsertTweets(prisma, [sampleTweet, { ...sampleTweet, id: 't2' }])
+    expect(merged).toMatchObject({ isPromoted: true, isPaidPromotion: true })
+  })
 
-    expect(upsert).toHaveBeenCalledTimes(2)
+  it('観測済みの URL を保ったまま新しい URL を後ろに足す', () => {
+    const merged = mergeTweet(
+      {
+        ...sampleTweet,
+        expandedUrls: ['https://example.com/new', 'https://example.com/old'],
+        cardDestinationUrls: ['https://example-shop.test/new'],
+        cardDestinationUrlsEvaluated: true,
+      },
+      existingRow({
+        expandedUrls: ['https://example.com/old'],
+        cardDestinationUrls: ['https://example-shop.test/old'],
+        cardDestinationUrlsEvaluated: true,
+      }),
+    )
+
+    expect(merged.expandedUrls).toEqual(['https://example.com/old', 'https://example.com/new'])
+    expect(merged.cardDestinationUrls).toEqual([
+      'https://example-shop.test/old',
+      'https://example-shop.test/new',
+    ])
+  })
+
+  it('Card を評価できなかった再取得で、評価済みフラグを false に戻さない', () => {
+    const merged = mergeTweet(
+      { ...sampleTweet, cardDestinationUrlsEvaluated: false },
+      existingRow({ cardDestinationUrlsEvaluated: true }),
+    )
+
+    expect(merged.cardDestinationUrlsEvaluated).toBe(true)
+  })
+
+  it('引用ツイートを解決できなかった再取得で、既知の値を消さず、別の値が解決されたら上書きする', () => {
+    const known = existingRow({ quotedTweetAuthorId: '3000001', quotedTweetHasVideo: true })
+
+    expect(
+      mergeTweet({ ...sampleTweet, quotedTweetAuthorId: null, quotedTweetHasVideo: null }, known),
+    ).toMatchObject({ quotedTweetAuthorId: '3000001', quotedTweetHasVideo: true })
+    expect(
+      mergeTweet(
+        { ...sampleTweet, quotedTweetAuthorId: '3000002', quotedTweetHasVideo: false },
+        known,
+      ),
+    ).toMatchObject({ quotedTweetAuthorId: '3000002', quotedTweetHasVideo: false })
+  })
+
+  it('出典付き動画数は、入力が欠けても 0 でも既知の値を消さない', () => {
+    const known = existingRow({ foreignVideoSourceCount: 2 })
+
+    expect(mergeTweet({ ...sampleTweet, foreignVideoSourceCount: null }, known)).toMatchObject({
+      foreignVideoSourceCount: 2,
+    })
+    expect(mergeTweet({ ...sampleTweet, foreignVideoSourceCount: 0 }, known)).toMatchObject({
+      foreignVideoSourceCount: 2,
+    })
+    expect(mergeTweet({ ...sampleTweet, foreignVideoSourceCount: 3 }, known)).toMatchObject({
+      foreignVideoSourceCount: 3,
+    })
+  })
+
+  it('hasAiGeneratedMedia と hasMedia は、入力が null のとき既知の値を保つ', () => {
+    const merged = mergeTweet(
+      { ...sampleTweet, hasAiGeneratedMedia: null, hasMedia: null },
+      existingRow({ hasAiGeneratedMedia: true, hasMedia: true }),
+    )
+
+    expect(merged).toMatchObject({ hasAiGeneratedMedia: true, hasMedia: true })
   })
 })
 
 describe('upsertTweets error isolation', () => {
   it('continues upserting the remaining tweets after one upsert fails', async () => {
-    const upsert = vi
+    const row = (id: string) => ({ ...sampleTweet, id, expandedUrls: [], cardDestinationUrls: [] })
+    const queryRaw = vi
       .fn()
-      .mockResolvedValueOnce({ id: 't1' })
-      .mockRejectedValueOnce(new Error('foreign key violation'))
-      .mockResolvedValueOnce({ id: 't3' })
-    const findUnique = vi.fn().mockResolvedValue(null)
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
+      .mockResolvedValueOnce([row('1000001')])
+      .mockRejectedValueOnce(new Error('connection reset'))
+      .mockResolvedValueOnce([row('1000003')])
+    const prisma = {
+      tweet: { findUnique: vi.fn().mockResolvedValue(null) },
+      $queryRaw: queryRaw,
+    } as unknown as PrismaClient
 
     const results = await upsertTweets(prisma, [
       sampleTweet,
-      { ...sampleTweet, id: 't2' },
-      { ...sampleTweet, id: 't3' },
+      { ...sampleTweet, id: '1000002' },
+      { ...sampleTweet, id: '1000003' },
     ])
 
-    expect(upsert).toHaveBeenCalledTimes(3)
-    expect(results.map((r) => r.tweet.id)).toEqual(['t1', 't3'])
-  })
-})
-
-describe('upsertTweet bundle-relevant change detection', () => {
-  it('returns changed: true for a brand-new tweet', async () => {
-    const upsert = vi.fn().mockResolvedValue({ ...sampleTweet })
-    const findUnique = vi.fn().mockResolvedValue(null)
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    const { changed } = await upsertTweet(prisma, sampleTweet)
-
-    expect(changed).toBe(true)
-  })
-
-  it('returns changed: false when the merged result matches the existing row exactly', async () => {
-    const existing = {
-      isPromoted: false,
-      isPaidPromotion: false,
-      hasMedia: null,
-      conversationId: null,
-      expandedUrls: [],
-      cardDestinationUrls: [],
-      cardDestinationUrlsEvaluated: false,
-      hasAiGeneratedMedia: false,
-      aiGeneratedDetectionSource: null,
-      foreignVideoSourceCount: null,
-      quotedTweetId: null,
-      quotedTweetAuthorId: null,
-      quotedTweetHasVideo: null,
-      fullText: sampleTweet.fullText,
-      createdAt: sampleTweet.createdAt,
-      retweetCount: sampleTweet.retweetCount,
-      likeCount: sampleTweet.likeCount,
-      isReply: sampleTweet.isReply,
-      isRetweet: sampleTweet.isRetweet,
-      inReplyToTweetId: sampleTweet.inReplyToTweetId,
-    }
-    const findUnique = vi.fn().mockResolvedValue(existing)
-    const upsert = vi.fn().mockResolvedValue({ id: sampleTweet.id, ...existing })
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    const { changed } = await upsertTweet(prisma, { ...sampleTweet, hasAiGeneratedMedia: null })
-
-    expect(changed).toBe(false)
-  })
-
-  it('returns changed: true when merge preserves a previously-true isPaidPromotion the input lost', async () => {
-    const existing = {
-      isPromoted: false,
-      isPaidPromotion: true,
-      expandedUrls: [],
-      cardDestinationUrls: [],
-      cardDestinationUrlsEvaluated: false,
-      hasAiGeneratedMedia: null,
-      aiGeneratedDetectionSource: null,
-      foreignVideoSourceCount: null,
-      quotedTweetId: null,
-      quotedTweetAuthorId: null,
-      quotedTweetHasVideo: null,
-      fullText: 'old text',
-      createdAt: sampleTweet.createdAt,
-      retweetCount: 0,
-      likeCount: 0,
-      isReply: false,
-      isRetweet: false,
-      inReplyToTweetId: null,
-    }
-    const findUnique = vi.fn().mockResolvedValue(existing)
-    const upsert = vi
-      .fn()
-      .mockResolvedValue({ id: sampleTweet.id, ...existing, fullText: sampleTweet.fullText })
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    const { changed } = await upsertTweet(prisma, { ...sampleTweet, isPaidPromotion: false })
-
-    expect(changed).toBe(true)
-  })
-})
-
-describe('upsertTweet ad-disclosure fields', () => {
-  it('passes isPromoted and isPaidPromotion through to both create and update', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue(null)
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, { ...sampleTweet, isPromoted: true, isPaidPromotion: true })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.create).toMatchObject({ isPromoted: true, isPaidPromotion: true })
-    expect(call.update).toMatchObject({ isPromoted: true, isPaidPromotion: true })
-  })
-
-  it('does not let a re-crawl lacking ad metadata flip a previously-true isPromoted/isPaidPromotion back to false', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue({ isPromoted: true, isPaidPromotion: true })
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, { ...sampleTweet, isPromoted: false, isPaidPromotion: false })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.update).toMatchObject({ isPromoted: true, isPaidPromotion: true })
-  })
-})
-
-describe('upsertTweet expanded URLs', () => {
-  it('preserves previously observed expanded URLs while adding newly observed URLs', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue({
-      expandedUrls: ['https://example.com/old'],
-    })
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, {
-      ...sampleTweet,
-      expandedUrls: ['https://example.com/new'],
-    })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.update).toMatchObject({
-      expandedUrls: ['https://example.com/new', 'https://example.com/old'],
-    })
-  })
-})
-
-describe('upsertTweet Card destination URLs', () => {
-  it('passes Card destination URLs and their evaluated flag through to create', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue(null)
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, {
-      ...sampleTweet,
-      cardDestinationUrls: ['https://example-shop.test/item/FICTIONAL'],
-      cardDestinationUrlsEvaluated: true,
-    })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.create).toMatchObject({
-      cardDestinationUrls: ['https://example-shop.test/item/FICTIONAL'],
-      cardDestinationUrlsEvaluated: true,
-    })
-  })
-
-  it('unions previously observed Card destination URLs with newly observed ones', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue({
-      cardDestinationUrls: ['https://example-shop.test/old'],
-      cardDestinationUrlsEvaluated: true,
-    })
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, {
-      ...sampleTweet,
-      cardDestinationUrls: ['https://example-shop.test/new'],
-      cardDestinationUrlsEvaluated: true,
-    })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.update).toMatchObject({
-      cardDestinationUrls: ['https://example-shop.test/new', 'https://example-shop.test/old'],
-    })
-  })
-
-  it('does not let a re-crawl that fails to evaluate the Card flip a previously-true evaluated flag back to false', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue({
-      cardDestinationUrls: [],
-      cardDestinationUrlsEvaluated: true,
-    })
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, { ...sampleTweet, cardDestinationUrlsEvaluated: false })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.update).toMatchObject({ cardDestinationUrlsEvaluated: true })
-  })
-
-  it('returns changed: true when only the Card destination URLs change', async () => {
-    const existing = {
-      isPromoted: false,
-      isPaidPromotion: false,
-      expandedUrls: [],
-      cardDestinationUrls: [],
-      cardDestinationUrlsEvaluated: false,
-      hasAiGeneratedMedia: false,
-      aiGeneratedDetectionSource: null,
-      foreignVideoSourceCount: null,
-      quotedTweetId: null,
-      quotedTweetAuthorId: null,
-      quotedTweetHasVideo: null,
-      fullText: sampleTweet.fullText,
-      createdAt: sampleTweet.createdAt,
-      retweetCount: sampleTweet.retweetCount,
-      likeCount: sampleTweet.likeCount,
-      isReply: sampleTweet.isReply,
-      isRetweet: sampleTweet.isRetweet,
-      inReplyToTweetId: sampleTweet.inReplyToTweetId,
-    }
-    const findUnique = vi.fn().mockResolvedValue(existing)
-    const upsert = vi.fn().mockResolvedValue({ id: sampleTweet.id, ...existing })
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    const { changed } = await upsertTweet(prisma, {
-      ...sampleTweet,
-      hasAiGeneratedMedia: null,
-      cardDestinationUrls: ['https://example-shop.test/new'],
-      cardDestinationUrlsEvaluated: true,
-    })
-
-    expect(changed).toBe(true)
-  })
-})
-
-describe('upsertTweet quoted-tweet fields', () => {
-  it('passes quotedTweetId, quotedTweetAuthorId and quotedTweetHasVideo through to both create and update', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue(null)
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, {
-      ...sampleTweet,
-      quotedTweetId: 'quoted1',
-      quotedTweetAuthorId: 'bob',
-      quotedTweetHasVideo: true,
-    })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.create).toMatchObject({
-      quotedTweetId: 'quoted1',
-      quotedTweetAuthorId: 'bob',
-      quotedTweetHasVideo: true,
-    })
-    expect(call.update).toMatchObject({
-      quotedTweetId: 'quoted1',
-      quotedTweetAuthorId: 'bob',
-      quotedTweetHasVideo: true,
-    })
-  })
-
-  it('does not let a re-crawl that fails to resolve the quoted tweet erase a previously-known value, like the ad-disclosure fields', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue({
-      quotedTweetId: 'quoted1',
-      quotedTweetAuthorId: 'bob',
-      quotedTweetHasVideo: true,
-    })
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, {
-      ...sampleTweet,
-      quotedTweetId: null,
-      quotedTweetAuthorId: null,
-      quotedTweetHasVideo: null,
-    })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.update).toMatchObject({
-      quotedTweetId: 'quoted1',
-      quotedTweetAuthorId: 'bob',
-      quotedTweetHasVideo: true,
-    })
-  })
-
-  it('overwrites a previously-known quoted-tweet value once the re-crawl resolves a different one', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue({
-      quotedTweetId: 'quoted1',
-      quotedTweetAuthorId: 'bob',
-      quotedTweetHasVideo: true,
-    })
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, {
-      ...sampleTweet,
-      quotedTweetId: 'quoted2',
-      quotedTweetAuthorId: 'carol',
-      quotedTweetHasVideo: false,
-    })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.update).toMatchObject({
-      quotedTweetId: 'quoted2',
-      quotedTweetAuthorId: 'carol',
-      quotedTweetHasVideo: false,
-    })
-  })
-})
-
-describe('upsertTweet foreign-video-source count', () => {
-  it('passes the source-attributed video count through to both create and update', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue(null)
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, { ...sampleTweet, foreignVideoSourceCount: 2 })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.create).toMatchObject({ foreignVideoSourceCount: 2 })
-    expect(call.update).toMatchObject({ foreignVideoSourceCount: 2 })
-  })
-
-  it('does not let a re-crawl without the provenance field erase a previously-known count', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue({ foreignVideoSourceCount: 2 })
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, { ...sampleTweet, foreignVideoSourceCount: null })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.update).toMatchObject({ foreignVideoSourceCount: 2 })
-  })
-
-  it('does not let a zero count erase a previously-known source-attributed video', async () => {
-    const upsert = vi.fn().mockResolvedValue({ id: 't1' })
-    const findUnique = vi.fn().mockResolvedValue({ foreignVideoSourceCount: 2 })
-    const prisma = { tweet: { upsert, findUnique } } as unknown as PrismaClient
-
-    await upsertTweet(prisma, { ...sampleTweet, foreignVideoSourceCount: 0 })
-
-    const call = upsert.mock.calls[0][0] as Record<string, unknown>
-    expect(call.update).toMatchObject({ foreignVideoSourceCount: 2 })
+    expect(queryRaw).toHaveBeenCalledTimes(3)
+    expect(results.map((r) => r.tweet.id)).toEqual(['1000001', '1000003'])
   })
 })
 
@@ -428,7 +206,7 @@ describe('loadRecentTweetsForAccounts', () => {
     const result = await loadRecentTweetsForAccounts(prisma, ['u1', 'u2', 'u3'], 20)
 
     expect(queryRaw).toHaveBeenCalledTimes(1)
-    const sql = (queryRaw.mock.calls[0][0] as unknown[]).join('')
+    const sql = (queryRaw.mock.calls[0][0] as { sql: string }).sql
     expect(sql).toContain('CROSS JOIN LATERAL')
     expect(sql).not.toMatch(/CROSS JOIN LATERAL \(\s+SELECT \*\s+FROM "Tweet"/)
     expect(sql).toContain('ORDER BY "createdAt" DESC')

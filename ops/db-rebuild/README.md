@@ -26,7 +26,7 @@ DB 作り直しで使う新しい postgres コンテナの定義と運用スク�
 
 builtin provider は OS のロケールに依存せず、musl の alpine イメージでも照合順序がコードポイント順になる (PG17 以降が必要)。`pg_database` では `datlocprovider=b`、`datlocale=C.UTF-8` になる。`datcollate` は `C`、`datctype` は `C.UTF-8` と表示されるが、builtin provider では `datcollate` は使われない。initdb 中に `locale: not found` と `no usable system locales were found` の警告が出るが、builtin provider では無害である。
 
-`initdb.sh` は、`crawler` ロールと `twitter_accounts_classifier` データベースを作り、`pg_stat_statements` と `pg_trgm` の拡張を入れる。
+`initdb.sh` は、所有者 (superuser) のロール `tac_owner` と `twitter_accounts_classifier` データベースを作り、`pg_stat_statements` と `pg_trgm` の拡張を入れる。`crawler`・`viewer`・`analyzer` の各ロールは、baseline の適用後に `scripts/db/run-migration-and-sync-grants.sh` が作る。`crawler` を所有者にすると `set_label_result` への書き込み制限が効かないため、所有者とアプリ用ロールは分ける。
 
 ## 使い方
 

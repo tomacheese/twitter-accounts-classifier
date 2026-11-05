@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { createSyntheticId } from 'id-boundary'
@@ -10,23 +10,6 @@ import { selectRecentTweetsBackfillCandidates } from './recent-tweets-backfill-r
 const prisma = getPrismaClient()
 
 describe('recent tweets backfill 部分index migration', () => {
-  it('AccountLabelLatest_backfill_label_evaluable_idx を期待する列順・述語で定義する', () => {
-    // tsconfig の module は CommonJS のため import.meta は使えない。
-    // eslint-disable-next-line unicorn/prefer-module
-    const migrationsDir = path.join(__dirname, '../../prisma/migrations')
-    const dirs = readdirSync(migrationsDir).filter((d) =>
-      d.includes('add_recent_tweets_backfill_label_evaluable_index'),
-    )
-    expect(dirs.length).toBe(1)
-    const sql = readFileSync(path.join(migrationsDir, dirs[0], 'migration.sql'), 'utf8')
-    expect(sql).toMatch(
-      /CREATE INDEX CONCURRENTLY IF NOT EXISTS "AccountLabelLatest_backfill_label_evaluable_idx"/,
-    )
-    expect(sql).toMatch(/ON "AccountLabelLatest"/)
-    expect(sql).toMatch(/\("labelDefinitionId", "accountId"\)/)
-    expect(sql).toMatch(/WHERE "evaluable" = false/)
-  })
-
   it('AccountCrawlState_recent_tweets_unattempted_idx を baseline で期待する列・述語で定義する', () => {
     // eslint-disable-next-line unicorn/prefer-module
     const sql = readFileSync(path.join(__dirname, '../../prisma/baseline/baseline.sql'), 'utf8')
@@ -37,7 +20,7 @@ describe('recent tweets backfill 部分index migration', () => {
 })
 
 describe('selectRecentTweetsBackfillCandidates query shape', () => {
-  it('AccountCrawlState を起点に LATERAL fence 付き EXISTS 相当で対象ラベルの有無を probe する', async () => {
+  it('AccountCrawlState を起点に LATERAL fence 付きで AccountLabelState の評価不能 (versions の負の値) を probe する', async () => {
     const queryRaw = vi
       .fn()
       .mockResolvedValueOnce([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }])
@@ -53,13 +36,13 @@ describe('selectRecentTweetsBackfillCandidates query shape', () => {
     expect(definitionLookupSql).toContain('"key" IN')
 
     const candidateSql = (queryRaw.mock.calls[1][0] as { strings: string[] }).strings.join('')
-    // 起点は AccountLabelLatest ではなく AccountCrawlState でなければ、
+    // 起点は AccountLabelState ではなく未試行の AccountCrawlState でなければ、
     // backfill 進行に伴う試行済み prefix の skip 量増加という残課題が再発する。
-    expect(candidateSql).toContain('FROM "AccountCrawlState" AS a')
+    expect(candidateSql).toContain('FROM "AccountCrawlState" AS c')
     expect(candidateSql).toContain('CROSS JOIN LATERAL')
-    expect(candidateSql).toContain('"labelDefinitionId" IN')
-    expect(candidateSql).toContain('"evaluable" = false')
-    expect(candidateSql).toContain('WHERE a."lastRecentTweetsAttemptedAt" IS NULL')
+    expect(candidateSql).toContain('FROM "AccountLabelState" AS state')
+    expect(candidateSql).toContain('state."versions"[d."labelDefinitionId"] < 0')
+    expect(candidateSql).toContain('WHERE c."lastRecentTweetsAttemptedAt" IS NULL')
     expect(candidateSql).not.toContain('FROM "Account" ')
     // LATERAL 内の LIMIT 1 が optimizer による semi-join への平坦化を防ぐ fence、
     // 外側の LIMIT が limit+1 sentinel。
@@ -98,11 +81,9 @@ async function createSyntheticTables(tx: Prisma.TransactionClient): Promise<void
     ) ON COMMIT DROP
   `
   await tx.$executeRaw`
-    CREATE TEMPORARY TABLE "AccountLabelLatest" (
-      "accountId" bigint NOT NULL,
-      "labelDefinitionId" smallint NOT NULL,
-      "evaluable" boolean NOT NULL,
-      PRIMARY KEY ("accountId", "labelDefinitionId")
+    CREATE TEMPORARY TABLE "AccountLabelState" (
+      "accountId" bigint PRIMARY KEY,
+      "versions" smallint[] NOT NULL
     ) ON COMMIT DROP
   `
 }
@@ -119,15 +100,15 @@ async function seedSyntheticAccount(
   `
 }
 
-async function seedSyntheticLatestLabel(
+/** versions の添字は LabelDefinition.id (1 始まり)。負の値は評価不能、0 は未評価。 */
+async function seedSyntheticLabelState(
   tx: Prisma.TransactionClient,
   accountId: string,
-  labelDefinitionId: number,
-  evaluable: boolean,
+  versions: number[],
 ): Promise<void> {
   await tx.$executeRaw`
-    INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "evaluable")
-    VALUES (${accountId}::bigint, ${labelDefinitionId}::smallint, ${evaluable})
+    INSERT INTO "AccountLabelState" ("accountId", "versions")
+    VALUES (${accountId}::bigint, ${versions}::smallint[])
   `
 }
 
@@ -171,13 +152,14 @@ describe.skipIf(!process.env.DATABASE_URL)('selectRecentTweetsBackfillCandidates
             (${wrongDefinitionId}, ${`synthetic_non_target_${runId}`})
         `
 
-        await seedSyntheticLatestLabel(tx, ids.accountA, botDefinitionId, false)
-        await seedSyntheticLatestLabel(tx, ids.accountA, replyFarmingDefinitionId, false)
-        await seedSyntheticLatestLabel(tx, ids.accountB, replyHijackDefinitionId, false)
-        await seedSyntheticLatestLabel(tx, ids.accountC, aiMediaDefinitionId, false)
-        await seedSyntheticLatestLabel(tx, ids.attempted, botDefinitionId, false)
-        await seedSyntheticLatestLabel(tx, ids.evaluable, botDefinitionId, true)
-        await seedSyntheticLatestLabel(tx, ids.wrongLabel, wrongDefinitionId, false)
+        // 添字は definition id。bot=1、reply_farming=2、reply_hijack_swarm=3、tweet_ai_generated_media=4。
+        await seedSyntheticLabelState(tx, ids.accountA, [-1, -1])
+        await seedSyntheticLabelState(tx, ids.accountB, [1, 1, -1])
+        await seedSyntheticLabelState(tx, ids.accountC, [1, 1, 1, -2])
+        await seedSyntheticLabelState(tx, ids.attempted, [-1])
+        await seedSyntheticLabelState(tx, ids.evaluable, [1, 0, 0, 0, 0])
+        await seedSyntheticLabelState(tx, ids.wrongLabel, [1, 1, 1, 1, -1])
+        // 状態行がまだ無い account (noLabel) は、どのラベルも評価不能ではない。
 
         const transactionClient = tx as unknown as PrismaClient
         await expect(
@@ -211,14 +193,22 @@ describe.skipIf(!process.env.DATABASE_URL)(
       try {
         await prisma.$transaction(async (tx) => {
           const baseId = BigInt(createSyntheticId())
+          // 低密度の評価不能ラベル付き account を大量に試行済みとして敷き、
+          // production の「進行済み prefix」を再現する。
           await tx.$executeRaw`
-            CREATE TEMPORARY TABLE "AccountLabelLatest" (
-              "accountId" bigint NOT NULL,
-              "labelDefinitionId" smallint NOT NULL,
-              "evaluable" boolean NOT NULL,
-              PRIMARY KEY ("accountId", "labelDefinitionId")
-            ) ON COMMIT DROP
+            INSERT INTO "Account" (
+              "id", "screenName", "displayName", "followersCount", "followingCount", "tweetCount",
+              "accountCreatedAt", "updatedAt"
+            )
+            SELECT ${baseId}::bigint + g, 'synthetic_user_' || g, 'Synthetic User ' || g, 0, 0, 0, now(), now()
+            FROM generate_series(1, 20001) AS g
           `
+          await tx.$executeRaw`
+            INSERT INTO "AccountCrawlState" ("accountId", "lastRecentTweetsAttemptedAt")
+            SELECT ${baseId}::bigint + g, CASE WHEN g <= 20000 THEN now() END
+            FROM generate_series(1, 20001) AS g
+          `
+          const candidateId = String(baseId + 20_001n)
           await tx.$executeRaw`
             INSERT INTO "LabelDefinition" ("key", "description")
             VALUES ('bot', 'synthetic')
@@ -227,57 +217,22 @@ describe.skipIf(!process.env.DATABASE_URL)(
           const [{ id: botDefinitionId }] = await tx.$queryRaw<{ id: number }[]>`
             SELECT "id" FROM "LabelDefinition" WHERE "key" = 'bot'
           `
-          // 低密度の evaluable=false 付き account を大量に試行済みとして敷き、
-          // production の「進行済み prefix」を再現する。
           await tx.$executeRaw`
-            INSERT INTO "Account" (
-              "id", "screenName", "displayName", "followersCount", "followingCount", "tweetCount",
-              "accountCreatedAt", "updatedAt"
-            )
-            SELECT
-              ${baseId}::bigint + g, 'synthetic_user_' || g, 'Synthetic User ' || g, 0, 0, 0,
-              now(), now()
-            FROM generate_series(1, 20000) AS g
-          `
-          await tx.$executeRaw`
-            INSERT INTO "AccountCrawlState" ("accountId", "lastRecentTweetsAttemptedAt")
-            SELECT ${baseId}::bigint + g, now()
-            FROM generate_series(1, 20000) AS g
-          `
-          await tx.$executeRaw`
-            INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "evaluable")
-            SELECT ${baseId}::bigint + g, ${botDefinitionId}::smallint, false
-            FROM generate_series(1, 20000) AS g
-            WHERE g % 10 = 0
-          `
-          const candidateId = String(baseId + 20_001n)
-          await tx.$executeRaw`
-            INSERT INTO "Account" (
-              "id", "screenName", "displayName", "followersCount", "followingCount", "tweetCount",
-              "accountCreatedAt", "updatedAt"
-            )
-            VALUES (
-              ${candidateId}::bigint, 'synthetic_candidate', 'Synthetic Candidate', 0, 0, 0,
-              now(), now()
-            )
-          `
-          await tx.$executeRaw`
-            INSERT INTO "AccountCrawlState" ("accountId", "lastRecentTweetsAttemptedAt")
-            VALUES (${candidateId}::bigint, NULL)
-          `
-          await tx.$executeRaw`
-            INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "evaluable")
-            VALUES (${candidateId}::bigint, ${botDefinitionId}::smallint, false)
+            INSERT INTO "AccountLabelState" ("accountId", "evaluatedAt", "versions")
+            SELECT ${baseId}::bigint + g, now(),
+                   array_fill(0, ARRAY[${botDefinitionId}::int - 1])::smallint[] || ARRAY[-1]::smallint[]
+            FROM generate_series(1, 20001) AS g
+            WHERE g % 10 = 0 OR g = 20001
           `
           // planner の統計情報を fixture 挿入直後の実データに合わせておかないと、
           // 共有 DB での実行順序次第で古い統計のまま EXPLAIN が別の plan を選び、
           // 期待した index の使用を検証できなくなる。
-          await tx.$executeRaw`ANALYZE "AccountCrawlState", "AccountLabelLatest"`
+          await tx.$executeRaw`ANALYZE "AccountCrawlState", "AccountLabelState"`
 
           let capturedCandidateSql: Prisma.Sql | undefined
           const capturingClient = {
             $queryRaw: async (sql: Prisma.Sql) => {
-              if (sql.strings.join('').includes('FROM "AccountCrawlState" AS a')) {
+              if (sql.strings.join('').includes('FROM "AccountCrawlState" AS c')) {
                 capturedCandidateSql = sql
               }
               return (tx as unknown as PrismaClient).$queryRaw(sql)
@@ -285,7 +240,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           } as unknown as PrismaClient
 
           await expect(
-            selectRecentTweetsBackfillCandidates(capturingClient, { limit: 5 }),
+            selectRecentTweetsBackfillCandidates(capturingClient, {
+              afterId: String(baseId),
+              limit: 5,
+            }),
           ).resolves.toEqual({ accountIds: [candidateId] })
           if (capturedCandidateSql === undefined) throw new Error('candidate SQL was not captured')
 
@@ -293,8 +251,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
             Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${capturedCandidateSql}`,
           )
           const plan = JSON.stringify(explainRows[0]['QUERY PLAN'])
-          // 部分 index からの Index Scan であれば、未試行分のみを読み、
-          // 試行済み prefix の長さに比例した skip は発生しない。
+          // 未試行分だけの部分 index からの Index Scan であれば、試行済み prefix の長さに比例した skip は発生しない。
           expect(plan).toContain('AccountCrawlState_recent_tweets_unattempted_idx')
           expect(plan).not.toContain('AccountCrawlState_pkey')
           expect(plan).not.toContain('Seq Scan')

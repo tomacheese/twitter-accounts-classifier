@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { randomUUID } from 'node:crypto'
+import { createSyntheticId } from 'id-boundary'
 import { getPrismaClient } from '../db/client'
 import { computeBlockReconciliation, reconcileBlockRelations } from './reconcile-block-relations'
 
@@ -55,13 +55,15 @@ describe.skipIf(!process.env.DATABASE_URL)('reconcileBlockRelations', () => {
   beforeEach(async () => {
     await prisma.blockStateChange.deleteMany()
     await prisma.block.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
   it('完全同期で存在しない Block を missing へ進め、BlockStateChange を 1 件追加する', async () => {
-    const blockerId = `account-${randomUUID()}`
-    const blockedId = `account-${randomUUID()}`
+    const blockerId = createSyntheticId()
+    const blockedId = createSyntheticId()
     await prisma.account.createMany({
       data: [blockerId, blockedId].map((id) => ({
         id,
@@ -94,8 +96,8 @@ describe.skipIf(!process.env.DATABASE_URL)('reconcileBlockRelations', () => {
   })
 
   it('fetch 対象に含まれていれば状態変化なしとして BlockStateChange を追加しない', async () => {
-    const blockerId = `account-${randomUUID()}`
-    const blockedId = `account-${randomUUID()}`
+    const blockerId = createSyntheticId()
+    const blockedId = createSyntheticId()
     await prisma.account.createMany({
       data: [blockerId, blockedId].map((id) => ({
         id,

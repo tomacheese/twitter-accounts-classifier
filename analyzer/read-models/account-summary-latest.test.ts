@@ -14,9 +14,12 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountSummaryLatest', () => {
   beforeEach(async () => {
     await prisma.accountClassificationLatest.deleteMany()
     await prisma.accountSummaryLatest.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -134,9 +137,12 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
   beforeEach(async () => {
     await prisma.accountClassificationLatest.deleteMany()
     await prisma.accountSummaryLatest.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -237,7 +243,7 @@ describe.skipIf(!process.env.DATABASE_URL)('upsertAccountClassificationLatest', 
         labeledAt: t10,
       },
     ])
-    // bootstrap: より新しい labeledAt=t15 の AccountLabelLatest 行を読んで書き込む。
+    // bootstrap: より新しい labeledAt=t15 の AccountActiveLabel 行を読んで書き込む。
     // 不変条件どおり observedAt := labeledAt を使う。
     await upsertAccountClassificationLatest(prisma, [
       {

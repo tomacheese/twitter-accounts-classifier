@@ -22,8 +22,7 @@
     "precheck": "pnpm run db:generate",
     "check": "run-p lint typecheck test",
     "db:generate": "prisma generate --schema=../prisma/schema.prisma && node ../prisma/scripts/stringify-bigint-types.mjs",
-    "db:migrate": "prisma migrate deploy --schema=../prisma/schema.prisma",
-    "db:migrate:dev": "prisma migrate dev --schema=../prisma/schema.prisma"
+    "db:baseline": "bash ../prisma/baseline/apply.sh"
   },
   "prisma": {
     "seed": "tsx ../prisma/seed.ts"

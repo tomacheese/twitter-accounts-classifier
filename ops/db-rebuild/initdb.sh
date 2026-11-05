@@ -9,7 +9,7 @@ IMAGE="${NEW_DB_IMAGE:-postgres:17-alpine}"
 DATA="${NEW_DB_DATA_HOST_PATH:-/mnt/ssd/twitter-accounts-classifier/postgres-new}"
 WAL_ARCHIVE="${NEW_DB_WAL_ARCHIVE_HOST_PATH:-/mnt/ssd/twitter-accounts-classifier/postgres-new-wal-archive}"
 BACKUP="${NEW_DB_BACKUP_HOST_PATH:-/mnt/ssd/twitter-accounts-classifier/postgres-new-backup}"
-DB_USER="${NEW_DB_USER:-crawler}"
+DB_USER="${NEW_DB_USER:-tac_owner}"
 DB_NAME="${NEW_DB_NAME:-twitter_accounts_classifier}"
 # 既知の既定パスワードを持たせない。superuser のパスワードになる。
 : "${NEW_DB_PASSWORD:?NEW_DB_PASSWORD must be set}"

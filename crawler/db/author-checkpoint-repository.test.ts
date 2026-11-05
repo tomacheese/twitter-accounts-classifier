@@ -113,7 +113,23 @@ function mockAccountRepository() {
   return { upsertAccountSpy }
 }
 
+/**
+ * Tweet の永続化は tweet-repository 側の統合テストで検証済みのため、
+ * ここでは tx モックの `tweet.upsert` が返す行をそのまま upsert 結果として扱う。
+ * `tweet.upsert` が返す行の形が、各テストで upsert 後の Tweet に何を期待するかを表している。
+ */
+function mockTweetRepositoryUpsert() {
+  vi.spyOn(tweetRepository, 'upsertTweet').mockImplementation(async (prisma, input) => {
+    const client = prisma as unknown as {
+      tweet: { upsert: (args: unknown) => Promise<unknown> }
+    }
+    const tweet = (await client.tweet.upsert({ where: { id: input.id }, create: input })) as never
+    return { tweet, changed: true }
+  })
+}
+
 beforeEach(() => {
+  mockTweetRepositoryUpsert()
   // 個別のテストで上書きしない限り、期間内のプロモ投稿の DB 集計は 0 件の前提にする。
   vi.spyOn(tweetRepository, 'loadPromotedTweetCountsForAccounts').mockResolvedValue(new Map())
   ;({ upsertAccountSpy } = mockAccountRepository())
@@ -136,7 +152,6 @@ describe('persistAuthorResultAtomic', () => {
     const authorProfile = profile('author1')
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
         upsert: vi.fn(({ create }: { create: ReturnType<typeof baseTweet> }) =>
           Promise.resolve({
@@ -226,7 +241,6 @@ describe('persistAuthorResultAtomic', () => {
     const authorProfile = profile('author1')
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
         upsert: vi.fn(({ create }: { create: ReturnType<typeof baseTweet> }) =>
           Promise.resolve({
@@ -308,7 +322,7 @@ describe('persistAuthorResultAtomic', () => {
     const queryRaw = vi.fn().mockResolvedValue([])
     const txClient = {
       tweet: { findUnique: tweetFindUnique, upsert: tweetUpsert },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      accountLabelState: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: queryRaw,
@@ -383,8 +397,8 @@ describe('persistAuthorResultAtomic', () => {
       })
     })
     const txClient = {
-      tweet: { findUnique: vi.fn().mockResolvedValue(null), upsert: tweetUpsert },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      tweet: { upsert: tweetUpsert },
+      accountLabelState: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -449,7 +463,6 @@ describe('persistAuthorResultAtomic', () => {
     ])
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: tweetUpsert,
         findMany: tweetFindMany,
       },
@@ -514,7 +527,6 @@ describe('persistAuthorResultAtomic', () => {
     // 直後の crawl state の更新で 'success' に変わることを再現する。
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
       },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
@@ -601,7 +613,6 @@ describe('persistAuthorResultAtomic', () => {
     const authorCheckpointUpsert = vi.fn().mockResolvedValue({})
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
       },
       crawlAuthorCheckpoint: { upsert: authorCheckpointUpsert },
@@ -637,7 +648,6 @@ describe('persistAuthorResultAtomic', () => {
   it('opens the transaction with an extended budget for the combined write', async () => {
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'author1' }),
       },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
@@ -672,10 +682,9 @@ describe('persistAuthorResultAtomic', () => {
   it('upserts each fallback author only once even if it appears against multiple context tweets', async () => {
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),
       },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      accountLabelState: { findMany: vi.fn().mockResolvedValue([]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -715,10 +724,9 @@ describe('persistAuthorResultAtomic', () => {
     )
     const txClient = {
       tweet: {
-        findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({ accountId: 'context1' }),
       },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([{ accountId: 'context1' }]) },
+      accountLabelState: { findMany: vi.fn().mockResolvedValue([{ accountId: 'context1' }]) },
       crawlAuthorCheckpoint: { upsert: vi.fn().mockResolvedValue({}) },
       followStateChange: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -755,11 +763,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // 実 DB で Account と crawl state の永続化まで通すため、共通のスパイを外す。
       vi.mocked(accountRepository.upsertAccount).mockRestore()
       vi.mocked(accountRepository.recordRecentTweetsFetchSuccess).mockRestore()
+      vi.mocked(tweetRepository.upsertTweet).mockRestore()
       // Block は他の統合テストファイルが残す可能性があり、
       // account 削除時の FK 違反を避けるため先に消しておく。
       await prisma.block.deleteMany()
       await prisma.tweet.deleteMany()
-      await prisma.accountLabelLatest.deleteMany()
+      await prisma.accountActiveLabel.deleteMany()
+      await prisma.accountLabelState.deleteMany()
       await prisma.crawlAuthorCheckpoint.deleteMany()
       await prisma.crawlAccountLabelRun.deleteMany()
       await prisma.crawlRun.deleteMany()
@@ -788,15 +798,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
         data: { startedAt: new Date(), lastHeartbeatAt: new Date(), status: 'running' },
       })
 
-      const authorProfile = profile('acct-1')
+      const authorProfile = profile('100001')
       // 1 周目: AI メディアが検出された状態で保存する。
       await persistAuthorResultAtomic(prisma, {
         crawlRunId: crawlRunOne.id,
         username: 'tester',
-        authorId: 'acct-1',
+        authorId: '100001',
         profile: authorProfile,
         recentTweets: [
-          tweet('t1', 'acct-1', {
+          tweet('2000001', '100001', {
             hasAiGeneratedMedia: true,
             aiGeneratedDetectionSource: 'C2paClient',
           }),
@@ -821,9 +831,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await persistAuthorResultAtomic(prisma, {
         crawlRunId: crawlRunTwo.id,
         username: 'tester',
-        authorId: 'acct-1',
+        authorId: '100001',
         profile: authorProfile,
-        recentTweets: [tweet('t1', 'acct-1', { hasAiGeneratedMedia: null })],
+        recentTweets: [tweet('2000001', '100001', { hasAiGeneratedMedia: null })],
         additionalOwnTweets: [],
         recentTweetsFallbackAuthors: [],
         followSample: null,
@@ -839,15 +849,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
         appVersion: 'test',
       })
 
-      const latest = await prisma.accountLabelLatest.findUniqueOrThrow({
-        where: {
-          accountId_labelDefinitionId: {
-            accountId: 'acct-1',
-            labelDefinitionId: labelDefinitionIds.get('test_ai_media') ?? '',
-          },
-        },
+      // true の行だけが AccountActiveLabel に残るため、行があること自体が評価 true を表す。
+      const labelDefinitionId = labelDefinitionIds.get('test_ai_media')
+      if (labelDefinitionId === undefined) throw new Error('test_ai_media definition is missing')
+      await prisma.accountActiveLabel.findUniqueOrThrow({
+        where: { accountId_labelDefinitionId: { accountId: '100001', labelDefinitionId } },
       })
-      expect(latest.value).toBe(true)
     })
   },
 )

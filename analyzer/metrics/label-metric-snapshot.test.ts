@@ -173,9 +173,12 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
     await prisma.accountClassificationReasonCount.deleteMany()
     await prisma.accountClassificationLatest.deleteMany()
     await prisma.accountSummaryLatest.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -195,7 +198,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date(),
+        crawlState: { create: { lastCrawledAt: new Date() } },
       },
     })
     await prisma.accountClassificationLatest.create({
@@ -287,7 +290,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
           followingCount: 0,
           tweetCount: 0,
           accountCreatedAt: new Date(),
-          lastCrawledAt: new Date(),
+          crawlState: { create: { lastCrawledAt: new Date() } },
         },
       })
       await prisma.accountClassificationLatest.create({
@@ -339,7 +342,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
           followingCount: 0,
           tweetCount: 0,
           accountCreatedAt: new Date(),
-          lastCrawledAt: new Date(),
+          crawlState: { create: { lastCrawledAt: new Date() } },
         },
       })
       await prisma.accountClassificationLatest.create({
@@ -378,7 +381,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildLabelAggregateSnapshotSet', () 
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date(),
+        crawlState: { create: { lastCrawledAt: new Date() } },
       },
     })
     await prisma.accountSummaryLatest.create({
@@ -423,8 +426,11 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
     await prisma.accountClassificationFreshnessBucket.deleteMany()
     await prisma.accountClassificationReasonCount.deleteMany()
     await prisma.accountClassificationLatest.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -442,7 +448,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
           followingCount: 0,
           tweetCount: 0,
           accountCreatedAt: new Date(),
-          lastCrawledAt: new Date(),
+          crawlState: { create: { lastCrawledAt: new Date() } },
         },
       })
     }
@@ -516,7 +522,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
           followingCount: 0,
           tweetCount: 0,
           accountCreatedAt: new Date(),
-          lastCrawledAt: new Date(),
+          crawlState: { create: { lastCrawledAt: new Date() } },
         },
       })
     }
@@ -595,7 +601,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date(),
+        crawlState: { create: { lastCrawledAt: new Date() } },
       },
     })
     await prisma.account.create({
@@ -607,7 +613,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date(),
+        crawlState: { create: { lastCrawledAt: new Date() } },
       },
     })
     await upsertAccountClassificationLatest(prisma, [
@@ -671,7 +677,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date(),
+        crawlState: { create: { lastCrawledAt: new Date() } },
       },
     })
     await upsertAccountClassificationLatest(prisma, [
@@ -744,7 +750,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date(),
+        crawlState: { create: { lastCrawledAt: new Date() } },
       },
     })
     await upsertAccountClassificationLatest(prisma, [
@@ -802,7 +808,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date(),
+        crawlState: { create: { lastCrawledAt: new Date() } },
       },
     })
     await upsertAccountClassificationLatest(prisma, [
@@ -887,7 +893,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date(),
+        crawlState: { create: { lastCrawledAt: new Date() } },
       },
     })
     await upsertAccountClassificationLatest(prisma, [
@@ -949,7 +955,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date(),
+        crawlState: { create: { lastCrawledAt: new Date() } },
       },
     })
 
@@ -1043,7 +1049,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
           followingCount: 0,
           tweetCount: 0,
           accountCreatedAt: new Date(),
-          lastCrawledAt: new Date(),
+          crawlState: { create: { lastCrawledAt: new Date() } },
         },
       })
     }
@@ -1104,7 +1110,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date(),
+        crawlState: { create: { lastCrawledAt: new Date() } },
       },
     })
     const freshAt = new Date(Date.now() - 60 * 60 * 1000)
@@ -1158,7 +1164,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
           followingCount: 0,
           tweetCount: 0,
           accountCreatedAt: new Date(),
-          lastCrawledAt: new Date(),
+          crawlState: { create: { lastCrawledAt: new Date() } },
         },
       })
     }
@@ -1226,7 +1232,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date(),
+        crawlState: { create: { lastCrawledAt: new Date() } },
       },
     })
     const freshAt = new Date(Date.now() - 60 * 60 * 1000)
@@ -1335,7 +1341,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
           followingCount: 0,
           tweetCount: 0,
           accountCreatedAt: new Date(),
-          lastCrawledAt: new Date(),
+          crawlState: { create: { lastCrawledAt: new Date() } },
         },
       })
     }
@@ -1456,7 +1462,7 @@ describe.skipIf(!process.env.DATABASE_URL)('AccountClassificationLatest aggregat
           followingCount: 0,
           tweetCount: 0,
           accountCreatedAt: new Date(),
-          lastCrawledAt: new Date(),
+          crawlState: { create: { lastCrawledAt: new Date() } },
         },
       })
     }
@@ -1529,8 +1535,11 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await prisma.accountClassificationReasonCount.deleteMany()
       await prisma.accountClassificationLatest.deleteMany()
       await prisma.accountSummaryLatest.deleteMany()
-      await prisma.accountLabelLatest.deleteMany()
+      await prisma.accountActiveLabel.deleteMany()
+      await prisma.accountLabelState.deleteMany()
+      await prisma.labelRuleVersion.deleteMany()
       await prisma.labelDefinition.deleteMany()
+      await prisma.accountCrawlState.deleteMany()
       await prisma.account.deleteMany()
     })
 
@@ -1553,7 +1562,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
             followingCount: 0,
             tweetCount: 0,
             accountCreatedAt: new Date(),
-            lastCrawledAt: new Date(),
+            crawlState: { create: { lastCrawledAt: new Date() } },
           },
         })
         await prisma.accountSummaryLatest.create({

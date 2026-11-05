@@ -80,7 +80,7 @@ function requireLastCrawledAt(row: {
 
 /**
  * 指定したラベルキーのいずれかで最新評価が `true` のアカウント ID を返す。
- * `AccountLabelLatest` を読む (設計意図は prisma/schema.prisma のコメントを参照)。
+ * true のラベルだけを持つ `AccountActiveLabel` を読む (設計意図は prisma/schema.prisma のコメントを参照)。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param labelKeys - マッチ対象のラベルキー (OR 条件)
  * @returns 一致したアカウント ID
@@ -91,9 +91,9 @@ async function findAccountIdsWithAnyLabel(
 ): Promise<string[]> {
   const rows = await prisma.$queryRaw<MatchingAccountIdRow[]>`
     SELECT DISTINCT ll."accountId"::text AS "accountId"
-    FROM "AccountLabelLatest" ll
+    FROM "AccountActiveLabel" ll
     JOIN "LabelDefinition" ld ON ld.id = ll."labelDefinitionId"
-    WHERE ll.value = true AND ld.key IN (${Prisma.join(labelKeys)})
+    WHERE ld.key IN (${Prisma.join(labelKeys)})
   `
   return rows.map((row) => row.accountId)
 }
@@ -102,7 +102,7 @@ async function findAccountIdsWithAnyLabel(
  * 指定した各アカウントについて、
  * 有効な (最新評価が `true` の) ラベルキーを読み込む。
  * アカウント一覧のラベルバッジ表示用。
- * `AccountLabelLatest` を読む点は {@link findAccountIdsWithAnyLabel} と同じ。
+ * `AccountActiveLabel` を読む点は {@link findAccountIdsWithAnyLabel} と同じ。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param accountIds - 有効ラベルを読み込む対象のアカウント
  * @returns アカウント ID から有効ラベルキー一覧へのマップ
@@ -117,9 +117,9 @@ async function getActiveLabelKeysByAccount(
 
   const rows = await prisma.$queryRaw<ActiveLabelRow[]>`
     SELECT ll."accountId"::text AS "accountId", ld.key AS "key"
-    FROM "AccountLabelLatest" ll
+    FROM "AccountActiveLabel" ll
     JOIN "LabelDefinition" ld ON ld.id = ll."labelDefinitionId"
-    WHERE ll.value = true AND ll."accountId" = ANY(${accountIds}::bigint[])
+    WHERE ll."accountId" = ANY(${accountIds}::bigint[])
   `
 
   const map = new Map<string, string[]>()

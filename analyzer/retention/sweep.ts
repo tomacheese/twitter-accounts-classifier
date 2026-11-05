@@ -1,169 +1,173 @@
 import { Prisma, type PrismaClient } from '../generated/prisma'
-
-const ANALYSIS_RUN_RETENTION_DAYS = 180
-const LABEL_METRIC_SNAPSHOT_RETENTION_DAYS = 90
-const WORK_ITEM_RETENTION_DAYS = 30
-const OVERVIEW_SNAPSHOT_RETENTION_DAYS = 30
-const SHADOW_DETECTOR_EVALUATION_RETENTION_DAYS = 30
-const ACCOUNT_CLASSIFICATION_OBSERVATION_RETENTION_DAYS = 30
-
-// succeeded は完了時に台帳へ移るため、キュー表の終端状態は dead だけである。
-const TERMINAL_WORK_ITEM_STATUSES = ['dead']
+import { deleteInBatches } from './batched-delete'
+import { MAINTENANCE_BATCH, RETENTION_DAYS } from './config'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-/**
- * @param now - 基準時刻
- * @param days - 遡る日数
- * @returns 基準時刻から days 日前の時刻
- */
-function daysBefore(now: Date, days: number): Date {
-  return new Date(now.getTime() - days * DAY_MS)
+/** 削除対象 1 表分の定義。 */
+interface RetentionTarget {
+  /** 結果の集計キー。 */
+  name: string
+  table: string
+  keyColumns: readonly string[]
+  /** 保持期限を過ぎ、かつ参照されていない行の述語。表はエイリアス `t` で参照する。 */
+  where: (cutoff: Date) => Prisma.Sql
+  retentionDays: number
 }
 
-/**
- * リトライを使い切った dead の WorkItem と、保持期間を過ぎた完了台帳の行を削除する。
- * AnalysisRun.workItemId は FK を持たない参照のため、WorkItem 削除後も AnalysisRun は残る。
- * AnalysisRun は自身の 180日の retention sweep が削除する。
- * @param prisma - Prisma クライアント
- * @param now - 基準時刻
- * @returns 削除した WorkItem 数 (台帳の行を含む)
- */
-async function sweepWorkItems(
-  prisma: PrismaClient,
-  now: Date,
-): Promise<{ deletedWorkItemCount: number }> {
-  // id IN で列挙すると PostgreSQL のバインド変数上限を超え得るため、述語を直接渡す。
-  const workItemResult = await prisma.analysisWorkItem.deleteMany({
-    where: {
-      status: { in: TERMINAL_WORK_ITEM_STATUSES },
-      updatedAt: { lt: daysBefore(now, WORK_ITEM_RETENTION_DAYS) },
-    },
-  })
-
-  const doneResult = await prisma.analysisWorkItemDone.deleteMany({
-    where: { completedAt: { lt: daysBefore(now, WORK_ITEM_RETENTION_DAYS) } },
-  })
-
-  return { deletedWorkItemCount: workItemResult.count + doneResult.count }
-}
-
-/**
- * OverviewSnapshot を保持期間に応じて削除する。
- * 世代公開のたびに前世代までしか残さない他の read model と異なり、
- * Overview は trend 表示のために日数単位の履歴を残す設計のため、
- * 現在参照中の generation を除いて日数だけで判定する。
- * @param prisma - Prisma クライアント
- * @param now - 基準時刻
- * @returns 削除した行数
- */
-async function sweepOverviewSnapshots(prisma: PrismaClient, now: Date): Promise<number> {
-  const pointer = await prisma.readModelPointer.findUnique({
-    where: { modelKey: 'overview_snapshot' },
-    select: { currentGenerationId: true },
-  })
-
-  const result = await prisma.overviewSnapshot.deleteMany({
-    where: {
-      generatedAt: { lt: daysBefore(now, OVERVIEW_SNAPSHOT_RETENTION_DAYS) },
-      generationId: { not: pointer?.currentGenerationId ?? '' },
-    },
-  })
-  return result.count
-}
-
-/**
- * shadow 評価の DetectorEvaluation を保持期間に応じて削除する。
- * 本番判定に使う isShadow: false の行は削除せず、無効化前の比較用に積み上げる
- * shadow 行だけを対象にする。
- * @param prisma - Prisma クライアント
- * @param now - 基準時刻
- * @returns 削除した行数
- */
-async function sweepShadowDetectorEvaluations(prisma: PrismaClient, now: Date): Promise<number> {
-  const result = await prisma.detectorEvaluation.deleteMany({
-    where: {
-      isShadow: true,
-      evaluatedAt: { lt: daysBefore(now, SHADOW_DETECTOR_EVALUATION_RETENTION_DAYS) },
-    },
-  })
-  return result.count
-}
-
-/**
- * AccountClassificationObservation を保持期間に応じて削除する。
- * account_summary_refresh WorkItem が triggerId として参照している間は、
- * その WorkItem が完了して台帳へ移るか dead (再試行され得ない) になるまで削除しない。
- * WorkItem 側は自身の 30日 retention (`sweepWorkItems`) で先に消えることがあるが、
- * その場合は保護対象から自然に外れるため二重に気にする必要はない。
- * 保護対象の ID を一覧取得してから notIn で除外する二段構えだと、取得と削除の間に
- * 新しい非終端 WorkItem が作られた場合を捕捉できないため、削除対象かどうかを
- * 削除文自身の NOT EXISTS で都度判定する一つの SQL 文にまとめている。
- * @param prisma - Prisma クライアント
- * @param now - 基準時刻
- * @returns 削除した行数
- */
-async function sweepAccountClassificationObservations(
-  prisma: PrismaClient,
-  now: Date,
-): Promise<number> {
-  const result = await prisma.$executeRaw`
-    DELETE FROM "AccountClassificationObservation" o
-    WHERE o."observedAt" < ${daysBefore(now, ACCOUNT_CLASSIFICATION_OBSERVATION_RETENTION_DAYS)}
+// succeeded は完了時に台帳へ移るため、キュー表の終端状態は dead だけである。
+// AnalysisRun.workItemId や AccountClassificationObservation を参照する WorkItem は、
+// 終端でない間は参照元を消さない。
+const RETENTION_TARGETS: readonly RetentionTarget[] = [
+  {
+    name: 'deadWorkItem',
+    table: 'AnalysisWorkItem',
+    keyColumns: ['id'],
+    retentionDays: RETENTION_DAYS.deadWorkItem,
+    where: (cutoff) => Prisma.sql`t."status" = 'dead' AND t."updatedAt" < ${cutoff}`,
+  },
+  {
+    name: 'analysisWorkItemDone',
+    table: 'AnalysisWorkItemDone',
+    keyColumns: ['kind', 'triggerType', 'triggerId'],
+    retentionDays: RETENTION_DAYS.analysisWorkItemDone,
+    where: (cutoff) => Prisma.sql`t."completedAt" < ${cutoff}`,
+  },
+  {
+    name: 'analysisRun',
+    table: 'AnalysisRun',
+    keyColumns: ['id'],
+    retentionDays: RETENTION_DAYS.analysisRun,
+    where: (cutoff) => Prisma.sql`
+      t."finishedAt" < ${cutoff}
+      AND NOT EXISTS (SELECT 1 FROM "AnalysisWorkItem" w WHERE w."id" = t."workItemId")`,
+  },
+  {
+    name: 'labelMetricSnapshot',
+    table: 'LabelMetricSnapshot',
+    keyColumns: ['id'],
+    retentionDays: RETENTION_DAYS.labelMetricSnapshot,
+    where: (cutoff) => Prisma.sql`
+      t."observedAt" < ${cutoff}
+      AND NOT EXISTS (SELECT 1 FROM "LabelSummaryCurrent" c WHERE c."latestSnapshotId" = t."id")`,
+  },
+  {
+    // trend 表示のため日数単位で履歴を残す。公開中の世代だけは日数に関わらず残す。
+    name: 'overviewSnapshot',
+    table: 'OverviewSnapshot',
+    keyColumns: ['id'],
+    retentionDays: RETENTION_DAYS.overviewSnapshot,
+    where: (cutoff) => Prisma.sql`
+      t."generatedAt" < ${cutoff}
+      AND NOT EXISTS (
+        SELECT 1 FROM "ReadModelPointer" p
+        WHERE p."modelKey" = 'overview_snapshot' AND p."currentGenerationId" = t."generationId"
+      )`,
+  },
+  {
+    // 本番判定 (isShadow = false) は無効化前の比較に使うため対象にしない。
+    name: 'shadowDetectorEvaluation',
+    table: 'DetectorEvaluation',
+    keyColumns: ['id'],
+    retentionDays: RETENTION_DAYS.shadowDetectorEvaluation,
+    where: (cutoff) => Prisma.sql`t."isShadow" AND t."evaluatedAt" < ${cutoff}`,
+  },
+  {
+    // 判定は削除文自身の NOT EXISTS で行う。保護対象を先に一覧で取ると、
+    // 取得と削除の間に積まれた WorkItem を取りこぼす。
+    name: 'accountClassificationObservation',
+    table: 'AccountClassificationObservation',
+    keyColumns: ['id'],
+    retentionDays: RETENTION_DAYS.accountClassificationObservation,
+    where: (cutoff) => Prisma.sql`
+      t."observedAt" < ${cutoff}
       AND NOT EXISTS (
         SELECT 1 FROM "AnalysisWorkItem" w
-        WHERE w."triggerId" = o."id"
+        WHERE w."triggerId" = t."id"
           AND w."kind" = 'account_summary_refresh'
           AND w."triggerType" = 'account_classification_observation'
-          AND w."status" NOT IN (${Prisma.join(TERMINAL_WORK_ITEM_STATUSES)})
-      )
-  `
-  return result
+          AND w."status" <> 'dead'
+      )`,
+  },
+  ...(['CrawlAccountCheckpoint', 'CrawlAuthorCheckpoint', 'CrawlAccountLabelRun'] as const).map(
+    (table): RetentionTarget => ({
+      name: table[0].toLowerCase() + table.slice(1),
+      table,
+      keyColumns: ['id'],
+      retentionDays: RETENTION_DAYS.crawlCheckpoint,
+      // 終了しないまま止まった Run も、最後の heartbeat から期限を数えて対象にする。
+      where: (cutoff) => Prisma.sql`
+        EXISTS (
+          SELECT 1 FROM "CrawlRun" r
+          WHERE r."id" = t."crawlRunId" AND COALESCE(r."finishedAt", r."lastHeartbeatAt") < ${cutoff}
+        )`,
+    }),
+  ),
+  // 現在の Occurrence は親が currentOccurrenceId で指しており、期限内外を問わず残す。
+  {
+    name: 'operationalIssueOccurrence',
+    table: 'OperationalIssueOccurrence',
+    keyColumns: ['id'],
+    retentionDays: RETENTION_DAYS.operationalIssueOccurrence,
+    where: (cutoff) => Prisma.sql`
+      t."observedAt" < ${cutoff}
+      AND NOT EXISTS (SELECT 1 FROM "OperationalIssue" i WHERE i."currentOccurrenceId" = t."id")`,
+  },
+  {
+    name: 'reviewFindingOccurrence',
+    table: 'ReviewFindingOccurrence',
+    keyColumns: ['id'],
+    retentionDays: RETENTION_DAYS.reviewFindingOccurrence,
+    where: (cutoff) => Prisma.sql`
+      t."observedAt" < ${cutoff}
+      AND NOT EXISTS (SELECT 1 FROM "ReviewFinding" f WHERE f."currentOccurrenceId" = t."id")`,
+  },
+]
+
+export interface RetentionSweepOptions {
+  /** true のとき何も削除せず、削除対象の行数を数える。 */
+  dryRun?: boolean
+  /** 表ごとのバッチ数の上限。既定は MAINTENANCE_BATCH の値。 */
+  maxBatchesPerTable?: number
+  batchSize?: number
+  pauseMs?: number
 }
 
-/** runRetentionSweep の結果。 */
+/** runRetentionSweep の結果。キーは RetentionTarget.name。 */
 export interface RetentionSweepResult {
-  deletedAnalysisRunCount: number
-  deletedWorkItemCount: number
-  deletedLabelMetricSnapshotCount: number
-  deletedOverviewSnapshotCount: number
-  deletedShadowDetectorEvaluationCount: number
-  deletedAccountClassificationObservationCount: number
+  /** 削除した行数 (dryRun では削除対象の行数)。 */
+  counts: Record<string, number>
+  /** バッチ数の上限で打ち切り、次回に持ち越す対象が残っている表。 */
+  truncatedTables: string[]
 }
 
 /**
- * analyzer が積み上げる履歴テーブルを保持期間に応じて削除する。
- * @param prisma - Prisma クライアント
+ * analyzer が積み上げる履歴テーブルを、保持期間に応じて小さなバッチで削除する。
+ * 期限ちょうどの行は残し、それより前の行だけを削除する。
  * @param now - 基準時刻
- * @returns 削除した行数
  */
 export async function runRetentionSweep(
   prisma: PrismaClient,
   now: Date,
+  options: RetentionSweepOptions = {},
 ): Promise<RetentionSweepResult> {
-  const analysisRunResult = await prisma.analysisRun.deleteMany({
-    where: { finishedAt: { lt: daysBefore(now, ANALYSIS_RUN_RETENTION_DAYS) } },
-  })
+  const counts: Record<string, number> = {}
+  const truncatedTables: string[] = []
 
-  const workItemSweepResult = await sweepWorkItems(prisma, now)
-
-  const labelMetricSnapshotResult = await prisma.labelMetricSnapshot.deleteMany({
-    where: { observedAt: { lt: daysBefore(now, LABEL_METRIC_SNAPSHOT_RETENTION_DAYS) } },
-  })
-
-  const deletedOverviewSnapshotCount = await sweepOverviewSnapshots(prisma, now)
-  const deletedShadowDetectorEvaluationCount = await sweepShadowDetectorEvaluations(prisma, now)
-  const deletedAccountClassificationObservationCount = await sweepAccountClassificationObservations(
-    prisma,
-    now,
-  )
-
-  return {
-    deletedAnalysisRunCount: analysisRunResult.count,
-    deletedWorkItemCount: workItemSweepResult.deletedWorkItemCount,
-    deletedLabelMetricSnapshotCount: labelMetricSnapshotResult.count,
-    deletedOverviewSnapshotCount,
-    deletedShadowDetectorEvaluationCount,
-    deletedAccountClassificationObservationCount,
+  for (const target of RETENTION_TARGETS) {
+    const cutoff = new Date(now.getTime() - target.retentionDays * DAY_MS)
+    const result = await deleteInBatches(prisma, {
+      table: target.table,
+      keyColumns: target.keyColumns,
+      where: target.where(cutoff),
+      batchSize: options.batchSize ?? MAINTENANCE_BATCH.deleteBatchSize,
+      maxBatches: options.maxBatchesPerTable ?? MAINTENANCE_BATCH.maxDeleteBatchesPerTable,
+      pauseMs: options.pauseMs ?? MAINTENANCE_BATCH.pauseMs,
+      dryRun: options.dryRun ?? false,
+    })
+    counts[target.name] = result.count
+    if (result.hasMore) truncatedTables.push(target.name)
   }
+
+  return { counts, truncatedTables }
 }

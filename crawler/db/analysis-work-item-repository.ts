@@ -344,7 +344,7 @@ export interface ClaimStillLeasedWorkItemIdsForUpdateInput {
  * `FOR UPDATE SKIP LOCKED` で行ロックしたうえで返す。単発の SELECT による生存確認では、
  * 確認直後に lease が失効し別 worker が再 claim・再評価・先に書き込みを終えてから、
  * この worker の古い評価結果が遅れて書き込まれると新しい結果を上書きしてしまう
- * (AccountLabelLatest の upsert guard は labeledAt の前後関係しか見ないため)。
+ * (ラベル書き込みの CAS は評価状態の rev しか見ないため)。
  * この関数を呼び出したトランザクションが commit するまで行ロックを保持し続けることで、
  * 他 worker の再 claim (同じく FOR UPDATE SKIP LOCKED で行う) がこの行をロック中とみなして
  * スキップするようになり、生存確認からラベル・evidence 書き込み・work item 完了までの
