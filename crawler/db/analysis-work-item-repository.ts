@@ -142,14 +142,13 @@ export async function peekWorkItemCandidates(
 ): Promise<WorkItemCandidate[]> {
   if (input.limit <= 0) return []
 
-  const now = new Date()
   return prisma.$queryRaw<WorkItemCandidate[]>`
     SELECT "id", "triggerId"
     FROM "AnalysisWorkItem"
     WHERE "kind" = ANY(${input.kinds})
       AND "status" IN ('queued', 'leased', 'failed')
-      AND "availableAt" <= ${now}
-      AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < ${now})
+      AND "availableAt" <= now()
+      AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < now())
       AND "attemptCount" < "maxAttempts"
     ORDER BY "priority" DESC, "availableAt" ASC
     LIMIT ${input.limit}
@@ -185,8 +184,8 @@ export async function claimWorkItemBatchByIds(
       FROM "AnalysisWorkItem"
       WHERE "id" = ANY(${input.ids})
         AND "status" IN ('queued', 'leased', 'failed')
-        AND "availableAt" <= ${now}
-        AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < ${now})
+        AND "availableAt" <= now()
+        AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < now())
         AND "attemptCount" < "maxAttempts"
       FOR UPDATE SKIP LOCKED
     )
@@ -224,14 +223,13 @@ export async function claimNextWorkItem(
         `SELECT "id" FROM "AnalysisWorkItem"
        WHERE "kind" = ANY($1)
          AND "status" IN ('queued', 'leased', 'failed')
-         AND "availableAt" <= $2
-         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < $2)
+         AND "availableAt" <= now()
+         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < now())
          AND "attemptCount" < "maxAttempts"
        ORDER BY "priority" DESC, "availableAt" ASC
        LIMIT 1
        FOR UPDATE SKIP LOCKED`,
         input.kinds,
-        now,
       )
       const target = rows.at(0)
       if (!target) return undefined
