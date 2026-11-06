@@ -252,6 +252,7 @@ describe.skipIf(!process.env.DATABASE_URL)('selectBlockCandidates (DB integratio
     await prisma.accountActiveLabel.deleteMany()
     await prisma.accountLabelState.deleteMany()
     await prisma.labelRuleVersion.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
     await prisma.labelDefinition.deleteMany()
   })
