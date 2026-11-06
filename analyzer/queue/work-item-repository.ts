@@ -158,14 +158,13 @@ export async function deadLetterExhaustedWorkItem(
         `SELECT "id" FROM "AnalysisWorkItem"
        WHERE "kind" = ANY($1)
          AND "status" IN ('queued', 'leased', 'failed')
-         AND "availableAt" <= $2
-         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < $2)
+         AND "availableAt" <= now()
+         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < now())
          AND "attemptCount" >= "maxAttempts"
        ORDER BY "priority" DESC, "availableAt" ASC
        LIMIT 1
        FOR UPDATE SKIP LOCKED`,
         input.kinds,
-        now,
       )
       const target = rows.at(0)
       if (!target) return undefined
@@ -211,14 +210,13 @@ export async function claimNextWorkItem(
         `SELECT "id" FROM "AnalysisWorkItem"
        WHERE "kind" = ANY($1)
          AND "status" IN ('queued', 'leased', 'failed')
-         AND "availableAt" <= $2
-         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < $2)
+         AND "availableAt" <= now()
+         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < now())
          AND "attemptCount" < "maxAttempts"
        ORDER BY "priority" DESC, "availableAt" ASC
        LIMIT 1
        FOR UPDATE SKIP LOCKED`,
         input.kinds,
-        now,
       )
       const target = rows.at(0)
       if (!target) return undefined
