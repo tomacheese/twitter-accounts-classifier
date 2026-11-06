@@ -304,6 +304,8 @@ run_tweet_step() {
             -c "COPY \"$leaf\" ($cols) FROM STDIN (FORMAT text, FREEZE)" \
             <"$dir/p$p" >"$WORK_DIR/log.$name.p$p" 2>&1 &
         cpids+=($!)
+        # 葉テーブルの CREATE TABLE が並行すると、型名の衝突で pg_type の一意制約違反になることがある。DDL をずらして投入する
+        sleep 1
     done
     # shellcheck disable=SC2086
     python3 -I "$HERE/tools/tweet-route.py" "$dir" $parts <"$in" 2>"$WORK_DIR/log.$name.router" &

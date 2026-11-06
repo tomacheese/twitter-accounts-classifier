@@ -49,6 +49,10 @@ CROSS JOIN LATERAL (SELECT (hashtext(a."id" || l.id) & 7) > 5 AS val, (hashtext(
 CROSS JOIN LATERAL (SELECT (ARRAY['1.0.0', '1.2.0', '1.10.0', '2.0.0'])[1 + (hashtext(a."id" || l.id || 'v') & 3)] AS rv) AS r
 WHERE (l.id <> 'lbl_d' OR (hashtext(a."id") & 1) = 0);
 
+-- 旧 relabel が残した、評価不能なのに value = true の行。移行では評価不能 (value = false) として扱う。
+UPDATE "AccountLabelLatest" SET "value" = true
+WHERE NOT "evaluable" AND (hashtext("accountId") & 63) = 0;
+
 INSERT INTO "AccountClassificationLatest" ("accountId", "labelDefinitionId", "value", "confidence", "reason", "method",
   "ruleVersion", "observedAt", "sourceObservationId", "evaluable", "labeledAt")
 SELECT a."id", l.id, (hashtext(a."id" || l.id) & 3) = 0, 0.5, 'fake acl reason ' || (hashtext(a."id") & 7), l.id, '1.0.0',
