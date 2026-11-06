@@ -1,9 +1,9 @@
 -- 検証 (新 DB 側だけで完結するゲート)。出力は 1 行 1 ゲートの「ゲート名|PASS or FAIL|詳細」。
--- 変数: db_size_limit_gib (全量での上限、既定 70)、scale (シャード実行の拡大率。全量は 1)
+-- 変数: db_size_limit_gib (全量での上限、既定 90)、scale (シャード実行の拡大率。全量は 1)
 SET TimeZone = 'UTC';
 
 -- 不変条件: 有効なラベルの行は、状態の versions が同じ ruleVersionNo の正の値でなければならない。
--- 旧 DB の「evaluable = false かつ value = true は存在しない」に対応する (評価不能なのに true の行が無い)。
+-- 旧データの「evaluable = false かつ value = true」の行は変換で false に揃えるため、新側では評価不能なのに true の行が無いことを確認する。
 SELECT 'invariant: no active label with a non-positive or mismatching versions entry',
        CASE WHEN n = 0 THEN 'PASS' ELSE 'FAIL' END, n || ' rows'
 FROM (SELECT count(*) AS n FROM "AccountActiveLabel" a

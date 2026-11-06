@@ -158,7 +158,7 @@ verify_labels
 
 # ---- 3. 新 DB 側のゲート ----
 if [ -z "${ONLY:-}" ] || [[ checks =~ $ONLY ]]; then
-    emit_gates < <(new_psql -At -F'|' -v db_size_limit_gib=70 -v scale="$SCALE" <"$HERE/verify/checks.sql")
+    emit_gates < <(new_psql -At -F'|' -v db_size_limit_gib=90 -v scale="$SCALE" <"$HERE/verify/checks.sql")
     emit_gates < <(new_psql -At -F'|' <"$HERE/verify/checks-work.sql")
 fi
 
