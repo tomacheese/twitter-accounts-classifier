@@ -304,7 +304,7 @@ run_tweet_step() {
             -c "COPY \"$leaf\" ($cols) FROM STDIN (FORMAT text, FREEZE)" \
             <"$dir/p$p" >"$WORK_DIR/log.$name.p$p" 2>&1 &
         cpids+=($!)
-        # 葉テーブルの CREATE TABLE が並行すると、型名の衝突で pg_type の一意制約違反になることがある。DDL をずらして投入する
+        # 葉テーブルの CREATE TABLE が並行すると、型名の衝突で pg_type の一意制約違反になることがある。DDL をずらして投入する (再試行や直列化は、並列度を落とすため採らない)
         sleep 1
     done
     # shellcheck disable=SC2086

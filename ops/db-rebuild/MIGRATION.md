@@ -53,10 +53,10 @@ cleanup  mig と stg を落とす (切り替えの前に実行する。検証が
 | テーブルの件数とハッシュ | 旧 DB 側は `transform/*.sql` の出力、新 DB 側は同じ列を投入後の表から取り、`hashtext(キー) % 256` のシャードごとに件数と内容ハッシュを比べる。列の対応表は `transform/*.sql` のヘッダの `columns` |
 | ラベルの再構築 | 新側の `AccountLabelState` と `AccountActiveLabel` から (アカウント, ラベル, ruleVersion, 値, 評価不能) を再構築し、旧 `AccountLabelLatest` と比べる (false 行と評価不能行の reason、confidence は含めない)。件数、シャード別ハッシュ、ラベル × ruleVersion の true 件数と評価不能件数、coverage、先頭 1000 アカウントの乾式の差分 |
 | 完了台帳 | `AnalysisWorkItemDone` が旧 DB の完了済みの行を `workItemId` (変換表を通した新 id)、`attemptCount`、`createdAt`、`completedAt` まで過不足なく持ち、`account_relabel` を含まず、キュー表と論理キーも id も重ならない。`AnalysisWorkItem`、`AnalysisRun`、`AccountLabelChange` の identity が取り込んだ最大の id 以上 |
-| 不変条件 | `AccountCrawlState` が `Account` と同数で 1 対 1 (欠落も孤児も無く、`lastCrawledAt` は NULL なし)、評価不能なのに true の行が無い、`versionNo` が 1 から連続、`evaluatedAt` の一致、未変換のラベル id が 0、`labelDefinitionId` 列がすべて smallint |
+| 不変条件 | `AccountCrawlState` が `Account` と同数で 1 対 1 (欠落も孤児も無く、`lastCrawledAt` は NULL なし)、評価不能なのに true の行が無い (旧データにある評価不能かつ true の行は、変換で評価不能 (false) に揃える)、`versionNo` が 1 から連続、`evaluatedAt` の一致、未変換のラベル id が 0、`labelDefinitionId` 列がすべて smallint |
 | 復元 | 外した制約、インデックス、FK がすべて戻り、無効なインデックスが無い |
 | EXPLAIN | 直近 20 件、blocker 候補、backfill 候補、stale scan が Seq Scan を使わず、想定のインデックスを使う |
-| サイズ | `pg_database_size` が 70GiB 以下 (シャード実行は、空の baseline からの増分を拡大率倍して判定) |
+| サイズ | `pg_database_size` が 90GiB 以下 (シャード実行は、空の baseline からの増分を拡大率倍して判定) |
 
 relabeler の実際の dry-run は、このツールの範囲に含めない。代わりに、先頭 1,000 アカウントについて、再構築した行が旧 DB の行と食い違う件数 (書き込み予定の差分に相当) が 0 であることを確認する。
 

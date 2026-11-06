@@ -7,7 +7,7 @@
 SET LOCAL work_mem = :'work_mem';
 
 -- 不変条件: 評価不能 (evaluable = false) の行は value = false でなければならない。
--- 10_label_row.sql の投入時にも検査しているが、投入済みの全行に対しても確認する。
+-- 10_label_row.sql の変換で揃えているが、投入済みの全行に対しても確認する。
 DO $$
 DECLARE
   n bigint;

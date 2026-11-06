@@ -34,7 +34,7 @@ SELECT (9000000000000000000 + i)::text, 'fake_user_' || i, 'Fake User ' || i,
 FROM generate_series(1, :seed_accounts) AS i;
 
 -- AccountLabelLatest。ラベル d は一部のアカウントだけが持つ (配列が途中で抜ける場合を作る)。
--- 評価不能 (evaluable = false) の行は value = false。
+-- 評価不能 (evaluable = false) の行は基本的に value = false。例外は下の UPDATE で作る。
 INSERT INTO "AccountLabelLatest" ("accountId", "labelDefinitionId", "value", "labeledAt", "confidence", "reason", "method",
   "ruleVersion", "sourceId", "sourceKind", "sourceUsername", "evaluable")
 SELECT a."id", l.id,
