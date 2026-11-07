@@ -1,3 +1,4 @@
+import { isValidId } from 'id-boundary'
 import type { PrismaClient } from '../../generated/prisma'
 
 const MAX_RESULTS_PER_TYPE = 5
@@ -11,7 +12,7 @@ export interface GlobalSearchAccountResult {
 
 /** 横断検索のラベル結果 1 件。 */
 export interface GlobalSearchLabelResult {
-  id: string
+  id: number
   key: string
 }
 
@@ -66,10 +67,12 @@ async function searchAccounts(
 ): Promise<GlobalSearchAccountResult[]> {
   const normalizedScreenQuery = query.toLowerCase()
   const [accountIdRows, screenNameRows, displayNameRows] = await Promise.all([
-    prisma.accountSummaryLatest.findMany({
-      where: { accountId: query },
-      take: MAX_RESULTS_PER_TYPE,
-    }),
+    isValidId(query)
+      ? prisma.accountSummaryLatest.findMany({
+          where: { accountId: query },
+          take: MAX_RESULTS_PER_TYPE,
+        })
+      : Promise.resolve([]),
     prisma.accountSummaryLatest.findMany({
       where: {
         normalizedScreenName: {

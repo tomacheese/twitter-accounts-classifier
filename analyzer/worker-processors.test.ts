@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { createSyntheticSerialId } from 'id-boundary'
 import { Logger } from '@book000/node-utils'
 import { getPrismaClient } from './db/client'
 import { Prisma } from './generated/prisma'
@@ -12,6 +13,7 @@ import {
   processLabelAggregateRefresh,
   processBlockReconciliation,
   processRetentionSweep,
+  enqueueWeeklyOrphanCheck,
   processOperationCycleRefresh,
   handleWorkItemSettled,
   processPostCompletionRefresh,
@@ -30,7 +32,7 @@ function makeCycleRefreshWorkItem(overrides: {
   triggerId: string
 }): Parameters<typeof processOperationCycleRefresh>[1] {
   return {
-    id: 'work-item-cycle-refresh',
+    id: 901,
     kind: 'operation_cycle_refresh',
     triggerType: overrides.triggerType,
     triggerId: overrides.triggerId,
@@ -58,23 +60,15 @@ function makeSettledWorkItem(overrides: {
   triggerType: string
 }): Parameters<typeof handleWorkItemSettled>[1] {
   return {
-    id: `work-item-${randomUUID()}`,
+    id: createSyntheticSerialId(),
     kind: 'read_model_refresh',
     triggerType: overrides.triggerType,
     triggerId: 'trigger-1',
     status: 'succeeded',
-    priority: 0,
-    availableAt: new Date(),
-    leaseOwner: null,
-    leaseExpiresAt: null,
     attemptCount: 1,
-    maxAttempts: 5,
-    dependencyKey: null,
-    staleRequestedAt: null,
     lastErrorCode: null,
     lastErrorSummary: null,
     createdAt: new Date(),
-    updatedAt: new Date(),
   }
 }
 
@@ -86,6 +80,7 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     await prisma.operationalIssue.deleteMany()
     await prisma.analysisRun.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.attentionItemCurrent.deleteMany()
     await prisma.overviewSnapshot.deleteMany()
     await prisma.blockRelationCurrent.deleteMany()
@@ -111,7 +106,7 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     })
 
     await processReadModelRefresh(prisma, {
-      id: 'work-item-3',
+      id: 903,
       kind: 'read_model_refresh',
       triggerType: 'crawl_run',
       triggerId: crawlRun.id,
@@ -152,7 +147,7 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     })
 
     await processBlockReconciliation(prisma, {
-      id: 'work-item-3',
+      id: 903,
       kind: 'block_reconciliation',
       triggerType: 'block_run',
       triggerId: blockRun.id,
@@ -188,7 +183,7 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
 
   it('processRetentionSweep は次回分の WorkItem を即時 claim 可能な状態で enqueue しない', async () => {
     await processRetentionSweep(prisma, {
-      id: 'work-item-4',
+      id: 904,
       kind: 'retention_sweep',
       triggerType: 'schedule',
       triggerId: '2026-01-01',
@@ -213,27 +208,67 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     expect(pending).toHaveLength(0)
   })
 
+  it('enqueueWeeklyOrphanCheck は同じ週の呼び出しで 1 件だけ積み、翌週の月曜に新しく積む', async () => {
+    await prisma.analysisWorkItem.deleteMany({ where: { kind: 'retention_sweep' } })
+    await prisma.analysisWorkItemDone.deleteMany({ where: { kind: 'retention_sweep' } })
+
+    await enqueueWeeklyOrphanCheck(prisma, new Date('2026-11-04T10:00:00.000Z'))
+    await enqueueWeeklyOrphanCheck(prisma, new Date('2026-11-08T23:59:59.000Z'))
+    await enqueueWeeklyOrphanCheck(prisma, new Date('2026-11-09T00:00:00.000Z'))
+
+    const items = await prisma.analysisWorkItem.findMany({
+      where: { kind: 'retention_sweep', triggerType: 'orphan_check' },
+      orderBy: { triggerId: 'asc' },
+    })
+    expect(items.map((item) => item.triggerId)).toEqual(['2026-11-02', '2026-11-09'])
+  })
+
+  it('processRetentionSweep は orphan_check の WorkItem で孤児を OperationalIssue に記録する', async () => {
+    await prisma.operationalIssueOccurrence.deleteMany()
+    await prisma.operationalIssue.deleteMany()
+    await prisma.accountLabelState.deleteMany()
+    await prisma.accountLabelState.create({
+      data: { accountId: '7777', evaluatedAt: new Date('2026-08-08T00:00:00.000Z') },
+    })
+
+    await processRetentionSweep(prisma, {
+      id: 906,
+      kind: 'retention_sweep',
+      triggerType: 'orphan_check',
+      triggerId: '2026-11-02',
+      status: 'leased',
+      priority: 0,
+      availableAt: new Date(),
+      leaseOwner: 'worker-1',
+      leaseExpiresAt: new Date(),
+      attemptCount: 1,
+      maxAttempts: 5,
+      dependencyKey: null,
+      staleRequestedAt: null,
+      lastErrorCode: null,
+      lastErrorSummary: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    const issue = await prisma.operationalIssue.findFirstOrThrow({ where: { type: 'orphan_rows' } })
+    expect(issue.status).toBe('active')
+    await prisma.accountLabelState.deleteMany()
+  })
+
   it('handleWorkItemSettled は Cycle 再構築後に Attention/Overview を改めて publish する', async () => {
     await handleWorkItemSettled(
       prisma,
       {
-        id: 'work-item-5',
+        id: 905,
         kind: 'read_model_refresh',
         triggerType: 'unhandled_trigger_type',
         triggerId: 'trigger-1',
         status: 'succeeded',
-        priority: 0,
-        availableAt: new Date(),
-        leaseOwner: null,
-        leaseExpiresAt: null,
         attemptCount: 1,
-        maxAttempts: 5,
-        dependencyKey: null,
-        staleRequestedAt: null,
         lastErrorCode: null,
         lastErrorSummary: null,
         createdAt: new Date(),
-        updatedAt: new Date(),
       },
       { status: 'succeeded' },
     )
@@ -275,20 +310,23 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
   })
 
   it('processPostCompletionRefresh は元 WorkItem の終了状態を復元して Attention/Overview を publish する', async () => {
-    const originalWorkItem = await prisma.analysisWorkItem.create({
+    // succeeded はキュー表から消えて台帳へ移るため、元 WorkItem は台帳から復元される。
+    const originalWorkItem = await prisma.analysisWorkItemDone.create({
       data: {
         kind: 'read_model_refresh',
         triggerType: 'unhandled_trigger_type',
         triggerId: `trigger-${randomUUID()}`,
-        status: 'succeeded',
+        workItemId: createSyntheticSerialId(),
+        attemptCount: 1,
+        createdAt: new Date(),
       },
     })
 
     await processPostCompletionRefresh(prisma, {
-      id: `post-completion-refresh-${randomUUID()}`,
+      id: createSyntheticSerialId(),
       kind: 'post_completion_refresh',
       triggerType: 'work_item_completion',
-      triggerId: originalWorkItem.id,
+      triggerId: String(originalWorkItem.workItemId),
       status: 'succeeded',
       priority: 0,
       availableAt: new Date(),
@@ -314,11 +352,46 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     expect(overviewPointer).not.toBeNull()
   })
 
+  it('processPostCompletionRefresh は元 WorkItem がキュー表にも台帳にも無ければ例外にする', async () => {
+    await expect(
+      processPostCompletionRefresh(prisma, {
+        id: createSyntheticSerialId(),
+        kind: 'post_completion_refresh',
+        triggerType: 'work_item_completion',
+        triggerId: '2000000000',
+        status: 'leased',
+        priority: 0,
+        availableAt: new Date(),
+        leaseOwner: 'worker-1',
+        leaseExpiresAt: new Date(),
+        attemptCount: 1,
+        maxAttempts: 5,
+        dependencyKey: null,
+        staleRequestedAt: null,
+        lastErrorCode: null,
+        lastErrorSummary: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    ).rejects.toThrow('settled work item 2000000000 not found in queue or completion ledger')
+  })
+
   it('processPostCompletionRefresh は元 WorkItem の lastErrorCode も復元し、generic issue を新規作成しない', async () => {
-    const workItemId = `work-item-${randomUUID()}`
+    // handleWorkItemSettled の post-completion hook が一度失敗し、durable retry として post_completion_refresh 経由で同じ元 WorkItem を再処理する状況を再現する。
+    const originalWorkItem = await prisma.analysisWorkItem.create({
+      data: {
+        kind: 'label_aggregate_refresh',
+        triggerType: 'schedule',
+        triggerId: `trigger-${randomUUID()}`,
+        status: 'dead',
+        attemptCount: 1,
+        lastErrorCode: 'label_aggregate_snapshot_failed',
+        lastErrorSummary: 'transaction timeout',
+      },
+    })
     await detectAnalysisStageFailure(prisma, {
       kind: 'label_aggregate_refresh',
-      workItemId,
+      workItemId: String(originalWorkItem.id),
       attemptNumber: 1,
       status: 'dead',
       errorSummary: 'transaction timeout',
@@ -330,25 +403,11 @@ describe.skipIf(!process.env.DATABASE_URL)('worker-processors', () => {
     const issue = await prisma.operationalIssue.findFirstOrThrow()
     expect(issue.component).toBe('analyzer:label_aggregate_refresh:snapshot')
 
-    // handleWorkItemSettled の post-completion hook が一度失敗し、durable retry として post_completion_refresh 経由で同じ元 WorkItem を再処理する状況を再現する。
-    const originalWorkItem = await prisma.analysisWorkItem.create({
-      data: {
-        id: workItemId,
-        kind: 'label_aggregate_refresh',
-        triggerType: 'schedule',
-        triggerId: `trigger-${randomUUID()}`,
-        status: 'dead',
-        attemptCount: 1,
-        lastErrorCode: 'label_aggregate_snapshot_failed',
-        lastErrorSummary: 'transaction timeout',
-      },
-    })
-
     await processPostCompletionRefresh(prisma, {
-      id: `post-completion-refresh-${randomUUID()}`,
+      id: createSyntheticSerialId(),
       kind: 'post_completion_refresh',
       triggerType: 'work_item_completion',
-      triggerId: originalWorkItem.id,
+      triggerId: String(originalWorkItem.id),
       status: 'succeeded',
       priority: 0,
       availableAt: new Date(),
@@ -433,12 +492,16 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     await prisma.accountClassificationLatest.deleteMany()
     await prisma.accountSummaryLatest.deleteMany()
     await prisma.accountLabelChange.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
     await prisma.accountClassificationObservation.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.readModelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -446,14 +509,14 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     const lastCrawledAt = new Date('2026-01-03T00:00:00Z')
     const account = await prisma.account.create({
       data: {
-        id: 'acct_refresh',
+        id: '100281870708',
         screenName: 'dave',
         displayName: 'Dave',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt,
+        crawlState: { create: { lastCrawledAt } },
       },
     })
     const labelA = await prisma.labelDefinition.create({
@@ -557,8 +620,8 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
     expect(summary?.profileObservedAt.toISOString()).toBe(lastCrawledAt.toISOString())
     expect(summary?.lastClassificationChangedAt?.toISOString()).toBe(observedAt.toISOString())
 
-    // AccountLabelChange は AccountLabelLatest への書き込みを検出する DB トリガーが
-    // 生成するため、AccountLabelLatest を書かないこの経路では作られない。
+    // AccountLabelChange は AccountActiveLabel への書き込みを検出する DB トリガーが
+    // 生成するため、AccountActiveLabel を書かないこの経路では作られない。
     const changes = await prisma.accountLabelChange.findMany({
       where: { accountId: account.id },
     })
@@ -574,14 +637,14 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
   it('propagates label.evaluable/label.labeledAt as-is into AccountClassificationLatest', async () => {
     const account = await prisma.account.create({
       data: {
-        id: 'acct_refresh_evaluable',
+        id: '100785461175',
         screenName: 'henry',
         displayName: 'Henry',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+        crawlState: { create: { lastCrawledAt: new Date('2026-01-03T00:00:00Z') } },
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
@@ -633,14 +696,14 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
   it('leaves classificationObservedAt unset when the snapshot has no labels, keeping it in sync with AccountClassificationLatest having no rows', async () => {
     const account = await prisma.account.create({
       data: {
-        id: 'acct_pop_1',
+        id: '100005423728',
         screenName: 'alice',
         displayName: 'Alice',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+        crawlState: { create: { lastCrawledAt: new Date('2026-01-03T00:00:00Z') } },
       },
     })
     const observedAt = new Date('2026-01-02T00:00:00Z')
@@ -676,14 +739,14 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountSummaryRefresh', () =>
   it('builds AccountClassificationLatest/AccountSummaryLatest from classificationSnapshot, and does not generate AccountLabelChange at the app layer', async () => {
     const account = await prisma.account.create({
       data: {
-        id: 'acct_refresh_snapshot',
+        id: '100749310395',
         screenName: 'iris',
         displayName: 'Iris',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt: new Date('2026-01-03T00:00:00Z'),
+        crawlState: { create: { lastCrawledAt: new Date('2026-01-03T00:00:00Z') } },
       },
     })
     const labelDefinition = await prisma.labelDefinition.create({
@@ -751,12 +814,16 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () =>
     await prisma.accountClassificationLatest.deleteMany()
     await prisma.accountSummaryLatest.deleteMany()
     await prisma.accountLabelChange.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
     await prisma.accountClassificationObservation.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.readModelState.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.block.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
@@ -764,14 +831,14 @@ describe.skipIf(!process.env.DATABASE_URL)('processAccountFindingRefresh', () =>
     const lastCrawledAt = new Date('2026-01-03T00:00:00Z')
     const account = await prisma.account.create({
       data: {
-        id: 'acct_finding_refresh',
+        id: '100183168398',
         screenName: 'erin',
         displayName: 'Erin',
         followersCount: 0,
         followingCount: 0,
         tweetCount: 0,
         accountCreatedAt: new Date(),
-        lastCrawledAt,
+        crawlState: { create: { lastCrawledAt } },
       },
     })
     const priorClassificationObservedAt = new Date('2026-01-02T00:00:00Z')
@@ -901,9 +968,12 @@ describe.skipIf(!process.env.DATABASE_URL)('processLabelAggregateRefresh', () =>
     await prisma.labelSummaryCurrent.deleteMany()
     await prisma.labelMetricSnapshot.deleteMany()
     await prisma.accountClassificationLatest.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
     await prisma.readModelState.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
   })
 
@@ -1030,7 +1100,7 @@ describe('processLabelAggregateRefresh のエラーコード分岐', () => {
 
   it('publishGeneration が失敗すると label_summary_publish_failed を投げる', async () => {
     vi.spyOn(labelMetricSnapshotModule, 'buildLabelAggregateSnapshotSet').mockResolvedValue({
-      triggerWorkItemId: 'wi-1',
+      triggerWorkItemId: 1,
       snapshotAt: new Date(),
       reused: false,
     })

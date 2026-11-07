@@ -14,7 +14,7 @@ export interface RunBacktestInput {
   /** replay 対象期間の終了時刻。 */
   targetTo: Date
   /** replay 対象の LabelDefinition ID 一覧。 */
-  labelDefinitionIds: string[]
+  labelDefinitionIds: number[]
   /** 評価したい候補 policy。 */
   candidatePolicy: DetectionPolicy
   /** 比較基準となる現行 policy。 */
@@ -90,12 +90,12 @@ function evaluateAllRules(
  * @returns computeFingerprint に渡す dimensions
  */
 function fingerprintDimensions(
-  labelDefinitionId: string,
+  labelDefinitionId: number,
   result: { type: string; reason?: string },
 ): Record<string, string> {
   return result.reason
-    ? { label: labelDefinitionId, reason: result.reason }
-    : { label: labelDefinitionId }
+    ? { label: String(labelDefinitionId), reason: result.reason }
+    : { label: String(labelDefinitionId) }
 }
 
 /**

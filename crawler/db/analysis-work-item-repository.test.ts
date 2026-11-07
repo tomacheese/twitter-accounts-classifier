@@ -18,6 +18,7 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueWorkItem (crawler)', () => {
 
   beforeEach(async () => {
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
   })
 
   it('同じ kind + triggerType + triggerId を重複投入しない', async () => {
@@ -46,6 +47,50 @@ describe.skipIf(!process.env.DATABASE_URL)('enqueueWorkItem (crawler)', () => {
       }),
     ).toBe(1)
   })
+  it('台帳に完了済みの論理キーがあれば、キューに入れない', async () => {
+    await prisma.analysisWorkItemDone.create({
+      data: {
+        kind: 'label_metrics',
+        triggerType: 'crawl_run',
+        triggerId: 'crawl-done',
+        workItemId: 1,
+        attemptCount: 1,
+        createdAt: new Date(),
+      },
+    })
+
+    await enqueueWorkItem(prisma, {
+      kind: 'label_metrics',
+      triggerType: 'crawl_run',
+      triggerId: 'crawl-done',
+    })
+
+    expect(await prisma.analysisWorkItem.count()).toBe(0)
+  })
+
+  it('同じ論理キーを並行して投入しても 1 行にまとまる', async () => {
+    const key = { kind: 'label_metrics', triggerType: 'crawl_run', triggerId: 'crawl-race' }
+    await Promise.all(Array.from({ length: 20 }, () => enqueueWorkItem(prisma, key)))
+    await enqueueWorkItem(prisma, { ...key, triggerId: 'crawl-next' })
+
+    const rows = await prisma.analysisWorkItem.findMany({ orderBy: { id: 'asc' } })
+    expect(rows.map((row) => row.triggerId)).toEqual(['crawl-race', 'crawl-next'])
+  })
+
+  it('トランザクション内の enqueue はロールバックされる', async () => {
+    await expect(
+      prisma.$transaction(async (tx) => {
+        await enqueueWorkItem(tx, {
+          kind: 'label_metrics',
+          triggerType: 'crawl_run',
+          triggerId: 'crawl-rollback',
+        })
+        throw new Error('rollback')
+      }),
+    ).rejects.toThrow('rollback')
+
+    expect(await prisma.analysisWorkItem.count()).toBe(0)
+  })
 })
 
 describe.skipIf(!process.env.DATABASE_URL)(
@@ -55,6 +100,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
     beforeEach(async () => {
       await prisma.analysisWorkItem.deleteMany()
+      await prisma.analysisWorkItemDone.deleteMany()
     })
 
     it('新規 account を queued として作成する', async () => {
@@ -71,7 +117,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(item.status).toBe('queued')
     })
 
-    it('succeeded だった account を queued に戻す', async () => {
+    it('完了済みの account はキュー表から消え、台帳には入らず、再要求で新しい行として積み直される', async () => {
       await requestAccountRelabel(prisma, 'acct-1')
       const claimed = await claimNextWorkItem(prisma, {
         kinds: ['account_relabel'],
@@ -79,31 +125,164 @@ describe.skipIf(!process.env.DATABASE_URL)(
         leaseDurationMs: 60_000,
       })
       if (!claimed) throw new Error('claim に失敗した')
-      await completeAccountRelabelWorkItem(prisma, {
-        workItemId: claimed.id,
+      expect(
+        await completeAccountRelabelWorkItem(prisma, {
+          workItemId: claimed.id,
+          leaseOwner: 'worker-1',
+        }),
+      ).toBe('succeeded')
+      expect(await prisma.analysisWorkItem.count()).toBe(0)
+      expect(await prisma.analysisWorkItemDone.count()).toBe(0)
+
+      await requestAccountRelabel(prisma, 'acct-1')
+
+      const item = await prisma.analysisWorkItem.findFirstOrThrow()
+      expect(item.status).toBe('queued')
+      expect(item.id).not.toBe(claimed.id)
+      expect(item.attemptCount).toBe(0)
+    })
+
+    it('bulk でも、完了済みの account を新しい行として積み直す', async () => {
+      await requestAccountRelabelBulk(prisma, ['acct-1', 'acct-2'])
+      const queuedRows = await prisma.analysisWorkItem.findMany()
+      const claimed = await claimWorkItemBatchByIds(prisma, {
+        ids: queuedRows.map((row) => row.id),
+        leaseOwner: 'worker-1',
+        leaseDurationMs: 60_000,
+      })
+      await completeAccountRelabelWorkItemsBulk(prisma, {
+        workItemIds: claimed.map((row) => row.id),
+        leaseOwner: 'worker-1',
+      })
+      expect(await prisma.analysisWorkItem.count()).toBe(0)
+
+      await requestAccountRelabelBulk(prisma, ['acct-1', 'acct-2'])
+
+      const rows = await prisma.analysisWorkItem.findMany({ orderBy: { triggerId: 'asc' } })
+      expect(rows.map((row) => [row.triggerId, row.status])).toEqual([
+        ['acct-1', 'queued'],
+        ['acct-2', 'queued'],
+      ])
+    })
+
+    it('failed・dead の行は bulk の再要求で queued に戻る', async () => {
+      await requestAccountRelabelBulk(prisma, ['acct-1', 'acct-2'])
+      const [first, second] = await prisma.analysisWorkItem.findMany({ orderBy: { id: 'asc' } })
+      await prisma.analysisWorkItem.update({
+        where: { id: first.id },
+        data: { status: 'failed', attemptCount: 3 },
+      })
+      await prisma.analysisWorkItem.update({ where: { id: second.id }, data: { status: 'dead' } })
+
+      await requestAccountRelabelBulk(prisma, ['acct-1', 'acct-2'])
+
+      const rows = await prisma.analysisWorkItem.findMany({ orderBy: { id: 'asc' } })
+      expect(rows.map((row) => [row.id, row.status, row.attemptCount])).toEqual([
+        [first.id, 'queued', 0],
+        [second.id, 'queued', 0],
+      ])
+    })
+
+    it('既存行への再要求は、行数も識別子の採番も増やさない', async () => {
+      await requestAccountRelabelBulk(prisma, ['acct-1', 'acct-1', 'acct-2'])
+      const before = await prisma.analysisWorkItem.findMany({ orderBy: { id: 'asc' } })
+      expect(before).toHaveLength(2)
+
+      await requestAccountRelabelBulk(prisma, ['acct-1', 'acct-2'])
+      await requestAccountRelabelBulk(prisma, ['acct-1', 'acct-3'])
+
+      const after = await prisma.analysisWorkItem.findMany({ orderBy: { id: 'asc' } })
+      expect(after.map((row) => row.triggerId)).toEqual(['acct-1', 'acct-2', 'acct-3'])
+      expect(after[2].id - after[1].id).toBe(1)
+    })
+
+    it('同じ account を並行して要求しても 1 行にまとまる', async () => {
+      await Promise.all(
+        Array.from({ length: 10 }, () => requestAccountRelabelBulk(prisma, ['acct-1', 'acct-2'])),
+      )
+
+      expect(await prisma.analysisWorkItem.count()).toBe(2)
+    })
+
+    it('2 万 account の bulk 要求を 1 回の呼び出しで、数秒以内に処理する', async () => {
+      const accountIds = Array.from({ length: 20_000 }, (_, i) => `bulk-${i}`)
+      await requestAccountRelabelBulk(prisma, accountIds.slice(0, 10_000))
+
+      const started = Date.now()
+      await requestAccountRelabelBulk(prisma, accountIds)
+      const elapsedMs = Date.now() - started
+
+      expect(await prisma.analysisWorkItem.count()).toBe(20_000)
+      expect(elapsedMs).toBeLessThan(10_000)
+    }, 30_000)
+
+    it('完了の bulk は、変更要求が来た行だけを queued に戻し、残りを削除する', async () => {
+      await requestAccountRelabelBulk(prisma, ['acct-1', 'acct-2', 'acct-3'])
+      const queuedRows = await prisma.analysisWorkItem.findMany()
+      const claimed = await claimWorkItemBatchByIds(prisma, {
+        ids: queuedRows.map((row) => row.id),
+        leaseOwner: 'worker-1',
+        leaseDurationMs: 60_000,
+      })
+      await requestAccountRelabel(prisma, 'acct-2')
+
+      const outcomes = await completeAccountRelabelWorkItemsBulk(prisma, {
+        workItemIds: claimed.map((row) => row.id),
         leaseOwner: 'worker-1',
       })
 
-      await requestAccountRelabel(prisma, 'acct-1')
-
-      const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: claimed.id } })
-      expect(item.status).toBe('queued')
+      const byId = new Map(claimed.map((row) => [row.id, row.triggerId]))
+      expect(outcomes.map((row) => [byId.get(row.id), row.status]).toSorted()).toEqual([
+        ['acct-1', 'succeeded'],
+        ['acct-2', 'requeued'],
+        ['acct-3', 'succeeded'],
+      ])
+      const remaining = await prisma.analysisWorkItem.findMany()
+      expect(remaining.map((row) => [row.triggerId, row.status])).toEqual([['acct-2', 'queued']])
     })
 
-    it('bulk でも succeeded だった account を queued に戻す', async () => {
+    it('完了が行ロックを保持している間に届いた再要求は、完了後に新しい行として積み直される', async () => {
       await requestAccountRelabel(prisma, 'acct-1')
-      const existing = await prisma.analysisWorkItem.findFirstOrThrow({
-        where: { kind: 'account_relabel', triggerType: 'account', triggerId: 'acct-1' },
+      const claimed = await claimNextWorkItem(prisma, {
+        kinds: ['account_relabel'],
+        leaseOwner: 'worker-1',
+        leaseDurationMs: 60_000,
       })
-      await prisma.analysisWorkItem.update({
-        where: { id: existing.id },
-        data: { status: 'succeeded' },
+      if (!claimed) throw new Error('claim に失敗した')
+
+      let request: Promise<void> | undefined
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "AnalysisWorkItem" WHERE "id" = ${claimed.id} FOR UPDATE`
+        request = requestAccountRelabelBulk(prisma, ['acct-1'])
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        await completeAccountRelabelWorkItemsBulk(tx, {
+          workItemIds: [claimed.id],
+          leaseOwner: 'worker-1',
+        })
+      })
+      await request
+
+      const rows = await prisma.analysisWorkItem.findMany()
+      expect(rows.map((row) => [row.triggerId, row.status])).toEqual([['acct-1', 'queued']])
+    })
+
+    it('別 owner の完了は何も変えず、lease_lost を返す', async () => {
+      await requestAccountRelabel(prisma, 'acct-1')
+      const claimed = await claimNextWorkItem(prisma, {
+        kinds: ['account_relabel'],
+        leaseOwner: 'worker-1',
+        leaseDurationMs: 60_000,
+      })
+      if (!claimed) throw new Error('claim に失敗した')
+
+      const outcome = await completeAccountRelabelWorkItem(prisma, {
+        workItemId: claimed.id,
+        leaseOwner: 'worker-2',
       })
 
-      await requestAccountRelabelBulk(prisma, ['acct-1'])
-
-      const item = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: existing.id } })
-      expect(item.status).toBe('queued')
+      expect(outcome).toBe('lease_lost')
+      const row = await prisma.analysisWorkItem.findUniqueOrThrow({ where: { id: claimed.id } })
+      expect(row.status).toBe('leased')
     })
 
     it('レース: leased 中に再要求が来た場合、complete で succeeded にならず queued に戻る', async () => {
@@ -187,6 +366,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
     beforeEach(async () => {
       await prisma.analysisWorkItem.deleteMany()
+      await prisma.analysisWorkItemDone.deleteMany()
     })
 
     it('期限切れかつ attemptCount 使い切りの leased 行は request で queued に全リセットされる', async () => {
@@ -342,6 +522,7 @@ describe.skipIf(!process.env.DATABASE_URL)('recoverExhaustedExpiredWorkItems (DB
 
   beforeEach(async () => {
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
   })
 
   it('staleRequestedAt が立っている orphan は queued に戻す', async () => {
@@ -556,8 +737,8 @@ describe('peekWorkItemCandidates (mock)', () => {
 
   it('$queryRaw が返した id・triggerId をそのまま返す (lease は更新しない)', async () => {
     const queryRaw = vi.fn().mockResolvedValue([
-      { id: 'wi-1', triggerId: 'alice' },
-      { id: 'wi-2', triggerId: 'bob' },
+      { id: 1, triggerId: 'alice' },
+      { id: 2, triggerId: 'bob' },
     ])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
@@ -567,8 +748,8 @@ describe('peekWorkItemCandidates (mock)', () => {
     })
 
     expect(result).toEqual([
-      { id: 'wi-1', triggerId: 'alice' },
-      { id: 'wi-2', triggerId: 'bob' },
+      { id: 1, triggerId: 'alice' },
+      { id: 2, triggerId: 'bob' },
     ])
     expect(queryRaw).toHaveBeenCalledTimes(1)
     const sql = (queryRaw.mock.calls[0][0] as unknown[]).join('')
@@ -593,12 +774,12 @@ describe('claimWorkItemBatchByIds (mock)', () => {
   })
 
   it('id = ANY(...) を条件に FOR UPDATE SKIP LOCKED で claim する', async () => {
-    const claimedRow = { id: 'wi-1', triggerId: 'alice', status: 'leased' }
+    const claimedRow = { id: 1, triggerId: 'alice', status: 'leased' }
     const queryRaw = vi.fn().mockResolvedValue([claimedRow])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
     const result = await claimWorkItemBatchByIds(prisma, {
-      ids: ['wi-1', 'wi-2'],
+      ids: [1, 2],
       leaseOwner: 'worker-1',
       leaseDurationMs: 60_000,
     })
@@ -627,20 +808,20 @@ describe('completeAccountRelabelWorkItemsBulk (mock)', () => {
 
   it('id = ANY(...) と leaseOwner 一致を条件に 1 回の UPDATE でまとめて完了させる', async () => {
     const queryRaw = vi.fn().mockResolvedValue([
-      { id: 'wi-1', status: 'succeeded' },
-      { id: 'wi-2', status: 'queued' },
+      { id: 1, status: 'succeeded' },
+      { id: 2, status: 'queued' },
     ])
     const prisma = { $queryRaw: queryRaw } as unknown as PrismaClient
 
     const result = await completeAccountRelabelWorkItemsBulk(prisma, {
-      workItemIds: ['wi-1', 'wi-2', 'wi-3'],
+      workItemIds: [1, 2, 3],
       leaseOwner: 'worker-1',
     })
 
     // wi-3 は結果に含まれない = lease を失っていた ('lease_lost' 相当)。
     expect(result).toEqual([
-      { id: 'wi-1', status: 'succeeded' },
-      { id: 'wi-2', status: 'requeued' },
+      { id: 1, status: 'succeeded' },
+      { id: 2, status: 'requeued' },
     ])
     expect(queryRaw).toHaveBeenCalledTimes(1)
     const sql = (queryRaw.mock.calls[0][0] as unknown[]).join('')
@@ -656,6 +837,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
     beforeEach(async () => {
       await prisma.analysisWorkItem.deleteMany()
+      await prisma.analysisWorkItemDone.deleteMany()
     })
 
     it('peek は lease を更新しない', async () => {

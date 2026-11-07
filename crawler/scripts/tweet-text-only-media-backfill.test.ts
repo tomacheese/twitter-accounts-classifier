@@ -13,9 +13,12 @@ const REQUIRED_ARGS = [
   '2026-09-28T00:00:00Z',
 ]
 
+// テストの Tweet は id ごとに accountId = `a${id}` の別アカウントに属する。
+const key = (id: string) => ({ accountId: `a${id}`, id })
+
 function makePrisma(windows: string[][], affectedPerWindow: number[]) {
   const queryRaw = vi.fn()
-  for (const ids of windows) queryRaw.mockResolvedValueOnce(ids.map((id) => ({ id })))
+  for (const ids of windows) queryRaw.mockResolvedValueOnce(ids.map((id) => key(id)))
   queryRaw.mockResolvedValue([])
   const executeRaw = vi.fn()
   for (const affected of affectedPerWindow) executeRaw.mockResolvedValueOnce(affected)
@@ -52,11 +55,17 @@ describe('parseTextOnlyBackfillArgs', () => {
     expect(run.batchSize).toBe(50)
   })
 
-  it('rejects an after-id that is not a numeric tweet id', () => {
-    expect(() => parseTextOnlyBackfillArgs([...REQUIRED_ARGS, '--after-id', '--execute'])).toThrow(
-      '--after-id must be a numeric tweet id',
+  it('rejects an after-key that is not <accountId>:<tweetId>', () => {
+    expect(() => parseTextOnlyBackfillArgs([...REQUIRED_ARGS, '--after-key', '--execute'])).toThrow(
+      '--after-key must be <accountId>:<tweetId>',
     )
-    expect(parseTextOnlyBackfillArgs([...REQUIRED_ARGS, '--after-id', '123']).afterId).toBe('123')
+    expect(() => parseTextOnlyBackfillArgs([...REQUIRED_ARGS, '--after-key', '123'])).toThrow(
+      '--after-key must be <accountId>:<tweetId>',
+    )
+    expect(parseTextOnlyBackfillArgs([...REQUIRED_ARGS, '--after-key', '7:123']).after).toEqual({
+      accountId: '7',
+      id: '123',
+    })
   })
 
   it('rejects a non-positive batch size', () => {
@@ -70,7 +79,7 @@ describe('runTextOnlyMediaBackfill', () => {
   it('does not write in dry-run and reports the candidates found in the sampled window', async () => {
     const { prisma, executeRaw, queryRaw } = makePrisma([['1', '2', '3']], [])
     queryRaw.mockReset()
-    queryRaw.mockResolvedValueOnce([{ id: '1' }, { id: '2' }, { id: '3' }])
+    queryRaw.mockResolvedValueOnce([key('1'), key('2'), key('3')])
     queryRaw.mockResolvedValueOnce([{ count: 2n }])
     const deps = makeDeps(prisma)
 
@@ -81,7 +90,7 @@ describe('runTextOnlyMediaBackfill', () => {
       mode: 'dry-run',
       scanned: 3,
       candidates: 2,
-      lastId: '3',
+      lastKey: 'a3:3',
     })
   })
 
@@ -100,7 +109,7 @@ describe('runTextOnlyMediaBackfill', () => {
       mode: 'execute',
       scanned: 3,
       updated: 3,
-      lastId: '3',
+      lastKey: 'a3:3',
     })
   })
 
@@ -114,6 +123,6 @@ describe('runTextOnlyMediaBackfill', () => {
     )
 
     expect(executeRaw).toHaveBeenCalledTimes(2)
-    expect(JSON.parse(deps.logs.at(-1) ?? '{}')).toMatchObject({ lastId: '2', updated: 2 })
+    expect(JSON.parse(deps.logs.at(-1) ?? '{}')).toMatchObject({ lastKey: 'a2:2', updated: 2 })
   })
 })

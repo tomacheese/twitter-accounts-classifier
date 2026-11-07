@@ -1,5 +1,22 @@
 import type { PrismaClient } from '../generated/prisma'
 
+/**
+ * Account.crawlState から最終クロール時刻を取り出す。
+ * crawlState は Account 作成と同時に作られる不変条件のため、欠けていれば異常として止める。
+ * @param account - id と crawlState を読み込んだ Account
+ * @returns 最終クロール時刻
+ * @throws crawlState が無い場合
+ */
+export function requireLastCrawledAt(account: {
+  id: string
+  crawlState: { lastCrawledAt: Date } | null
+}): Date {
+  if (account.crawlState === null) {
+    throw new Error(`AccountCrawlState row is missing for account ${account.id}`)
+  }
+  return account.crawlState.lastCrawledAt
+}
+
 /** upsertAccountSummaryLatest の入力。呼び出し元が更新しない component は現在値をそのまま渡す。 */
 export interface UpsertAccountSummaryLatestInput {
   accountId: string
@@ -46,7 +63,7 @@ export async function upsertAccountSummaryLatest(
       "activeLabelKeys", "activeLabelCount", "lastClassificationChangedAt", "classificationObservedAt",
       "activeFindingCount", "highestFindingSeverity", "findingObservedAt", now()
     FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS u(
-      "accountId" text, "normalizedScreenName" text, "normalizedDisplayName" text, "searchDocument" text,
+      "accountId" bigint, "normalizedScreenName" text, "normalizedDisplayName" text, "searchDocument" text,
       "profileObservedAt" timestamp, "activeLabelKeys" text[], "activeLabelCount" int,
       "lastClassificationChangedAt" timestamp, "classificationObservedAt" timestamp,
       "activeFindingCount" int, "highestFindingSeverity" text, "findingObservedAt" timestamp
@@ -95,7 +112,7 @@ export async function upsertAccountSummaryLatest(
 /** upsertAccountClassificationLatest の入力行。 */
 export interface AccountClassificationLatestRow {
   accountId: string
-  labelDefinitionId: string
+  labelDefinitionId: number
   value: boolean
   confidence: number
   reason: string
@@ -143,8 +160,8 @@ export async function upsertAccountClassificationLatest(
       "observedAt", "sourceObservationId", "evaluable", "labeledAt"
     )
     SELECT * FROM UNNEST(
-      ${sortedRows.map((row) => row.accountId)}::text[],
-      ${sortedRows.map((row) => row.labelDefinitionId)}::text[],
+      ${sortedRows.map((row) => row.accountId)}::bigint[],
+      ${sortedRows.map((row) => row.labelDefinitionId)}::smallint[],
       ${sortedRows.map((row) => row.value)}::boolean[],
       ${sortedRows.map((row) => row.confidence)}::double precision[],
       ${sortedRows.map((row) => row.reason)}::text[],

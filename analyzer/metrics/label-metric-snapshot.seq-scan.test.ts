@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { createSyntheticId } from 'id-boundary'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { getPrismaClient } from '../db/client'
 
@@ -41,20 +42,26 @@ const NOISE_LABEL_COUNT = 2000
 const NOISE_ACCOUNT_COUNT = 2000
 
 describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Scan', () => {
-  const labelId = `label_seqscan_${randomUUID()}`
-  const noiseLabelIds = Array.from(
-    { length: NOISE_LABEL_COUNT },
-    (_, index) => `${labelId}_noise_${index}`,
-  )
-  const allLabelIds = [labelId, ...noiseLabelIds]
+  const labelKey = `label_seqscan_${randomUUID()}`
+  const noiseAccountBase = BigInt(createSyntheticId())
+  const noiseAccountId = (index: number): string => String(noiseAccountBase + BigInt(index))
+  let labelId = 0
+  let noiseLabelIds: number[] = []
+  let allLabelIds: number[] = []
 
   beforeAll(async () => {
-    await prisma.labelDefinition.create({
-      data: { id: labelId, key: labelId, description: 'テスト用ラベル' },
+    const label = await prisma.labelDefinition.create({
+      data: { key: labelKey, description: 'テスト用ラベル' },
     })
-    await prisma.labelDefinition.createMany({
-      data: noiseLabelIds.map((id) => ({ id, key: id, description: 'ノイズ用ラベル' })),
+    labelId = label.id
+    const noiseLabels = await prisma.labelDefinition.createManyAndReturn({
+      data: Array.from({ length: NOISE_LABEL_COUNT }, (_, index) => ({
+        key: `${labelKey}_noise_${index}`,
+        description: 'ノイズ用ラベル',
+      })),
     })
+    noiseLabelIds = noiseLabels.map((noiseLabel) => noiseLabel.id)
+    allLabelIds = [labelId, ...noiseLabelIds]
     await prisma.accountClassificationValueCount.create({
       data: { labelDefinitionId: labelId, value: true, count: 1, confidenceSum: 0.5 },
     })
@@ -101,7 +108,7 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
 
     await prisma.account.createMany({
       data: Array.from({ length: NOISE_ACCOUNT_COUNT }, (_, index) => ({
-        id: `account-seq-scan-noise-${index}`,
+        id: noiseAccountId(index),
         screenName: `account_seq_scan_noise_${index}`,
         displayName: `Noise ${index}`,
         followersCount: 0,
@@ -112,7 +119,7 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
     })
     await prisma.accountClassificationLatest.createMany({
       data: Array.from({ length: NOISE_ACCOUNT_COUNT }, (_, index) => ({
-        accountId: `account-seq-scan-noise-${index}`,
+        accountId: noiseAccountId(index),
         labelDefinitionId: noiseLabelIds[index % noiseLabelIds.length],
         value: index % 50 === 0,
         confidence: 0.5,
@@ -124,7 +131,7 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
     })
     await prisma.accountSummaryLatest.createMany({
       data: Array.from({ length: NOISE_ACCOUNT_COUNT }, (_, index) => ({
-        accountId: `account-seq-scan-noise-${index}`,
+        accountId: noiseAccountId(index),
         normalizedScreenName: `account_seq_scan_noise_${index}`,
         normalizedDisplayName: `noise ${index}`,
         searchDocument: `account_seq_scan_noise_${index} noise ${index}`,
@@ -146,28 +153,31 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
 
   afterAll(async () => {
     await prisma.accountClassificationValueCount.deleteMany({
-      where: { labelDefinitionId: { in: [labelId, ...noiseLabelIds] } },
+      where: { labelDefinitionId: { in: allLabelIds } },
     })
     await prisma.accountClassificationConfidenceBucketCount.deleteMany({
-      where: { labelDefinitionId: { in: [labelId, ...noiseLabelIds] } },
+      where: { labelDefinitionId: { in: allLabelIds } },
     })
     await prisma.accountClassificationRuleVersionCount.deleteMany({
-      where: { labelDefinitionId: { in: [labelId, ...noiseLabelIds] } },
+      where: { labelDefinitionId: { in: allLabelIds } },
     })
     await prisma.accountClassificationFreshnessBucket.deleteMany({
-      where: { labelDefinitionId: { in: [labelId, ...noiseLabelIds] } },
+      where: { labelDefinitionId: { in: allLabelIds } },
     })
     await prisma.accountClassificationReasonCount.deleteMany({
-      where: { labelDefinitionId: { in: [labelId, ...noiseLabelIds] } },
+      where: { labelDefinitionId: { in: allLabelIds } },
     })
     await prisma.accountClassificationLatest.deleteMany({
-      where: { accountId: { startsWith: 'account-seq-scan-noise-' } },
+      where: { accountId: { gte: noiseAccountId(0), lte: noiseAccountId(NOISE_ACCOUNT_COUNT) } },
     })
     await prisma.accountSummaryLatest.deleteMany({
-      where: { accountId: { startsWith: 'account-seq-scan-noise-' } },
+      where: { accountId: { gte: noiseAccountId(0), lte: noiseAccountId(NOISE_ACCOUNT_COUNT) } },
     })
-    await prisma.account.deleteMany({ where: { id: { startsWith: 'account-seq-scan-noise-' } } })
-    await prisma.labelDefinition.deleteMany({ where: { id: { in: [labelId, ...noiseLabelIds] } } })
+    await prisma.account.deleteMany({
+      where: { id: { gte: noiseAccountId(0), lte: noiseAccountId(NOISE_ACCOUNT_COUNT) } },
+    })
+    await prisma.labelRuleVersion.deleteMany({ where: { labelDefinitionId: { in: allLabelIds } } })
+    await prisma.labelDefinition.deleteMany({ where: { id: { in: allLabelIds } } })
   })
 
   it('AccountSummaryLatest 基準の populationCount クエリ', async () => {
@@ -179,16 +189,16 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
     expect(collectSeqScans(plan, 'AccountClassificationLatest')).toHaveLength(0)
   })
 
-  const perTableQueries = [
-    `SELECT "labelDefinitionId", "value", "count", "confidenceSum" FROM "AccountClassificationValueCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
-    `SELECT "labelDefinitionId", "confidenceBucket", "count" FROM "AccountClassificationConfidenceBucketCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
-    `SELECT "labelDefinitionId", "ruleVersion", "count" FROM "AccountClassificationRuleVersionCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
-    `SELECT "labelDefinitionId", SUM("count") FROM "AccountClassificationFreshnessBucket" WHERE "labelDefinitionId" IN ('${labelId}') GROUP BY 1`,
-    `SELECT "labelDefinitionId", "reason", "count" FROM "AccountClassificationReasonCount" WHERE "labelDefinitionId" IN ('${labelId}')`,
+  const perTableQueries = (): string[] => [
+    `SELECT "labelDefinitionId", "value", "count", "confidenceSum" FROM "AccountClassificationValueCount" WHERE "labelDefinitionId" IN (${labelId})`,
+    `SELECT "labelDefinitionId", "confidenceBucket", "count" FROM "AccountClassificationConfidenceBucketCount" WHERE "labelDefinitionId" IN (${labelId})`,
+    `SELECT "labelDefinitionId", "ruleVersion", "count" FROM "AccountClassificationRuleVersionCount" WHERE "labelDefinitionId" IN (${labelId})`,
+    `SELECT "labelDefinitionId", SUM("count") FROM "AccountClassificationFreshnessBucket" WHERE "labelDefinitionId" IN (${labelId}) GROUP BY 1`,
+    `SELECT "labelDefinitionId", "reason", "count" FROM "AccountClassificationReasonCount" WHERE "labelDefinitionId" IN (${labelId})`,
   ]
 
-  it(`${perTableQueries.length} つの集計テーブル読み取りクエリ`, async () => {
-    for (const sql of perTableQueries) {
+  it('5 つの集計テーブル読み取りクエリ', async () => {
+    for (const sql of perTableQueries()) {
       const plan = await explain(sql)
       const table = /FROM "(\w+)"/.exec(sql)?.[1] ?? ''
       expect(collectSeqScans(plan, table)).toHaveLength(0)
@@ -196,7 +206,7 @@ describe.skipIf(!process.env.DATABASE_URL)('label aggregate queries avoid Seq Sc
   })
 
   it('reasonDistribution クエリは AccountClassificationLatest を一切参照しない', async () => {
-    const labelIdsSql = allLabelIds.map((id) => `'${id}'`).join(', ')
+    const labelIdsSql = allLabelIds.join(', ')
     const plan = await explain(
       `SELECT "labelDefinitionId", "reason", "count" FROM "AccountClassificationReasonCount" WHERE "labelDefinitionId" IN (${labelIdsSql})`,
     )

@@ -36,6 +36,11 @@ export interface AccountListResult {
   totalCount: number
 }
 
+// 全件ソートが想定外に長引いたときに DB を占有し続けないよう、一覧の取得に上限時間を設ける。
+const ACCOUNT_LIST_STATEMENT_TIMEOUT_MS = 20_000
+// Prisma の対話型 transaction は既定 5 秒で閉じるため、2 文分の statement_timeout より長くする。
+const ACCOUNT_LIST_TRANSACTION_TIMEOUT_MS = ACCOUNT_LIST_STATEMENT_TIMEOUT_MS * 2 + 5000
+
 interface MatchingAccountIdRow {
   accountId: string
 }
@@ -46,8 +51,36 @@ interface ActiveLabelRow {
 }
 
 /**
+ * 同値の行でページ境界が揺れないよう、id を第 2 キーにして順序を決定的にする。
+ * @param sortBy - ソート対象の列
+ * @param direction - ソート方向
+ * @returns Prisma の orderBy
+ */
+export function buildAccountOrderBy(
+  sortBy: AccountSortField,
+  direction: SortDirection,
+): Prisma.AccountOrderByWithRelationInput[] {
+  return [
+    sortBy === 'lastCrawledAt'
+      ? { crawlState: { lastCrawledAt: direction } }
+      : { [sortBy]: direction },
+    { id: 'asc' },
+  ]
+}
+
+function requireLastCrawledAt(row: {
+  id: string
+  crawlState: { lastCrawledAt: Date } | null
+}): Date {
+  if (row.crawlState === null) {
+    throw new Error(`AccountCrawlState row is missing for account ${row.id}`)
+  }
+  return row.crawlState.lastCrawledAt
+}
+
+/**
  * 指定したラベルキーのいずれかで最新評価が `true` のアカウント ID を返す。
- * `AccountLabelLatest` を読む (設計意図は prisma/schema.prisma のコメントを参照)。
+ * true のラベルだけを持つ `AccountActiveLabel` を読む (設計意図は prisma/schema.prisma のコメントを参照)。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param labelKeys - マッチ対象のラベルキー (OR 条件)
  * @returns 一致したアカウント ID
@@ -57,10 +90,10 @@ async function findAccountIdsWithAnyLabel(
   labelKeys: string[],
 ): Promise<string[]> {
   const rows = await prisma.$queryRaw<MatchingAccountIdRow[]>`
-    SELECT DISTINCT ll."accountId" AS "accountId"
-    FROM "AccountLabelLatest" ll
+    SELECT DISTINCT ll."accountId"::text AS "accountId"
+    FROM "AccountActiveLabel" ll
     JOIN "LabelDefinition" ld ON ld.id = ll."labelDefinitionId"
-    WHERE ll.value = true AND ld.key IN (${Prisma.join(labelKeys)})
+    WHERE ld.key IN (${Prisma.join(labelKeys)})
   `
   return rows.map((row) => row.accountId)
 }
@@ -69,7 +102,7 @@ async function findAccountIdsWithAnyLabel(
  * 指定した各アカウントについて、
  * 有効な (最新評価が `true` の) ラベルキーを読み込む。
  * アカウント一覧のラベルバッジ表示用。
- * `AccountLabelLatest` を読む点は {@link findAccountIdsWithAnyLabel} と同じ。
+ * `AccountActiveLabel` を読む点は {@link findAccountIdsWithAnyLabel} と同じ。
  * @param prisma - クエリを実行する Prisma クライアント
  * @param accountIds - 有効ラベルを読み込む対象のアカウント
  * @returns アカウント ID から有効ラベルキー一覧へのマップ
@@ -83,10 +116,10 @@ async function getActiveLabelKeysByAccount(
   }
 
   const rows = await prisma.$queryRaw<ActiveLabelRow[]>`
-    SELECT ll."accountId" AS "accountId", ld.key AS "key"
-    FROM "AccountLabelLatest" ll
+    SELECT ll."accountId"::text AS "accountId", ld.key AS "key"
+    FROM "AccountActiveLabel" ll
     JOIN "LabelDefinition" ld ON ld.id = ll."labelDefinitionId"
-    WHERE ll.value = true AND ll."accountId" IN (${Prisma.join(accountIds)})
+    WHERE ll."accountId" = ANY(${accountIds}::bigint[])
   `
 
   const map = new Map<string, string[]>()
@@ -135,16 +168,22 @@ export async function listAccounts(
   }
 
   const where = accountIdFilter ? { id: { in: accountIdFilter } } : {}
+  const orderBy = buildAccountOrderBy(filters.sortBy, filters.sortDirection)
 
-  const [rows, totalCount] = await Promise.all([
-    prisma.account.findMany({
-      where,
-      orderBy: { [filters.sortBy]: filters.sortDirection },
-      skip: (filters.page - 1) * filters.pageSize,
-      take: filters.pageSize,
-    }),
-    prisma.account.count({ where }),
-  ])
+  const [rows, totalCount] = await prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT set_config('statement_timeout', ${String(ACCOUNT_LIST_STATEMENT_TIMEOUT_MS)}, true)`
+      const pageRows = await tx.account.findMany({
+        where,
+        orderBy,
+        skip: (filters.page - 1) * filters.pageSize,
+        take: filters.pageSize,
+        include: { crawlState: { select: { lastCrawledAt: true } } },
+      })
+      return [pageRows, await tx.account.count({ where })] as const
+    },
+    { timeout: ACCOUNT_LIST_TRANSACTION_TIMEOUT_MS },
+  )
 
   const activeLabelsByAccount = await getActiveLabelKeysByAccount(
     prisma,
@@ -158,7 +197,7 @@ export async function listAccounts(
       displayName: row.displayName,
       followersCount: row.followersCount,
       tweetCount: row.tweetCount,
-      lastCrawledAt: row.lastCrawledAt,
+      lastCrawledAt: requireLastCrawledAt(row),
       isBlueVerified: row.isBlueVerified,
       activeLabelKeys: activeLabelsByAccount.get(row.id) ?? [],
     })),

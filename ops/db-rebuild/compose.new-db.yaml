@@ -1,0 +1,47 @@
+# 新 DB (DB 作り直し用) の postgres コンテナ定義。
+# 既存の compose.yaml とはプロジェクト名、コンテナ名、ポート、データディレクトリを分離しており、
+# 旧 DB と並べて起動できる。使い方は README.md を参照する。
+#
+#   DB_PROFILE=bulk   一括投入用
+#   DB_PROFILE=steady 定常運用用 (WAL アーカイブ有効)
+# DB_PROFILE は必須にしている。既定値を持たせると、steady 運用中に指定を忘れた up で bulk 設定へ戻ってしまう。
+name: ${NEW_DB_PROJECT:-tac-new-db}
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: ${NEW_DB_IMAGE:-postgres:17-alpine}
+    container_name: ${NEW_DB_CONTAINER_NAME:-tac-new-postgres}
+    restart: unless-stopped
+    # 並列クエリの dynamic shared memory 用。64MB の Docker 既定値では不足する。
+    shm_size: 1gb
+    # 15GB を共有するホストで、新 DB が他コンテナを巻き込んで OOM しないよう上限を設ける。
+    # shared_buffers と maintenance 系の確保に加え、dirty ページも cgroup に数えられるため余裕を持たせる。
+    mem_limit: ${NEW_DB_MEM_LIMIT:-10g}
+    # SIGTERM (smart shutdown) は接続が残る限り終了しないため、fast shutdown になる SIGINT で止める。
+    stop_signal: SIGINT
+    stop_grace_period: 120s
+    command: ["postgres", "-c", "config_file=/etc/postgresql-new/postgresql.conf"]
+    environment:
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      # initdb.sh で初期化済みのデータディレクトリ。旧 DB とは別のホストパスにする。
+      - ${NEW_DB_DATA_HOST_PATH:-/mnt/ssd/twitter-accounts-classifier/postgres-new}:/var/lib/postgresql/data
+      - ./conf/postgresql.conf:/etc/postgresql-new/postgresql.conf:ro
+      - ./conf/profile-${DB_PROFILE:?DB_PROFILE must be bulk or steady}.conf:/etc/postgresql-new/profile.conf:ro
+      - ${NEW_DB_WAL_ARCHIVE_HOST_PATH:-/mnt/ssd/twitter-accounts-classifier/postgres-new-wal-archive}:/wal-archive
+      - ${NEW_DB_BACKUP_HOST_PATH:-/mnt/ssd/twitter-accounts-classifier/postgres-new-backup}:/backup
+    ports:
+      # 旧 DB (5432、ホスト非公開) と衝突しない別ポート。既定はローカルのみ。
+      - "${NEW_DB_BIND:-127.0.0.1}:${NEW_DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NEW_DB_USER:-tac_owner} -d ${NEW_DB_NAME:-twitter_accounts_classifier}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging

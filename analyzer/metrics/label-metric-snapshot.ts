@@ -87,35 +87,35 @@ function assertFreshnessThresholdsCompatibleWithBucketing(freshnessThresholdsMs:
  */
 async function compactFreshnessBuckets(
   tx: Prisma.TransactionClient,
-  labelDefinitionId: string,
+  labelDefinitionId: number,
 ): Promise<void> {
   await tx.$executeRaw`
     INSERT INTO "AccountClassificationFreshnessBucket" ("labelDefinitionId", "observedAtBucket", "count")
-    VALUES (${labelDefinitionId}, TIMESTAMP '1970-01-01', 0)
+    VALUES (${labelDefinitionId}::smallint, TIMESTAMP '1970-01-01', 0)
     ON CONFLICT DO NOTHING
   `
   await tx.$queryRaw`
     SELECT * FROM "AccountClassificationFreshnessBucket"
-    WHERE "labelDefinitionId" = ${labelDefinitionId} AND "observedAtBucket" = TIMESTAMP '1970-01-01'
+    WHERE "labelDefinitionId" = ${labelDefinitionId}::smallint AND "observedAtBucket" = TIMESTAMP '1970-01-01'
     FOR UPDATE
   `
   await tx.$executeRaw`
     WITH stale_buckets AS (
       SELECT "observedAtBucket", "count"
       FROM "AccountClassificationFreshnessBucket"
-      WHERE "labelDefinitionId" = ${labelDefinitionId}
+      WHERE "labelDefinitionId" = ${labelDefinitionId}::smallint
         AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
         AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
       FOR UPDATE
     )
     UPDATE "AccountClassificationFreshnessBucket" AS sentinel
     SET "count" = sentinel."count" + (SELECT COALESCE(SUM("count"), 0) FROM stale_buckets)
-    WHERE sentinel."labelDefinitionId" = ${labelDefinitionId}
+    WHERE sentinel."labelDefinitionId" = ${labelDefinitionId}::smallint
       AND sentinel."observedAtBucket" = TIMESTAMP '1970-01-01'
   `
   await tx.$executeRaw`
     DELETE FROM "AccountClassificationFreshnessBucket"
-    WHERE "labelDefinitionId" = ${labelDefinitionId}
+    WHERE "labelDefinitionId" = ${labelDefinitionId}::smallint
       AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
       AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
   `
@@ -136,10 +136,10 @@ async function compactFreshnessBuckets(
  */
 async function compactFreshnessBucketsForAllLabels(
   prisma: PrismaClient,
-  labelIds: string[],
+  labelIds: number[],
 ): Promise<void> {
   if (labelIds.length === 0) return
-  const sortedLabelIds = labelIds.toSorted()
+  const sortedLabelIds = labelIds.toSorted((left, right) => left - right)
   const startedAt = performance.now()
 
   await prisma.$transaction(
@@ -147,14 +147,14 @@ async function compactFreshnessBucketsForAllLabels(
       await tx.$executeRaw`
         INSERT INTO "AccountClassificationFreshnessBucket" ("labelDefinitionId", "observedAtBucket", "count")
         SELECT "id", TIMESTAMP '1970-01-01', 0
-        FROM UNNEST(${sortedLabelIds}::text[]) AS "id"
+        FROM UNNEST(${sortedLabelIds}::smallint[]) AS "id"
         ON CONFLICT DO NOTHING
       `
 
       const lockedAt = performance.now()
-      const lockedRows = await tx.$queryRaw<{ labelDefinitionId: string }[]>`
+      const lockedRows = await tx.$queryRaw<{ labelDefinitionId: number }[]>`
         SELECT "labelDefinitionId" FROM "AccountClassificationFreshnessBucket"
-        WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::text[]) AND "observedAtBucket" = TIMESTAMP '1970-01-01'
+        WHERE "labelDefinitionId" = ANY(${sortedLabelIds}::smallint[]) AND "observedAtBucket" = TIMESTAMP '1970-01-01'
         ORDER BY "labelDefinitionId"
         FOR UPDATE SKIP LOCKED
       `
@@ -171,7 +171,7 @@ async function compactFreshnessBucketsForAllLabels(
         WITH stale_totals AS (
           SELECT "labelDefinitionId", SUM("count") AS total
           FROM "AccountClassificationFreshnessBucket"
-          WHERE "labelDefinitionId" = ANY(${lockedLabelIds}::text[])
+          WHERE "labelDefinitionId" = ANY(${lockedLabelIds}::smallint[])
             AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
             AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
           GROUP BY 1
@@ -184,7 +184,7 @@ async function compactFreshnessBucketsForAllLabels(
       `
       await tx.$executeRaw`
         DELETE FROM "AccountClassificationFreshnessBucket"
-        WHERE "labelDefinitionId" = ANY(${lockedLabelIds}::text[])
+        WHERE "labelDefinitionId" = ANY(${lockedLabelIds}::smallint[])
           AND "observedAtBucket" < (now() AT TIME ZONE 'UTC') - interval '7 days'
           AND "observedAtBucket" <> TIMESTAMP '1970-01-01'
       `
@@ -200,13 +200,13 @@ async function compactFreshnessBucketsForAllLabels(
 /** buildLabelAggregateSnapshotSet の入力。 */
 export interface BuildLabelAggregateSnapshotSetInput {
   /** この build を確定させた WorkItem の id。snapshot set の識別子。 */
-  triggerWorkItemId: string
+  triggerWorkItemId: number
   /** この build の契機となった CrawlRun 等の ID (付随メタデータ)。 */
   sourceCrawlRunId?: string
   policyHash: string
   analyzerVersion: string
   thresholds: CompletenessThresholds
-  analysisRunId?: string
+  analysisRunId?: number
   /**
    * freshness 分類 (current/delayed/stale) のしきい値。ハードコードせず、
    * 呼び出し元 (processLabelAggregateRefresh) が適用中の
@@ -217,7 +217,7 @@ export interface BuildLabelAggregateSnapshotSetInput {
 
 /** buildLabelAggregateSnapshotSet の結果。 */
 export interface BuildLabelAggregateSnapshotSetResult {
-  triggerWorkItemId: string
+  triggerWorkItemId: number
   snapshotAt: Date
   /** 既存の commit 済み snapshot set を再利用した場合 true。 */
   reused: boolean
@@ -225,7 +225,7 @@ export interface BuildLabelAggregateSnapshotSetResult {
 
 /** AccountClassificationValueCount の読み取り行。 */
 interface ValueCountRow {
-  labelDefinitionId: string
+  labelDefinitionId: number
   value: boolean
   // AccountClassificationValueCount.count は INTEGER 列の直接 SELECT であり、
   // COUNT(*) 等の集約ではないため node-postgres 経由でも number になる。
@@ -234,26 +234,26 @@ interface ValueCountRow {
 }
 /** AccountClassificationConfidenceBucketCount の読み取り行。 */
 interface ConfidenceBucketCountRow {
-  labelDefinitionId: string
+  labelDefinitionId: number
   confidenceBucket: number
   count: number
 }
 /** AccountClassificationRuleVersionCount の読み取り行。 */
 interface RuleVersionCountRow {
-  labelDefinitionId: string
+  labelDefinitionId: number
   ruleVersion: string
   count: number
 }
 /** AccountClassificationFreshnessBucket を current/delayed/stale に振り分け集計した行。 */
 interface FreshnessCountRow {
-  labelDefinitionId: string
+  labelDefinitionId: number
   currentCount: bigint | null
   delayedCount: bigint | null
   staleCount: bigint | null
 }
 /** AccountClassificationReasonCount の読み取り行。 */
 interface ReasonCountRow {
-  labelDefinitionId: string
+  labelDefinitionId: number
   reason: string
   // AccountClassificationReasonCount.count は INTEGER 列の直接 SELECT であり、
   // COUNT(*) 等の集約ではないため node-postgres 経由でも number になる。
@@ -364,10 +364,10 @@ export async function buildLabelAggregateSnapshotSet(
               `,
             ])
 
-      const groupByLabel = <T extends { labelDefinitionId: string }>(
+      const groupByLabel = <T extends { labelDefinitionId: number }>(
         rows: T[],
-      ): Map<string, T[]> => {
-        const map = new Map<string, T[]>()
+      ): Map<number, T[]> => {
+        const map = new Map<number, T[]>()
         for (const row of rows) {
           const group = map.get(row.labelDefinitionId) ?? []
           group.push(row)

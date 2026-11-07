@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { enqueuedKeys } from './enqueued-keys.test-helper'
 import {
   startOrResumeBlockRun,
   finishBlockRun,
@@ -27,9 +28,7 @@ function fakePrisma() {
       upsert: vi.fn().mockResolvedValue({}),
       count: vi.fn().mockResolvedValue(0),
     },
-    analysisWorkItem: {
-      upsert: vi.fn().mockResolvedValue({}),
-    },
+    $executeRaw: vi.fn().mockResolvedValue(0),
   }
   return {
     ...prisma,
@@ -53,21 +52,9 @@ describe('startOrResumeBlockRun', () => {
         staleAfterAt: new Date(startedAt.getTime() + 3_600_000),
       },
     })
-    expect(prisma.analysisWorkItem.upsert).toHaveBeenCalledWith({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'operation_cycle_refresh',
-          triggerType: 'block_run',
-          triggerId: 'run-1',
-        },
-      },
-      create: {
-        kind: 'operation_cycle_refresh',
-        triggerType: 'block_run',
-        triggerId: 'run-1',
-      },
-      update: {},
-    })
+    expect(enqueuedKeys(prisma.$executeRaw)).toEqual([
+      ['operation_cycle_refresh', 'block_run', 'run-1'],
+    ])
   })
 
   it('resumes the existing running BlockRun when its heartbeat is not stale', async () => {
@@ -108,7 +95,7 @@ describe('startOrResumeBlockRun', () => {
       select: { username: true },
       distinct: ['username'],
     })
-    expect(prisma.analysisWorkItem.upsert).not.toHaveBeenCalled()
+    expect(prisma.$executeRaw).not.toHaveBeenCalled()
   })
 
   it('finalizes a stale running BlockRun as failed and creates a new one', async () => {
@@ -134,21 +121,10 @@ describe('startOrResumeBlockRun', () => {
         staleAfterAt: new Date(startedAt.getTime() + 3_600_000),
       },
     })
-    expect(prisma.analysisWorkItem.upsert).toHaveBeenCalledWith({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'operation_cycle_refresh',
-          triggerType: 'block_run',
-          triggerId: 'run-1',
-        },
-      },
-      create: {
-        kind: 'operation_cycle_refresh',
-        triggerType: 'block_run',
-        triggerId: 'run-1',
-      },
-      update: {},
-    })
+    expect(enqueuedKeys(prisma.$executeRaw)).toEqual([
+      ['block_reconciliation', 'block_run', 'stale-run'],
+      ['operation_cycle_refresh', 'block_run', 'run-1'],
+    ])
     expect(result).toEqual({ id: 'run-1', completedUsernames: [] })
   })
 })
@@ -171,17 +147,9 @@ describe('finishBlockRun', () => {
 
     await finishBlockRun(prisma as never, 'run-1', new Date('2026-08-04T01:00:00Z'), 'failed')
 
-    expect(prisma.analysisWorkItem.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          kind_triggerType_triggerId: {
-            kind: 'block_reconciliation',
-            triggerType: 'block_run',
-            triggerId: 'run-1',
-          },
-        },
-      }),
-    )
+    expect(enqueuedKeys(prisma.$executeRaw)).toEqual([
+      ['block_reconciliation', 'block_run', 'run-1'],
+    ])
   })
 })
 
@@ -265,7 +233,7 @@ describe('recordBlockAction', () => {
       blockAccountRunId: 'account-run-1',
       blockerId: 'blocker-1',
       blockedId: 'blocked-1',
-      labelDefinitionId: 'label-1',
+      labelDefinitionId: 1,
       confidence: 0.95,
       result: 'success',
       errorMessage: null,
@@ -278,7 +246,7 @@ describe('recordBlockAction', () => {
         blockAccountRunId: 'account-run-1',
         blockerId: 'blocker-1',
         blockedId: 'blocked-1',
-        labelDefinitionId: 'label-1',
+        labelDefinitionId: 1,
         confidence: 0.95,
         result: 'success',
         errorMessage: null,
@@ -295,7 +263,7 @@ describe('recordBlockAction', () => {
       blockAccountRunId: 'bar-1',
       blockerId: 'blocker-1',
       blockedId: 'blocked-1',
-      labelDefinitionId: 'label-1',
+      labelDefinitionId: 1,
       confidence: 0.9,
       result: 'success',
       errorMessage: null,

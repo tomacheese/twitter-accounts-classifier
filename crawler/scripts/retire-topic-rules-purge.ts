@@ -26,12 +26,13 @@ export const RETIRED_TOPIC_LABEL_KEYS = [
 ] as const
 
 // 集計テーブルは行テーブルのトリガーが decrement するため、行テーブルを先に空にする。
+// AccountActiveLabel の DELETE は監査トリガーが AccountLabelChange へ記録するため、その後に AccountLabelChange を空にする。
 export const PURGE_TABLES = [
   'BlockAction',
   'BlockOutboxEntry',
+  'AccountActiveLabel',
   'AccountLabelChange',
   'AccountClassificationLatest',
-  'AccountLabelLatest',
   'CrawlAccountLabelRun',
   'WeeklyReviewSampleBucketCount',
   'AccountClassificationValueCount',
@@ -42,12 +43,13 @@ export const PURGE_TABLES = [
   'LabelMetricSnapshot',
   'LabelMetricDaily',
   'LabelSummaryCurrent',
+  'RelabelCoverageSnapshot',
 ] as const
 
-// マイグレーションから作った DB にだけ残る旧テーブル。外部キーで LabelDefinition を参照するため、存在する場合のみ消す。
-export const OPTIONAL_PURGE_TABLES = ['AccountLabel_pre_compaction'] as const
+// LabelDefinition の id は再利用せず、廃止したラベルも版の履歴ごと残す。
+const KEPT_TABLES = ['LabelRuleVersion'] as const
 
-type PurgeTable = (typeof PURGE_TABLES)[number] | (typeof OPTIONAL_PURGE_TABLES)[number]
+type PurgeTable = (typeof PURGE_TABLES)[number]
 
 export interface PurgeOptions {
   batchSize: number
@@ -74,7 +76,7 @@ async function runBatches(deps: PurgeDependencies, run: () => Promise<number>): 
 
 /**
  * 対象外のテーブルに `labelDefinitionId` があれば、孤立行を残さないよう何も消さずに失敗する。
- * @returns 削除対象のテーブル。`PURGE_TABLES` の後ろに、存在する `OPTIONAL_PURGE_TABLES` が続く
+ * @returns 削除対象のテーブル (`PURGE_TABLES`)
  */
 async function resolvePurgeTables(prisma: PrismaClient): Promise<PurgeTable[]> {
   const rows = await prisma.$queryRawUnsafe<{ tableName: string }[]>(
@@ -82,26 +84,26 @@ async function resolvePurgeTables(prisma: PrismaClient): Promise<PurgeTable[]> {
      WHERE table_schema = 'public' AND column_name = 'labelDefinitionId'`,
   )
   const present = new Set(rows.map((row) => row.tableName))
-  const known = new Set<string>([...PURGE_TABLES, ...OPTIONAL_PURGE_TABLES])
+  const known = new Set<string>([...PURGE_TABLES, ...KEPT_TABLES])
   const uncovered = [...present].filter((name) => !known.has(name))
   if (uncovered.length > 0) {
     throw new Error(
       `Tables with labelDefinitionId are not covered by the purge: ${uncovered.join(', ')}`,
     )
   }
-  return [...PURGE_TABLES, ...OPTIONAL_PURGE_TABLES.filter((table) => present.has(table))]
+  return [...PURGE_TABLES]
 }
 
 async function deleteBatch(
   prisma: PrismaClient,
   table: PurgeTable,
-  labelDefinitionIds: string[],
+  labelDefinitionIds: number[],
   batchSize: number,
 ): Promise<number> {
   // table は PURGE_TABLES の固定値のみで、外部入力は含まない。
   return prisma.$executeRawUnsafe(
     `DELETE FROM "${table}" WHERE ctid = ANY(ARRAY(
-       SELECT ctid FROM "${table}" WHERE "labelDefinitionId" = ANY($1::text[]) LIMIT $2::int
+       SELECT ctid FROM "${table}" WHERE "labelDefinitionId" = ANY($1::smallint[]) LIMIT $2::int
      ))`,
     labelDefinitionIds,
     batchSize,
@@ -154,12 +156,12 @@ export async function runRetireTopicRulesPurge(deps: PurgeDependencies): Promise
   )
   log(`Removed retired keys from ${updated} rows of AccountSummaryLatest`)
 
-  // 外部キーが残っていれば RESTRICT で失敗する。これは削除漏れの検知を兼ねる。
-  const removed = await prisma.$executeRawUnsafe(
-    `DELETE FROM "LabelDefinition" WHERE id = ANY($1::text[])`,
+  // id は AccountLabelState.versions の添字を兼ねるため、行は削除せず廃止済みにする。
+  const retired = await prisma.$executeRawUnsafe(
+    `UPDATE "LabelDefinition" SET "retiredAt" = COALESCE("retiredAt", now()) WHERE id = ANY($1::smallint[])`,
     labelDefinitionIds,
   )
-  log(`Deleted ${removed} rows from LabelDefinition`)
+  log(`Retired ${retired} rows of LabelDefinition`)
 }
 
 async function main(): Promise<void> {

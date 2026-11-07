@@ -76,15 +76,18 @@ it('relabel evaluation receives the resolved parent author id', async () => {
       ['root-1', { fullText: 'root text', accountId: 'account-1' }],
     ]),
   )
-  vi.spyOn(labelRepository, 'recordAccountLabelsBulkLatestOnlyForAccounts').mockResolvedValue()
+  vi.spyOn(labelRepository, 'loadAccountLabelStates').mockResolvedValue(
+    new Map([['account-1', { rev: 0, versions: [], active: new Map() }]]),
+  )
+  vi.spyOn(labelRepository, 'recordAccountLabelsBulkForAccounts').mockResolvedValue([])
   vi.spyOn(workItemRepository, 'completeAccountRelabelWorkItemsBulk').mockResolvedValue([
-    { id: 'wi-1', status: 'succeeded' },
+    { id: 1, status: 'succeeded' },
   ])
-  vi.spyOn(workItemRepository, 'claimStillLeasedWorkItemIdsForUpdate').mockResolvedValue(['wi-1'])
+  vi.spyOn(workItemRepository, 'claimStillLeasedWorkItemIdsForUpdate').mockResolvedValue([1])
 
-  await evaluateAccountRelabelItems(prisma, [{ id: 'wi-1', triggerId: 'account-1' } as never], {
+  await evaluateAccountRelabelItems(prisma, [{ id: 1, triggerId: 'account-1' } as never], {
     registry,
-    labelDefinitionIds: new Map([[probeRule.key, 'def-1']]),
+    labelDefinitionIds: new Map([[probeRule.key, 1]]),
     duplicateReplyIndex: { countOtherAccounts: () => 0 },
     bioDuplicateIndex: { countOtherAccounts: () => 0 },
     replyHijackIndex: {

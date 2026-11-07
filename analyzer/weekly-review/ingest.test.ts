@@ -76,6 +76,7 @@ function buildStructuredOutput(
 describe.skipIf(!process.env.DATABASE_URL)('ingestWeeklyReviewFindings', () => {
   beforeEach(async () => {
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()
@@ -83,6 +84,7 @@ describe.skipIf(!process.env.DATABASE_URL)('ingestWeeklyReviewFindings', () => {
 
   afterEach(async () => {
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.findingEvidence.deleteMany()
     await prisma.reviewFindingOccurrence.deleteMany()
     await prisma.reviewFinding.deleteMany()

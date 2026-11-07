@@ -14,14 +14,22 @@ export interface AccountDetailProfile {
   verifiedType: string | null
 }
 
+/**
+ * ラベルの評価結果。評価されていないラベル (versions の添字が 0) は一覧に含めない。
+ * 'false' と 'unevaluable' は行を持たないため、confidence・reason・method・labeledAt は null になる。
+ */
+export type AccountDetailLabelStatus = 'true' | 'false' | 'unevaluable'
+
 export interface AccountDetailLabel {
   labelKey: string
+  status: AccountDetailLabelStatus
   value: boolean
-  confidence: number
-  reason: string
-  method: string
+  confidence: number | null
+  reason: string | null
+  method: string | null
+  /** 最後に評価したときのルールのバージョン。 */
   ruleVersion: string
-  labeledAt: Date
+  labeledAt: Date | null
   history: AccountDetailLabelHistoryEntry[]
 }
 
@@ -74,7 +82,7 @@ const FOLLOW_LIST_LIMIT = 100
 const LABEL_HISTORY_LIMIT = 20
 // ラベルルールが true/false を繰り返した場合でも 1 アカウントのページ読み込みが際限なく重くならないための防御的な上限。
 // AccountLabelChange には変化があった評価のみ記録されるため、この上限は history の長さを打ち切るだけであり、
-// 現在値 (labels[].value 等) は AccountLabelLatest から取得するため影響を受けない。
+// 現在値 (labels[].value 等) は AccountLabelState と AccountActiveLabel から取得するため影響を受けない。
 const ACCOUNT_LABEL_CHANGE_FETCH_LIMIT = 2000
 
 /**
@@ -84,7 +92,7 @@ const ACCOUNT_LABEL_CHANGE_FETCH_LIMIT = 2000
  */
 function buildLabelHistoryByDefinition(
   changes: {
-    labelDefinitionId: string
+    labelDefinitionId: number
     changeType: string
     previousValue: boolean | null
     newValue: boolean | null
@@ -94,8 +102,8 @@ function buildLabelHistoryByDefinition(
     newReason: string | null
     changedAt: Date
   }[],
-): Map<string, AccountDetailLabelHistoryEntry[]> {
-  const historyByDefinition = new Map<string, AccountDetailLabelHistoryEntry[]>()
+): Map<number, AccountDetailLabelHistoryEntry[]> {
+  const historyByDefinition = new Map<number, AccountDetailLabelHistoryEntry[]>()
 
   for (const change of changes) {
     let history = historyByDefinition.get(change.labelDefinitionId)
@@ -121,47 +129,82 @@ function buildLabelHistoryByDefinition(
   return historyByDefinition
 }
 
+interface LabelDefinitionWithVersions {
+  id: number
+  key: string
+  retiredAt: Date | null
+  ruleVersions: { versionNo: number; ruleVersion: string }[]
+}
+
+interface ActiveLabelRow {
+  labelDefinitionId: number
+  confidence: number
+  reason: string
+  method: string
+  ruleVersionNo: number
+  labeledAt: Date
+}
+
 /**
- * AccountLabelLatest の現在値一覧に、対応する history を組み合わせてラベル一覧を組み立てる。
- * @param latestLabels - labeledAt 降順で取得した AccountLabelLatest の一覧 (labelDefinition を含む)
+ * 評価状態と true のラベル行に、対応する history を組み合わせてラベル一覧を組み立てる。
+ * 評価済みのラベルだけを返す。true の行を labeledAt 降順で先に、false と評価不能をキー順で後に並べる。
+ * @param definitions - key 昇順の全 LabelDefinition (ruleVersions を含む)
+ * @param versions - AccountLabelState.versions (添字は LabelDefinition.id - 1。状態行が無ければ空)
+ * @param activeRows - true のラベル行
  * @param historyRows - changedAt 降順、id 降順で取得した AccountLabelChange の一覧
- * @returns ラベルごとに集約された一覧。並び順は AccountLabelLatest の並び順を保つ。
+ * @returns ラベルごとに集約された一覧
  */
-function groupLabelsByDefinition(
-  latestLabels: {
-    labelDefinitionId: string
-    labelDefinition: { key: string }
-    value: boolean
-    confidence: number
-    reason: string
-    method: string
-    ruleVersion: string
-    labeledAt: Date
-  }[],
-  historyRows: {
-    labelDefinitionId: string
-    changeType: string
-    previousValue: boolean | null
-    newValue: boolean | null
-    previousConfidence: number | null
-    newConfidence: number | null
-    previousReason: string | null
-    newReason: string | null
-    changedAt: Date
-  }[],
+function buildLabels(
+  definitions: LabelDefinitionWithVersions[],
+  versions: number[],
+  activeRows: ActiveLabelRow[],
+  historyRows: Parameters<typeof buildLabelHistoryByDefinition>[0],
 ): AccountDetailLabel[] {
   const historyByDefinition = buildLabelHistoryByDefinition(historyRows)
+  const activeByDefinition = new Map(activeRows.map((row) => [row.labelDefinitionId, row]))
+  const trueLabels: AccountDetailLabel[] = []
+  const otherLabels: AccountDetailLabel[] = []
 
-  return latestLabels.map((label) => ({
-    labelKey: label.labelDefinition.key,
-    value: label.value,
-    confidence: label.confidence,
-    reason: label.reason,
-    method: label.method,
-    ruleVersion: label.ruleVersion,
-    labeledAt: label.labeledAt,
-    history: historyByDefinition.get(label.labelDefinitionId) ?? [],
-  }))
+  for (const definition of definitions) {
+    const active = activeByDefinition.get(definition.id)
+    const slot = versions[definition.id - 1] ?? 0
+    // 廃止したラベルは、現在も true の行を持つ場合だけ表示する。
+    if ((slot === 0 && !active) || (definition.retiredAt !== null && !active)) continue
+    const versionNo = active?.ruleVersionNo ?? Math.abs(slot)
+    const ruleVersion =
+      definition.ruleVersions.find((row) => row.versionNo === versionNo)?.ruleVersion ?? ''
+    const history = historyByDefinition.get(definition.id) ?? []
+    if (active) {
+      trueLabels.push({
+        labelKey: definition.key,
+        status: 'true',
+        value: true,
+        confidence: active.confidence,
+        reason: active.reason,
+        method: active.method,
+        ruleVersion,
+        labeledAt: active.labeledAt,
+        history,
+      })
+    } else {
+      otherLabels.push({
+        labelKey: definition.key,
+        status: slot < 0 ? 'unevaluable' : 'false',
+        value: false,
+        confidence: null,
+        reason: null,
+        method: null,
+        ruleVersion,
+        labeledAt: null,
+        history,
+      })
+    }
+  }
+
+  trueLabels.sort(
+    (left, right) => (right.labeledAt?.getTime() ?? 0) - (left.labeledAt?.getTime() ?? 0),
+  )
+  return [...trueLabels, ...otherLabels]
 }
 
 /**
@@ -182,7 +225,9 @@ export async function getAccountDetail(
   }
 
   const [
-    latestLabels,
+    labelState,
+    activeLabels,
+    labelDefinitions,
     labelHistoryRows,
     tweets,
     followingEdges,
@@ -192,10 +237,11 @@ export async function getAccountDetail(
     blockedEdges,
     blockedCount,
   ] = await Promise.all([
-    prisma.accountLabelLatest.findMany({
-      where: { accountId },
-      orderBy: { labeledAt: 'desc' },
-      include: { labelDefinition: true },
+    prisma.accountLabelState.findUnique({ where: { accountId }, select: { versions: true } }),
+    prisma.accountActiveLabel.findMany({ where: { accountId } }),
+    prisma.labelDefinition.findMany({
+      orderBy: { key: 'asc' },
+      include: { ruleVersions: { select: { versionNo: true, ruleVersion: true } } },
     }),
     prisma.accountLabelChange.findMany({
       where: { accountId },
@@ -246,7 +292,12 @@ export async function getAccountDetail(
       isBlueVerified: account.isBlueVerified,
       verifiedType: account.verifiedType,
     },
-    labels: groupLabelsByDefinition(latestLabels, labelHistoryRows),
+    labels: buildLabels(
+      labelDefinitions,
+      labelState?.versions ?? [],
+      activeLabels,
+      labelHistoryRows,
+    ),
     recentTweets: tweets.map((tweet) => ({
       id: tweet.id,
       fullText: tweet.fullText,

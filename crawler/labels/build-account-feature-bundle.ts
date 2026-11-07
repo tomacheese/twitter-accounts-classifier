@@ -1,4 +1,5 @@
-import type { Account, Tweet } from '../generated/prisma'
+import type { Tweet } from '../generated/prisma'
+import type { AccountWithCrawlState } from '../db/account-repository'
 import type { AccountFeatureBundle } from './types'
 import type { buildDuplicateReplyIndex } from './duplicate-reply-index'
 import type { buildBioDuplicateIndex } from './bio-duplicate-index'
@@ -10,7 +11,7 @@ import type { FollowChurnObservation } from '../db/follow-churn-observation'
  * Account と Tweet の DB 確定値(merge 後の状態)から AccountFeatureBundle を組み立てる。
  * crawl 時の atomic 評価と relabel worker の両方から呼ばれる唯一の bundle 組み立て経路にすることで、
  * 経路ごとに参照するフィールドが drift しないようにする。
- * @param account - バンドルを組み立てる対象アカウントの DB 確定値
+ * @param account - バンドルを組み立てる対象アカウントの DB 確定値 (AccountCrawlState を含む)
  * @param recentTweets - このアカウント自身の直近ツイートの DB 確定値
  * @param duplicateReplyIndex - アカウント横断で共有する重複返信インデックス
  * @param bioDuplicateIndex - アカウント横断で共有する bio 複製インデックス
@@ -23,7 +24,7 @@ import type { FollowChurnObservation } from '../db/follow-churn-observation'
  * @returns アカウントの feature bundle
  */
 export function buildAccountFeatureBundle(
-  account: Account,
+  account: AccountWithCrawlState,
   recentTweets: Tweet[],
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>,
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>,
@@ -77,7 +78,7 @@ export function buildAccountFeatureBundle(
       verifiedType: account.verifiedType,
       professionalType: account.professionalType,
       parodyCommentaryFanLabel: account.parodyCommentaryFanLabel,
-      recentTweetsFetchStatus: account.recentTweetsFetchStatus,
+      recentTweetsFetchStatus: account.crawlState?.recentTweetsFetchStatus ?? null,
       profileImageUrl: account.profileImageUrl,
     },
     recentTweets: recentTweets.map((tweet) => ({

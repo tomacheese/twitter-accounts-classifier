@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto'
+import { createSyntheticId } from 'id-boundary'
 import { afterEach, describe, expect, it } from 'vitest'
-import { PrismaClient } from '../generated/prisma'
+import { getPrismaClient } from './client'
 
-const prisma = new PrismaClient()
+const prisma = getPrismaClient()
 const accountIds: string[] = []
 
 async function createSyntheticAccount(): Promise<{ id: string }> {
-  const id = `synthetic_follow_state_${randomUUID()}`
+  const id = createSyntheticId()
   accountIds.push(id)
 
   return prisma.account.create({

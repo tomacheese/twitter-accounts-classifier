@@ -7,6 +7,7 @@ import { AccountLabels } from './account-labels'
 function makeLabel(overrides: Partial<AccountDetailLabel> = {}): AccountDetailLabel {
   return {
     labelKey: 'spam',
+    status: 'true',
     value: true,
     confidence: 0.9,
     reason: 'matches keyword',
@@ -35,16 +36,38 @@ describe('AccountLabels', () => {
     expect(html).not.toContain('<details>')
   })
 
-  it('collapses evaluated-but-inactive (value=false) labels behind a details element', () => {
+  it('collapses false and unevaluable labels behind a details element, without a reason', () => {
     const html = renderToStaticMarkup(
       <AccountLabels
-        labels={[makeLabel({ labelKey: 'not_spam', value: false, reason: 'no keyword match' })]}
+        labels={[
+          makeLabel({
+            labelKey: 'not_spam',
+            status: 'false',
+            value: false,
+            confidence: null,
+            reason: null,
+            method: null,
+            labeledAt: null,
+          }),
+          makeLabel({
+            labelKey: 'few_samples',
+            status: 'unevaluable',
+            value: false,
+            confidence: null,
+            reason: null,
+            method: null,
+            labeledAt: null,
+          }),
+        ]}
       />,
     )
 
     expect(html).toContain('<details>')
-    expect(html).toContain('評価済みで非該当のラベル (1件)')
-    expect(html).toContain('no keyword match')
+    expect(html).toContain('評価済みで非該当・評価不能のラベル (2件)')
+    expect(html).toContain('非該当')
+    expect(html).toContain('評価不能')
+    expect(html).toContain('理由と confidence は保存していません')
+    expect(html).not.toContain('confidence null')
   })
 
   it('shows a history toggle only for labels that have history entries', () => {

@@ -1,5 +1,5 @@
 import { Logger } from '@book000/node-utils'
-import type { PrismaClient, Tweet } from '../generated/prisma'
+import { Prisma, type PrismaClient, type Tweet } from '../generated/prisma'
 import type { NormalizedTweet, NormalizedTweetSource } from 'twitter-client'
 
 const logger = Logger.configure('tweet-repository')
@@ -13,30 +13,70 @@ export interface UpsertTweetResult {
   changed: boolean
 }
 
-// AccountFeatureBundle.recentTweets が参照するフィールドのうち、
-// DB の既存値と比較して変化検知の対象にするもの。
-interface ExistingTweetSnapshot {
-  fullText: string
-  createdAt: Date
-  retweetCount: number
-  likeCount: number
-  isReply: boolean
-  conversationId: string | null
-  isRetweet: boolean
-  inReplyToTweetId: string | null
-  isPromoted: boolean
-  isPaidPromotion: boolean
-  expandedUrls: string[]
-  cardDestinationUrls: string[]
-  cardDestinationUrlsEvaluated: boolean
-  hasMedia: boolean | null
-  hasAiGeneratedMedia: boolean | null
-  aiGeneratedDetectionSource: string | null
-  foreignVideoSourceCount: number | null
-  quotedTweetId: string | null
-  quotedTweetAuthorId: string | null
-  quotedTweetHasVideo: boolean | null
+// PK の形 (現在は (accountId, id)) に依存する箇所は、この 2 つに閉じ込める。
+// PK が変わるときは、tweetKey と TWEET_CONFLICT_TARGET だけを書き換える。
+// ID 単独の検索は PK の形に依存しないため、含めない。
+
+function tweetKey(accountId: string, id: string) {
+  return { accountId_id: { accountId, id } }
 }
+
+const TWEET_CONFLICT_TARGET = Prisma.sql`("accountId", "id")`
+
+// 生 SQL の戻り値を Prisma の `Tweet` 型に合わせるための列。
+export const TWEET_ROW_COLUMNS = Prisma.sql`
+  "id"::text AS "id",
+  "accountId"::text AS "accountId",
+  "fullText",
+  "createdAt",
+  "retweetCount",
+  "likeCount",
+  "replyCount",
+  "isReply",
+  "conversationId"::text AS "conversationId",
+  "inReplyToTweetId"::text AS "inReplyToTweetId",
+  "isAuthorReply",
+  "isRetweet",
+  "isPromoted",
+  "isPaidPromotion",
+  COALESCE("expandedUrls", '{}') AS "expandedUrls",
+  COALESCE("cardDestinationUrls", '{}') AS "cardDestinationUrls",
+  "cardDestinationUrlsEvaluated",
+  "hasMedia",
+  "hasAiGeneratedMedia",
+  "aiGeneratedDetectionSource",
+  "quotedTweetAuthorId"::text AS "quotedTweetAuthorId",
+  "quotedTweetHasVideo",
+  "foreignVideoSourceCount",
+  "collectedAt"
+`
+
+type TweetMergeBase = Pick<
+  Tweet,
+  | 'fullText'
+  | 'createdAt'
+  | 'retweetCount'
+  | 'likeCount'
+  | 'replyCount'
+  | 'isReply'
+  | 'conversationId'
+  | 'isRetweet'
+  | 'inReplyToTweetId'
+  | 'isPromoted'
+  | 'isPaidPromotion'
+  | 'expandedUrls'
+  | 'cardDestinationUrls'
+  | 'cardDestinationUrlsEvaluated'
+  | 'hasMedia'
+  | 'hasAiGeneratedMedia'
+  | 'aiGeneratedDetectionSource'
+  | 'foreignVideoSourceCount'
+  | 'quotedTweetAuthorId'
+  | 'quotedTweetHasVideo'
+>
+
+/** merge 後に書き込む値。INSERT の値と、変化があったときの UPDATE の値を兼ねる。 */
+export type TweetWriteValues = TweetMergeBase & Pick<Tweet, 'isAuthorReply'>
 
 /**
  * 2 つの URL 配列が要素集合として異なるかを判定する。
@@ -54,12 +94,9 @@ function hasArrayChange(a: string[], b: string[]): boolean {
  * merge 後の値が既存行と異なるかを判定する。
  * @param existing - 更新前の既存行
  * @param merged - merge 後に書き込む値
- * @returns 変化があれば true
+ * @returns ラベル評価の入力に影響しうる変化があれば true
  */
-function hasBundleRelevantChange(
-  existing: ExistingTweetSnapshot,
-  merged: ExistingTweetSnapshot,
-): boolean {
+function hasBundleRelevantChange(existing: TweetMergeBase, merged: TweetMergeBase): boolean {
   return (
     existing.fullText !== merged.fullText ||
     existing.createdAt.getTime() !== merged.createdAt.getTime() ||
@@ -83,66 +120,38 @@ function hasBundleRelevantChange(
   )
 }
 
-/**
- * Tweet を upsert し、ラベル評価に影響しうるフィールドが変化したかどうかも返す。
- * @param prisma - Prisma クライアント
- * @param input - 正規化済みのツイート
- * @returns upsert 後の Tweet と変化検知の結果
- */
-export async function upsertTweet(
-  prisma: PrismaClient,
-  input: TweetInput,
-): Promise<UpsertTweetResult> {
-  // `isPromoted`/`isPaidPromotion` は既存値との OR で合成する: 単純に入力値で上書きすると、
-  // 広告メタデータを含まない経路で再取得した際に、
-  // 既に検出済みの `true` が `false` に戻ってしまう。
-  // 同様の問題は `twitter-client` の `mergeTweetAdFlags` でも扱っている。
-  // `hasAiGeneratedMedia` 系や引用ツイート関連のフィールドも、
-  // `null` を「未評価」ではなく「上書きしてよい値」として扱うと既知の値を消してしまうため、
-  // 入力値が `null` のときのみ既存値にフォールバックする(詳細は該当マイグレーション参照)。
-  const existing = await prisma.tweet.findUnique({
-    where: { id: input.id },
-    select: {
-      fullText: true,
-      createdAt: true,
-      retweetCount: true,
-      likeCount: true,
-      isReply: true,
-      conversationId: true,
-      isRetweet: true,
-      inReplyToTweetId: true,
-      isPromoted: true,
-      isPaidPromotion: true,
-      expandedUrls: true,
-      cardDestinationUrls: true,
-      cardDestinationUrlsEvaluated: true,
-      hasMedia: true,
-      hasAiGeneratedMedia: true,
-      aiGeneratedDetectionSource: true,
-      foreignVideoSourceCount: true,
-      quotedTweetId: true,
-      quotedTweetAuthorId: true,
-      quotedTweetHasVideo: true,
-    },
-  })
+// 並びが入れ替わると同値の更新が書き込まれてしまうため、既存の並びの後ろに足す。
+function unionUrls(existing: string[] | undefined, incoming: string[] | undefined): string[] {
+  return [...new Set([...(existing ?? []), ...(incoming ?? [])])]
+}
 
-  const mergedUpdate = {
+/**
+ * 入力と既存行を merge した書き込み値を作る。
+ * `isPromoted`/`isPaidPromotion` は既存値との OR で合成する: 単純に入力値で上書きすると、
+ * 広告メタデータを含まない経路で再取得した際に、既に検出済みの `true` が `false` に戻ってしまう。
+ * `hasAiGeneratedMedia` 系や引用ツイート関連のフィールドも、
+ * `null` を「未評価」ではなく「上書きしてよい値」として扱うと既知の値を消してしまうため、
+ * 入力値が `null` のときのみ既存値にフォールバックする。
+ * @param input - 正規化済みのツイート
+ * @param existing - 既存行。無ければ null
+ * @returns 書き込む値。`isAuthorReply` は新規作成時だけ書かれ、既存行では更新されない
+ */
+export function mergeTweet(input: TweetInput, existing: TweetMergeBase | null): TweetWriteValues {
+  return {
     fullText: input.fullText,
     createdAt: input.createdAt,
     retweetCount: input.retweetCount,
     likeCount: input.likeCount,
     replyCount: input.replyCount,
-    quoteCount: input.quoteCount,
     isReply: input.isReply,
+    isAuthorReply: input.isAuthorReply,
     conversationId: input.conversationId ?? existing?.conversationId ?? null,
     isRetweet: input.isRetweet,
     inReplyToTweetId: input.inReplyToTweetId,
     isPromoted: input.isPromoted || (existing?.isPromoted ?? false),
     isPaidPromotion: input.isPaidPromotion || (existing?.isPaidPromotion ?? false),
-    expandedUrls: [...new Set([...(input.expandedUrls ?? []), ...(existing?.expandedUrls ?? [])])],
-    cardDestinationUrls: [
-      ...new Set([...(input.cardDestinationUrls ?? []), ...(existing?.cardDestinationUrls ?? [])]),
-    ],
+    expandedUrls: unionUrls(existing?.expandedUrls, input.expandedUrls),
+    cardDestinationUrls: unionUrls(existing?.cardDestinationUrls, input.cardDestinationUrls),
     cardDestinationUrlsEvaluated:
       (input.cardDestinationUrlsEvaluated ?? false) ||
       (existing?.cardDestinationUrlsEvaluated ?? false),
@@ -159,24 +168,122 @@ export async function upsertTweet(
       input.foreignVideoSourceCount == null
         ? (existing?.foreignVideoSourceCount ?? null)
         : Math.max(input.foreignVideoSourceCount, existing?.foreignVideoSourceCount ?? 0),
-    quotedTweetId: input.quotedTweetId ?? existing?.quotedTweetId ?? null,
     quotedTweetAuthorId: input.quotedTweetAuthorId ?? existing?.quotedTweetAuthorId ?? null,
     quotedTweetHasVideo: input.quotedTweetHasVideo ?? existing?.quotedTweetHasVideo ?? null,
-    source: input.source,
   }
+}
 
-  const changed = existing === null || hasBundleRelevantChange(existing, mergedUpdate)
+/**
+ * Tweet を (accountId, id) で 1 行取得する。
+ * @param prisma - Prisma クライアント
+ * @param accountId - 投稿者の ID
+ * @param id - ツイート ID
+ * @returns 行。無ければ null
+ */
+export async function findTweet(
+  prisma: PrismaClient,
+  accountId: string,
+  id: string,
+): Promise<Tweet | null> {
+  return prisma.tweet.findUnique({ where: tweetKey(accountId, id) })
+}
 
-  const tweet = await prisma.tweet.upsert({
-    where: { id: input.id },
-    create: input,
-    update: mergedUpdate,
-  })
+// Prisma の upsert は空配列を NULL ではなく `{}` で書くため、生 SQL を使う。
+async function writeTweet(
+  prisma: PrismaClient,
+  accountId: string,
+  id: string,
+  v: TweetWriteValues,
+): Promise<Tweet | undefined> {
+  const expandedUrls = v.expandedUrls.length === 0 ? null : v.expandedUrls
+  const cardDestinationUrls = v.cardDestinationUrls.length === 0 ? null : v.cardDestinationUrls
+  const rows = await prisma.$queryRaw<Tweet[]>(Prisma.sql`
+    INSERT INTO "Tweet" AS t (
+      "id", "accountId", "createdAt", "inReplyToTweetId", "conversationId", "quotedTweetAuthorId",
+      "retweetCount", "likeCount", "replyCount", "foreignVideoSourceCount",
+      "isReply", "isAuthorReply", "isRetweet", "isPromoted", "isPaidPromotion",
+      "cardDestinationUrlsEvaluated", "hasMedia", "hasAiGeneratedMedia", "quotedTweetHasVideo",
+      "aiGeneratedDetectionSource", "expandedUrls", "cardDestinationUrls", "fullText"
+    ) VALUES (
+      ${id}::bigint, ${accountId}::bigint, ${v.createdAt}::timestamptz,
+      ${v.inReplyToTweetId}::bigint, ${v.conversationId}::bigint, ${v.quotedTweetAuthorId}::bigint,
+      ${v.retweetCount}::int, ${v.likeCount}::int, ${v.replyCount}::int,
+      ${v.foreignVideoSourceCount}::int,
+      ${v.isReply}::boolean, ${v.isAuthorReply}::boolean, ${v.isRetweet}::boolean,
+      ${v.isPromoted}::boolean, ${v.isPaidPromotion}::boolean,
+      ${v.cardDestinationUrlsEvaluated}::boolean, ${v.hasMedia}::boolean,
+      ${v.hasAiGeneratedMedia}::boolean, ${v.quotedTweetHasVideo}::boolean,
+      ${v.aiGeneratedDetectionSource}::text, ${expandedUrls}::text[], ${cardDestinationUrls}::text[],
+      ${v.fullText}::text
+    )
+    ON CONFLICT ${TWEET_CONFLICT_TARGET} DO UPDATE SET
+      "createdAt" = EXCLUDED."createdAt",
+      "inReplyToTweetId" = EXCLUDED."inReplyToTweetId",
+      "conversationId" = EXCLUDED."conversationId",
+      "quotedTweetAuthorId" = EXCLUDED."quotedTweetAuthorId",
+      "retweetCount" = EXCLUDED."retweetCount",
+      "likeCount" = EXCLUDED."likeCount",
+      "replyCount" = EXCLUDED."replyCount",
+      "foreignVideoSourceCount" = EXCLUDED."foreignVideoSourceCount",
+      "isReply" = EXCLUDED."isReply",
+      "isRetweet" = EXCLUDED."isRetweet",
+      "isPromoted" = EXCLUDED."isPromoted",
+      "isPaidPromotion" = EXCLUDED."isPaidPromotion",
+      "cardDestinationUrlsEvaluated" = EXCLUDED."cardDestinationUrlsEvaluated",
+      "hasMedia" = EXCLUDED."hasMedia",
+      "hasAiGeneratedMedia" = EXCLUDED."hasAiGeneratedMedia",
+      "quotedTweetHasVideo" = EXCLUDED."quotedTweetHasVideo",
+      "aiGeneratedDetectionSource" = EXCLUDED."aiGeneratedDetectionSource",
+      "expandedUrls" = EXCLUDED."expandedUrls",
+      "cardDestinationUrls" = EXCLUDED."cardDestinationUrls",
+      "fullText" = EXCLUDED."fullText"
+    WHERE (
+      t."createdAt", t."inReplyToTweetId", t."conversationId", t."quotedTweetAuthorId",
+      t."retweetCount", t."likeCount", t."replyCount", t."foreignVideoSourceCount",
+      t."isReply", t."isRetweet", t."isPromoted", t."isPaidPromotion",
+      t."cardDestinationUrlsEvaluated", t."hasMedia", t."hasAiGeneratedMedia",
+      t."quotedTweetHasVideo", t."aiGeneratedDetectionSource",
+      COALESCE(t."expandedUrls", '{}'), COALESCE(t."cardDestinationUrls", '{}'), t."fullText"
+    ) IS DISTINCT FROM (
+      EXCLUDED."createdAt", EXCLUDED."inReplyToTweetId", EXCLUDED."conversationId",
+      EXCLUDED."quotedTweetAuthorId", EXCLUDED."retweetCount", EXCLUDED."likeCount",
+      EXCLUDED."replyCount", EXCLUDED."foreignVideoSourceCount", EXCLUDED."isReply",
+      EXCLUDED."isRetweet", EXCLUDED."isPromoted", EXCLUDED."isPaidPromotion",
+      EXCLUDED."cardDestinationUrlsEvaluated", EXCLUDED."hasMedia", EXCLUDED."hasAiGeneratedMedia",
+      EXCLUDED."quotedTweetHasVideo", EXCLUDED."aiGeneratedDetectionSource",
+      COALESCE(EXCLUDED."expandedUrls", '{}'), COALESCE(EXCLUDED."cardDestinationUrls", '{}'),
+      EXCLUDED."fullText"
+    )
+    RETURNING ${TWEET_ROW_COLUMNS}
+  `)
+  return rows[0]
+}
 
+/**
+ * Tweet を upsert し、ラベル評価に影響しうるフィールドが変化したかどうかも返す。
+ * 既存行と値が同じなら UPDATE しない。
+ * @param prisma - Prisma クライアント
+ * @param input - 正規化済みのツイート
+ * @returns upsert 後の Tweet と変化検知の結果
+ */
+export async function upsertTweet(
+  prisma: PrismaClient,
+  input: TweetInput,
+): Promise<UpsertTweetResult> {
+  const existing = await findTweet(prisma, input.accountId, input.id)
+  const merged = mergeTweet(input, existing)
+  const changed = existing === null || hasBundleRelevantChange(existing, merged)
+
+  const written = await writeTweet(prisma, input.accountId, input.id, merged)
+  if (written !== undefined) return { tweet: written, changed }
+  const tweet = existing ?? (await findTweet(prisma, input.accountId, input.id))
+  if (tweet === null) {
+    throw new Error(`Tweet ${input.id} (accountId=${input.accountId}) vanished during upsert`)
+  }
   return { tweet, changed }
 }
 
-// ツイートごとに個別に upsert する: 1 件の失敗 (account FK 未永続化や一時的な DB エラー) で、
+// ツイートごとに個別に upsert する: 1 件の失敗 (一時的な DB エラーなど) で、
 // バッチ内の後続ツイートまで巻き込んで永続化を止めてはならないため。
 export async function upsertTweets(
   prisma: PrismaClient,
@@ -196,6 +303,21 @@ export async function upsertTweets(
   return results
 }
 
+/** 直近ツイートの取得 SQL。実行計画のテストでも同じ文を使う。 */
+export function recentTweetsQuery(accountIds: string[], limitPerAccount: number): Prisma.Sql {
+  return Prisma.sql`
+    SELECT t.*
+    FROM UNNEST(${accountIds}::bigint[]) AS target("accountId")
+    CROSS JOIN LATERAL (
+      SELECT ${TWEET_ROW_COLUMNS}
+      FROM "Tweet"
+      WHERE "Tweet"."accountId" = target."accountId"
+      ORDER BY "createdAt" DESC
+      LIMIT ${limitPerAccount}
+    ) t
+  `
+}
+
 /**
  * 複数 account の直近ツイートを account ごとに `limitPerAccount` 件までまとめて 1 ラウンドトリップで取得する。
  * account ごとに `findMany` を発行する代わりに、`(accountId, createdAt)` 索引を使う `LATERAL JOIN` で account ごとの上位 N 件を 1 クエリに畳み込む。
@@ -212,45 +334,7 @@ export async function loadRecentTweetsForAccounts(
   const tweetsByAccountId = new Map<string, Tweet[]>()
   if (accountIds.length === 0) return tweetsByAccountId
 
-  const rows = await prisma.$queryRaw<Tweet[]>`
-    SELECT t.*
-    FROM UNNEST(${accountIds}::text[]) AS target("accountId")
-    CROSS JOIN LATERAL (
-      SELECT
-        "id",
-        "accountId",
-        "fullText",
-        "createdAt",
-        "retweetCount",
-        "likeCount",
-        "replyCount",
-        "quoteCount",
-        "isReply",
-        "conversationId",
-        "inReplyToTweetId",
-        "isAuthorReply",
-        "isRetweet",
-        "retweetedTweetId",
-        "isPromoted",
-        "isPaidPromotion",
-        "expandedUrls",
-        "cardDestinationUrls",
-        "cardDestinationUrlsEvaluated",
-        "hasMedia",
-        "hasAiGeneratedMedia",
-        "aiGeneratedDetectionSource",
-        "quotedTweetId",
-        "quotedTweetAuthorId",
-        "quotedTweetHasVideo",
-        "foreignVideoSourceCount",
-        "source",
-        "collectedAt"
-      FROM "Tweet"
-      WHERE "Tweet"."accountId" = target."accountId"
-      ORDER BY "createdAt" DESC
-      LIMIT ${limitPerAccount}
-    ) t
-  `
+  const rows = await prisma.$queryRaw<Tweet[]>(recentTweetsQuery(accountIds, limitPerAccount))
   for (const row of rows) {
     const existing = tweetsByAccountId.get(row.accountId)
     if (existing) {
@@ -278,9 +362,9 @@ export async function loadPromotedTweetCountsForAccounts(
   if (accountIds.length === 0) return counts
 
   const rows = await prisma.$queryRaw<{ accountId: string; count: number }[]>`
-    SELECT "accountId", COUNT(*)::int AS "count"
+    SELECT "accountId"::text AS "accountId", COUNT(*)::int AS "count"
     FROM "Tweet"
-    WHERE "accountId" = ANY(${accountIds}::text[])
+    WHERE "accountId" = ANY(${accountIds}::bigint[])
       AND "isPromoted" = true
       AND "createdAt" >= ${since}
     GROUP BY "accountId"
@@ -288,6 +372,8 @@ export async function loadPromotedTweetCountsForAccounts(
   for (const row of rows) counts.set(row.accountId, row.count)
   return counts
 }
+
+// 以下の ID 単独の検索は、投稿者が分からない親ツイートの引き当て用で、件数の少ないバッチに限る。
 
 /**
  * @param prisma - Prisma クライアント

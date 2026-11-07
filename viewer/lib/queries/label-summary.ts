@@ -5,7 +5,7 @@ const MODEL_KEY = 'label_summary'
 
 /** ラベル一覧の 1 行。 */
 export interface LabelSummaryListItem {
-  labelDefinitionId: string
+  labelDefinitionId: number
   labelKey: string
   labelDescription: string
   evaluatedCount: number
@@ -61,7 +61,7 @@ export async function listLabelSummaries(prisma: PrismaClient): Promise<ListLabe
 
   const items: LabelSummaryListItem[] = rows.map((row) => ({
     labelDefinitionId: row.labelDefinitionId,
-    labelKey: definitionById.get(row.labelDefinitionId)?.key ?? row.labelDefinitionId,
+    labelKey: definitionById.get(row.labelDefinitionId)?.key ?? String(row.labelDefinitionId),
     labelDescription: definitionById.get(row.labelDefinitionId)?.description ?? '',
     evaluatedCount: row.evaluatedCount,
     trueCount: row.trueCount,

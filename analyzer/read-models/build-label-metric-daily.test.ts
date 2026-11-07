@@ -1,3 +1,4 @@
+import { createSyntheticSerialId } from 'id-boundary'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { getPrismaClient } from '../db/client'
@@ -9,6 +10,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
   beforeEach(async () => {
     await prisma.labelMetricDaily.deleteMany()
     await prisma.labelMetricSnapshot.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
   })
 
@@ -23,7 +25,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     await prisma.labelMetricSnapshot.createMany({
       data: [
         {
-          triggerWorkItemId: `work_item_${randomUUID()}`,
+          triggerWorkItemId: createSyntheticSerialId(),
           sourceCrawlRunId: `crawl-${randomUUID()}`,
           labelDefinitionId: labelDefinition.id,
           observedAt: earlier,
@@ -36,7 +38,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
           analyzerVersion: '1',
         },
         {
-          triggerWorkItemId: `work_item_${randomUUID()}`,
+          triggerWorkItemId: createSyntheticSerialId(),
           sourceCrawlRunId: `crawl-${randomUUID()}`,
           labelDefinitionId: labelDefinition.id,
           observedAt: later,
@@ -69,7 +71,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     const now = new Date()
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: `work_item_${randomUUID()}`,
+        triggerWorkItemId: createSyntheticSerialId(),
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: now,
@@ -97,7 +99,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     const now = new Date()
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: `work_item_${randomUUID()}`,
+        triggerWorkItemId: createSyntheticSerialId(),
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: now,
@@ -126,7 +128,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     const future = new Date(now.getTime() + 60 * 60 * 1000)
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: `work_item_${randomUUID()}`,
+        triggerWorkItemId: createSyntheticSerialId(),
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: future,
@@ -160,7 +162,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     await prisma.labelMetricSnapshot.createMany({
       data: [
         {
-          triggerWorkItemId: `work_item_${randomUUID()}`,
+          triggerWorkItemId: createSyntheticSerialId(),
           sourceCrawlRunId: `crawl-${randomUUID()}`,
           labelDefinitionId: labelDefinition.id,
           observedAt: older,
@@ -173,7 +175,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
           analyzerVersion: '1',
         },
         {
-          triggerWorkItemId: `work_item_${randomUUID()}`,
+          triggerWorkItemId: createSyntheticSerialId(),
           sourceCrawlRunId: `crawl-${randomUUID()}`,
           labelDefinitionId: labelDefinition.id,
           observedAt: newer,
@@ -211,7 +213,7 @@ describe.skipIf(!process.env.DATABASE_URL)('rollUpLabelMetricDaily', () => {
     const now = new Date()
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: `work_item_${randomUUID()}`,
+        triggerWorkItemId: createSyntheticSerialId(),
         sourceCrawlRunId: `crawl-${randomUUID()}`,
         labelDefinitionId: labelDefinition.id,
         observedAt: now,

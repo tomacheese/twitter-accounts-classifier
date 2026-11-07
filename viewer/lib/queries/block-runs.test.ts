@@ -28,7 +28,7 @@ function buildRun(overrides: Record<string, unknown> = {}) {
             blockerId: 'accountAlice',
             blockedId: 'accountEve',
             blocked: { screenName: 'eve' },
-            labelDefinitionId: 'label1',
+            labelDefinitionId: 1,
             labelDefinition: { key: 'spam' },
             confidence: 0.9,
             result: 'failure',

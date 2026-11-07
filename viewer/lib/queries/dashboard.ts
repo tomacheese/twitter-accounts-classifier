@@ -44,7 +44,7 @@ export async function getDashboardKpis(prisma: PrismaClient): Promise<DashboardK
     prisma.account.count(),
     prisma.tweet.count(),
     getLabeledAccountsCount(prisma),
-    prisma.account.aggregate({ _max: { lastCrawledAt: true } }),
+    prisma.accountCrawlState.aggregate({ _max: { lastCrawledAt: true } }),
   ])
 
   return {

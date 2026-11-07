@@ -6,6 +6,7 @@ export default defineConfig({
     // twitter-client の dist は .gitignore 対象で CI では未ビルドのため、
     // テスト実行時はビルド済み dist ではなくソースを直接解決する。
     alias: {
+      'id-boundary': fileURLToPath(new URL('../id-boundary/index.ts', import.meta.url)),
       'twitter-client': fileURLToPath(new URL('../twitter-client/index.ts', import.meta.url)),
     },
   },

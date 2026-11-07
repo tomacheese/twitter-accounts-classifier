@@ -251,8 +251,8 @@ async function persistSuccessfulCandidate(
         for (const tweet of tweets) {
           await deps.upsertTweet(tx, tweet)
         }
-        const coverage = await tx.account.updateMany({
-          where: { id: accountId, lastRecentTweetsAttemptedAt: null },
+        const coverage = await tx.accountCrawlState.updateMany({
+          where: { accountId, lastRecentTweetsAttemptedAt: null },
           data: {
             lastRecentTweetsAttemptedAt: attemptedAt,
             lastRecentTweetsFetchedAt: fetchedAt,
@@ -279,8 +279,8 @@ async function recordFailedCandidate(
   accountId: string,
   attemptedAt: Date,
 ): Promise<void> {
-  await deps.prisma.account.updateMany({
-    where: { id: accountId, lastRecentTweetsAttemptedAt: null },
+  await deps.prisma.accountCrawlState.updateMany({
+    where: { accountId, lastRecentTweetsAttemptedAt: null },
     data: {
       lastRecentTweetsAttemptedAt: attemptedAt,
       recentTweetsFetchStatus: 'failed',

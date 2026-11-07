@@ -10,6 +10,7 @@ import { evaluateLabelCountDrop } from './detectors/label-count-drop'
 import { evaluateReasonDistributionShifts } from './detectors/reason-distribution-shift'
 import type { DetectionPolicy, DetectionPolicyRule } from '../policy/schema'
 import { Logger } from '@book000/node-utils'
+import { enqueueWorkItem } from '../queue/work-item-repository'
 
 const logger = Logger.configure('analyzer:generate-findings')
 
@@ -26,7 +27,7 @@ type FindingsClient = PrismaClient | Prisma.TransactionClient
  */
 export interface GenerateFindingsForAggregateRefreshInput {
   /** この観測の識別子。同一 WorkItem の retry では不変。 */
-  triggerWorkItemId: string
+  triggerWorkItemId: number
   /** immutable evidence epoch の識別子。指定時は detector observation identity に使う。 */
   evidenceEpochId?: string
   /** 適用する検出ポリシー。 */
@@ -69,8 +70,8 @@ const RULE_TYPES_EVALUATED_ELSEWHERE = new Set(['possible_false_positive', 'read
  */
 async function resolveBaselineSnapshot(
   prisma: FindingsClient,
-  labelDefinitionId: string,
-  current: { triggerWorkItemId: string; observedAt: Date },
+  labelDefinitionId: number,
+  current: { triggerWorkItemId: number; observedAt: Date },
   baselineWindow: string | undefined,
 ): Promise<LabelMetricSnapshot | null> {
   const observedAtUpperBound =
@@ -233,20 +234,10 @@ async function upsertOccurrence(
   })
 
   if (input.primaryScopeType === 'account') {
-    await tx.analysisWorkItem.upsert({
-      where: {
-        kind_triggerType_triggerId: {
-          kind: 'account_summary_refresh',
-          triggerType: 'review_finding_occurrence',
-          triggerId: occurrence.id,
-        },
-      },
-      create: {
-        kind: 'account_summary_refresh',
-        triggerType: 'review_finding_occurrence',
-        triggerId: occurrence.id,
-      },
-      update: {},
+    await enqueueWorkItem(tx, {
+      kind: 'account_summary_refresh',
+      triggerType: 'review_finding_occurrence',
+      triggerId: occurrence.id,
     })
   }
 }
@@ -421,13 +412,13 @@ export async function generateFindingsForAggregateRefresh(
           prisma,
           {
             type: rule.type,
-            dimensions: { label: snapshot.labelDefinitionId },
+            dimensions: { label: String(snapshot.labelDefinitionId) },
             primaryScopeType: 'label',
-            primaryScopeId: snapshot.labelDefinitionId,
+            primaryScopeId: String(snapshot.labelDefinitionId),
             observation: result,
             rule,
             sourceType: input.evidenceEpochId ? 'label_evidence_epoch' : 'crawl_run',
-            sourceId: input.evidenceEpochId ?? input.triggerWorkItemId,
+            sourceId: input.evidenceEpochId ?? String(input.triggerWorkItemId),
           },
           input,
         )
@@ -454,13 +445,13 @@ export async function generateFindingsForAggregateRefresh(
             prisma,
             {
               type: rule.type,
-              dimensions: { label: snapshot.labelDefinitionId, reason: result.reason },
+              dimensions: { label: String(snapshot.labelDefinitionId), reason: result.reason },
               primaryScopeType: 'label',
-              primaryScopeId: snapshot.labelDefinitionId,
+              primaryScopeId: String(snapshot.labelDefinitionId),
               observation: result,
               rule,
               sourceType: input.evidenceEpochId ? 'label_evidence_epoch' : 'crawl_run',
-              sourceId: input.evidenceEpochId ?? input.triggerWorkItemId,
+              sourceId: input.evidenceEpochId ?? String(input.triggerWorkItemId),
             },
             input,
           )
@@ -472,39 +463,4 @@ export async function generateFindingsForAggregateRefresh(
   for (const ruleType of unimplementedRuleTypes) {
     logger.warn(`no detector implemented for enabled policy rule type: ${ruleType}`)
   }
-}
-
-/**
- * generateFindingsForCrawlCycle の入力。
- */
-export interface GenerateFindingsForCrawlCycleInput {
-  /** 対象の CrawlRun ID。 */
-  crawlRunId: string
-  /** 適用する検出ポリシー。 */
-  policy: DetectionPolicy
-  /** 適用したポリシーの content hash。 */
-  policyHash: string
-  /** 検出器のバージョン。 */
-  detectorVersion: string
-  /** この観測の元データ自体の時刻。 */
-  sourceObservedAt?: Date
-}
-
-/**
- * crawlRunId を triggerWorkItemId として generateFindingsForAggregateRefresh へ
- * 委譲する薄いラッパー。
- * @param prisma - Prisma クライアント
- * @param input - 対象 crawl run と検出ポリシー
- */
-export async function generateFindingsForCrawlCycle(
-  prisma: PrismaClient,
-  input: GenerateFindingsForCrawlCycleInput,
-): Promise<void> {
-  await generateFindingsForAggregateRefresh(prisma, {
-    triggerWorkItemId: input.crawlRunId,
-    policy: input.policy,
-    policyHash: input.policyHash,
-    detectorVersion: input.detectorVersion,
-    sourceObservedAt: input.sourceObservedAt,
-  })
 }

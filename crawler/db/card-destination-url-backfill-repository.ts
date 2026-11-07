@@ -18,11 +18,11 @@ interface CandidateRow {
 }
 
 interface DefinitionIdRow {
-  id: string
+  id: number
 }
 
 /**
- * `ad_pr_hashtag=true` の account のうち、
+ * `ad_pr_hashtag=true` (AccountActiveLabel に行がある) の account のうち、
  * 直近 `recentTweetsPerAccount` 件の Tweet に Card 未評価のものを含むものを keyset pagination で返す。
  * `recent-tweets-backfill-repository.ts` と同じく LATERAL + LIMIT 1 の fence で各条件を probe し、
  * optimizer による semi-join への平坦化を防ぐ。
@@ -49,16 +49,17 @@ export async function selectCardDestinationUrlBackfillCandidates(
   const definitionId = definitions[0].id
 
   const cursorCondition =
-    options.afterId === undefined ? Prisma.empty : Prisma.sql`AND a."id" > ${options.afterId}`
+    options.afterId === undefined
+      ? Prisma.empty
+      : Prisma.sql`AND a."id" > ${options.afterId}::bigint`
   const rows = await prisma.$queryRaw<CandidateRow[]>(Prisma.sql`
-    SELECT a."id" AS "accountId"
+    SELECT a."id"::text AS "accountId"
     FROM "Account" AS a
     CROSS JOIN LATERAL (
       SELECT 1
-      FROM "AccountLabelLatest" AS latest
-      WHERE latest."accountId" = a."id"
-        AND latest."labelDefinitionId" = ${definitionId}
-        AND latest."value" = true
+      FROM "AccountActiveLabel" AS active
+      WHERE active."accountId" = a."id"
+        AND active."labelDefinitionId" = ${definitionId}
       LIMIT 1
     ) AS "prMatch"
     CROSS JOIN LATERAL (

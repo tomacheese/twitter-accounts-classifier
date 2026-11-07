@@ -32,9 +32,11 @@ export async function selectForeignVideoSourceBackfillCandidates(
   options: ForeignVideoSourceBackfillCandidateOptions,
 ): Promise<ForeignVideoSourceBackfillCandidatePage> {
   const cursorCondition =
-    options.afterId === undefined ? Prisma.empty : Prisma.sql`AND a."id" > ${options.afterId}`
+    options.afterId === undefined
+      ? Prisma.empty
+      : Prisma.sql`AND a."id" > ${options.afterId}::bigint`
   const rows = await prisma.$queryRaw<CandidateRow[]>(Prisma.sql`
-    SELECT a."id" AS "accountId"
+    SELECT a."id"::text AS "accountId"
     FROM "Account" AS a
     CROSS JOIN LATERAL (
       SELECT 1

@@ -25,7 +25,8 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
     expect(sql).toContain('NOT EXISTS')
     expect(sql).toContain('ORDER BY change."changedAt" DESC, change.id DESC')
     expect(sql).toContain('LIMIT ?')
-    expect(sql.indexOf('JOIN "AccountLabelLatest"')).toBeLessThan(sql.indexOf('LIMIT ?'))
+    expect(sql.indexOf('JOIN "AccountActiveLabel"')).toBeGreaterThan(0)
+    expect(sql.indexOf('JOIN "AccountActiveLabel"')).toBeLessThan(sql.indexOf('LIMIT ?'))
     expect(sql).not.toContain('row_number()')
   })
 
@@ -48,7 +49,7 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
     ])
   })
 
-  it('baseline candidates は AccountLabel/AccountLabelLatest を一切クエリしない', async () => {
+  it('baseline candidates は AccountLabel 系のテーブルを一切クエリしない', async () => {
     const queries: { strings: readonly string[] }[] = []
     const prisma = {
       labelDefinition: {
@@ -103,7 +104,7 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
     expect(queries).toHaveLength(1)
   })
 
-  it('listChangeCandidates を除く全メソッドが AccountLabel/AccountLabelLatest を参照しない', () => {
+  it('listChangeCandidates を除く全メソッドが AccountLabel 系のテーブルを参照しない', () => {
     // tsconfig の module は CommonJS のため import.meta は使えない。
     // eslint-disable-next-line unicorn/prefer-module
     const sourcePath = path.join(__dirname, 'prisma-review-plan-data-source.ts')
@@ -111,7 +112,11 @@ describe('PrismaWeeklyReviewPlanningDataSource', () => {
     const changeCandidatesStart = source.indexOf('public async listChangeCandidates')
     expect(changeCandidatesStart).toBeGreaterThan(0)
 
-    const withoutChangeCandidates = source.slice(0, changeCandidatesStart)
+    // listChangeCandidates の JSDoc も、その実装に属するものとして除外する。
+    const withoutChangeCandidates = source.slice(
+      0,
+      source.lastIndexOf('/**', changeCandidatesStart),
+    )
 
     expect(withoutChangeCandidates).not.toContain('AccountLabel')
   })

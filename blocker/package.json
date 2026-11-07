@@ -15,12 +15,13 @@
     "test": "vitest run",
     "precheck": "pnpm run db:generate",
     "check": "run-p lint typecheck test",
-    "db:generate": "prisma generate --schema=../prisma/schema.prisma --generator blockerClient"
+    "db:generate": "prisma generate --schema=../prisma/schema.prisma --generator blockerClient && node ../prisma/scripts/stringify-bigint-types.mjs"
   },
   "dependencies": {
     "@book000/node-utils": "^1.0.0",
     "@prisma/client": "^6.0.0",
     "@sentry/node": "^8.0.0",
+    "id-boundary": "workspace:*",
     "twitter-client": "workspace:*",
     "zod": "^3.24.0"
   },

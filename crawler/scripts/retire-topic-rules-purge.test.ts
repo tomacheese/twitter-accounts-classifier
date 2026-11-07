@@ -58,7 +58,7 @@ describe('runRetireTopicRulesPurge', () => {
 
   it('deletes each table in batches until a batch affects no rows, then moves to the next table', async () => {
     const remaining = new Map<string, number>([
-      ['AccountLabelLatest', 7],
+      ['AccountActiveLabel', 7],
       ['AccountClassificationLatest', 2],
     ])
     const { prisma, executeRawUnsafe } = makePrisma({
@@ -74,10 +74,10 @@ describe('runRetireTopicRulesPurge', () => {
 
     await runRetireTopicRulesPurge(deps)
 
-    expect(deps.logs).toContain('Purged 7 rows from AccountLabelLatest')
+    expect(deps.logs).toContain('Purged 7 rows from AccountActiveLabel')
     expect(deps.logs).toContain('Purged 2 rows from AccountClassificationLatest')
     const labelBatches = executeRawUnsafe.mock.calls.filter(
-      ([sql]) => typeof sql === 'string' && sql.startsWith('DELETE FROM "AccountLabelLatest"'),
+      ([sql]) => typeof sql === 'string' && sql.startsWith('DELETE FROM "AccountActiveLabel"'),
     )
     expect(labelBatches).toHaveLength(4)
     expect(labelBatches[0].slice(1)).toEqual([['l1', 'l2'], 3])
@@ -98,14 +98,14 @@ describe('runRetireTopicRulesPurge', () => {
     )
   })
 
-  it('cleans activeLabelKeys with the retired keys and deletes the definitions last', async () => {
+  it('cleans activeLabelKeys with the retired keys and retires the definitions last', async () => {
     const { prisma, executeRawUnsafe } = makePrisma({ executeRaw: () => 0 })
 
     await runRetireTopicRulesPurge(makeDeps(prisma))
 
     const sqls = executeRawUnsafe.mock.calls.map(([sql]) => sql)
     const updateIndex = sqls.findIndex((sql) => sql.startsWith('UPDATE "AccountSummaryLatest"'))
-    const definitionIndex = sqls.findIndex((sql) => sql.startsWith('DELETE FROM "LabelDefinition"'))
+    const definitionIndex = sqls.findIndex((sql) => sql.startsWith('UPDATE "LabelDefinition"'))
     expect(updateIndex).toBeGreaterThan(sqls.length - 3)
     expect(definitionIndex).toBe(sqls.length - 1)
     expect(executeRawUnsafe.mock.calls[updateIndex].slice(1)).toEqual([
@@ -127,24 +127,18 @@ describe('runRetireTopicRulesPurge', () => {
     expect(executeRawUnsafe).not.toHaveBeenCalled()
   })
 
-  it('purges the optional legacy table only when it exists', async () => {
-    const withLegacy = makePrisma({
-      labelTables: [...PURGE_TABLES, 'AccountLabel_pre_compaction'],
+  it('does not treat LabelRuleVersion as an uncovered table, and never deletes it', async () => {
+    const { prisma, executeRawUnsafe } = makePrisma({
+      labelTables: [...PURGE_TABLES, 'LabelRuleVersion'],
       executeRaw: () => 0,
     })
-    await runRetireTopicRulesPurge(makeDeps(withLegacy.prisma))
-    const withoutLegacy = makePrisma({ executeRaw: () => 0 })
-    await runRetireTopicRulesPurge(makeDeps(withoutLegacy.prisma))
 
-    const purgedTables = (executeRawUnsafe: typeof withLegacy.executeRawUnsafe) =>
-      executeRawUnsafe.mock.calls
-        .map(([sql]) => /^DELETE FROM "(\w+)" WHERE ctid/.exec(sql)?.[1])
-        .filter((table): table is string => table !== undefined)
-    expect(purgedTables(withLegacy.executeRawUnsafe)).toEqual([
-      ...PURGE_TABLES,
-      'AccountLabel_pre_compaction',
-    ])
-    expect(purgedTables(withoutLegacy.executeRawUnsafe)).toEqual([...PURGE_TABLES])
+    await runRetireTopicRulesPurge(makeDeps(prisma))
+
+    const purged = executeRawUnsafe.mock.calls
+      .map(([sql]) => /^DELETE FROM "(\w+)" WHERE ctid/.exec(sql)?.[1])
+      .filter((table): table is string => table !== undefined)
+    expect(purged).toEqual([...PURGE_TABLES])
   })
 
   it('is a no-op when the definitions are already gone', async () => {
@@ -153,7 +147,7 @@ describe('runRetireTopicRulesPurge', () => {
 
     await runRetireTopicRulesPurge(deps)
 
-    expect(deps.logs).toContain('Deleted 0 rows from LabelDefinition')
+    expect(deps.logs).toContain('Retired 0 rows of LabelDefinition')
     const firstDelete = executeRawUnsafe.mock.calls[0]
     expect(firstDelete.slice(1)).toEqual([[], 3])
   })

@@ -1,6 +1,13 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  resolve: {
+    // id-boundary の dist は .gitignore 対象で CI では未ビルドのため、テスト実行時はソースを直接解決する。
+    alias: {
+      'id-boundary': fileURLToPath(new URL('../id-boundary/index.ts', import.meta.url)),
+    },
+  },
   test: {
     environment: 'node',
     include: ['**/*.test.ts'],

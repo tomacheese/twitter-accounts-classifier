@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { createSyntheticId } from 'id-boundary'
 import { getPrismaClient } from '../db/client'
 import { buildBlockRelationSummary } from './build-block-relation-summary'
 
@@ -10,13 +11,15 @@ describe.skipIf(!process.env.DATABASE_URL)('buildBlockRelationSummary', () => {
     await prisma.blockRelationCurrent.deleteMany()
     await prisma.blockStateChange.deleteMany()
     await prisma.block.deleteMany()
-    await prisma.accountLabelLatest.deleteMany()
+    await prisma.accountActiveLabel.deleteMany()
+    await prisma.accountLabelState.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
   })
 
   it('Block を screenName 正規化した BlockRelationCurrent へ変換する', async () => {
-    const blockerId = `account-${randomUUID()}`
-    const blockedId = `account-${randomUUID()}`
+    const blockerId = createSyntheticId()
+    const blockedId = createSyntheticId()
     await prisma.account.createMany({
       data: [
         {
@@ -55,8 +58,8 @@ describe.skipIf(!process.env.DATABASE_URL)('buildBlockRelationSummary', () => {
   })
 
   it('ページサイズを超える件数の Block でも全件が新 generationId で作られる', async () => {
-    const blockerId = `account-${randomUUID()}`
-    const blockedIds = Array.from({ length: 5 }, () => `account-${randomUUID()}`)
+    const blockerId = createSyntheticId()
+    const blockedIds = Array.from({ length: 5 }, () => createSyntheticId())
     await prisma.account.createMany({
       data: [blockerId, ...blockedIds].map((id, index) => ({
         id,

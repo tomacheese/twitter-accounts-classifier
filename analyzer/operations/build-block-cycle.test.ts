@@ -11,6 +11,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateBlockCycle', () => {
     await prisma.operationCycle.deleteMany()
     await prisma.analysisRun.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.blockAccountRun.deleteMany()
     await prisma.blockRun.deleteMany()
   })

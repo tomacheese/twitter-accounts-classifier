@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest'
+import { createSyntheticId } from 'id-boundary'
 import { getPrismaClient } from '../db/client'
 import {
   detectAnalysisStageFailure,
@@ -556,7 +557,9 @@ describe.skipIf(!process.env.DATABASE_URL)('detectStalledBlockOutboxEntries', ()
     await prisma.blockOutboxEntry.deleteMany()
     await prisma.blockAccountRun.deleteMany()
     await prisma.blockRun.deleteMany()
+    await prisma.accountCrawlState.deleteMany()
     await prisma.account.deleteMany()
+    await prisma.labelRuleVersion.deleteMany()
     await prisma.labelDefinition.deleteMany()
     await prisma.operationalIssueOccurrence.deleteMany()
     await prisma.operationalIssue.deleteMany()
@@ -569,7 +572,7 @@ describe.skipIf(!process.env.DATABASE_URL)('detectStalledBlockOutboxEntries', ()
    * @param count - 作成する停滞済み (createdAt が古い) outbox entry の件数
    */
   async function createStalledOutboxEntries(count: number): Promise<void> {
-    const blockerId = `blocker-${randomUUID()}`
+    const blockerId = createSyntheticId()
     await prisma.account.create({
       data: {
         id: blockerId,
@@ -597,7 +600,7 @@ describe.skipIf(!process.env.DATABASE_URL)('detectStalledBlockOutboxEntries', ()
     })
 
     for (let i = 0; i < count; i++) {
-      const blockedId = `blocked-${randomUUID()}`
+      const blockedId = createSyntheticId()
       await prisma.account.create({
         data: {
           id: blockedId,

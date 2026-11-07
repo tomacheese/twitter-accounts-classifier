@@ -44,14 +44,14 @@ describe('getBlockAccountRunsWithActions', () => {
           id: 'ba-1',
           blockAccountRunId: 'bar-1',
           blockedId: 'account-2',
-          labelDefinitionId: 'label-1',
+          labelDefinitionId: 1,
           confidence: 0.9,
           result: 'success',
           errorMessage: null,
           outboxEntryId: 'outbox-1',
         },
       ],
-      labelDefinitions: [{ id: 'label-1', key: 'test_label' }],
+      labelDefinitions: [{ id: 1, key: 'test_label' }],
       outboxEntries: [{ id: 'outbox-1', status: 'local_persisted' }],
     })
 
@@ -81,14 +81,14 @@ describe('getBlockAccountRunsWithActions', () => {
           id: 'ba-2',
           blockAccountRunId: 'bar-1',
           blockedId: 'account-3',
-          labelDefinitionId: 'label-1',
+          labelDefinitionId: 1,
           confidence: 0.5,
           result: 'failed',
           errorMessage: 'boom',
           outboxEntryId: null,
         },
       ],
-      labelDefinitions: [{ id: 'label-1', key: 'test_label' }],
+      labelDefinitions: [{ id: 1, key: 'test_label' }],
       outboxEntries: [],
     })
 

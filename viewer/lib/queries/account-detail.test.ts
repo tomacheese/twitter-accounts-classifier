@@ -2,6 +2,47 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
 import { getAccountDetail } from './account-detail'
 
+interface ActiveLabelFixture {
+  labelDefinitionId: number
+  confidence: number
+  reason: string
+  method: string
+  ruleVersionNo: number
+  labeledAt: Date
+}
+
+interface LabelDefinitionFixture {
+  id: number
+  key: string
+  retiredAt: Date | null
+  ruleVersions: { versionNo: number; ruleVersion: string }[]
+}
+
+/** AccountLabelState・AccountActiveLabel・LabelDefinition の prisma モックをまとめて作る。 */
+function makeLabelStorage(
+  input: {
+    versions?: number[]
+    active?: ActiveLabelFixture[]
+    definitions?: LabelDefinitionFixture[]
+  } = {},
+) {
+  const stateFindUnique = vi
+    .fn()
+    .mockResolvedValue(input.versions ? { versions: input.versions } : null)
+  const activeFindMany = vi.fn().mockResolvedValue(input.active ?? [])
+  const definitionFindMany = vi.fn().mockResolvedValue(input.definitions ?? [])
+  return {
+    stateFindUnique,
+    activeFindMany,
+    definitionFindMany,
+    models: {
+      accountLabelState: { findUnique: stateFindUnique },
+      accountActiveLabel: { findMany: activeFindMany },
+      labelDefinition: { findMany: definitionFindMany },
+    },
+  }
+}
+
 describe('getAccountDetail', () => {
   it('returns null when the account does not exist', async () => {
     const prisma = {
@@ -28,33 +69,46 @@ describe('getAccountDetail', () => {
       verifiedType: 'Business',
     }
     const findUnique = vi.fn().mockResolvedValue(account)
-    const latestFindMany = vi.fn().mockResolvedValue([
-      {
-        value: true,
-        confidence: 0.95,
-        reason: 'reappeared spam pattern',
-        method: 'heuristic',
-        ruleVersion: '1.2.0',
-        labeledAt: new Date('2026-07-03T00:00:00Z'),
-        labelDefinitionId: 'ld-spam',
-        labelDefinition: { key: 'spam' },
-      },
-      {
-        value: true,
-        confidence: 0.8,
-        reason: 'account behavior matches bot pattern',
-        method: 'ai-generated',
-        ruleVersion: '1.0.0',
-        labeledAt: new Date('2026-07-01T00:00:00Z'),
-        labelDefinitionId: 'ld-bot',
-        labelDefinition: { key: 'bot' },
-      },
-    ])
+    const labelStorage = makeLabelStorage({
+      versions: [1, 1],
+      active: [
+        {
+          labelDefinitionId: 1,
+          confidence: 0.95,
+          reason: 'reappeared spam pattern',
+          method: 'heuristic',
+          ruleVersionNo: 1,
+          labeledAt: new Date('2026-07-03T00:00:00Z'),
+        },
+        {
+          labelDefinitionId: 2,
+          confidence: 0.8,
+          reason: 'account behavior matches bot pattern',
+          method: 'ai-generated',
+          ruleVersionNo: 1,
+          labeledAt: new Date('2026-07-01T00:00:00Z'),
+        },
+      ],
+      definitions: [
+        {
+          id: 2,
+          key: 'bot',
+          retiredAt: null,
+          ruleVersions: [{ versionNo: 1, ruleVersion: '1.0.0' }],
+        },
+        {
+          id: 1,
+          key: 'spam',
+          retiredAt: null,
+          ruleVersions: [{ versionNo: 1, ruleVersion: '1.2.0' }],
+        },
+      ],
+    })
     // ld-spam は added(初回) → removed → added(現在値) の3回遷移している。
     // ld-bot は初回 added のみで、それ以降の遷移がない。
     const labelChangeFindMany = vi.fn().mockResolvedValue([
       {
-        labelDefinitionId: 'ld-spam',
+        labelDefinitionId: 1,
         changeType: 'added',
         previousValue: false,
         newValue: true,
@@ -65,7 +119,7 @@ describe('getAccountDetail', () => {
         changedAt: new Date('2026-07-03T00:00:00Z'),
       },
       {
-        labelDefinitionId: 'ld-spam',
+        labelDefinitionId: 1,
         changeType: 'removed',
         previousValue: true,
         newValue: false,
@@ -76,7 +130,7 @@ describe('getAccountDetail', () => {
         changedAt: new Date('2026-07-02T00:00:00Z'),
       },
       {
-        labelDefinitionId: 'ld-spam',
+        labelDefinitionId: 1,
         changeType: 'added',
         previousValue: null,
         newValue: true,
@@ -87,7 +141,7 @@ describe('getAccountDetail', () => {
         changedAt: new Date('2026-07-01T00:00:00Z'),
       },
       {
-        labelDefinitionId: 'ld-bot',
+        labelDefinitionId: 2,
         changeType: 'added',
         previousValue: null,
         newValue: true,
@@ -155,7 +209,7 @@ describe('getAccountDetail', () => {
     const blockCount = vi.fn().mockResolvedValue(1)
     const prisma = {
       account: { findUnique },
-      accountLabelLatest: { findMany: latestFindMany },
+      ...labelStorage.models,
       accountLabelChange: { findMany: labelChangeFindMany },
       tweet: { findMany: tweetFindMany },
       follow: { findMany: followFindMany, count: followCount },
@@ -181,6 +235,7 @@ describe('getAccountDetail', () => {
       labels: [
         {
           labelKey: 'spam',
+          status: 'true',
           value: true,
           confidence: 0.95,
           reason: 'reappeared spam pattern',
@@ -222,6 +277,7 @@ describe('getAccountDetail', () => {
         },
         {
           labelKey: 'bot',
+          status: 'true',
           value: true,
           confidence: 0.8,
           reason: 'account behavior matches bot pattern',
@@ -292,12 +348,10 @@ describe('getAccountDetail', () => {
     expect(tweetFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { accountId: 'a1' }, take: 10 }),
     )
-    expect(latestFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { accountId: 'a1' },
-        orderBy: { labeledAt: 'desc' },
-      }),
+    expect(labelStorage.stateFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { accountId: 'a1' } }),
     )
+    expect(labelStorage.activeFindMany).toHaveBeenCalledWith({ where: { accountId: 'a1' } })
     expect(labelChangeFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { accountId: 'a1' },
@@ -322,7 +376,7 @@ describe('getAccountDetail', () => {
     }
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      ...makeLabelStorage().models,
       accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: {
@@ -361,7 +415,7 @@ describe('getAccountDetail', () => {
     const blockCount = vi.fn().mockResolvedValue(250)
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      ...makeLabelStorage().models,
       accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: { findMany: followFindMany, count: followCount },
@@ -395,7 +449,7 @@ describe('getAccountDetail', () => {
     const blockFindMany = vi.fn().mockResolvedValue([])
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      ...makeLabelStorage().models,
       accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: { findMany: followFindMany, count: vi.fn().mockResolvedValue(0) },
@@ -439,7 +493,7 @@ describe('getAccountDetail', () => {
       verifiedType: null,
     }
     const changeRows = Array.from({ length: 25 }, (_, index) => ({
-      labelDefinitionId: 'ld-spam',
+      labelDefinitionId: 1,
       changeType: 'added',
       previousValue: null,
       newValue: true,
@@ -449,21 +503,30 @@ describe('getAccountDetail', () => {
       newReason: `evaluation ${index}`,
       changedAt: new Date(2026, 6, 25 - index),
     }))
-    const latestFindMany = vi.fn().mockResolvedValue([
-      {
-        value: true,
-        confidence: 0.9,
-        reason: 'evaluation 0',
-        method: 'heuristic',
-        ruleVersion: '1.0.0',
-        labeledAt: new Date(2026, 6, 25),
-        labelDefinitionId: 'ld-spam',
-        labelDefinition: { key: 'spam' },
-      },
-    ])
+    const labelStorage = makeLabelStorage({
+      versions: [1],
+      active: [
+        {
+          labelDefinitionId: 1,
+          confidence: 0.9,
+          reason: 'evaluation 0',
+          method: 'heuristic',
+          ruleVersionNo: 1,
+          labeledAt: new Date(2026, 6, 25),
+        },
+      ],
+      definitions: [
+        {
+          id: 1,
+          key: 'spam',
+          retiredAt: null,
+          ruleVersions: [{ versionNo: 1, ruleVersion: '1.0.0' }],
+        },
+      ],
+    })
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
-      accountLabelLatest: { findMany: latestFindMany },
+      ...labelStorage.models,
       accountLabelChange: { findMany: vi.fn().mockResolvedValue(changeRows) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: {
@@ -499,7 +562,7 @@ describe('getAccountDetail', () => {
     const labelChangeFindMany = vi.fn().mockResolvedValue([])
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
-      accountLabelLatest: { findMany: vi.fn().mockResolvedValue([]) },
+      ...makeLabelStorage().models,
       accountLabelChange: { findMany: labelChangeFindMany },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: {
@@ -517,7 +580,7 @@ describe('getAccountDetail', () => {
     expect(labelChangeFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 2000 }))
   })
 
-  it('keeps a label visible from AccountLabelLatest even when its history rows are crowded out of the capped AccountLabelChange fetch', async () => {
+  it('keeps a label visible from AccountActiveLabel even when its history rows are crowded out of the capped AccountLabelChange fetch', async () => {
     const account = {
       id: 'a7',
       screenName: 'grace',
@@ -533,21 +596,30 @@ describe('getAccountDetail', () => {
     }
     // 別ラベルの変化行だけで ACCOUNT_LABEL_CHANGE_FETCH_LIMIT を使い切り、
     // ld-quiet 自身の履歴行が取得結果に一件も含まれない状況を再現する。
-    const latestFindMany = vi.fn().mockResolvedValue([
-      {
-        value: true,
-        confidence: 0.7,
-        reason: 'stable evaluation',
-        method: 'heuristic',
-        ruleVersion: '1.0.0',
-        labeledAt: new Date('2026-01-01T00:00:00Z'),
-        labelDefinitionId: 'ld-quiet',
-        labelDefinition: { key: 'quiet' },
-      },
-    ])
+    const labelStorage = makeLabelStorage({
+      versions: [0, 0, 1],
+      active: [
+        {
+          labelDefinitionId: 3,
+          confidence: 0.7,
+          reason: 'stable evaluation',
+          method: 'heuristic',
+          ruleVersionNo: 1,
+          labeledAt: new Date('2026-01-01T00:00:00Z'),
+        },
+      ],
+      definitions: [
+        {
+          id: 3,
+          key: 'quiet',
+          retiredAt: null,
+          ruleVersions: [{ versionNo: 1, ruleVersion: '1.0.0' }],
+        },
+      ],
+    })
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
-      accountLabelLatest: { findMany: latestFindMany },
+      ...labelStorage.models,
       accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: {
@@ -565,6 +637,7 @@ describe('getAccountDetail', () => {
     expect(result?.labels).toEqual([
       {
         labelKey: 'quiet',
+        status: 'true',
         value: true,
         confidence: 0.7,
         reason: 'stable evaluation',
@@ -576,7 +649,7 @@ describe('getAccountDetail', () => {
     ])
   })
 
-  it('keeps a never-triggered (value=false) label visible with an empty history when it has no AccountLabelChange rows at all', async () => {
+  it('shows false and unevaluable labels without a reason, skips unevaluated and retired ones', async () => {
     const account = {
       id: 'a8',
       screenName: 'henry',
@@ -590,23 +663,32 @@ describe('getAccountDetail', () => {
       isBlueVerified: false,
       verifiedType: null,
     }
-    // ルールが一度も true 判定を出したことがないラベルは、AccountLabelChange
-    // トリガーが一度も発火しないため変化行がそもそも存在しない。
-    const latestFindMany = vi.fn().mockResolvedValue([
-      {
-        value: false,
-        confidence: 0.1,
-        reason: 'no keyword match',
-        method: 'heuristic',
-        ruleVersion: '1.0.0',
-        labeledAt: new Date('2026-01-01T00:00:00Z'),
-        labelDefinitionId: 'ld-never-triggered',
-        labelDefinition: { key: 'never_triggered' },
-      },
-    ])
+    // versions の添字は LabelDefinition.id - 1。1 = never_triggered (false)、2 = few_samples (評価不能)、
+    // 3 = not_yet (未評価)、4 = retired_false (廃止済みで false)、5 = retired_true (廃止済みで true)。
+    const ruleVersions = [{ versionNo: 1, ruleVersion: '1.0.0' }]
+    const labelStorage = makeLabelStorage({
+      versions: [1, -1, 0, 1, 1],
+      active: [
+        {
+          labelDefinitionId: 5,
+          confidence: 0.6,
+          reason: 'still true',
+          method: 'heuristic',
+          ruleVersionNo: 1,
+          labeledAt: new Date('2026-01-01T00:00:00Z'),
+        },
+      ],
+      definitions: [
+        { id: 2, key: 'few_samples', retiredAt: null, ruleVersions },
+        { id: 1, key: 'never_triggered', retiredAt: null, ruleVersions },
+        { id: 3, key: 'not_yet', retiredAt: null, ruleVersions },
+        { id: 4, key: 'retired_false', retiredAt: new Date('2026-02-01T00:00:00Z'), ruleVersions },
+        { id: 5, key: 'retired_true', retiredAt: new Date('2026-02-01T00:00:00Z'), ruleVersions },
+      ],
+    })
     const prisma = {
       account: { findUnique: vi.fn().mockResolvedValue(account) },
-      accountLabelLatest: { findMany: latestFindMany },
+      ...labelStorage.models,
       accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
       tweet: { findMany: vi.fn().mockResolvedValue([]) },
       follow: {
@@ -623,15 +705,76 @@ describe('getAccountDetail', () => {
 
     expect(result?.labels).toEqual([
       {
-        labelKey: 'never_triggered',
-        value: false,
-        confidence: 0.1,
-        reason: 'no keyword match',
+        labelKey: 'retired_true',
+        status: 'true',
+        value: true,
+        confidence: 0.6,
+        reason: 'still true',
         method: 'heuristic',
         ruleVersion: '1.0.0',
         labeledAt: new Date('2026-01-01T00:00:00Z'),
         history: [],
       },
+      {
+        labelKey: 'few_samples',
+        status: 'unevaluable',
+        value: false,
+        confidence: null,
+        reason: null,
+        method: null,
+        ruleVersion: '1.0.0',
+        labeledAt: null,
+        history: [],
+      },
+      {
+        labelKey: 'never_triggered',
+        status: 'false',
+        value: false,
+        confidence: null,
+        reason: null,
+        method: null,
+        ruleVersion: '1.0.0',
+        labeledAt: null,
+        history: [],
+      },
     ])
+  })
+
+  it('returns no labels for an account that has never been evaluated', async () => {
+    const account = {
+      id: 'a9',
+      screenName: 'ivy',
+      displayName: 'Ivy',
+      bio: null,
+      profileImageUrl: null,
+      followersCount: 0,
+      followingCount: 0,
+      tweetCount: 0,
+      accountCreatedAt: new Date('2020-01-01T00:00:00Z'),
+      isBlueVerified: false,
+      verifiedType: null,
+    }
+    const labelStorage = makeLabelStorage({
+      definitions: [
+        {
+          id: 1,
+          key: 'spam',
+          retiredAt: null,
+          ruleVersions: [{ versionNo: 1, ruleVersion: '1.0.0' }],
+        },
+      ],
+    })
+    const prisma = {
+      account: { findUnique: vi.fn().mockResolvedValue(account) },
+      ...labelStorage.models,
+      accountLabelChange: { findMany: vi.fn().mockResolvedValue([]) },
+      tweet: { findMany: vi.fn().mockResolvedValue([]) },
+      follow: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      block: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+    } as unknown as PrismaClient
+
+    const result = await getAccountDetail(prisma, 'a9', 10)
+
+    expect(result?.labels).toEqual([])
   })
 })

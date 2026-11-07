@@ -12,7 +12,7 @@ export interface FindOrCreateOutboxEntryInput {
   blockAccountRunId: string
   blockerId: string
   blockedId: string
-  labelDefinitionId: string
+  labelDefinitionId: number
   confidence: number
 }
 
@@ -153,7 +153,7 @@ export interface StalledOutboxEntry {
   status: OutboxEntryStatus
   blockerId: string
   blockedId: string
-  labelDefinitionId: string
+  labelDefinitionId: number
   confidence: number
   blockAccountRunId: string
 }

@@ -1,0 +1,28 @@
+{
+  "name": "id-boundary",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "run-p lint typecheck test"
+  },
+  "devDependencies": {
+    "@book000/eslint-config": "1.13.1",
+    "@types/node": "^20.0.0",
+    "eslint": "^9.0.0",
+    "npm-run-all2": "^7.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}

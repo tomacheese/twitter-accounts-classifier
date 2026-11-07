@@ -32,7 +32,7 @@ export interface RecordBlockActionParams {
   blockAccountRunId: string
   blockerId: string
   blockedId: string
-  labelDefinitionId: string
+  labelDefinitionId: number
   confidence: number
   result: string
   errorMessage: string | null

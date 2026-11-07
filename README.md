@@ -10,6 +10,7 @@ Twitter をクロールしてツイート・アカウント情報を収集し、
 - `viewer/`: 収集結果をダッシュボード表示する Next.js アプリ。
 - `twitter-client/`: crawler・blocker が共有する Twitter/X クライアントのライブラリ。
 - `pipeline-health/`: viewer が使うパイプライン健全性判定のライブラリ。
+- `id-boundary/`: Twitter/X の ID (bigint) とアプリケーション内の 10 進文字列を Prisma の境界で相互変換するライブラリ。各パッケージの Prisma クライアントが利用する。
 - `prisma/`: crawler・viewer が共有する Postgres スキーマ。リポジトリルート直下に置き、両アプリから `--schema=../prisma/schema.prisma` で相対参照する。
 - 詳細な設計判断・背景は [SPEC.md](./SPEC.md) を参照。
 
@@ -25,9 +26,9 @@ Twitter をクロールしてツイート・アカウント情報を収集し、
 
 1. `.env.example` を `.env` にコピーし、値を埋める。
 2. `data/config.json` を用意する (`email`/`username`/`password`/`otp_secret` を含むアカウント配列)。
-3. 初回のみ、Postgres に `viewer`/`analyzer` ロールを作成する。`compose.yaml` の `migrate` サービスは既存ロールへの権限同期・検証だけを毎回自動実行し、ロール自体の作成は行わないため、これを飛ばすと `migrate` サービスがロール不在で失敗する。`scripts/db/create-viewer-role.sql`・`scripts/db/create-analyzer-role.sql` 内の `CHANGE_ME_*_PASSWORD` を `.env` の `VIEWER_DB_PASSWORD`/`ANALYZER_DB_PASSWORD` と同じ値に置き換えたうえで、Prisma migration を実行するテーブル所有者ロール (`crawler`) で1度だけ実行する。
+3. `.env` に `DB_OWNER_PASSWORD` (テーブル所有者 `tac_owner` のパスワード)、`CRAWLER_DB_PASSWORD`、`VIEWER_DB_PASSWORD`、`ANALYZER_DB_PASSWORD` を設定する。`compose.yaml` の `migrate` サービスが、所有者で `prisma/baseline` を適用し (適用済みなら何もしない)、`crawler`・`viewer`・`analyzer` ロールの作成と権限同期・検証を毎回自動実行する。`crawler` ロールは所有者でも superuser でもない。ラベル状態 (`AccountLabelState`、`AccountActiveLabel`) への書き込みは、関数 `set_label_result` だけに限られる。
 4. `docker compose up -d --build` で起動する。
-5. 初回起動時に Prisma のマイグレーション・ラベル定義のシードが自動実行される。
+5. 初回起動時にラベル定義のシードが自動実行される。スキーマは `prisma/baseline` から作るため、`prisma migrate deploy` は実行しない。
 
 ## アクセス
 
@@ -59,7 +60,7 @@ Viewer には認証機構がなく、フォロー・フォロワー・ブロッ�
 | `RELABELER_WORKER_BATCH_SIZE`         | -    | relabeler worker が 1 cycle あたりに claim する work item の上限件数 (concurrency 分の合計ではなく 1 レーンあたりの値)。デフォルト 2000                                                                                   |
 | `RELABELER_WORKER_CONCURRENCY`        | -    | relabeler worker の evaluate フェーズの並行度。デフォルト 1                                                                                                                                                               |
 | `RELABELER_WORKER_CHUNK_SIZE`         | -    | relabeler worker が claim/evaluate する際の 1 chunk あたりの account 件数。デフォルト 1000                                                                                                    |
-| `RELABELER_LABEL_LOOKUP_CHUNK_SIZE`   | -    | relabeler producer の stale scan が AccountLabelLatest を lookup する際の 1 chunk あたりの account 件数。デフォルト 1000                                                                                                  |
+| `RELABELER_LABEL_LOOKUP_CHUNK_SIZE`   | -    | relabeler producer の stale scan が AccountLabelState を lookup する際の 1 chunk あたりの account 件数。デフォルト 1000                                                                                                  |
 | `RELABELER_ORPHAN_RECOVERY_BATCH_SIZE` | -    | relabeler が孤立した work item を回復する際の 1 回あたりの件数。デフォルト 1000 |
 
 ## relabel backfill の運用契約

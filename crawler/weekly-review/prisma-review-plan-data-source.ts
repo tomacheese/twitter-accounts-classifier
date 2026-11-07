@@ -33,7 +33,7 @@ type BaselineCandidateByValueRow = Omit<
 >
 
 interface BaselineCandidateTask {
-  definitionId: string
+  definitionId: number
   labelKey: string
   value: boolean
   populationCount: number
@@ -43,10 +43,24 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
   public constructor(private readonly prisma: PrismaClient | Prisma.TransactionClient) {}
 
   public async listDefinitions(): Promise<PlanningDefinitionRow[]> {
-    return this.prisma.labelDefinition.findMany({
-      select: { id: true, key: true, currentRuleVersion: true },
+    const definitions = await this.prisma.labelDefinition.findMany({
+      where: { retiredAt: null },
+      select: {
+        id: true,
+        key: true,
+        currentRuleVersionNo: true,
+        ruleVersions: { select: { versionNo: true, ruleVersion: true } },
+      },
       orderBy: { key: 'asc' },
     })
+    return definitions.map((definition) => ({
+      id: definition.id,
+      key: definition.key,
+      currentRuleVersion:
+        definition.ruleVersions.find(
+          (version) => version.versionNo === definition.currentRuleVersionNo,
+        )?.ruleVersion ?? null,
+    }))
   }
 
   public async listSnapshots(targetTo: Date): Promise<PlanningSnapshotRow[]> {
@@ -88,7 +102,10 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
       },
       _count: { _all: true },
     })
-    return rows.map((row) => ({ labelDefinitionId: row.primaryScopeId, count: row._count._all }))
+    return rows.map((row) => ({
+      labelDefinitionId: Number(row.primaryScopeId),
+      count: row._count._all,
+    }))
   }
 
   public async listRecentChangeCounts(
@@ -121,6 +138,7 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
   ): Promise<PlanningCandidateRow[]> {
     const [definitions, populationCounts] = await Promise.all([
       this.prisma.labelDefinition.findMany({
+        where: { retiredAt: null },
         select: { id: true, key: true },
         orderBy: { id: 'asc' },
       }),
@@ -160,19 +178,19 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
           : selectBuckets(seed, task.definitionId, task.value, bucketReadCount)
       const rows = await this.prisma.$queryRaw<BaselineCandidateByValueRow[]>(Prisma.sql`
         SELECT
-          classification."accountId",
+          classification."accountId"::text AS "accountId",
           classification.value,
           classification.confidence,
           classification.reason,
           classification."ruleVersion",
           classification."labeledAt",
           classification.evaluable,
-          account."recentTweetsFetchStatus",
-          account."lastRecentTweetsAttemptedAt",
-          account."lastRecentTweetsFetchedAt"
+          crawl."recentTweetsFetchStatus",
+          crawl."lastRecentTweetsAttemptedAt",
+          crawl."lastRecentTweetsFetchedAt"
         FROM "AccountClassificationLatest" classification
-        JOIN "Account" account ON account.id = classification."accountId"
-        WHERE classification."labelDefinitionId" = ${task.definitionId}
+        JOIN "AccountCrawlState" crawl ON crawl."accountId" = classification."accountId"
+        WHERE classification."labelDefinitionId" = ${task.definitionId}::smallint
           AND classification.value = ${task.value}
           AND classification.evaluable = true
           AND classification."labeledAt" IS NOT NULL
@@ -183,8 +201,8 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
           }
       `)
       const ranked = rows.toSorted((a, b) =>
-        stableRank(seed, task.definitionId, String(task.value), a.accountId).localeCompare(
-          stableRank(seed, task.definitionId, String(task.value), b.accountId),
+        stableRank(seed, String(task.definitionId), String(task.value), a.accountId).localeCompare(
+          stableRank(seed, String(task.definitionId), String(task.value), b.accountId),
         ),
       )
       rowsByTask.push(
@@ -229,6 +247,12 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
     return row.now
   }
 
+  /**
+   * 期間内に最後に変化したラベルごとに、現在の評価状態を持つ candidate を返す。
+   * true の行は AccountActiveLabel から、それ以外は AccountLabelState の符号から (正は false、負は評価不能) 判定する。
+   * false と評価不能の行は reason と confidence を持たないため、変化の記録から補い、無ければ中立値にする。
+   * LEFT JOIN のため、現在 true でないラベルの変化 (removed と unevaluable) も落とさない。
+   */
   public async listChangeCandidates(
     targetFrom: Date,
     targetTo: Date,
@@ -236,25 +260,36 @@ export class PrismaWeeklyReviewPlanningDataSource implements WeeklyReviewPlannin
   ): Promise<PlanningCandidateRow[]> {
     return this.prisma.$queryRaw<PlanningCandidateRow[]>(Prisma.sql`
       SELECT
-        latest."accountId",
-        latest."labelDefinitionId",
+        change."accountId"::text AS "accountId",
+        change."labelDefinitionId",
         definition.key AS "labelKey",
-        latest.value,
-        latest.confidence,
-        latest.reason,
-        latest."ruleVersion",
-        latest."labeledAt",
-        latest.evaluable,
-        account."recentTweetsFetchStatus",
-        account."lastRecentTweetsAttemptedAt",
-        account."lastRecentTweetsFetchedAt",
-        change."changeType"
+        (active."accountId" IS NOT NULL) AS value,
+        COALESCE(active.confidence, change."newConfidence", 0.5) AS confidence,
+        COALESCE(
+          active.reason,
+          change."newReason",
+          'not currently true (' || change."changeType" || '); previous reason: '
+            || COALESCE(change."previousReason", 'n/a')
+        ) AS reason,
+        COALESCE(rule_version."ruleVersion", '') AS "ruleVersion",
+        COALESCE(active."labeledAt", state."evaluatedAt", change."changedAt") AS "labeledAt",
+        (active."accountId" IS NOT NULL OR COALESCE(state.versions[change."labelDefinitionId"], 0) > 0)
+          AS evaluable,
+        crawl."recentTweetsFetchStatus",
+        crawl."lastRecentTweetsAttemptedAt",
+        crawl."lastRecentTweetsFetchedAt",
+        change."changeType"::text AS "changeType"
       FROM "AccountLabelChange" change
-      JOIN "AccountLabelLatest" latest
-        ON latest."accountId" = change."accountId"
-       AND latest."labelDefinitionId" = change."labelDefinitionId"
-      JOIN "LabelDefinition" definition ON definition.id = latest."labelDefinitionId"
-      JOIN "Account" account ON account.id = latest."accountId"
+      LEFT JOIN "AccountActiveLabel" active
+        ON active."accountId" = change."accountId"
+       AND active."labelDefinitionId" = change."labelDefinitionId"
+      LEFT JOIN "AccountLabelState" state ON state."accountId" = change."accountId"
+      LEFT JOIN "LabelRuleVersion" rule_version
+        ON rule_version."labelDefinitionId" = change."labelDefinitionId"
+       AND rule_version."versionNo" = abs(COALESCE(
+             active."ruleVersionNo", state.versions[change."labelDefinitionId"], 0))
+      JOIN "LabelDefinition" definition ON definition.id = change."labelDefinitionId"
+      JOIN "AccountCrawlState" crawl ON crawl."accountId" = change."accountId"
       WHERE change."changedAt" >= ${targetFrom}
         AND change."changedAt" <= ${targetTo}
         AND NOT EXISTS (

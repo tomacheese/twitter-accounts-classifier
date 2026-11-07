@@ -16,15 +16,17 @@ export async function enqueueWorkItem(
   tx: Prisma.TransactionClient | PrismaClient,
   input: EnqueueWorkItemInput,
 ): Promise<void> {
-  await tx.analysisWorkItem.upsert({
-    where: {
-      kind_triggerType_triggerId: {
-        kind: input.kind,
-        triggerType: input.triggerType,
-        triggerId: input.triggerId,
-      },
-    },
-    create: input,
-    update: {},
-  })
+  await tx.$executeRaw`
+    INSERT INTO "AnalysisWorkItem" ("kind", "triggerType", "triggerId", "updatedAt")
+    SELECT ${input.kind}, ${input.triggerType}, ${input.triggerId}, now()
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "AnalysisWorkItemDone"
+      WHERE "kind" = ${input.kind} AND "triggerType" = ${input.triggerType} AND "triggerId" = ${input.triggerId}
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM "AnalysisWorkItem"
+      WHERE "kind" = ${input.kind} AND "triggerType" = ${input.triggerType} AND "triggerId" = ${input.triggerId}
+    )
+    ON CONFLICT ("kind", "triggerType", "triggerId") DO NOTHING
+  `
 }

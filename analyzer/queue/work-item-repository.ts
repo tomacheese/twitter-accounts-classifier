@@ -1,4 +1,4 @@
-import type { PrismaClient, AnalysisWorkItem } from '../generated/prisma'
+import { Prisma, type PrismaClient, type AnalysisWorkItem } from '../generated/prisma'
 
 /**
  * enqueueWorkItem の入力。
@@ -17,44 +17,106 @@ export interface EnqueueWorkItemInput {
 }
 
 /**
- * kind + triggerType + triggerId の一意制約に対する upsert で冪等にする。
- * 既に queued/leased/failed で存在する場合は再実行対象として残し、
- * succeeded で存在する場合だけ何もしない (再実行不要な完了イベントの再通知を無視する)。
- * @param prisma - Prisma クライアント
+ * 論理キー (kind, triggerType, triggerId) で冪等に enqueue する。
+ * キュー表に同じキーがあるとき、または台帳 (完了済み) にあるときは何もしない。
+ * 識別子は ON CONFLICT でも採番が進むため、既存キーの再通知で消費しないよう、
+ * 挿入前に NOT EXISTS で除外する。
+ * 完了処理の commit と競合した場合だけ二重に積まれ得るが、処理は at-least-once を前提とする。
+ * @param prisma - Prisma クライアントまたはトランザクションクライアント
  * @param input - enqueue する WorkItem の内容
  */
 export async function enqueueWorkItem(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   input: EnqueueWorkItemInput,
 ): Promise<void> {
-  const existing = await prisma.analysisWorkItem.findUnique({
-    where: {
-      kind_triggerType_triggerId: {
-        kind: input.kind,
-        triggerType: input.triggerType,
-        triggerId: input.triggerId,
-      },
-    },
-  })
-  if (existing?.status === 'succeeded') return
+  await prisma.$executeRaw`
+    INSERT INTO "AnalysisWorkItem" ("kind", "triggerType", "triggerId", "priority", "dependencyKey", "updatedAt")
+    SELECT ${input.kind}, ${input.triggerType}, ${input.triggerId}, ${input.priority ?? 0}, ${input.dependencyKey ?? null}, now()
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "AnalysisWorkItemDone"
+      WHERE "kind" = ${input.kind} AND "triggerType" = ${input.triggerType} AND "triggerId" = ${input.triggerId}
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM "AnalysisWorkItem"
+      WHERE "kind" = ${input.kind} AND "triggerType" = ${input.triggerType} AND "triggerId" = ${input.triggerId}
+    )
+    ON CONFLICT ("kind", "triggerType", "triggerId") DO NOTHING
+  `
+}
 
-  await prisma.analysisWorkItem.upsert({
-    where: {
-      kind_triggerType_triggerId: {
-        kind: input.kind,
-        triggerType: input.triggerType,
-        triggerId: input.triggerId,
-      },
-    },
-    create: {
-      kind: input.kind,
-      triggerType: input.triggerType,
-      triggerId: input.triggerId,
-      priority: input.priority ?? 0,
-      dependencyKey: input.dependencyKey,
-    },
-    update: {},
+/** キュー表または台帳から復元した WorkItem のうち、後続処理が参照する項目。 */
+export type SettledWorkItem = Pick<
+  AnalysisWorkItem,
+  | 'id'
+  | 'kind'
+  | 'triggerType'
+  | 'triggerId'
+  | 'createdAt'
+  | 'attemptCount'
+  | 'status'
+  | 'lastErrorCode'
+  | 'lastErrorSummary'
+>
+
+interface WorkItemDoneRow {
+  workItemId: number
+  kind: string
+  triggerType: string
+  triggerId: string
+  createdAt: Date
+  attemptCount: number
+}
+
+function fromDone(done: WorkItemDoneRow): SettledWorkItem {
+  return {
+    id: done.workItemId,
+    kind: done.kind,
+    triggerType: done.triggerType,
+    triggerId: done.triggerId,
+    createdAt: done.createdAt,
+    attemptCount: done.attemptCount,
+    status: 'succeeded',
+    lastErrorCode: null,
+    lastErrorSummary: null,
+  }
+}
+
+/**
+ * 論理キーで WorkItem を引く。完了するとキュー表から消えるため、無ければ台帳を見る。
+ * 完了処理は両表を 1 文で入れ替えるので、キュー表 → 台帳の順に読めば取りこぼさない。
+ * @param prisma - Prisma クライアント
+ * @param key - 論理キー
+ * @returns 見つかった WorkItem。キュー表にも台帳にも無ければ undefined
+ */
+export async function findWorkItemByKey(
+  prisma: PrismaClient,
+  key: { kind: string; triggerType: string; triggerId: string },
+): Promise<SettledWorkItem | undefined> {
+  const queued = await prisma.analysisWorkItem.findUnique({
+    where: { kind_triggerType_triggerId: key },
   })
+  if (queued) return queued
+  const done = await prisma.analysisWorkItemDone.findUnique({
+    where: { kind_triggerType_triggerId: key },
+  })
+  return done ? fromDone(done) : undefined
+}
+
+/**
+ * WorkItem の id から引く。AnalysisRun や post-completion の参照は、
+ * 完了済みの WorkItem では台帳の workItemId を指すため、キュー表に無ければ台帳を見る。
+ * @param prisma - Prisma クライアント
+ * @param workItemId - WorkItem の id
+ * @returns 見つかった WorkItem。保持期間を過ぎて台帳からも消えていれば undefined
+ */
+export async function findWorkItemById(
+  prisma: PrismaClient,
+  workItemId: number,
+): Promise<SettledWorkItem | undefined> {
+  const queued = await prisma.analysisWorkItem.findUnique({ where: { id: workItemId } })
+  if (queued) return queued
+  const done = await prisma.analysisWorkItemDone.findFirst({ where: { workItemId } })
+  return done ? fromDone(done) : undefined
 }
 
 /**
@@ -92,18 +154,17 @@ export async function deadLetterExhaustedWorkItem(
   const now = new Date()
   return prisma.$transaction(
     async (tx) => {
-      const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
+      const rows = await tx.$queryRawUnsafe<{ id: number }[]>(
         `SELECT "id" FROM "AnalysisWorkItem"
        WHERE "kind" = ANY($1)
          AND "status" IN ('queued', 'leased', 'failed')
-         AND "availableAt" <= $2
-         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < $2)
+         AND "availableAt" <= now()
+         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < now())
          AND "attemptCount" >= "maxAttempts"
        ORDER BY "priority" DESC, "availableAt" ASC
        LIMIT 1
        FOR UPDATE SKIP LOCKED`,
         input.kinds,
-        now,
       )
       const target = rows.at(0)
       if (!target) return undefined
@@ -145,18 +206,17 @@ export async function claimNextWorkItem(
 
   return prisma.$transaction(
     async (tx) => {
-      const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
+      const rows = await tx.$queryRawUnsafe<{ id: number }[]>(
         `SELECT "id" FROM "AnalysisWorkItem"
        WHERE "kind" = ANY($1)
          AND "status" IN ('queued', 'leased', 'failed')
-         AND "availableAt" <= $2
-         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < $2)
+         AND "availableAt" <= now()
+         AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < now())
          AND "attemptCount" < "maxAttempts"
        ORDER BY "priority" DESC, "availableAt" ASC
        LIMIT 1
        FOR UPDATE SKIP LOCKED`,
         input.kinds,
-        now,
       )
       const target = rows.at(0)
       if (!target) return undefined
@@ -185,7 +245,7 @@ export async function claimNextWorkItem(
 /** renewWorkItemLease の入力。 */
 export interface RenewWorkItemLeaseInput {
   /** 対象 WorkItem の ID。 */
-  workItemId: string
+  workItemId: number
   /** 現在の lease owner。 */
   leaseOwner: string
   /** 更新後の lease 有効期間 (ミリ秒)。 */
@@ -213,7 +273,7 @@ export async function renewWorkItemLease(
 
 export interface CompleteWorkItemInput {
   /** 対象の WorkItem ID。 */
-  workItemId: string
+  workItemId: number
   /** claim 時に設定した lease owner。 */
   leaseOwner: string
   /** 記録する終了状態。 */
@@ -244,6 +304,8 @@ export function computeRetryBackoffMs(attemptCount: number): number {
 /**
  * lease owner と一致する場合だけ更新する。
  * 期限切れ owner が新しい結果で上書きすることを防ぐため、更新件数を見て真偽を返す。
+ * succeeded は、キュー表からの削除と台帳への記録を 1 文で行い、
+ * 片方だけが反映される状態を作らない。
  * @param prisma - Prisma クライアント
  * @param input - 対象 WorkItem と記録する終了状態
  * @returns 更新できたら true、lease を失っていたら false
@@ -252,6 +314,27 @@ export async function completeWorkItem(
   prisma: PrismaClient,
   input: CompleteWorkItemInput,
 ): Promise<boolean> {
+  if (input.status === 'succeeded') {
+    const rows = await prisma.$queryRaw<{ id: number }[]>`
+      WITH removed AS (
+        DELETE FROM "AnalysisWorkItem"
+        WHERE "id" = ${input.workItemId} AND "leaseOwner" = ${input.leaseOwner}
+        RETURNING "id", "kind", "triggerType", "triggerId", "attemptCount", "createdAt"
+      )
+      INSERT INTO "AnalysisWorkItemDone"
+        ("kind", "triggerType", "triggerId", "workItemId", "attemptCount", "createdAt", "completedAt")
+      SELECT "kind", "triggerType", "triggerId", "id", "attemptCount", "createdAt", now()
+      FROM removed
+      ON CONFLICT ("kind", "triggerType", "triggerId") DO UPDATE SET
+        "workItemId" = EXCLUDED."workItemId",
+        "attemptCount" = EXCLUDED."attemptCount",
+        "createdAt" = EXCLUDED."createdAt",
+        "completedAt" = EXCLUDED."completedAt"
+      RETURNING "workItemId" AS "id"
+    `
+    return rows.length > 0
+  }
+
   const result = await prisma.analysisWorkItem.updateMany({
     where: { id: input.workItemId, leaseOwner: input.leaseOwner },
     data: {
@@ -271,7 +354,7 @@ export async function completeWorkItem(
 /** startAnalysisRun の入力。 */
 export interface StartAnalysisRunInput {
   /** 対象の WorkItem ID。 */
-  workItemId: string
+  workItemId: number
   /** claim 時に確定した試行回数。 */
   attemptNumber: number
 }
@@ -285,7 +368,7 @@ export interface StartAnalysisRunInput {
 export async function startAnalysisRun(
   prisma: PrismaClient,
   input: StartAnalysisRunInput,
-): Promise<string> {
+): Promise<number> {
   const run = await prisma.analysisRun.create({
     data: {
       workItemId: input.workItemId,
@@ -299,7 +382,7 @@ export async function startAnalysisRun(
 /** finishAnalysisRun の入力。 */
 export interface FinishAnalysisRunInput {
   /** 対象の AnalysisRun ID。 */
-  analysisRunId: string
+  analysisRunId: number
   /** 記録する終了状態。 */
   status: 'succeeded' | 'failed' | 'dead'
   /** 失敗時のエラーコード。 */

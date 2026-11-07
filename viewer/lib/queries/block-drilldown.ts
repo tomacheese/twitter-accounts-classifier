@@ -76,7 +76,7 @@ export async function getBlockAccountRunsWithActions(
     list.push({
       id: action.id,
       blockedId: action.blockedId,
-      labelKey: labelKeyById.get(action.labelDefinitionId) ?? action.labelDefinitionId,
+      labelKey: labelKeyById.get(action.labelDefinitionId) ?? String(action.labelDefinitionId),
       confidence: action.confidence,
       result: action.result,
       errorMessage: action.errorMessage,

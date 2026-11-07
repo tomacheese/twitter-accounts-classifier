@@ -12,7 +12,12 @@ import {
   FOLLOW_CHURN_OBSERVATION_WINDOW_DAYS,
 } from './follow-churn-observation'
 import type { FollowListResult } from '../twitter/follows'
-import { upsertAccount, upsertAccountsBulk, type AccountProfileInput } from './account-repository'
+import {
+  recordRecentTweetsFetchSuccess,
+  upsertAccount,
+  upsertAccountsBulk,
+  type AccountProfileInput,
+} from './account-repository'
 import { upsertAccountRequestingRelabelIfChanged } from './account-relabel-on-change'
 import {
   upsertTweet,
@@ -46,7 +51,7 @@ export interface PersistAuthorResultAtomicParams {
    * ラベル評価が merge 前の値を見る状態を避ける。
    */
   additionalOwnTweets: TweetInput[]
-  /** `recentTweets` に含まれる文脈 Tweet の `accountId` FK を満たすための fallback profile。 */
+  /** `recentTweets` に含まれる文脈 Tweet の投稿者の fallback profile。Account 行が無いと自己返信コーパスが投稿者を引けない。 */
   recentTweetsFallbackAuthors: AccountProfileInput[]
   /** remote fetch に失敗した場合は null。null の場合サンプル書き込みは skip する。 */
   followSample: FollowListResult | null
@@ -58,7 +63,7 @@ export interface PersistAuthorResultAtomicParams {
   parentTweetFetchRateLimitRemaining?: number | null
   parentTweetFetchRateLimitReset?: number | null
   registry: LabelRuleRegistry
-  labelDefinitionIds: Map<string, string>
+  labelDefinitionIds: Map<string, number>
   duplicateReplyIndex: ReturnType<typeof buildDuplicateReplyIndex>
   bioDuplicateIndex: ReturnType<typeof buildBioDuplicateIndex>
   replyHijackIndex: ReturnType<typeof buildReplyHijackIndex>
@@ -114,22 +119,17 @@ export async function persistAuthorResultAtomic(
     async (tx) => {
       const txClient = tx as unknown as PrismaClient
 
-      const { account: accountBeforeFetchStatusUpdate } = await upsertAccount(
-        txClient,
-        params.profile,
-      )
+      const { account: upsertedAccount } = await upsertAccount(txClient, params.profile)
       // `upsertAccount` の戻り値は `recentTweetsFetchStatus: 'success'` を反映する前の状態のため、
-      // 以降のラベル評価には必ず update 後の戻り値を使う。
-      const account = await txClient.account.update({
-        where: { id: accountBeforeFetchStatusUpdate.id },
-        data: {
-          lastRecentTweetsAttemptedAt: params.recentTweetsFetchedAt ?? new Date(),
-          lastRecentTweetsFetchedAt: params.recentTweetsFetchedAt ?? new Date(),
-          recentTweetsFetchStatus: 'success',
-        },
-      })
-      // `recentTweets` には他者に帰属する会話コンテキストの Tweet が混在するため、
-      // Tweet.accountId の FK を満たすには対応する Account を先に用意しておく必要がある。
+      // 以降のラベル評価には必ず crawl state の更新後の値を載せた account を使う。
+      const crawlState = await recordRecentTweetsFetchSuccess(
+        txClient,
+        upsertedAccount.id,
+        params.recentTweetsFetchedAt ?? new Date(),
+      )
+      const account = { ...upsertedAccount, crawlState }
+      // `recentTweets` には他者に帰属する会話コンテキストの Tweet が混在する。
+      // Tweet は Account への FK を持たないが、自己返信コーパスが投稿者の screenName を Account から引くため、先に用意する。
       // この account 自身は今回の crawl 対象ではなく、このループでしか profile 更新を観測できないため、
       // ラベル評価に影響する変化があれば relabel も併せて要求する。
       for (const fallbackAuthor of fallbackAuthorsById.values()) {
@@ -201,7 +201,7 @@ export async function persistAuthorResultAtomic(
       const appliedRules = params.registry.applyAll(bundle)
       const ruleResults = appliedRules.flatMap(({ rule, result }) => {
         const labelDefinitionId = params.labelDefinitionIds.get(rule.key)
-        if (!labelDefinitionId) {
+        if (labelDefinitionId === undefined) {
           logger.warn(`No LabelDefinition id found for rule "${rule.key}", skipping persistence`)
           return []
         }

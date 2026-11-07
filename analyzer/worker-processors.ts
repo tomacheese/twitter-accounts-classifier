@@ -1,7 +1,11 @@
 import path from 'node:path'
 import { Prisma, type AnalysisWorkItem, type PrismaClient } from './generated/prisma'
 import { captureException } from './monitoring/sentry'
-import { enqueueWorkItem } from './queue/work-item-repository'
+import {
+  enqueueWorkItem,
+  findWorkItemById,
+  type SettledWorkItem,
+} from './queue/work-item-repository'
 import { buildLabelAggregateSnapshotSet } from './metrics/label-metric-snapshot'
 import { generateFindingsForAggregateRefresh } from './findings/generate-findings'
 import { runLabelFindingsSerialized } from './findings/serialize-label-findings'
@@ -21,7 +25,9 @@ import { buildLabelSummary } from './read-models/build-label-summary'
 import { buildAttentionItems } from './read-models/build-attention-items'
 import { buildOverviewSnapshot } from './read-models/build-overview-snapshot'
 import { buildBlockRelationSummary } from './read-models/build-block-relation-summary'
+import { refreshRelabelCoverageSnapshot } from './read-models/relabel-coverage-snapshot'
 import { ingestWeeklyReviewFindings } from './weekly-review/ingest'
+import { reportOrphanIssue, runOrphanCheck } from './retention/orphan-check'
 import { runRetentionSweep } from './retention/sweep'
 import { structuredOutputSchema } from './weekly-review/structured-output-schema'
 import { validateStructuredOutputAgainstReviewPlan } from './weekly-review/validate-review-plan'
@@ -31,6 +37,7 @@ import { Logger } from '@book000/node-utils'
 import { findActiveFindingsAtWatermarkForAccount } from './read-models/build-account-summary-latest-row'
 import { parseClassificationSnapshot } from './read-models/account-classification-snapshot'
 import {
+  requireLastCrawledAt,
   touchAccountSummaryLatestState,
   upsertAccountClassificationLatest,
   upsertAccountSummaryLatest,
@@ -202,7 +209,7 @@ function isSameLabelKeySet(a: string[], b: string[]): boolean {
  * `AccountSummaryLatest`/`AccountClassificationLatest` へ反映する。
  * finding 系フィールド (activeFindingCount/highestFindingSeverity/findingObservedAt) は
  * ここでは更新しない (現状値をそのまま渡す)。
- * `AccountLabelChange` は `AccountLabelLatest` への書き込みを検出する DB トリガーが
+ * `AccountLabelChange` は `AccountActiveLabel` への書き込みを検出する DB トリガーが
  * 生成するため、ここでは生成しない。
  * @param prisma - Prisma クライアント
  * @param workItem - `triggerType: 'account_classification_observation'` の WorkItem
@@ -216,7 +223,9 @@ export async function processAccountSummaryRefresh(
   })
   const account = await prisma.account.findUniqueOrThrow({
     where: { id: observation.accountId },
+    include: { crawlState: { select: { lastCrawledAt: true } } },
   })
+  const profileObservedAt = requireLastCrawledAt(account)
   const [labels, existing] = await Promise.all([
     Promise.resolve(
       parseClassificationSnapshot(observation.accountId, observation.classificationSnapshot),
@@ -249,7 +258,7 @@ export async function processAccountSummaryRefresh(
           // profileObservedAt には Account の実際のプロフィール取得時刻 (lastCrawledAt) を使う。
           // classification observation の時刻を流用すると、プロフィールを再取得していない
           // refresh でも profile が最新化されたかのように見えてしまう。
-          profileObservedAt: account.lastCrawledAt,
+          profileObservedAt,
           activeLabelKeys,
           activeLabelCount: activeLabelKeys.length,
           lastClassificationChangedAt: changed
@@ -306,7 +315,10 @@ export async function processAccountFindingRefresh(
   })
   if (occurrence.finding.primaryScopeType !== 'account') return
   const accountId = occurrence.finding.primaryScopeId
-  const account = await prisma.account.findUniqueOrThrow({ where: { id: accountId } })
+  const account = await prisma.account.findUniqueOrThrow({
+    where: { id: accountId },
+    include: { crawlState: { select: { lastCrawledAt: true } } },
+  })
   const [activeFindings, existing] = await Promise.all([
     findActiveFindingsAtWatermarkForAccount(prisma, accountId, occurrence.sourceObservedAt),
     prisma.accountSummaryLatest.findUnique({ where: { accountId } }),
@@ -324,7 +336,7 @@ export async function processAccountFindingRefresh(
       normalizedDisplayName: existing?.normalizedDisplayName ?? account.displayName.toLowerCase(),
       searchDocument:
         existing?.searchDocument ?? `${account.screenName} ${account.displayName}`.toLowerCase(),
-      profileObservedAt: existing?.profileObservedAt ?? account.lastCrawledAt,
+      profileObservedAt: existing?.profileObservedAt ?? requireLastCrawledAt(account),
       activeLabelKeys: existing?.activeLabelKeys ?? [],
       activeLabelCount: existing?.activeLabelCount ?? 0,
       lastClassificationChangedAt: existing?.lastClassificationChangedAt ?? null,
@@ -482,6 +494,16 @@ export async function processLabelAggregateRefresh(
       error instanceof Error ? error.message : String(error),
     )
   }
+  // viewer の relabel coverage だけが読む補助的な集計で、全アカウントの状態を走査するため時間ごとの schedule でだけ作り直す。
+  // 失敗しても他の read model の更新は妨げない。
+  if (workItem.triggerType === 'schedule') {
+    try {
+      await refreshRelabelCoverageSnapshot(prisma)
+    } catch (error) {
+      logger.error('Failed to refresh RelabelCoverageSnapshot', error as Error)
+      captureException(error, { source: 'processLabelAggregateRefresh.relabelCoverageSnapshot' })
+    }
+  }
   await publishAttentionAndOverview(prisma, snapshotAt)
 }
 
@@ -614,27 +636,55 @@ export async function enqueueDailyRetentionSweep(prisma: PrismaClient, now: Date
   })
 }
 
+const ORPHAN_CHECK_TRIGGER_TYPE = 'orphan_check'
+
 /**
- * kind: retention_sweep の処理関数。古い履歴行を削除する。
+ * 週ごとに 1 件だけ作られる孤児検査の WorkItem を積む。
+ * 起動ごとに呼んでも、同じ週 (月曜の日付で識別) の分は enqueueWorkItem の一意制約で no-op になる。
+ * 保持期限の sweep と同じ kind に載せ、triggerType で処理を分ける。
+ * @param prisma - Prisma クライアント
+ * @param now - 基準時刻
+ */
+export async function enqueueWeeklyOrphanCheck(prisma: PrismaClient, now: Date): Promise<void> {
+  const daysSinceMonday = (now.getUTCDay() + 6) % 7
+  const monday = new Date(now.getTime() - daysSinceMonday * 24 * 60 * 60 * 1000)
+  await enqueueWorkItem(prisma, {
+    kind: 'retention_sweep',
+    triggerType: ORPHAN_CHECK_TRIGGER_TYPE,
+    triggerId: toDateKey(monday),
+  })
+}
+
+/**
+ * kind: retention_sweep の処理関数。triggerType が schedule なら古い履歴行を削除し、
+ * orphan_check なら FK を持たない表の孤児を検査して OperationalIssue に反映する。
  * 次回分の enqueue は `main()` が毎パスの起動時に当日分を冪等に行うため、
  * ここで翌日分を自己予約しない。`enqueueWorkItem` は `availableAt` を
  * 指定できず即時 claim 可能な行を作るため、ここから予約すると
  * queue が空にならないまま翌日分以降を連鎖して処理してしまう。
  * @param prisma - Prisma クライアント
- * @param workItem - `triggerType: 'schedule'` の WorkItem
+ * @param workItem - `triggerType` が `schedule` または `orphan_check` の WorkItem
  */
 export async function processRetentionSweep(
   prisma: PrismaClient,
   workItem: AnalysisWorkItem,
 ): Promise<void> {
+  if (workItem.triggerType === ORPHAN_CHECK_TRIGGER_TYPE) {
+    const results = await runOrphanCheck(prisma)
+    await reportOrphanIssue(prisma, results, new Date())
+    logger.info(
+      `orphan check (${workItem.triggerId}): ` +
+        results.map((result) => `${result.table}=${result.orphanAccountCount}`).join(', '),
+    )
+    return
+  }
+
   const result = await runRetentionSweep(prisma, new Date())
   logger.info(
-    `retention sweep (${workItem.triggerId}) removed ${result.deletedAnalysisRunCount} AnalysisRun, ` +
-      `${result.deletedWorkItemCount} AnalysisWorkItem, ` +
-      `${result.deletedLabelMetricSnapshotCount} LabelMetricSnapshot, ` +
-      `${result.deletedOverviewSnapshotCount} OverviewSnapshot, ` +
-      `${result.deletedShadowDetectorEvaluationCount} shadow DetectorEvaluation rows, ` +
-      `${result.deletedAccountClassificationObservationCount} AccountClassificationObservation rows`,
+    `retention sweep (${workItem.triggerId}) removed ${JSON.stringify(result.counts)}` +
+      (result.truncatedTables.length > 0
+        ? `; remaining for next run: ${result.truncatedTables.join(', ')}`
+        : ''),
   )
 }
 
@@ -701,6 +751,7 @@ const NON_CYCLE_TRIGGER_TYPES = new Set([
   'account_summary_sampling_bootstrap_chunk',
   'bootstrap_completion',
   RETENTION_SWEEP_TRIGGER_TYPE,
+  ORPHAN_CHECK_TRIGGER_TYPE,
   WORK_ITEM_COMPLETION_TRIGGER_TYPE,
 ])
 
@@ -713,14 +764,14 @@ const NON_CYCLE_TRIGGER_TYPES = new Set([
  */
 export async function handleWorkItemSettled(
   prisma: PrismaClient,
-  workItem: AnalysisWorkItem,
+  workItem: SettledWorkItem,
   outcome: WorkItemOutcome,
 ): Promise<void> {
   await refreshReadModelFreshnessFromPolicy(prisma)
 
   await detectAnalysisStageFailure(prisma, {
     kind: workItem.kind,
-    workItemId: workItem.id,
+    workItemId: String(workItem.id),
     attemptNumber: workItem.attemptCount,
     status: outcome.status,
     errorSummary: outcome.errorSummary,
@@ -761,7 +812,7 @@ export async function handleWorkItemSettled(
  * kind: post_completion_refresh の処理関数。
  * handleWorkItemSettled が例外を投げて non-durable な post-completion hook として
  * 終わった場合の再試行を担う。元 WorkItem は既に succeeded/failed/dead で確定済みのため、
- * その行を再読み込みして終了状態を復元し、同じ後処理をやり直す。
+ * キュー表 (failed/dead) または台帳 (succeeded) から終了状態を復元し、同じ後処理をやり直す。
  * @param prisma - Prisma クライアント
  * @param workItem - triggerId に元 WorkItem の ID を持つ post_completion_refresh の WorkItem
  */
@@ -769,9 +820,11 @@ export async function processPostCompletionRefresh(
   prisma: PrismaClient,
   workItem: AnalysisWorkItem,
 ): Promise<void> {
-  const originalWorkItem = await prisma.analysisWorkItem.findUniqueOrThrow({
-    where: { id: workItem.triggerId },
-  })
+  const originalId = Number(workItem.triggerId)
+  const originalWorkItem = await findWorkItemById(prisma, originalId)
+  if (!originalWorkItem) {
+    throw new Error(`settled work item ${originalId} not found in queue or completion ledger`)
+  }
   const outcome: WorkItemOutcome = {
     status: originalWorkItem.status as WorkItemOutcome['status'],
     errorCode: originalWorkItem.lastErrorCode ?? undefined,

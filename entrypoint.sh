@@ -15,12 +15,6 @@ INTERVAL_SECONDS="${CRAWL_INTERVAL_SECONDS:-21600}"
 
 cd /app/crawler
 
-echo "[entrypoint] applying database migrations"
-prisma migrate deploy --schema=../prisma/schema.prisma
-
-echo "[entrypoint] syncing and verifying role grants"
-(cd /app && bash scripts/db/run-migration-and-sync-grants.sh)
-
 echo "[entrypoint] seeding label definitions"
 prisma db seed --schema=../prisma/schema.prisma
 

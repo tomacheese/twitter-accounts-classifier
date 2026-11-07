@@ -7,12 +7,12 @@ DECLARE
   unreadable_tables text;
   unexpected_write_tables text;
   write_allowlist text[] := ARRAY[
-    'AnalysisWorkItem', 'AnalysisRun',
+    'AnalysisWorkItem', 'AnalysisWorkItemDone', 'AnalysisRun',
     'OperationCycle', 'OperationStage', 'OperationalIssue', 'OperationalIssueOccurrence',
     'ReviewFinding', 'ReviewFindingOccurrence', 'FindingEvidence', 'FindingRawArtifact',
     'FindingEntityLink', 'DetectionPolicyVersion', 'DetectorEvaluation',
     'PolicyBacktestRun', 'PolicyBacktestFinding',
-    'LabelMetricSnapshot', 'LabelMetricDaily',
+    'LabelMetricSnapshot', 'LabelMetricDaily', 'RelabelCoverageSnapshot',
     'AccountLabelChange',
     'AccountSummaryLatest', 'AccountClassificationLatest', 'ReadModelBootstrap',
     'LabelSummaryCurrent', 'BlockRelationCurrent', 'BlockStateChange',
@@ -24,7 +24,10 @@ DECLARE
   ];
   limited_write_allowlist text[] := ARRAY['ComponentBuildIdentity'];
   update_only_allowlist text[] := ARRAY['LabeledAccountCounter'];
-  delete_only_allowlist text[] := ARRAY['AccountClassificationObservation'];
+  delete_only_allowlist text[] := ARRAY[
+    'AccountClassificationObservation',
+    'CrawlAccountCheckpoint', 'CrawlAuthorCheckpoint', 'CrawlAccountLabelRun'
+  ];
   missing_writes text;
   missing_limited_writes text;
   missing_update_only text;

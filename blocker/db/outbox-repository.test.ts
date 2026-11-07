@@ -39,7 +39,7 @@ describe('findOrCreateOutboxEntry', () => {
       blockAccountRunId: 'bar-1',
       blockerId: 'blocker-1',
       blockedId: 'blocked-1',
-      labelDefinitionId: 'label-1',
+      labelDefinitionId: 1,
       confidence: 0.9,
     })
 
@@ -59,7 +59,7 @@ describe('findOrCreateOutboxEntry', () => {
       blockAccountRunId: 'bar-1',
       blockerId: 'blocker-1',
       blockedId: 'blocked-1',
-      labelDefinitionId: 'label-1',
+      labelDefinitionId: 1,
       confidence: 0.9,
     })
 
@@ -82,7 +82,7 @@ describe('findOrCreateOutboxEntry', () => {
       blockAccountRunId: 'bar-2',
       blockerId: 'blocker-1',
       blockedId: 'blocked-1',
-      labelDefinitionId: 'label-2',
+      labelDefinitionId: 2,
       confidence: 0.5,
     })
 
@@ -94,7 +94,7 @@ describe('findOrCreateOutboxEntry', () => {
         remoteSucceededAt: null,
         localPersistedAt: null,
         blockAccountRunId: 'bar-2',
-        labelDefinitionId: 'label-2',
+        labelDefinitionId: 2,
         confidence: 0.5,
       },
     })
@@ -118,7 +118,7 @@ describe('findOrCreateOutboxEntry', () => {
       blockAccountRunId: 'bar-1',
       blockerId: 'blocker-1',
       blockedId: 'blocked-1',
-      labelDefinitionId: 'label-1',
+      labelDefinitionId: 1,
       confidence: 0.9,
     })
 

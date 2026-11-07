@@ -8,8 +8,8 @@ vi.mock('./label-summary', () => ({ listLabelSummaries: vi.fn() }))
 
 function createMockPrisma(options: { counter?: { labeledAccounts: number } | null }) {
   const prisma = {
-    account: {
-      count: vi.fn().mockResolvedValue(120),
+    account: { count: vi.fn().mockResolvedValue(120) },
+    accountCrawlState: {
       aggregate: vi
         .fn()
         .mockResolvedValue({ _max: { lastCrawledAt: new Date('2026-07-27T00:00:00Z') } }),
@@ -19,7 +19,8 @@ function createMockPrisma(options: { counter?: { labeledAccounts: number } | nul
       findUnique: vi.fn().mockResolvedValue(options.counter ?? null),
     },
   } as unknown as PrismaClient & {
-    account: { count: ReturnType<typeof vi.fn>; aggregate: ReturnType<typeof vi.fn> }
+    account: { count: ReturnType<typeof vi.fn> }
+    accountCrawlState: { aggregate: ReturnType<typeof vi.fn> }
     tweet: { count: ReturnType<typeof vi.fn> }
     labeledAccountCounter: { findUnique: ReturnType<typeof vi.fn> }
   }
@@ -28,7 +29,7 @@ function createMockPrisma(options: { counter?: { labeledAccounts: number } | nul
 
 function makeSummaryItem(overrides: Partial<Record<string, unknown>>) {
   return {
-    labelDefinitionId: 'label-1',
+    labelDefinitionId: 1,
     labelKey: 'spam',
     labelDescription: 'Likely spam account',
     evaluatedCount: 120,
@@ -90,7 +91,7 @@ describe('getDashboardKpis', () => {
     const prisma = createMockPrisma({ counter: null })
     prisma.account.count.mockResolvedValue(0)
     prisma.tweet.count.mockResolvedValue(0)
-    prisma.account.aggregate.mockResolvedValue({ _max: { lastCrawledAt: null } })
+    prisma.accountCrawlState.aggregate.mockResolvedValue({ _max: { lastCrawledAt: null } })
 
     const result = await getDashboardKpisFor(prisma)
 

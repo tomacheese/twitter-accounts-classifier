@@ -30,22 +30,24 @@ services:
       - "-c"
       - "maintenance_work_mem=512MB"
     environment:
-      POSTGRES_USER: crawler
-      POSTGRES_PASSWORD: crawler
+      # 所有者 (superuser)。crawler ロールとは別にし、アプリ用ロールは migrate サービスが作る。
+      POSTGRES_USER: ${DB_OWNER_USER:-tac_owner}
+      POSTGRES_PASSWORD: ${DB_OWNER_PASSWORD:?DB_OWNER_PASSWORD must be set in .env}
       POSTGRES_DB: twitter_accounts_classifier
     volumes:
       - ${POSTGRES_DATA_HOST_PATH:-./data/postgres}:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U crawler -d twitter_accounts_classifier"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_OWNER_USER:-tac_owner} -d twitter_accounts_classifier"]
       interval: 5s
       timeout: 5s
       retries: 10
     logging: *default-logging
 
-  # crawler と viewer の両方がマイグレーション適用済みの状態を前提にできるよう、
-  # 一度だけ実行して完了する専用サービスに分離する。crawler の entrypoint.sh も
-  # 起動時に prisma migrate deploy を実行するが、これは冪等なため二重実行しても
-  # 無害であり、このサービスなしで crawler 単体を起動する経路の保険として残す。
+  # スキーマは prisma/baseline から作る (prisma migrate deploy は実行しない)。
+  # テーブルを所有する DB_OWNER_USER で baseline を適用し (適用済みなら何もしない)、
+  # crawler・viewer・analyzer の各ロールを作って権限を同期する。
+  # crawler ロールは所有者でも superuser でもなく、ラベル状態の書き込みは set_label_result に限られる。
+  # 他のサービスはこのサービスの完了後に起動するため、アプリ用ロールは所有者と別にしなければならない。
   migrate:
     build:
       context: .
@@ -55,14 +57,15 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
+      DATABASE_URL: postgresql://${DB_OWNER_USER:-tac_owner}:${DB_OWNER_PASSWORD:?DB_OWNER_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
+      CRAWLER_DB_PASSWORD: ${CRAWLER_DB_PASSWORD:?CRAWLER_DB_PASSWORD must be set in .env}
       VIEWER_DB_PASSWORD: ${VIEWER_DB_PASSWORD:?VIEWER_DB_PASSWORD must be set in .env}
       ANALYZER_DB_PASSWORD: ${ANALYZER_DB_PASSWORD:?ANALYZER_DB_PASSWORD must be set in .env}
     entrypoint:
       [
         "sh",
         "-c",
-        "export PATH=/app/crawler/node_modules/.bin:$PATH && cd /app/crawler && prisma migrate deploy --schema=../prisma/schema.prisma && cd /app && bash scripts/db/run-migration-and-sync-grants.sh",
+        "cd /app && bash prisma/baseline/apply.sh && bash scripts/db/run-migration-and-sync-grants.sh",
       ]
     logging: *default-logging
 
@@ -77,7 +80,7 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
+      DATABASE_URL: postgresql://crawler:${CRAWLER_DB_PASSWORD:?CRAWLER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
       COOKIE_ISSUER_URL: ${COOKIE_ISSUER_URL:?COOKIE_ISSUER_URL must be set in .env}
       CRAWL_INTERVAL_SECONDS: "10800"
       CRAWL_STALE_THRESHOLD_MULTIPLIER: ${CRAWL_STALE_THRESHOLD_MULTIPLIER:-3}
@@ -103,7 +106,7 @@ services:
     entrypoint: ["/app/relabeler-entrypoint.sh"]
     environment:
       # analyzer と同様、PostgreSQL の shared memory を圧迫しないよう DB 接続本数を絞る。
-      DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}?connection_limit=5&pool_timeout=0
+      DATABASE_URL: postgresql://crawler:${CRAWLER_DB_PASSWORD:?CRAWLER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}?connection_limit=5&pool_timeout=0
       RELABELER_INTERVAL_SECONDS: ${RELABELER_INTERVAL_SECONDS:-30}
       RELABELER_PRODUCER_BATCH_SIZE: ${RELABELER_PRODUCER_BATCH_SIZE:-5000}
       RELABELER_WORKER_BATCH_SIZE: ${RELABELER_WORKER_BATCH_SIZE:-2000}
@@ -129,11 +132,11 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    # entrypoint.sh は引数ありなら migrate/seed/crawl ループを飛ばしてそのまま exec するため、
+    # entrypoint.sh は引数ありなら seed/crawl ループを飛ばしてそのまま exec するため、
     # crawler 用の image をそのまま流用しつつこのサービス専用のコマンドだけを差し替えられる。
     command: ["node", "dist/scripts/storage-guard-cycle.js"]
     environment:
-      DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}?connection_limit=1&pool_timeout=0
+      DATABASE_URL: postgresql://crawler:${CRAWLER_DB_PASSWORD:?CRAWLER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}?connection_limit=1&pool_timeout=0
       STORAGE_GUARD_INTERVAL_SECONDS: ${STORAGE_GUARD_INTERVAL_SECONDS:-60}
       POSTGRES_DATA_PATH: /data/postgres
       GLITCHTIP_DSN: ${GLITCHTIP_DSN:-}
@@ -198,7 +201,7 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      DATABASE_URL: postgresql://crawler:crawler@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
+      DATABASE_URL: postgresql://crawler:${CRAWLER_DB_PASSWORD:?CRAWLER_DB_PASSWORD must be set in .env}@postgres:5432/${POSTGRES_DB:-twitter_accounts_classifier}
       COOKIE_ISSUER_URL: ${COOKIE_ISSUER_URL:?COOKIE_ISSUER_URL must be set in .env}
       BLOCK_INTERVAL_SECONDS: ${BLOCK_INTERVAL_SECONDS:-21600}
       BLOCK_STALE_THRESHOLD_MULTIPLIER: ${BLOCK_STALE_THRESHOLD_MULTIPLIER:-3}

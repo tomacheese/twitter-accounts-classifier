@@ -27,6 +27,7 @@ function createMockPrismaClient(): {
   const prisma = {
     crawlRun: { findUniqueOrThrow },
     analysisWorkItem: { findUnique },
+    analysisWorkItemDone: { findUnique: vi.fn().mockResolvedValue(null) },
     operationCycle: { upsert: cycleUpsert },
     operationStage: { upsert: stageUpsert, findMany: stageFindMany, deleteMany: stageDeleteMany },
     $transaction: vi.fn((fn: (tx: unknown) => Promise<void>) => fn(prisma)),
@@ -50,6 +51,7 @@ describe.skipIf(!process.env.DATABASE_URL)('buildOrUpdateCrawlCycle', () => {
     await prisma.operationCycle.deleteMany()
     await prisma.analysisRun.deleteMany()
     await prisma.analysisWorkItem.deleteMany()
+    await prisma.analysisWorkItemDone.deleteMany()
     await prisma.crawlRun.deleteMany()
   })
 

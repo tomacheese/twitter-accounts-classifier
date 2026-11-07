@@ -61,14 +61,14 @@ export function stableRank(...parts: string[]): string {
  */
 export function selectBuckets(
   runId: string,
-  labelDefinitionId: string,
+  labelDefinitionId: number,
   value: boolean,
   m: number,
 ): number[] {
   const buckets = Array.from({ length: BUCKET_COUNT }, (_, bucket) => bucket)
   const ranked = buckets.toSorted((a, b) =>
-    stableRank(runId, labelDefinitionId, String(value), String(a)).localeCompare(
-      stableRank(runId, labelDefinitionId, String(value), String(b)),
+    stableRank(runId, String(labelDefinitionId), String(value), String(a)).localeCompare(
+      stableRank(runId, String(labelDefinitionId), String(value), String(b)),
     ),
   )
   return ranked.slice(0, m).toSorted((a, b) => a - b)

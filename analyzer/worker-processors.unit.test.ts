@@ -24,7 +24,7 @@ function makeLabelAggregatePrisma(
 
 function mockLabelAggregateDependencies() {
   vi.spyOn(labelMetricSnapshotModule, 'buildLabelAggregateSnapshotSet').mockResolvedValue({
-    triggerWorkItemId: 'work-1',
+    triggerWorkItemId: 1,
     snapshotAt: new Date('2026-08-15T00:00:00Z'),
     reused: false,
   })
@@ -56,7 +56,7 @@ describe('processAccountSummaryRefresh transaction budget', () => {
           id: 'account-1',
           screenName: 'Alice',
           displayName: 'Alice',
-          lastCrawledAt: observedAt,
+          crawlState: { lastCrawledAt: observedAt },
         }),
       },
       accountSummaryLatest: { findUnique: vi.fn().mockResolvedValue(null) },
@@ -66,7 +66,7 @@ describe('processAccountSummaryRefresh transaction budget', () => {
     } as unknown as PrismaClient
 
     await processAccountSummaryRefresh(prisma, {
-      id: 'work-1',
+      id: 1,
       triggerId: 'observation-1',
     } as never)
 
@@ -74,6 +74,36 @@ describe('processAccountSummaryRefresh transaction budget', () => {
       expect.any(Function),
       expect.objectContaining({ timeout: 60_000 }),
     )
+  })
+})
+
+describe('processAccountSummaryRefresh crawl state invariant', () => {
+  it('throws when the account has no AccountCrawlState row', async () => {
+    const prisma = {
+      accountClassificationObservation: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: 'observation-1',
+          accountId: '1001',
+          observedAt: new Date('2026-08-10T00:00:00Z'),
+          classificationSnapshot: [],
+        }),
+      },
+      account: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: '1001',
+          screenName: 'alice',
+          displayName: 'Alice',
+          crawlState: null,
+        }),
+      },
+      accountSummaryLatest: { findUnique: vi.fn().mockResolvedValue(null) },
+      labelDefinition: { findMany: vi.fn().mockResolvedValue([]) },
+      $transaction: vi.fn(),
+    } as unknown as PrismaClient
+
+    await expect(
+      processAccountSummaryRefresh(prisma, { id: 1, triggerId: 'observation-1' } as never),
+    ).rejects.toThrow('AccountCrawlState row is missing for account 1001')
   })
 })
 
@@ -86,7 +116,7 @@ describe('processLabelAggregateRefresh evidence eligibility', () => {
     const runFindings = mockLabelAggregateDependencies()
 
     await processLabelAggregateRefresh(makeLabelAggregatePrisma('partial', 1), {
-      id: 'work-1',
+      id: 1,
       triggerType: 'crawl_run',
       triggerId: 'crawl-1',
     } as never)
@@ -98,7 +128,7 @@ describe('processLabelAggregateRefresh evidence eligibility', () => {
     const runFindings = mockLabelAggregateDependencies()
 
     await processLabelAggregateRefresh(makeLabelAggregatePrisma('partial', 0), {
-      id: 'work-1',
+      id: 1,
       triggerType: 'crawl_run',
       triggerId: 'crawl-1',
     } as never)
@@ -110,7 +140,7 @@ describe('processLabelAggregateRefresh evidence eligibility', () => {
     const runFindings = mockLabelAggregateDependencies()
 
     await processLabelAggregateRefresh(makeLabelAggregatePrisma('failed', 1), {
-      id: 'work-1',
+      id: 1,
       triggerType: 'crawl_run',
       triggerId: 'crawl-1',
     } as never)
@@ -122,7 +152,7 @@ describe('processLabelAggregateRefresh evidence eligibility', () => {
     const runFindings = mockLabelAggregateDependencies()
 
     await processLabelAggregateRefresh(makeLabelAggregatePrisma('success', 1), {
-      id: 'work-1',
+      id: 1,
       triggerType: 'crawl_run',
       triggerId: 'crawl-1',
     } as never)

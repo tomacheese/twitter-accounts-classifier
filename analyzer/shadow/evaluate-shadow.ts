@@ -17,7 +17,7 @@ export interface EvaluateShadowInput {
 }
 
 /**
- * 本番判定 (generateFindingsForCrawlCycle) と同じ検出器ロジックを、
+ * 本番判定 (generateFindingsForAggregateRefresh) と同じ検出器ロジックを、
  * `DetectorEvaluation.isShadow = true` だけへ書く薄いラッパーとして実行する。
  * ReviewFinding/ReviewFindingOccurrence を更新する本番判定関数を一切呼ばないため、
  * Overview/Review の表示には反映されない。
@@ -62,7 +62,9 @@ export async function evaluateShadow(
         await prisma.detectorEvaluation.create({
           data: {
             detectorType: rule.detectorType,
-            fingerprint: computeFingerprint(rule.type, { label: snapshot.labelDefinitionId }),
+            fingerprint: computeFingerprint(rule.type, {
+              label: String(snapshot.labelDefinitionId),
+            }),
             identityVersion: rule.identityVersion,
             sourceId: input.crawlRunId,
             isShadow: true,
@@ -89,7 +91,7 @@ export async function evaluateShadow(
             data: {
               detectorType: rule.detectorType,
               fingerprint: computeFingerprint(rule.type, {
-                label: snapshot.labelDefinitionId,
+                label: String(snapshot.labelDefinitionId),
                 reason: result.reason,
               }),
               identityVersion: rule.identityVersion,

@@ -8,6 +8,7 @@ import {
   enqueueWorkItem,
   finishAnalysisRun,
   startAnalysisRun,
+  type SettledWorkItem,
 } from './queue/work-item-repository'
 import { LabelAggregateRefreshError } from './worker-processors'
 import { Logger } from '@book000/node-utils'
@@ -73,7 +74,7 @@ export interface WorkerLoopDeps {
    */
   onWorkItemSettled?: (
     prisma: PrismaClient,
-    workItem: AnalysisWorkItem,
+    workItem: SettledWorkItem,
     outcome: WorkItemOutcome,
   ) => Promise<void>
 }
@@ -137,7 +138,7 @@ async function dispatch(
 async function runPostCompletionHook(
   prisma: PrismaClient,
   deps: WorkerLoopDeps,
-  workItem: AnalysisWorkItem,
+  workItem: SettledWorkItem,
   outcome: WorkItemOutcome,
 ): Promise<void> {
   try {
@@ -150,7 +151,7 @@ async function runPostCompletionHook(
     await enqueueWorkItem(prisma, {
       kind: POST_COMPLETION_REFRESH_KIND,
       triggerType: WORK_ITEM_COMPLETION_TRIGGER_TYPE,
-      triggerId: workItem.id,
+      triggerId: String(workItem.id),
     })
   }
 }

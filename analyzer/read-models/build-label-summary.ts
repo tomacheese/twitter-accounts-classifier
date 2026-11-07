@@ -36,7 +36,7 @@ export interface BuildLabelSummaryInput {
   /** 書き込み先の generationId。 */
   generationId: string
   /** 今回の LabelSummaryCurrent の元になる snapshot set の識別子。 */
-  triggerWorkItemId: string
+  triggerWorkItemId: number
   /** 集計の基準時刻。 */
   sourceWatermarkAt: Date
 }
@@ -58,7 +58,7 @@ interface ComparableSnapshot {
  */
 async function findSnapshotAtOrBefore(
   prisma: PrismaClient,
-  labelDefinitionId: string,
+  labelDefinitionId: number,
   at: Date,
 ): Promise<ComparableSnapshot | null> {
   return prisma.labelMetricSnapshot.findFirst({
@@ -99,7 +99,7 @@ export async function buildLabelSummary(
         where: {
           status: { in: ['active', 'recurring'] },
           primaryScopeType: 'label',
-          primaryScopeId: current.labelDefinitionId,
+          primaryScopeId: String(current.labelDefinitionId),
         },
         select: { currentSeverity: true },
       })

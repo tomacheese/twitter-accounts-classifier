@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { randomUUID } from 'node:crypto'
+import { createSyntheticSerialId } from 'id-boundary'
 import { getPrismaClient } from '../db/client'
 import { evaluateShadow } from './evaluate-shadow'
 import type { DetectionPolicy } from '../policy/schema'
@@ -34,12 +35,12 @@ describe.skipIf(!process.env.DATABASE_URL)('evaluateShadow', () => {
   })
 
   it('DetectorEvaluation を isShadow: true で書き、ReviewFinding は一切作らない', async () => {
-    const labelDefinitionId = `label-${randomUUID()}`
+    const labelDefinitionId = createSyntheticSerialId() % 30_000
     const crawlRunId = `crawl-${randomUUID()}`
 
     await prisma.labelMetricSnapshot.create({
       data: {
-        triggerWorkItemId: crawlRunId,
+        triggerWorkItemId: createSyntheticSerialId(),
         sourceCrawlRunId: crawlRunId,
         labelDefinitionId,
         observedAt: new Date(),
