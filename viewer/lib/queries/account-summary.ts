@@ -98,11 +98,15 @@ export async function listAccountSummaries(
     minFindingSeverity: minFindingSeverity ?? null,
   })
   const decodedCursor = input.cursor ? decodeCursor(input.cursor, filterHash) : null
-  // 改ざんされた cursor を ID 型の列の条件へ渡すと例外になるため、先頭ページへ戻す。
-  const cursorValues =
-    decodedCursor && decodedCursor.length >= 2 && !isValidId(decodedCursor[1])
-      ? null
-      : decodedCursor
+  // 改ざんされた cursor を ID 型や日時の条件へ渡すと例外になるため、先頭ページへ戻す。
+  const isTamperedCursor =
+    decodedCursor !== null &&
+    decodedCursor.length >= 2 &&
+    (!isValidId(decodedCursor[1]) ||
+      (input.view !== 'all' &&
+        decodedCursor[0] !== '' &&
+        Number.isNaN(new Date(decodedCursor[0]).getTime())))
+  const cursorValues = isTamperedCursor ? null : decodedCursor
 
   const cursorWhere = ((): object => {
     if (!cursorValues || cursorValues.length < 2) return {}

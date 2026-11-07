@@ -134,6 +134,21 @@ describe('listAccountSummaries', () => {
     expect(call.where.OR).toBeUndefined()
   })
 
+  it('recentlyChanged の cursor の日時が不正なら無視して先頭から取得する', async () => {
+    const filterHash = JSON.stringify({
+      view: 'recentlyChanged',
+      labelKeys: [],
+      minFindingSeverity: null,
+    })
+    const cursor = encodeCursor({ sortValues: ['not-a-date', '1001'], filterHash })
+
+    const { prisma, findMany } = createMockPrisma({})
+    await listAccountSummaries(prisma, { view: 'recentlyChanged', limit: 2, cursor })
+
+    const call = findMany.mock.calls[0][0] as { where: { OR?: unknown[] } }
+    expect(call.where.OR).toBeUndefined()
+  })
+
   it('filter が変わった cursor は無視する', async () => {
     const first = createMockPrisma({
       rows: Array.from({ length: 3 }, (_, index) => createRow(index, null)),
