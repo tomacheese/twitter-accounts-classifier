@@ -1,4 +1,4 @@
-import { PrismaClient } from '../generated/prisma'
+import { getPrismaClient, disconnectPrisma } from '../db/client'
 import { loadSelfReplyPromoCorpus } from '../db/self-reply-promo-corpus'
 import { buildSelfReplyPromoIndex } from '../labels/self-reply-promo-index'
 import { buildAccountFeatureBundle } from '../labels/build-account-feature-bundle'
@@ -11,7 +11,7 @@ import { CRAWL_LIMITS } from '../config/crawl-limits'
 const BACKTEST_ACCOUNT_LIMIT = Number(process.env.BACKTEST_ACCOUNT_LIMIT ?? 500)
 
 async function main(): Promise<void> {
-  const prisma = new PrismaClient()
+  const prisma = getPrismaClient()
   try {
     const watermark = new Date()
     console.log('Loading self-reply promo corpus...')
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
       `Backtest complete: ${positiveCount} / ${accounts.length} candidate accounts evaluated positive`,
     )
   } finally {
-    await prisma.$disconnect()
+    await disconnectPrisma()
   }
 }
 

@@ -1,3 +1,4 @@
+import { isValidId } from 'id-boundary'
 import type { PrismaClient } from '../../generated/prisma'
 import type { ReadModelFreshnessStatus } from '../api-response'
 import { decodeCursor, encodeCursor } from '../pagination/keyset-cursor'
@@ -96,7 +97,16 @@ export async function listAccountSummaries(
     labelKeys: [...labelKeys].toSorted(),
     minFindingSeverity: minFindingSeverity ?? null,
   })
-  const cursorValues = input.cursor ? decodeCursor(input.cursor, filterHash) : null
+  const decodedCursor = input.cursor ? decodeCursor(input.cursor, filterHash) : null
+  // 改ざんされた cursor を ID 型や日時の条件へ渡すと例外になるため、先頭ページへ戻す。
+  const isTamperedCursor =
+    decodedCursor !== null &&
+    decodedCursor.length >= 2 &&
+    (!isValidId(decodedCursor[1]) ||
+      (input.view !== 'all' &&
+        decodedCursor[0] !== '' &&
+        Number.isNaN(new Date(decodedCursor[0]).getTime())))
+  const cursorValues = isTamperedCursor ? null : decodedCursor
 
   const cursorWhere = ((): object => {
     if (!cursorValues || cursorValues.length < 2) return {}
