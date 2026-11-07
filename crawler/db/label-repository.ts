@@ -195,12 +195,13 @@ export async function loadAccountLabelStates(
     accountIds.map((accountId) => [accountId, { rev: 0, versions: [], active: new Map() }]),
   )
   if (accountIds.length === 0) return snapshots
-  const [states, activeRows] = await Promise.all([
-    prisma.accountLabelState.findMany({
-      where: { accountId: { in: accountIds } },
-      select: { accountId: true, rev: true, versions: true },
-    }),
-    prisma.accountActiveLabel.findMany({
+  // 状態 (rev) を先に読む。活性ラベルをその後に読めば、読み違えが起きても rev が古い側に倒れ、
+  // CAS の失敗と再試行で正しく直る。逆順や並列では、新しい rev と古い活性ラベルの組になり得る。
+  const states = await prisma.accountLabelState.findMany({
+    where: { accountId: { in: accountIds } },
+    select: { accountId: true, rev: true, versions: true },
+  })
+  const activeRows = await prisma.accountActiveLabel.findMany({
       where: { accountId: { in: accountIds } },
       select: {
         accountId: true,
@@ -210,8 +211,7 @@ export async function loadAccountLabelStates(
         reason: true,
         method: true,
       },
-    }),
-  ])
+  })
   for (const state of states) {
     const snapshot = snapshots.get(state.accountId)
     if (snapshot) {

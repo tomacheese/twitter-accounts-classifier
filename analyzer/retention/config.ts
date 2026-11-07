@@ -5,7 +5,7 @@ export const RETENTION_DAYS = {
   /** リトライを使い切った dead の WorkItem。 */
   deadWorkItem: 30,
   analysisRun: 180,
-  overviewSnapshot: 90,
+  overviewSnapshot: 30,
   labelMetricSnapshot: 90,
   /** isShadow の行だけが対象。本番判定の行は削除しない。 */
   shadowDetectorEvaluation: 30,

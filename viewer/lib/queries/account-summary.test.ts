@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PrismaClient } from '../../generated/prisma'
 import { listAccountSummaries } from './account-summary'
+import { encodeCursor } from '../pagination/keyset-cursor'
 import { getPrismaClient } from '../prisma'
 
 function createMockPrisma(overrides: {
@@ -34,7 +35,7 @@ function createMockPrisma(overrides: {
 
 function createRow(index: number, changedAt: Date | null) {
   return {
-    accountId: `account-${index}`,
+    accountId: `${1000 + index}`,
     normalizedScreenName: `screen_${index}`,
     normalizedDisplayName: `Display ${index}`,
     activeLabelKeys: [],
@@ -118,8 +119,19 @@ describe('listAccountSummaries', () => {
     const call = second.findMany.mock.calls[0][0] as { where: { OR?: unknown[] } }
     expect(call.where.OR).toEqual([
       { normalizedScreenName: { gt: 'screen_1' } },
-      { normalizedScreenName: 'screen_1', accountId: { gt: 'account-1' } },
+      { normalizedScreenName: 'screen_1', accountId: { gt: '1001' } },
     ])
+  })
+
+  it('accountId が ID の形式でない cursor は無視して先頭から取得する', async () => {
+    const filterHash = JSON.stringify({ view: 'all', labelKeys: [], minFindingSeverity: null })
+    const cursor = encodeCursor({ sortValues: ['screen_1', 'not-a-numeric-id'], filterHash })
+
+    const { prisma, findMany } = createMockPrisma({})
+    await listAccountSummaries(prisma, { view: 'all', limit: 2, cursor })
+
+    const call = findMany.mock.calls[0][0] as { where: { OR?: unknown[] } }
+    expect(call.where.OR).toBeUndefined()
   })
 
   it('filter が変わった cursor は無視する', async () => {
@@ -161,7 +173,7 @@ describe('listAccountSummaries', () => {
     }
     expect(call.where.OR).toBeUndefined()
     expect(call.where.lastClassificationChangedAt).toBeNull()
-    expect(call.where.accountId).toEqual({ lt: 'account-0' })
+    expect(call.where.accountId).toEqual({ lt: '1000' })
   })
 
   it('recentlyChanged の日時あり cursor は日時行の続きの後に null 行も辿る', async () => {
@@ -184,7 +196,7 @@ describe('listAccountSummaries', () => {
     const call = second.findMany.mock.calls[0][0] as { where: { OR?: unknown[] } }
     expect(call.where.OR).toEqual([
       { lastClassificationChangedAt: { lt: changedAt } },
-      { lastClassificationChangedAt: changedAt, accountId: { lt: 'account-0' } },
+      { lastClassificationChangedAt: changedAt, accountId: { lt: '1000' } },
       { lastClassificationChangedAt: null },
     ])
   })

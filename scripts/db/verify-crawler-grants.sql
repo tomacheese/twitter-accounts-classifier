@@ -16,7 +16,7 @@ BEGIN
     RAISE EXCEPTION 'role crawler must not own tables';
   END IF;
 
-  FOREACH v_table IN ARRAY ARRAY['AccountLabelState', 'AccountActiveLabel'] LOOP
+  FOREACH v_table IN ARRAY ARRAY['AccountLabelState', 'AccountActiveLabel', 'AccountLabelChange'] LOOP
     FOREACH v_privilege IN ARRAY ARRAY['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'TRIGGER'] LOOP
       IF has_table_privilege('crawler', format('public.%I', v_table), v_privilege) THEN
         RAISE EXCEPTION 'crawler must not have % on %', v_privilege, v_table;

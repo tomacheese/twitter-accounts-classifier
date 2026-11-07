@@ -1,3 +1,4 @@
+import { isValidId } from 'id-boundary'
 import type { PrismaClient } from '../../generated/prisma'
 import type { ReadModelFreshnessStatus } from '../api-response'
 import { decodeCursor, encodeCursor } from '../pagination/keyset-cursor'
@@ -96,7 +97,10 @@ export async function listAccountSummaries(
     labelKeys: [...labelKeys].toSorted(),
     minFindingSeverity: minFindingSeverity ?? null,
   })
-  const cursorValues = input.cursor ? decodeCursor(input.cursor, filterHash) : null
+  const decodedCursor = input.cursor ? decodeCursor(input.cursor, filterHash) : null
+  // ID の形式でない cursor は、改ざんされた不正な cursor として無効 (先頭ページ) 扱いにする。
+  const cursorValues =
+    decodedCursor && decodedCursor.length >= 2 && !isValidId(decodedCursor[1]) ? null : decodedCursor
 
   const cursorWhere = ((): object => {
     if (!cursorValues || cursorValues.length < 2) return {}
