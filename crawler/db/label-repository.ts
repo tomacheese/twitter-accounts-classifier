@@ -202,15 +202,15 @@ export async function loadAccountLabelStates(
     select: { accountId: true, rev: true, versions: true },
   })
   const activeRows = await prisma.accountActiveLabel.findMany({
-      where: { accountId: { in: accountIds } },
-      select: {
-        accountId: true,
-        labelDefinitionId: true,
-        ruleVersionNo: true,
-        confidence: true,
-        reason: true,
-        method: true,
-      },
+    where: { accountId: { in: accountIds } },
+    select: {
+      accountId: true,
+      labelDefinitionId: true,
+      ruleVersionNo: true,
+      confidence: true,
+      reason: true,
+      method: true,
+    },
   })
   for (const state of states) {
     const snapshot = snapshots.get(state.accountId)

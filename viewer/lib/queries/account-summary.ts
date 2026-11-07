@@ -98,9 +98,11 @@ export async function listAccountSummaries(
     minFindingSeverity: minFindingSeverity ?? null,
   })
   const decodedCursor = input.cursor ? decodeCursor(input.cursor, filterHash) : null
-  // ID の形式でない cursor は、改ざんされた不正な cursor として無効 (先頭ページ) 扱いにする。
+  // 改ざんされた cursor を ID 型の列の条件へ渡すと例外になるため、先頭ページへ戻す。
   const cursorValues =
-    decodedCursor && decodedCursor.length >= 2 && !isValidId(decodedCursor[1]) ? null : decodedCursor
+    decodedCursor && decodedCursor.length >= 2 && !isValidId(decodedCursor[1])
+      ? null
+      : decodedCursor
 
   const cursorWhere = ((): object => {
     if (!cursorValues || cursorValues.length < 2) return {}

@@ -29,7 +29,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO cr
 -- ラベル状態への書き込みは set_label_result (SECURITY DEFINER) だけに閉じる。
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
   ON "AccountLabelState", "AccountActiveLabel" FROM crawler;
--- 監査ログも、トリガー (SECURITY DEFINER) だけが書く。crawler が直接書いて改ざんできないようにする。
+-- 監査ログへの書き込みはトリガーだけに閉じる。
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON "AccountLabelChange" FROM crawler;
 GRANT EXECUTE ON FUNCTION set_label_result(
   bigint[], smallint[], integer[], smallint[], smallint[], double precision[], text[], text[],
