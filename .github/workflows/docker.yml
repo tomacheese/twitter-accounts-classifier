@@ -114,6 +114,9 @@ jobs:
           # pull_request_target は既定で base branch を checkout するため、
           # PR の実際の変更内容を計測するため head SHA を明示する。
           ref: ${{ github.event.pull_request.head.sha }}
+          # pull_request_target では fork PR の head の checkout が既定で拒否されるため、
+          # approval-gate の承認を通過した fork PR に限って opt-in する。
+          allow-unsafe-pr-checkout: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
           # このジョブは git 操作を行わないため、fork PR のコードが同じ build context に
           # 含まれる credential を読み取れないよう永続化を無効化する。
           persist-credentials: false
