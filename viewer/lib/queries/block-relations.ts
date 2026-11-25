@@ -1,5 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma'
-import { decodeCursor, encodeCursor } from '../pagination/keyset-cursor'
+import { decodeDateIdCursor, encodeCursor } from '../pagination/keyset-cursor'
 
 const MODEL_KEY = 'block_relation'
 const DEFAULT_LIMIT = 25
@@ -54,7 +54,7 @@ export async function listBlockRelations(
   const status = input.filters?.status ?? 'active'
   const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
   const filterHash = JSON.stringify({ status })
-  const cursorValues = input.cursor ? decodeCursor(input.cursor, filterHash) : null
+  const cursorValues = input.cursor ? decodeDateIdCursor(input.cursor, filterHash) : null
 
   const rows = await prisma.blockRelationCurrent.findMany({
     where: {

@@ -1,5 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma'
-import { decodeCursor, encodeCursor } from '../pagination/keyset-cursor'
+import { decodeDateIdCursor, encodeCursor } from '../pagination/keyset-cursor'
 
 /** OperationCycle の種別。 */
 export type OperationCycleKind = 'crawl' | 'weekly_review' | 'block'
@@ -44,7 +44,7 @@ export async function listOperationCycles(
   const attentionRequired = input.filters?.attentionRequired ?? false
   const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
   const filterHash = JSON.stringify({ kind, attentionRequired })
-  const cursorValues = input.cursor ? decodeCursor(input.cursor, filterHash) : null
+  const cursorValues = input.cursor ? decodeDateIdCursor(input.cursor, filterHash) : null
 
   const rows = await prisma.operationCycle.findMany({
     where: {

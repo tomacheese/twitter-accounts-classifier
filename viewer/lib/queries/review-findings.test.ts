@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { encodeCursor } from '../pagination/keyset-cursor'
 import type { PrismaClient } from '../../generated/prisma'
 import { listReviewFindings } from './review-findings'
 
@@ -20,6 +21,31 @@ const baseRow = {
 }
 
 describe('listReviewFindings', () => {
+  it.each([
+    [[]],
+    [['2', 'bad', 'id']],
+    [['bad', '2026-01-01T00:00:00.000Z', 'id']],
+    [['2', '2026-01-01T00:00:00.000Z', '']],
+  ])('不正な cursor を無視する: %j', async (sortValues) => {
+    const prisma = createMockPrisma([])
+    const filterHash = JSON.stringify({
+      status: ['active', 'recurring'],
+      severity: [],
+      type: null,
+      primaryScopeType: null,
+    })
+    await listReviewFindings(prisma, {
+      filters: {},
+      limit: 25,
+      cursor: encodeCursor({ sortValues, filterHash }),
+    })
+    const firstPage = createMockPrisma([])
+    await listReviewFindings(firstPage, { filters: {}, limit: 25 })
+    expect((prisma.$queryRaw as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(
+      (firstPage.$queryRaw as ReturnType<typeof vi.fn>).mock.calls[0],
+    )
+  })
+
   it('既定では active/recurring のみを対象にする WHERE を組み立てる', async () => {
     const prisma = createMockPrisma([])
     await listReviewFindings(prisma, { filters: {}, limit: 25 })

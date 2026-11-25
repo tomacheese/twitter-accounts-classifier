@@ -1,5 +1,5 @@
 import { Prisma, type PrismaClient } from '../../generated/prisma'
-import { encodeCursor, decodeCursor } from '../pagination/keyset-cursor'
+import { encodeCursor, decodeCursor, isCursorDate } from '../pagination/keyset-cursor'
 
 /** ReviewFinding のライフサイクル状態。 */
 export type ReviewFindingStatus = 'active' | 'recurring' | 'resolved' | 'superseded'
@@ -114,7 +114,14 @@ export async function listReviewFindings(
   const filterHash = hashFilters(input.filters)
   const whereFragment = buildWhereFragment(input.filters)
 
-  const cursorValues = input.cursor ? decodeCursor(input.cursor, filterHash) : null
+  const decodedCursor = input.cursor ? decodeCursor(input.cursor, filterHash) : null
+  const cursorValues =
+    decodedCursor?.length === 3 &&
+    ['-1', '0', '1', '2', '3'].includes(decodedCursor[0]) &&
+    isCursorDate(decodedCursor[1]) &&
+    decodedCursor[2]
+      ? decodedCursor
+      : null
   const cursorFragment = cursorValues
     ? Prisma.sql`AND (${SEVERITY_RANK_SQL}, "lastDetectedAt", "id") < (${Number(cursorValues[0])}, ${new Date(cursorValues[1] ?? '')}, ${cursorValues[2]})`
     : Prisma.empty

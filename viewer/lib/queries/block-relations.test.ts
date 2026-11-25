@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { encodeCursor } from '../pagination/keyset-cursor'
 import type { PrismaClient } from '../../generated/prisma'
 import { getBlockRelationDetail, listBlockRelations } from './block-relations'
 
@@ -26,6 +27,23 @@ function createMockPrisma(overrides: {
 }
 
 describe('listBlockRelations', () => {
+  it.each([
+    [[]],
+    [['']],
+    [['bad', 'id']],
+    [['+999999-01-01T00:00:00.000Z', 'id']],
+    [['2026-01-01T00:00:00.000Z']],
+    [['2026-01-01T00:00:00.000Z', '']],
+  ])('不正な cursor を無視する: %j', async (sortValues) => {
+    const { prisma, findMany } = createMockPrisma({
+      pointer: { currentGenerationId: 'generation-1' },
+    })
+    const cursor = encodeCursor({ sortValues, filterHash: JSON.stringify({ status: 'active' }) })
+    await listBlockRelations(prisma, { cursor })
+    const call = findMany.mock.calls[0][0] as { where: { OR?: unknown } }
+    expect(call.where.OR).toBeUndefined()
+  })
+
   it('ReadModelPointer が無ければ空配列を返す', async () => {
     const { prisma } = createMockPrisma({})
     expect(await listBlockRelations(prisma)).toEqual({

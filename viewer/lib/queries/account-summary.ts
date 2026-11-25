@@ -1,7 +1,7 @@
 import { isValidId } from 'id-boundary'
 import type { PrismaClient } from '../../generated/prisma'
 import type { ReadModelFreshnessStatus } from '../api-response'
-import { decodeCursor, encodeCursor } from '../pagination/keyset-cursor'
+import { decodeCursor, encodeCursor, isCursorDate } from '../pagination/keyset-cursor'
 import {
   getReadModelMeta,
   getReadModelReadiness,
@@ -103,9 +103,7 @@ export async function listAccountSummaries(
     decodedCursor !== null &&
     decodedCursor.length >= 2 &&
     (!isValidId(decodedCursor[1]) ||
-      (input.view !== 'all' &&
-        decodedCursor[0] !== '' &&
-        Number.isNaN(new Date(decodedCursor[0]).getTime())))
+      (input.view !== 'all' && decodedCursor[0] !== '' && !isCursorDate(decodedCursor[0])))
   const cursorValues = isTamperedCursor ? null : decodedCursor
 
   const cursorWhere = ((): object => {

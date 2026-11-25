@@ -41,3 +41,15 @@ export function decodeCursor(cursor: string, expectedFilterHash: string): string
     return null
   }
 }
+
+export function isCursorDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) || value.startsWith('0000-'))
+    return false
+  const date = new Date(value)
+  return !Number.isNaN(date.getTime()) && date.toISOString() === value
+}
+
+export function decodeDateIdCursor(cursor: string, filterHash: string): string[] | null {
+  const values = decodeCursor(cursor, filterHash)
+  return values?.length === 2 && isCursorDate(values[0]) && values[1] ? values : null
+}

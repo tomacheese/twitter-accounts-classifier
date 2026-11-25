@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { encodeCursor } from '../pagination/keyset-cursor'
 import type { PrismaClient } from '../../generated/prisma'
 import {
   getBlockCycleDetail,
@@ -26,6 +27,24 @@ function createMockPrisma(overrides: {
 }
 
 describe('listOperationCycles', () => {
+  it.each([
+    [[]],
+    [['']],
+    [['bad', 'id']],
+    [['+999999-01-01T00:00:00.000Z', 'id']],
+    [['2026-01-01T00:00:00.000Z']],
+    [['2026-01-01T00:00:00.000Z', '']],
+  ])('不正な cursor を無視する: %j', async (sortValues) => {
+    const { prisma, findMany } = createMockPrisma({})
+    const cursor = encodeCursor({
+      sortValues,
+      filterHash: JSON.stringify({ attentionRequired: false }),
+    })
+    await listOperationCycles(prisma, { cursor })
+    const call = findMany.mock.calls[0][0] as { where: { OR?: unknown } }
+    expect(call.where.OR).toBeUndefined()
+  })
+
   it('一覧に currentStageKey を含める', async () => {
     const row = {
       id: 'cycle-1',

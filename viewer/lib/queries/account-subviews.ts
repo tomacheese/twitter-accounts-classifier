@@ -1,7 +1,7 @@
 import type { PrismaClient } from '../../generated/prisma'
 import type { ReadModelFreshnessStatus } from '../api-response'
 import { getReadModelMeta } from '../read-model-meta'
-import { decodeCursor, encodeCursor } from '../pagination/keyset-cursor'
+import { decodeDateIdCursor, encodeCursor } from '../pagination/keyset-cursor'
 
 /** Account 詳細の Overview subview。 */
 export interface AccountOverviewView {
@@ -168,7 +168,7 @@ export async function getAccountRelations(
   const accountFilter = { OR: [{ blockerId: accountId }, { blockedId: accountId }] }
   const limit = Math.min(options.limit ?? DEFAULT_RELATION_LIMIT, MAX_RELATION_LIMIT)
   const filterHash = JSON.stringify({ accountId })
-  const cursorValues = options.cursor ? decodeCursor(options.cursor, filterHash) : null
+  const cursorValues = options.cursor ? decodeDateIdCursor(options.cursor, filterHash) : null
 
   const cursorFilter =
     cursorValues && cursorValues.length >= 2

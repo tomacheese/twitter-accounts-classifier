@@ -246,6 +246,18 @@ describe('getAccountEvidence', () => {
 })
 
 describe('getAccountRelations', () => {
+  it('不正な日時の cursor は先頭ページとして扱う', async () => {
+    const { prisma, blockFindMany, blockCount } = createMockPrisma({ blocks: [], blockCount: 0 })
+    const cursor = encodeCursor({
+      sortValues: ['bad', 'block-1'],
+      filterHash: JSON.stringify({ accountId: 'account-1' }),
+    })
+    await getAccountRelations(prisma, 'account-1', { cursor })
+    const call = blockFindMany.mock.calls[0][0] as { where: { AND?: unknown } }
+    expect(call.where.AND).toBeUndefined()
+    expect(blockCount).toHaveBeenCalled()
+  })
+
   it('自分が blocker 側か blocked 側かで direction と相手を切り替える', async () => {
     const { prisma } = createMockPrisma({
       blocks: [

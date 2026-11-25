@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { encodeCursor, decodeCursor } from './keyset-cursor'
+import { encodeCursor, decodeCursor, decodeDateIdCursor, isCursorDate } from './keyset-cursor'
 
 describe('keyset cursor', () => {
   it('encode したものを decode すると同じ値が戻る', () => {
@@ -44,5 +44,24 @@ describe('keyset cursor', () => {
   it('空の sortValues は有効な cursor として扱う', () => {
     const cursor = encodeCursor({ sortValues: [], filterHash: 'f1' })
     expect(decodeCursor(cursor, 'f1')).toEqual([])
+  })
+})
+
+describe('日時 cursor の検証', () => {
+  it.each([
+    '',
+    'invalid',
+    '2026-02-30T00:00:00.000Z',
+    '+999999-01-01T00:00:00.000Z',
+    '0000-01-01T00:00:00.000Z',
+  ])('不正な日時を拒否する: %s', (value) => {
+    expect(isCursorDate(value)).toBe(false)
+  })
+
+  it('有効な日時と ID を受け付ける', () => {
+    const sortValues = ['2026-01-01T00:00:00.000Z', 'id']
+    expect(decodeDateIdCursor(encodeCursor({ sortValues, filterHash: 'f' }), 'f')).toEqual(
+      sortValues,
+    )
   })
 })
