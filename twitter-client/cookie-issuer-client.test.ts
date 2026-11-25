@@ -9,6 +9,49 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe('createCookieIssuerClient', () => {
+  it.each(['request', 'success body', 'error body'])('aborts a stalled %s', async (stage) => {
+    const controller = new AbortController()
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal)
+    const reason = new DOMException('The operation timed out', 'TimeoutError')
+    const fetchImpl = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      const signal = init.signal
+      if (!signal) throw new Error('Missing abort signal')
+      const pending = () =>
+        new Promise<never>((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              reject(reason)
+            },
+            { once: true },
+          )
+        })
+      if (stage === 'request') return pending()
+      return Promise.resolve({
+        ok: stage === 'success body',
+        status: 503,
+        json: pending,
+        text: pending,
+      })
+    })
+    try {
+      const client = createCookieIssuerClient({ baseUrl: 'http://issuer.local', fetchImpl })
+      const result = client.issueCookiesWithRetry({
+        username: 'test_user',
+        password: 'secret',
+        otp_secret: null,
+      })
+      const assertion = expect(result).rejects.toBe(reason)
+      await Promise.resolve()
+      controller.abort(reason)
+      await assertion
+      expect(timeout).toHaveBeenCalledWith(60_000)
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+    } finally {
+      timeout.mockRestore()
+    }
+  })
+
   it('returns cookies parsed from a successful response', async () => {
     const fetchImpl = vi
       .fn()

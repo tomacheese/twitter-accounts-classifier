@@ -4,6 +4,8 @@ export interface CookieIssuerAccount {
   otp_secret: string | null
 }
 
+const COOKIE_ISSUER_REQUEST_TIMEOUT_MS = 60_000
+
 export interface IssuedCookies {
   ct0: string
   authToken: string
@@ -76,6 +78,7 @@ export function createCookieIssuerClient(options: CookieIssuerClientOptions) {
       method: 'POST',
       headers,
       body: JSON.stringify(account),
+      signal: AbortSignal.timeout(COOKIE_ISSUER_REQUEST_TIMEOUT_MS),
     })
 
     if (!response.ok) {
