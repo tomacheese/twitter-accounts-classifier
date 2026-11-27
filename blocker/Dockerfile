@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
@@ -39,7 +39,7 @@ RUN set -eu; \
 # typescript は @prisma/client の optional peer dependency として解決されるだけで、実行時には使われない。
 RUN find /app/deploy/blocker/node_modules/.pnpm -maxdepth 1 -type d -name 'typescript@*' -exec rm -rf {} +
 
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 
 ARG APPLICATION_VERSION=unknown
 ENV APPLICATION_VERSION=$APPLICATION_VERSION

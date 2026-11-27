@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
@@ -24,7 +24,7 @@ RUN pnpm --filter viewer run build
 # next.config.ts の outputFileTracingRoot は pnpm workspace のルート (viewer/ の 1 つ上) に固定されている。
 # このためトレース結果もその構成を反映し、共有依存は .next/standalone/node_modules に、
 # アプリ本体は standalone ルートではなく .next/standalone/viewer/ にネストして配置される。
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 
 ARG APPLICATION_VERSION=unknown
 ENV APPLICATION_VERSION=$APPLICATION_VERSION
