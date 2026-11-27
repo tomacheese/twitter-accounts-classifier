@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",
-    "@sentry/node": "^8.0.0",
+    "@sentry/node": "^11.0.0",
     "id-boundary": "workspace:*",
     "next": "^15.5.29",
     "pipeline-health": "workspace:*",
