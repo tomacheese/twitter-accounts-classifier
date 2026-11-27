@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
@@ -42,7 +42,7 @@ RUN find /app/deploy/crawler/node_modules/.pnpm -maxdepth 1 -type d -name 'types
 # 最終 stage へ COPY する前に削除しておかないと、devDependency を含む symlink 構成の node_modules が layer に残ってしまう。
 RUN rm -rf /app/crawler/node_modules
 
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 
 # reusable-docker.yml が渡す APPLICATION_VERSION (semver) を実行時に process.env から読めるよう
 # ENV へ引き継ぐ。CrawlAccountRun.appVersion に記録し、warning がどのビルドで発生したか追跡する。
