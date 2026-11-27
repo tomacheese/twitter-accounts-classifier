@@ -36,7 +36,7 @@
     "id-boundary": "workspace:*",
     "twitter-client": "workspace:*",
     "twitter-openapi-typescript": "^0.0.56",
-    "zod": "^3.24.0"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@book000/eslint-config": "1.13.1",
