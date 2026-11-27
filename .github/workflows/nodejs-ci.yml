@@ -23,7 +23,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:19-alpine
         env:
           POSTGRES_USER: tac_owner
           POSTGRES_PASSWORD: tac_owner
@@ -86,7 +86,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:19-alpine
         env:
           POSTGRES_USER: tac_owner
           POSTGRES_PASSWORD: tac_owner

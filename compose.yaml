@@ -6,7 +6,7 @@ x-default-logging: &default-logging
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:19-alpine
     restart: unless-stopped
     # PostgreSQL の parallel query は dynamic shared memory を /dev/shm に確保する。
     # 64MB の Docker 既定値では crawler と analyzer の同時集計で枯渇するため拡張する。

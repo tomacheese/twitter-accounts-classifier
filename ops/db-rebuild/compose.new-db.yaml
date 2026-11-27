@@ -15,7 +15,7 @@ x-default-logging: &default-logging
 
 services:
   postgres:
-    image: ${NEW_DB_IMAGE:-postgres:17-alpine}
+    image: ${NEW_DB_IMAGE:-postgres:19-alpine}
     container_name: ${NEW_DB_CONTAINER_NAME:-tac-new-postgres}
     restart: unless-stopped
     # 並列クエリの dynamic shared memory 用。64MB の Docker 既定値では不足する。
