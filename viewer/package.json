@@ -20,7 +20,7 @@
     "db:generate": "prisma generate --schema=../prisma/schema.prisma --generator viewerClient && node ../prisma/scripts/stringify-bigint-types.mjs"
   },
   "dependencies": {
-    "@prisma/client": "^6.0.0",
+    "@prisma/client": "^7.0.0",
     "@sentry/node": "^11.0.0",
     "id-boundary": "workspace:*",
     "next": "^15.5.29",
@@ -44,7 +44,7 @@
     "npm-run-all2": "^9.0.0",
     "postcss": "^8.4.0",
     "prettier": "^3.0.0",
-    "prisma": "^6.0.0",
+    "prisma": "^7.0.0",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.6.0",
     "vitest": "^2.0.0"
