@@ -2,7 +2,7 @@
   "name": "id-boundary",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@11.18.0",
+  "packageManager": "pnpm@11.29.0",
   "engines": {
     "node": ">=24"
   },
@@ -17,7 +17,7 @@
     "check": "run-p lint typecheck test"
   },
   "devDependencies": {
-    "@book000/eslint-config": "1.13.1",
+    "@book000/eslint-config": "1.17.14",
     "@types/node": "^26.0.0",
     "eslint": "^9.0.0",
     "npm-run-all2": "^9.0.0",

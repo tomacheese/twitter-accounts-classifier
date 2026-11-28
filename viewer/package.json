@@ -2,7 +2,7 @@
   "name": "viewer",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@11.18.0",
+  "packageManager": "pnpm@11.29.0",
   "engines": {
     "node": ">=24"
   },
@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",
-    "@sentry/node": "^11.0.0",
+    "@sentry/node": "^11.14.0",
     "id-boundary": "workspace:*",
     "next": "^15.5.29",
     "pipeline-health": "workspace:*",
@@ -30,12 +30,12 @@
     "recharts": "^3.0.0"
   },
   "devDependencies": {
-    "@book000/eslint-config": "1.13.1",
+    "@book000/eslint-config": "1.17.14",
     "@eslint/eslintrc": "^3.3.0",
     "@testing-library/react": "^16.3.2",
     "@types/lodash": "^4.17.24",
     "@types/node": "^26.0.0",
-    "@types/react": "^19.0.0",
+    "@types/react": "^19.3.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.0",
     "eslint": "^9.0.0",
