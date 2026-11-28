@@ -2,7 +2,7 @@
   "name": "crawler",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@11.18.0",
+  "packageManager": "pnpm@11.29.0",
   "engines": {
     "node": ">=24"
   },
@@ -28,18 +28,18 @@
     "seed": "tsx ../prisma/seed.ts"
   },
   "dependencies": {
-    "@book000/node-utils": "^1.0.0",
+    "@book000/node-utils": "^1.26.35",
     "@prisma/client": "^6.0.0",
-    "@sentry/node": "^11.0.0",
+    "@sentry/node": "^11.14.0",
     "prisma": "^6.0.0",
     "tsx": "^4.23.1",
     "id-boundary": "workspace:*",
     "twitter-client": "workspace:*",
-    "twitter-openapi-typescript": "^0.0.56",
+    "twitter-openapi-typescript": "^0.1.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@book000/eslint-config": "1.13.1",
+    "@book000/eslint-config": "1.17.14",
     "@types/node": "^26.0.0",
     "eslint": "^9.0.0",
     "npm-run-all2": "^9.0.0",
