@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@11.18.0",
   "engines": {
-    "node": ">=24"
+    "node": "v26.13.1"
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json && cp -r generated dist/generated && cp policy/detection-policy.json dist/policy/detection-policy.json",
